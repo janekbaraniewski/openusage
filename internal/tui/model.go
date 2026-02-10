@@ -69,7 +69,6 @@ type Model struct {
 	analyticsScroll    int
 	analyticsFilter    string
 	analyticsFiltering bool
-	analyticsSubTab    int // 0=overview, 1=providers, 2=models, 3=budget, 4=efficiency
 	analyticsSortBy    int // 0=cost↓, 1=name↑, 2=tokens↓
 }
 
@@ -184,36 +183,12 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.analyticsScroll--
 		}
 	case "down", "j":
-		m.analyticsScroll++ // capped during render
-	case "]":
-		// Next sub-tab
-		m.analyticsSubTab = (m.analyticsSubTab + 1) % analyticsTabCount
-		m.analyticsScroll = 0
-	case "[":
-		// Previous sub-tab
-		m.analyticsSubTab = (m.analyticsSubTab - 1 + analyticsTabCount) % analyticsTabCount
-		m.analyticsScroll = 0
-	case "o":
-		m.analyticsSubTab = analyticsTabOverview
-		m.analyticsScroll = 0
-	case "p":
-		m.analyticsSubTab = analyticsTabProviders
-		m.analyticsScroll = 0
-	case "m":
-		m.analyticsSubTab = analyticsTabModels
-		m.analyticsScroll = 0
-	case "b":
-		m.analyticsSubTab = analyticsTabBudget
-		m.analyticsScroll = 0
-	case "e":
-		m.analyticsSubTab = analyticsTabEfficiency
-		m.analyticsScroll = 0
+		m.analyticsScroll++
 	case "s":
-		// Cycle sort mode
 		m.analyticsSortBy = (m.analyticsSortBy + 1) % analyticsSortCount
 		m.analyticsScroll = 0
 	case "G":
-		m.analyticsScroll = 9999 // capped during render
+		m.analyticsScroll = 9999
 	case "g":
 		m.analyticsScroll = 0
 	case "/":
@@ -538,8 +513,7 @@ func (m Model) renderFooter(w int) string {
 	case m.screen == screenAnalytics:
 		keys = []string{
 			helpKeyStyle.Render("↑↓") + helpStyle.Render(" scroll"),
-			helpKeyStyle.Render("[/]") + helpStyle.Render(" view"),
-			helpKeyStyle.Render("o/p/m/b/e") + helpStyle.Render(" tabs"),
+			helpKeyStyle.Render("g/G") + helpStyle.Render(" top/btm"),
 			helpKeyStyle.Render("s") + helpStyle.Render(" sort"),
 			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
 			tabHint,

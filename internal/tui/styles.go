@@ -219,10 +219,6 @@ var (
 
 	// ─── Analytics Styles ───────────────────────────────────────────
 
-	analyticsSectionIcon = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorAccent)
-
 	analyticsCardTitleStyle = lipgloss.NewStyle().
 				Foreground(colorDim)
 
@@ -234,19 +230,6 @@ var (
 
 	analyticsSortLabelStyle = lipgloss.NewStyle().
 				Foreground(colorTeal)
-
-	// ─── Analytics Sub-Tab Styles ───────────────────────────────────
-
-	analyticsTabActiveStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorMantle).
-				Background(colorSapphire).
-				Padding(0, 1)
-
-	analyticsTabInactiveStyle = lipgloss.NewStyle().
-					Foreground(colorDim).
-					Background(colorSurface0).
-					Padding(0, 1)
 
 	// ─── Chart Styles ───────────────────────────────────────────────
 

@@ -131,11 +131,10 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 
 	analyticsKeys := []struct{ key, desc string }{
 		{"↑↓ / j k", "Scroll analytics content"},
-		{"g", "Cycle grouping: Overview → By Provider → By Model"},
+		{"g / G", "Jump to top / bottom"},
 		{"s", "Cycle sort: Cost ↓ → Name ↑ → Tokens ↓"},
 		{"/", "Filter by provider or model name"},
 		{"Esc", "Clear filter"},
-		{"G", "Jump to bottom"},
 	}
 
 	for _, k := range analyticsKeys {
