@@ -1,0 +1,118 @@
+version: 2
+
+project_name: agentusage
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # --- Linux amd64 ---
+  - id: linux-amd64
+    main: ./cmd/agentusage
+    binary: agentusage
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=gcc
+    ldflags:
+      - -s -w
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+
+  # --- Linux arm64 ---
+  - id: linux-arm64
+    main: ./cmd/agentusage
+    binary: agentusage
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+    ldflags:
+      - -s -w
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+
+  # --- Windows amd64 ---
+  - id: windows-amd64
+    main: ./cmd/agentusage
+    binary: agentusage
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+    ldflags:
+      - -s -w
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+
+  # --- macOS (built natively on macOS runner for both archs) ---
+  # Note: macOS builds are handled separately in the release-macos job
+  # because CGO cross-compilation to macOS from Linux is not straightforward.
+  # If you only need Linux/Windows, this config is sufficient.
+  # For macOS, see the separate release-macos job in release.yaml.
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE*
+      - README*
+      - configs/example.toml
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: "✨ Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "📚 Documentation"
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "🧹 Maintenance"
+      regexp: '^.*?(chore|ci|build|refactor|perf|test)(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: "Other"
+      order: 999
+  filters:
+    exclude:
+      - "^Merge"
+
+release:
+  github:
+    owner: janekbaraniewski
+    name: agentusage
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    ## AgentUsage {{.Version}}
+
+    Monitor your AI coding tool quotas from a single TUI dashboard.
+  footer: |
+    **Full Changelog**: https://github.com/janekbaraniewski/agentusage/compare/{{ .PreviousTag }}...{{ .Tag }}

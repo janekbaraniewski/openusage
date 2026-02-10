@@ -1,0 +1,43 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - typecheck
+    - misspell
+    - gofmt
+    - goimports
+    - bodyclose
+    - nilerr
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    gofmt:
+      simplify: true
+    misspell:
+      locale: US
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - unused
+        - errcheck
+    - path: _test\.go
+      text: "dot-imports"
+  max-issues-per-linter: 50
+  max-same-issues: 10

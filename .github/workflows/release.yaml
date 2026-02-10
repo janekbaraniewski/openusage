@@ -1,0 +1,227 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release (Linux & Windows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install cross-compilation toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            gcc-mingw-w64-x86-64
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-macos:
+    name: Release (macOS binaries)
+    runs-on: macos-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS amd64
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -ldflags="-s -w \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.Version=${{ steps.version.outputs.version }}' \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o dist/agentusage_darwin_amd64 ./cmd/agentusage
+
+      - name: Build macOS arm64
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -ldflags="-s -w \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.Version=${{ steps.version.outputs.version }}' \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
+            -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o dist/agentusage_darwin_arm64 ./cmd/agentusage
+
+      - name: Create macOS archives
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cd dist
+
+          mkdir -p agentusage_${VERSION}_darwin_amd64
+          cp agentusage_darwin_amd64 agentusage_${VERSION}_darwin_amd64/agentusage
+          cp ../configs/example.toml agentusage_${VERSION}_darwin_amd64/
+          [ -f ../LICENSE* ] && cp ../LICENSE* agentusage_${VERSION}_darwin_amd64/ || true
+          [ -f ../README* ] && cp ../README* agentusage_${VERSION}_darwin_amd64/ || true
+          tar czf agentusage_${VERSION}_darwin_amd64.tar.gz agentusage_${VERSION}_darwin_amd64
+
+          mkdir -p agentusage_${VERSION}_darwin_arm64
+          cp agentusage_darwin_arm64 agentusage_${VERSION}_darwin_arm64/agentusage
+          cp ../configs/example.toml agentusage_${VERSION}_darwin_arm64/
+          [ -f ../LICENSE* ] && cp ../LICENSE* agentusage_${VERSION}_darwin_arm64/ || true
+          [ -f ../README* ] && cp ../README* agentusage_${VERSION}_darwin_arm64/ || true
+          tar czf agentusage_${VERSION}_darwin_arm64.tar.gz agentusage_${VERSION}_darwin_arm64
+
+      - name: Upload macOS binaries to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/agentusage_${VERSION}_darwin_amd64.tar.gz \
+            dist/agentusage_${VERSION}_darwin_arm64.tar.gz \
+            --clobber
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [release, release-macos]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for release assets to be available
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          for i in $(seq 1 30); do
+            ASSETS=$(gh release view "${GITHUB_REF_NAME}" --json assets -q '.assets[].name' 2>/dev/null || true)
+            if echo "$ASSETS" | grep -q "darwin_arm64.tar.gz" && \
+               echo "$ASSETS" | grep -q "darwin_amd64.tar.gz" && \
+               echo "$ASSETS" | grep -q "linux_amd64.tar.gz" && \
+               echo "$ASSETS" | grep -q "linux_arm64.tar.gz"; then
+              echo "All release assets found."
+              exit 0
+            fi
+            echo "Waiting for release assets... attempt $i/30"
+            sleep 10
+          done
+          echo "Timed out waiting for release assets"
+          exit 1
+
+      - name: Download release assets and compute checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p /tmp/release-assets
+          cd /tmp/release-assets
+
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${{ github.repository }}" \
+            --pattern "agentusage_${VERSION}_darwin_amd64.tar.gz" \
+            --pattern "agentusage_${VERSION}_darwin_arm64.tar.gz" \
+            --pattern "agentusage_${VERSION}_linux_amd64.tar.gz" \
+            --pattern "agentusage_${VERSION}_linux_arm64.tar.gz"
+
+          echo "SHA_DARWIN_AMD64=$(sha256sum agentusage_${VERSION}_darwin_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_DARWIN_ARM64=$(sha256sum agentusage_${VERSION}_darwin_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_AMD64=$(sha256sum agentusage_${VERSION}_linux_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_ARM64=$(sha256sum agentusage_${VERSION}_linux_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Generate Homebrew formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          REPO="janekbaraniewski/agentusage"
+          BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
+
+          mkdir -p /tmp/homebrew-formula
+
+          cat > /tmp/homebrew-formula/agentusage.rb << FORMULA
+          # typed: false
+          # frozen_string_literal: true
+
+          class Agentusage < Formula
+            desc "Monitor your AI coding tool quotas from a single TUI dashboard"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/agentusage_${VERSION}_darwin_arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "${BASE_URL}/agentusage_${VERSION}_darwin_amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/agentusage_${VERSION}_linux_arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "${BASE_URL}/agentusage_${VERSION}_linux_amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+            end
+
+            def install
+              bin.install "agentusage"
+            end
+
+            test do
+              assert_match "agentusage", shell_output("#{bin}/agentusage --version 2>&1", 0)
+            end
+          end
+          FORMULA
+
+          sed -i 's/^          //' /tmp/homebrew-formula/agentusage.rb
+
+      - name: Push formula to Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone --branch master "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/janekbaraniewski/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Formula
+          cp /tmp/homebrew-formula/agentusage.rb /tmp/homebrew-tap/Formula/agentusage.rb
+
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/agentusage.rb
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Update agentusage to ${{ steps.version.outputs.version }}"
+          git push

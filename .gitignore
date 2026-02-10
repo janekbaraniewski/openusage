@@ -1,0 +1,32 @@
+# Binary
+/agentusage
+/agentquota
+bin/
+dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.claude/
+.opencode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug / temp
+*.har
+*.prof
