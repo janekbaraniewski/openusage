@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/janekbaraniewski/agentusage/internal/core"
 )
 
 // RateLimitGroup holds a parsed set of rate-limit header values.
@@ -69,6 +71,25 @@ func ParseRateLimitGroup(h http.Header, limitHeader, remainingHeader, resetHeade
 		Limit:     limit,
 		Remaining: remaining,
 		ResetTime: ParseResetTime(h.Get(resetHeader)),
+	}
+}
+
+// ApplyRateLimitGroup parses rate-limit headers and writes the result into the
+// given snapshot under the specified metric key. It is a no-op when the headers
+// contain no usable data.
+func ApplyRateLimitGroup(h http.Header, snap *core.QuotaSnapshot, key, unit, window, limitH, remainH, resetH string) {
+	rlg := ParseRateLimitGroup(h, limitH, remainH, resetH)
+	if rlg == nil {
+		return
+	}
+	snap.Metrics[key] = core.Metric{
+		Limit:     rlg.Limit,
+		Remaining: rlg.Remaining,
+		Unit:      unit,
+		Window:    window,
+	}
+	if rlg.ResetTime != nil {
+		snap.Resets[key+"_reset"] = *rlg.ResetTime
 	}
 }
 

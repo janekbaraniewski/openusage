@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -50,7 +49,7 @@ func (p *Provider) Describe() core.ProviderInfo {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
-	apiKey := resolveAPIKey(acct)
+	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
 		return core.QuotaSnapshot{
 			ProviderID: p.ID(),
@@ -163,13 +162,13 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 func (p *Provider) fetchRateLimits(ctx context.Context, url, apiKey string, snap *core.QuotaSnapshot) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("deepseek: creating models request: %w", err)
+		return fmt.Errorf("creating models request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("deepseek: models request failed: %w", err)
+		return fmt.Errorf("models request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -187,33 +186,10 @@ func (p *Provider) fetchRateLimits(ctx context.Context, url, apiKey string, snap
 		snap.Message = "rate limited (HTTP 429)"
 	}
 
-	applyRateLimitGroup(resp.Header, snap, "rpm", "requests", "1m",
+	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm", "requests", "1m",
 		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	applyRateLimitGroup(resp.Header, snap, "tpm", "tokens", "1m",
+	parsers.ApplyRateLimitGroup(resp.Header, snap, "tpm", "tokens", "1m",
 		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
 
 	return nil
-}
-
-func resolveAPIKey(acct core.AccountConfig) string {
-	if acct.Token != "" {
-		return acct.Token
-	}
-	return os.Getenv(acct.APIKeyEnv)
-}
-
-func applyRateLimitGroup(h http.Header, snap *core.QuotaSnapshot, key, unit, window, limitH, remainH, resetH string) {
-	rlg := parsers.ParseRateLimitGroup(h, limitH, remainH, resetH)
-	if rlg == nil {
-		return
-	}
-	snap.Metrics[key] = core.Metric{
-		Limit:     rlg.Limit,
-		Remaining: rlg.Remaining,
-		Unit:      unit,
-		Window:    window,
-	}
-	if rlg.ResetTime != nil {
-		snap.Resets[key+"_reset"] = *rlg.ResetTime
-	}
 }

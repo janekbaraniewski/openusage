@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // AccountConfig holds the per-account configuration loaded from TOML.
 type AccountConfig struct {
@@ -13,6 +16,14 @@ type AccountConfig struct {
 	BaseURL    string            `toml:"base_url,omitempty"`    // custom API base URL (e.g. for OpenRouter)
 	Token      string            `toml:"-"`                     // runtime-only: access token (never persisted)
 	ExtraData  map[string]string `toml:"-"`                     // runtime-only: extra detection data
+}
+
+// ResolveAPIKey returns the API key from Token (runtime) or the environment variable.
+func (c AccountConfig) ResolveAPIKey() string {
+	if c.Token != "" {
+		return c.Token
+	}
+	return os.Getenv(c.APIKeyEnv)
 }
 
 // ProviderInfo describes a provider adapter's capabilities.
