@@ -262,7 +262,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	snap.Raw["total_models"] = fmt.Sprintf("%d", len(generativeModels))
 
 	// Parse any rate-limit headers (Gemini occasionally includes them)
-	parseGroup(resp.Header, &snap, "rpm", "requests", "1m",
+	applyRateLimitGroup(resp.Header, &snap, "rpm", "requests", "1m",
 		"x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset")
 
 	// Add pricing reference data
@@ -285,20 +285,18 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func parseGroup(h http.Header, snap *core.QuotaSnapshot, key, unit, window, limitH, remainH, resetH string) {
-	limit := parsers.ParseFloat(h.Get(limitH))
-	remaining := parsers.ParseFloat(h.Get(remainH))
-
-	if limit != nil || remaining != nil {
-		snap.Metrics[key] = core.Metric{
-			Limit:     limit,
-			Remaining: remaining,
-			Unit:      unit,
-			Window:    window,
-		}
+func applyRateLimitGroup(h http.Header, snap *core.QuotaSnapshot, key, unit, window, limitH, remainH, resetH string) {
+	rlg := parsers.ParseRateLimitGroup(h, limitH, remainH, resetH)
+	if rlg == nil {
+		return
 	}
-
-	if rt := parsers.ParseResetTime(h.Get(resetH)); rt != nil {
-		snap.Resets[key+"_reset"] = *rt
+	snap.Metrics[key] = core.Metric{
+		Limit:     rlg.Limit,
+		Remaining: rlg.Remaining,
+		Unit:      unit,
+		Window:    window,
+	}
+	if rlg.ResetTime != nil {
+		snap.Resets[key+"_reset"] = *rlg.ResetTime
 	}
 }

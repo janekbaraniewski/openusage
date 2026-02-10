@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -8,12 +9,10 @@ import (
 
 // ─── Help Overlay ───────────────────────────────────────────────────────────
 
-// renderHelpOverlay draws a centered help popup explaining the TUI categories,
-// status icons, and keybindings. Dismissed by pressing any key.
+// renderHelpOverlay draws a centered help popup with animated ASCII banner,
+// theme gallery, category/status reference, and keybindings.
+// Dismissed by pressing any key.
 func (m Model) renderHelpOverlay(screenW, screenH int) string {
-	// ── Build content sections ──
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
 	headingStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(colorSapphire)
 	descStyle := lipgloss.NewStyle().Foreground(colorSubtext)
@@ -22,28 +21,68 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 
 	var lines []string
 
-	// Title
-	lines = append(lines, titleStyle.Render("  AgentUsage Help"))
+	// ── Animated ASCII Art Banner ──
+	banner := ASCIIBanner(m.animFrame)
+	for _, bl := range strings.Split(banner, "\n") {
+		lines = append(lines, "  "+bl)
+	}
+	lines = append(lines, "")
+
+	// Subtitle
+	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
+		Render("  AI provider quota dashboard")
+	lines = append(lines, subtitle)
+	lines = append(lines, "")
+
+	// ── Active Theme ──
+	lines = append(lines, headingStyle.Render("  Themes")+"  "+
+		dimHintStyle.Render("press t to cycle"))
+	lines = append(lines, "")
+
+	// Theme gallery — show all themes with active highlighted
+	var themePills []string
+	for i, t := range Themes {
+		pill := t.Icon + " " + t.Name
+		if i == ActiveThemeIdx {
+			themePills = append(themePills, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorMantle).
+				Background(colorAccent).
+				Padding(0, 1).
+				Render(pill))
+		} else {
+			themePills = append(themePills, lipgloss.NewStyle().
+				Foreground(colorSubtext).
+				Background(colorSurface0).
+				Padding(0, 1).
+				Render(pill))
+		}
+	}
+	// Wrap themes into rows of 3
+	for i := 0; i < len(themePills); i += 3 {
+		end := i + 3
+		if end > len(themePills) {
+			end = len(themePills)
+		}
+		lines = append(lines, "    "+strings.Join(themePills[i:end], " "))
+	}
 	lines = append(lines, "")
 
 	// ── Category Tags ──
 	lines = append(lines, headingStyle.Render("  Category Tags"))
-	lines = append(lines, descStyle.Render("  Each provider shows one tag based on what data is available:"))
 	lines = append(lines, "")
 
 	tags := []struct {
-		emoji, label, color, desc string
+		emoji, label, desc string
 	}{
-		{"💰", "Spend", "peach", "Hard spending limit — $ used vs $ budget (e.g. Cursor team plans)"},
-		{"📊", "Plan", "sapphire", "Plan-level spending — $ used against plan allowance"},
-		{"💳", "Credits", "teal", "Prepaid credit balance — remaining vs total purchased"},
-		{"⚡", "Rate", "yellow", "Rate limits — requests/tokens remaining in current window"},
-		{"🔥", "Cost", "peach", "Running cost tracker — $ spent today or total (no hard limit)"},
-		{"⏱", "Block", "sky", "Time-block cost — $ spent in a rolling window (e.g. 5h block)"},
-		{"📊", "Quota", "sapphire", "Generic quota — % remaining of any limit (requests, tokens, etc.)"},
-		{"💬", "Activity", "green", "Activity counter — messages, sessions, tool calls today"},
-		{"📋", "Metrics", "subtext", "Raw metric — a single data point when nothing else matched"},
-		{"ℹ", "Info", "lavender", "Informational message from the provider"},
+		{"💰", "Spend", "Hard spending limit — $ used vs $ budget"},
+		{"📊", "Plan", "Plan-level spending — $ used against allowance"},
+		{"💳", "Credits", "Prepaid credit balance — remaining vs total"},
+		{"⚡", "Rate", "Rate limits — requests/tokens remaining"},
+		{"🔥", "Cost", "Running cost tracker — $ spent today or total"},
+		{"⏱", "Block", "Time-block cost — $ spent in rolling window"},
+		{"📊", "Quota", "Generic quota — % remaining of any limit"},
+		{"💬", "Activity", "Activity counter — messages, sessions, tools"},
 	}
 
 	for _, t := range tags {
@@ -51,7 +90,6 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		tagStr := lipgloss.NewStyle().Foreground(tc).Bold(true).Render(t.emoji + " " + padRight(t.label, 10))
 		lines = append(lines, "    "+tagStr+tagDescStyle.Render(t.desc))
 	}
-
 	lines = append(lines, "")
 
 	// ── Status Icons ──
@@ -63,10 +101,10 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		color             lipgloss.Color
 	}{
 		{"●", "OK", "All good — quota/limits healthy", colorOK},
-		{"◐", "WARN", "Approaching limit (below warning threshold)", colorWarn},
-		{"◌", "LIMIT", "At or over limit — requests may be rejected", colorCrit},
-		{"◈", "AUTH", "Authentication required — check API key / login", colorAuth},
-		{"✗", "ERR", "Error fetching data from provider", colorCrit},
+		{"◐", "WARN", "Approaching limit", colorWarn},
+		{"◌", "LIMIT", "At or over limit", colorCrit},
+		{"◈", "AUTH", "Authentication required", colorAuth},
+		{"✗", "ERR", "Error fetching data", colorCrit},
 		{"◇", "…", "Unknown or unsupported", colorDim},
 	}
 
@@ -75,90 +113,65 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		badgeStr := lipgloss.NewStyle().Foreground(s.color).Bold(true).Render(padRight(s.badge, 7))
 		lines = append(lines, "    "+iconStr+" "+badgeStr+tagDescStyle.Render(s.desc))
 	}
-
 	lines = append(lines, "")
 
-	// ── Gauge Bar ──
+	// ── Gauge Demo ──
 	lines = append(lines, headingStyle.Render("  Gauge Bar"))
 	lines = append(lines, "")
-	lines = append(lines, "    "+tagDescStyle.Render("The progress bar shows % remaining (not used)."))
-	lines = append(lines, "    "+RenderGauge(72, 20, 30, 15)+"  "+tagDescStyle.Render("← healthy"))
-	lines = append(lines, "    "+RenderGauge(25, 20, 30, 15)+"  "+tagDescStyle.Render("← warning"))
-	lines = append(lines, "    "+RenderGauge(8, 20, 30, 15)+"  "+tagDescStyle.Render("← critical"))
+	lines = append(lines, "    "+RenderGauge(85, 16, 0.30, 0.15)+"  "+tagDescStyle.Render("healthy"))
+	lines = append(lines, "    "+RenderGauge(25, 16, 0.30, 0.15)+"  "+tagDescStyle.Render("warning"))
+	lines = append(lines, "    "+RenderGauge(8, 16, 0.30, 0.15)+"  "+tagDescStyle.Render("critical"))
 	lines = append(lines, "")
 
-	// ── Screen Tabs ──
-	lines = append(lines, headingStyle.Render("  Screen Tabs"))
-	lines = append(lines, "")
-	lines = append(lines, "    "+tagDescStyle.Render("Use Tab / Shift+Tab to cycle between screens:"))
+	// ── Keybindings (compact) ──
+	lines = append(lines, headingStyle.Render("  Keybindings"))
 	lines = append(lines, "")
 
-	screenTabs := []struct{ key, desc string }{
-		{"Tab", "Next screen (Dashboard → List → Analytics)"},
-		{"Shift+Tab", "Previous screen"},
-	}
-	for _, st := range screenTabs {
-		kStr := keyStyle.Render(padRight(st.key, 12))
-		lines = append(lines, "    "+kStr+tagDescStyle.Render(st.desc))
-	}
-	lines = append(lines, "")
-
-	// ── Dashboard Keybindings ──
-	lines = append(lines, headingStyle.Render("  Dashboard Keys"))
-	lines = append(lines, "")
-
-	keys := []struct{ key, desc string }{
-		{"↑↓ / j k", "Navigate providers"},
-		{"← → / h l", "Navigate tiles / panels"},
-		{"⏎ Enter", "Open detail view"},
-		{"Esc / Backspace", "Back to list"},
-		{"/", "Filter providers by name"},
-		{"[ ]", "Switch detail tabs"},
-		{"g / G", "Jump to top / bottom (detail)"},
-		{"r", "Refresh all providers"},
+	type keyGroup struct {
+		title string
+		keys  []struct{ key, desc string }
 	}
 
-	for _, k := range keys {
-		kStr := keyStyle.Render(padRight(k.key, 18))
-		lines = append(lines, "    "+kStr+tagDescStyle.Render(k.desc))
+	groups := []keyGroup{
+		{
+			title: "Navigation",
+			keys: []struct{ key, desc string }{
+				{"↑↓ / j k", "Move cursor"},
+				{"← → / h l", "Navigate tiles/panels"},
+				{"⏎ Enter", "Open detail"},
+				{"Esc", "Back"},
+				{"Tab", "Next screen"},
+			},
+		},
+		{
+			title: "Actions",
+			keys: []struct{ key, desc string }{
+				{"/", "Filter providers"},
+				{"[ ]", "Switch detail tabs"},
+				{"s", "Cycle sort (analytics)"},
+				{"g / G", "Top / bottom"},
+				{"r", "Refresh"},
+				{"t", "Cycle theme"},
+			},
+		},
+		{
+			title: "Global",
+			keys: []struct{ key, desc string }{
+				{"?", "Toggle help"},
+				{"q", "Quit"},
+			},
+		},
 	}
 
-	lines = append(lines, "")
-
-	// ── Analytics Keybindings ──
-	lines = append(lines, headingStyle.Render("  Analytics Keys"))
-	lines = append(lines, "")
-
-	analyticsKeys := []struct{ key, desc string }{
-		{"↑↓ / j k", "Scroll analytics content"},
-		{"g / G", "Jump to top / bottom"},
-		{"s", "Cycle sort: Cost ↓ → Name ↑ → Tokens ↓"},
-		{"/", "Filter by provider or model name"},
-		{"Esc", "Clear filter"},
+	for _, g := range groups {
+		lines = append(lines, "    "+lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(g.title))
+		for _, k := range g.keys {
+			kStr := keyStyle.Render(padRight(k.key, 14))
+			lines = append(lines, "      "+kStr+descStyle.Render(k.desc))
+		}
+		lines = append(lines, "")
 	}
 
-	for _, k := range analyticsKeys {
-		kStr := keyStyle.Render(padRight(k.key, 18))
-		lines = append(lines, "    "+kStr+tagDescStyle.Render(k.desc))
-	}
-
-	lines = append(lines, "")
-
-	// ── Global ──
-	lines = append(lines, headingStyle.Render("  Global"))
-	lines = append(lines, "")
-
-	globalKeys := []struct{ key, desc string }{
-		{"?", "Toggle this help"},
-		{"q / Ctrl+C", "Quit"},
-	}
-
-	for _, k := range globalKeys {
-		kStr := keyStyle.Render(padRight(k.key, 18))
-		lines = append(lines, "    "+kStr+tagDescStyle.Render(k.desc))
-	}
-
-	lines = append(lines, "")
 	lines = append(lines, "  "+dimHintStyle.Render("Press any key to dismiss"))
 
 	// ── Build the overlay box ──
@@ -172,16 +185,11 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 			contentW = w
 		}
 	}
-	contentH := len(lines)
 
 	// Add some padding to the box
 	boxW := contentW + 4
 	if boxW > screenW-4 {
 		boxW = screenW - 4
-	}
-	boxH := contentH + 2
-	if boxH > screenH-2 {
-		boxH = screenH - 2
 	}
 
 	boxStyle := lipgloss.NewStyle().
@@ -226,7 +234,25 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		renderedLines++
 	}
 
-	return overlay.String()
+	// Also add a version/credit line at the bottom
+	creditLine := fmt.Sprintf("%s  •  %s",
+		dimHintStyle.Render("AgentUsage"),
+		dimHintStyle.Render(ThemeName()),
+	)
+	creditW := lipgloss.Width(creditLine)
+	creditPad := (screenW - creditW) / 2
+	if creditPad < 0 {
+		creditPad = 0
+	}
+	// Replace the last empty line with credit
+	result := overlay.String()
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) > 1 {
+		resultLines[len(resultLines)-1] = strings.Repeat(" ", creditPad) + creditLine
+		result = strings.Join(resultLines, "\n")
+	}
+
+	return result
 }
 
 // padRight pads a string with spaces to the given width.

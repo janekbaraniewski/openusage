@@ -23,33 +23,7 @@ const (
 	tileBorderH      = 2 // left + right border chars
 )
 
-// ─── Tile Styles ────────────────────────────────────────────────────────────
-
-var (
-	tileBorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorSurface1).
-			Padding(0, tilePadH)
-
-	tileSelectedBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorAccent).
-				Padding(0, tilePadH)
-
-	tileNameStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorText)
-
-	tileNameSelectedStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorLavender)
-
-	tileSummaryStyle = lipgloss.NewStyle().
-				Foreground(colorSubtext)
-
-	tileTimestampStyle = lipgloss.NewStyle().
-				Foreground(colorDim)
-)
+// Tile styles are defined in styles.go for theme support.
 
 // ─── Grid Computation ───────────────────────────────────────────────────────
 
@@ -416,9 +390,15 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 
 	content := strings.Join(all, "\n")
 
+	// Status-glow effect: selected tiles get border colored by their status
 	border := tileBorderStyle.Width(tileW)
 	if selected {
-		border = tileSelectedBorderStyle.Width(tileW)
+		statusGlow := StatusBorderColor(snap.Status)
+		border = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(statusGlow).
+			Padding(0, tilePadH).
+			Width(tileW)
 	}
 	return border.Render(content)
 }

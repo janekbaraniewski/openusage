@@ -35,16 +35,23 @@ func (m Metric) Percent() float64 {
 	return -1
 }
 
+// TimePoint is a single data point in a time series (date → value).
+type TimePoint struct {
+	Date  string  `json:"date"`  // "2025-01-15"
+	Value float64 `json:"value"` // metric value at that date
+}
+
 // QuotaSnapshot is the canonical result returned by every provider adapter.
 type QuotaSnapshot struct {
-	ProviderID string               `json:"provider_id"`
-	AccountID  string               `json:"account_id"`
-	Timestamp  time.Time            `json:"timestamp"`
-	Status     Status               `json:"status"`
-	Metrics    map[string]Metric    `json:"metrics"`           // keys like "rpm", "tpm", "rpd"
-	Resets     map[string]time.Time `json:"resets,omitempty"`  // e.g. "rpm_reset"
-	Raw        map[string]string    `json:"raw,omitempty"`     // redacted header dump / CLI lines
-	Message    string               `json:"message,omitempty"` // human-readable summary
+	ProviderID  string                 `json:"provider_id"`
+	AccountID   string                 `json:"account_id"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Status      Status                 `json:"status"`
+	Metrics     map[string]Metric      `json:"metrics"`                // keys like "rpm", "tpm", "rpd"
+	Resets      map[string]time.Time   `json:"resets,omitempty"`       // e.g. "rpm_reset"
+	Raw         map[string]string      `json:"raw,omitempty"`          // redacted header dump / CLI lines
+	DailySeries map[string][]TimePoint `json:"daily_series,omitempty"` // time-indexed data (e.g. "messages", "cost", "tokens_<model>")
+	Message     string                 `json:"message,omitempty"`      // human-readable summary
 }
 
 // WorstStatus returns the "worst" status across all metrics.

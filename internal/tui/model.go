@@ -4,11 +4,22 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/agentusage/internal/core"
 )
+
+// tickMsg drives animations (gradient brand, spinner, pulse).
+type tickMsg time.Time
+
+// tickCmd returns the next animation tick command.
+func tickCmd() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // ─── Screen Tabs (tmux-style) ───────────────────────────────────────────────
 
@@ -70,6 +81,10 @@ type Model struct {
 	analyticsFilter    string
 	analyticsFiltering bool
 	analyticsSortBy    int // 0=cost↓, 1=name↑, 2=tokens↓
+
+	// Animation state
+	animFrame  int  // monotonically increasing frame counter
+	refreshing bool // true when a manual refresh is in progress
 }
 
 // NewModel creates a new TUI model.
@@ -83,10 +98,14 @@ func NewModel(warnThresh, critThresh float64) Model {
 
 // ─── Bubble Tea Interface ───────────────────────────────────────────────────
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return tickCmd() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tickMsg:
+		m.animFrame++
+		return m, tickCmd()
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -94,6 +113,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SnapshotsMsg:
 		m.snapshots = msg
+		m.refreshing = false
 		m.rebuildSortedIDs()
 		return m, nil
 
@@ -118,6 +138,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Screen tab switching: Tab / Shift+Tab cycle through screens
+	// Theme cycling: t key
 	if !m.filtering && !m.analyticsFiltering {
 		switch msg.String() {
 		case "tab":
@@ -129,6 +150,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = (m.screen - 1 + screenCount) % screenCount
 			m.mode = modeList
 			m.detailOffset = 0
+			return m, nil
+		case "t":
+			CycleTheme()
 			return m, nil
 		}
 	}
@@ -200,7 +224,7 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.analyticsScroll = 0
 		}
 	case "r":
-		// Engine handles refresh
+		m.refreshing = true
 	}
 	return m, nil
 }
@@ -247,7 +271,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		m.filter = ""
 	case "r":
-		// Engine handles actual refresh; TUI just acknowledges.
+		m.refreshing = true
 	}
 	return m, nil
 }
@@ -332,7 +356,7 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		m.filter = ""
 	case "r":
-		// Engine handles actual refresh
+		m.refreshing = true
 	}
 	return m, nil
 }
@@ -418,11 +442,23 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 // ─── Header & Footer ────────────────────────────────────────────────────────
 
 func (m Model) renderHeader(w int) string {
-	brand := headerBrandStyle.Render("⚡")
-	title := headerStyle.Render(" AgentUsage")
+	// ── Animated brand with color wave ──
+	bolt := PulseChar(
+		lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("⚡"),
+		lipgloss.NewStyle().Foreground(colorDim).Bold(true).Render("⚡"),
+		m.animFrame,
+	)
+	brandText := RenderGradientText("AgentUsage", m.animFrame)
 
 	// ── Screen tabs (tmux-style) ──
 	tabs := m.renderScreenTabs()
+
+	// ── Spinner when refreshing ──
+	spinnerStr := ""
+	if m.refreshing {
+		frame := m.animFrame % len(SpinnerFrames)
+		spinnerStr = " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
+	}
 
 	// ── Right side info ──
 	var info string
@@ -430,7 +466,8 @@ func (m Model) renderHeader(w int) string {
 	switch m.screen {
 	case screenAnalytics:
 		if m.analyticsFiltering {
-			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter+"█")
+			cursor := PulseChar("█", "▌", m.animFrame)
+			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter+cursor)
 		} else if m.analyticsFilter != "" {
 			info = dimStyle.Render("filtered: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter)
 		} else {
@@ -441,13 +478,14 @@ func (m Model) renderHeader(w int) string {
 		info = fmt.Sprintf("⊞ %d providers", len(ids))
 
 		if m.filtering {
-			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.filter+"█")
+			cursor := PulseChar("█", "▌", m.animFrame)
+			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.filter+cursor)
 		} else if m.filter != "" {
 			info = dimStyle.Render("filtered: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.filter)
 		}
 	}
 
-	// ── Status indicators ──
+	// ── Status indicators with pulse ──
 	ids := m.filteredIDs()
 	okCount, warnCount, errCount := 0, 0, 0
 	for _, id := range ids {
@@ -464,27 +502,64 @@ func (m Model) renderHeader(w int) string {
 
 	statusInfo := ""
 	if okCount > 0 {
-		statusInfo += lipgloss.NewStyle().Foreground(colorGreen).Render(fmt.Sprintf(" %d●", okCount))
+		dot := PulseChar("●", "◉", m.animFrame)
+		statusInfo += lipgloss.NewStyle().Foreground(colorGreen).Render(fmt.Sprintf(" %d%s", okCount, dot))
 	}
 	if warnCount > 0 {
-		statusInfo += lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf(" %d◐", warnCount))
+		dot := PulseChar("◐", "◑", m.animFrame)
+		statusInfo += lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf(" %d%s", warnCount, dot))
 	}
 	if errCount > 0 {
-		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d✗", errCount))
+		dot := PulseChar("✗", "✕", m.animFrame)
+		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d%s", errCount, dot))
 	}
 
 	infoRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(info)
 
-	left := brand + title + " " + tabs + statusInfo
+	left := bolt + " " + brandText + " " + tabs + statusInfo + spinnerStr
 	gap := w - lipgloss.Width(left) - lipgloss.Width(infoRendered)
 	if gap < 1 {
 		gap = 1
 	}
 
 	line := left + strings.Repeat(" ", gap) + infoRendered
-	sep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("━", w))
+
+	// ── Separator with accent fade ──
+	sep := m.renderGradientSeparator(w)
 
 	return line + "\n" + sep
+}
+
+// renderGradientSeparator renders a separator line with a subtle accent glow.
+func (m Model) renderGradientSeparator(w int) string {
+	if w <= 0 {
+		return ""
+	}
+	// Build a separator that has a subtle accent glow in the center
+	dimBar := lipgloss.NewStyle().Foreground(colorSurface1)
+	accentBar := lipgloss.NewStyle().Foreground(colorAccent)
+
+	if w < 20 {
+		return dimBar.Render(strings.Repeat("━", w))
+	}
+
+	// Animated glow position
+	glowW := 8
+	pos := (m.animFrame * 2) % (w + glowW)
+
+	var b strings.Builder
+	for i := 0; i < w; i++ {
+		dist := i - (pos - glowW/2)
+		if dist < 0 {
+			dist = -dist
+		}
+		if dist <= glowW/2 {
+			b.WriteString(accentBar.Render("━"))
+		} else {
+			b.WriteString(dimBar.Render("━"))
+		}
+	}
+	return b.String()
 }
 
 // renderScreenTabs renders tmux-style screen tab indicators.
@@ -508,6 +583,7 @@ func (m Model) renderFooter(w int) string {
 
 	// Screen tab hint
 	tabHint := helpKeyStyle.Render("⇥") + helpStyle.Render(" tab")
+	themeHint := helpKeyStyle.Render("t") + helpStyle.Render(" theme")
 
 	switch {
 	case m.screen == screenAnalytics:
@@ -517,6 +593,7 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("s") + helpStyle.Render(" sort"),
 			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
 			tabHint,
+			themeHint,
 			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
 			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
 		}
@@ -526,6 +603,7 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("↑↓") + helpStyle.Render(" scroll"),
 			helpKeyStyle.Render("g/G") + helpStyle.Render(" top/btm"),
 			helpKeyStyle.Render("esc") + helpStyle.Render(" back"),
+			themeHint,
 			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
 			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
 		}
@@ -535,6 +613,7 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("⏎") + helpStyle.Render(" detail"),
 			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
 			tabHint,
+			themeHint,
 			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
 			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
 		}
@@ -544,13 +623,25 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("⏎") + helpStyle.Render(" detail"),
 			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
 			tabHint,
+			themeHint,
 			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
 			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
 		}
 	}
 
 	help := " " + strings.Join(keys, "   ")
-	return sep + "\n" + help
+
+	// Theme name indicator (right-aligned)
+	themeName := lipgloss.NewStyle().Foreground(colorAccent).Render(ThemeName())
+	helpW := lipgloss.Width(help)
+	themeW := lipgloss.Width(themeName)
+	gap := w - helpW - themeW - 1
+	if gap < 1 {
+		// Not enough room for theme name
+		return sep + "\n" + help
+	}
+
+	return sep + "\n" + help + strings.Repeat(" ", gap) + themeName
 }
 
 // ─── Left Panel: Provider List ──────────────────────────────────────────────

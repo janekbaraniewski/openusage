@@ -120,13 +120,14 @@ type versionInfo struct {
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
 	snap := core.QuotaSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Status:     core.StatusOK,
-		Metrics:    make(map[string]core.Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        make(map[string]string),
+		ProviderID:  p.ID(),
+		AccountID:   acct.ID,
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
 	}
 
 	configDir := ""
@@ -159,6 +160,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	} else {
 		hasData = true
 	}
+
+	// 1b. Scan session directory tree for daily activity time series
+	p.readDailySessionCounts(sessionsDir, &snap)
 
 	// 2. Read version.json
 	versionFile := filepath.Join(configDir, "version.json")
@@ -415,6 +419,50 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 	}
 
 	return lastPayload, scanner.Err()
+}
+
+// readDailySessionCounts scans the sessions/<year>/<month>/<day>/ directory
+// tree and counts session files per day to build a daily activity time series.
+func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.QuotaSnapshot) {
+	dayCounts := make(map[string]int) // "2025-01-15" → count
+
+	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		// Extract date from path: sessions/2025/01/15/rollout-xxx.jsonl
+		rel, relErr := filepath.Rel(sessionsDir, path)
+		if relErr != nil {
+			return nil
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) >= 3 {
+			dateStr := fmt.Sprintf("%s-%s-%s", parts[0], parts[1], parts[2])
+			// Validate date format
+			if _, parseErr := time.Parse("2006-01-02", dateStr); parseErr == nil {
+				dayCounts[dateStr]++
+			}
+		}
+		return nil
+	})
+
+	if len(dayCounts) == 0 {
+		return
+	}
+
+	// Sort dates and store as time series
+	dates := make([]string, 0, len(dayCounts))
+	for d := range dayCounts {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+
+	for _, d := range dates {
+		snap.DailySeries["sessions"] = append(snap.DailySeries["sessions"], core.TimePoint{
+			Date:  d,
+			Value: float64(dayCounts[d]),
+		})
+	}
 }
 
 // formatWindow converts window minutes to a human-readable string.

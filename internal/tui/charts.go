@@ -990,7 +990,7 @@ func RenderLeaderboard(items []chartItem, w, maxShow int, title string) string {
 	}
 
 	miniBarW := 16
-	nameW := 22
+	nameW := 30
 	if nameW+miniBarW+30 > w {
 		nameW = w - miniBarW - 30
 		if nameW < 10 {
@@ -1138,4 +1138,307 @@ func RenderTokenBreakdown(input, output float64, w int) string {
 		dimStyle.Render(formatTokens(output)+" tok")))
 
 	return sb.String()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-SERIES TIME-SERIES LINE CHART
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Renders a multi-series chart with a Y-axis, date X-axis, and legend:
+//
+//	  100 ┤          ●·····●
+//	   75 ┤    ●····●      ○····○
+//	   50 ┤   ○···○          ●
+//	   25 ┤ ●                  ○
+//	    0 ┤─────────────────────────
+//	      Jan 1    Jan 15    Feb 1
+//
+//	● claude-code  ○ cursor-ide
+
+// TimeSeriesLine represents one series in a multi-line chart.
+type TimeSeriesLine struct {
+	Label  string
+	Points []TimeSeriesPoint
+	Color  lipgloss.Color
+}
+
+// TimeSeriesPoint is one (date, value) point.
+type TimeSeriesPoint struct {
+	Date  string // "2025-01-15"
+	Value float64
+}
+
+// RenderTimeSeriesChart draws a multi-series chart with Y-axis, date X-axis, and legend.
+// chartW is the total available width; chartH is the number of Y-axis rows.
+func RenderTimeSeriesChart(series []TimeSeriesLine, chartW, chartH int) string {
+	if len(series) == 0 || chartW < 30 {
+		return ""
+	}
+	if chartH < 5 {
+		chartH = 5
+	}
+	if chartH > 20 {
+		chartH = 20
+	}
+
+	// ── 1. Collect all unique dates and global min/max ──
+	dateSet := make(map[string]bool)
+	globalMax := float64(0)
+	for _, s := range series {
+		for _, p := range s.Points {
+			dateSet[p.Date] = true
+			if p.Value > globalMax {
+				globalMax = p.Value
+			}
+		}
+	}
+	if globalMax == 0 {
+		globalMax = 1
+	}
+
+	// Sort dates
+	allDates := make([]string, 0, len(dateSet))
+	for d := range dateSet {
+		allDates = append(allDates, d)
+	}
+	sortStrings(allDates)
+
+	if len(allDates) == 0 {
+		return ""
+	}
+
+	// ── 2. Sizing ──
+	yAxisW := 8 // width for Y-axis labels
+	plotW := chartW - yAxisW - 4
+	if plotW < 10 {
+		plotW = 10
+	}
+
+	// Map dates to X positions (columns in the plot area)
+	dateToX := make(map[string]int)
+	if len(allDates) == 1 {
+		dateToX[allDates[0]] = plotW / 2
+	} else {
+		for i, d := range allDates {
+			dateToX[d] = int(float64(i) / float64(len(allDates)-1) * float64(plotW-1))
+		}
+	}
+
+	// Build lookup for each series: X column → Y value
+	type xyPoint struct {
+		x, y int
+	}
+	seriesPoints := make([][]xyPoint, len(series))
+	for si, s := range series {
+		lookup := make(map[string]float64)
+		for _, p := range s.Points {
+			lookup[p.Date] = p.Value
+		}
+		for _, d := range allDates {
+			if v, ok := lookup[d]; ok {
+				x := dateToX[d]
+				yRow := int(v / globalMax * float64(chartH-1))
+				if yRow >= chartH {
+					yRow = chartH - 1
+				}
+				seriesPoints[si] = append(seriesPoints[si], xyPoint{x: x, y: yRow})
+			}
+		}
+	}
+
+	// ── 3. Render grid ──
+	// grid[row][col] = index of series (-1 = empty)
+	// Row 0 = top (max value), Row chartH-1 = bottom (0 value)
+	grid := make([][]int, chartH)
+	for r := range grid {
+		grid[r] = make([]int, plotW)
+		for c := range grid[r] {
+			grid[r][c] = -1
+		}
+	}
+
+	// Also track connector segments between points
+	type connector struct {
+		col      int
+		seriesID int
+	}
+	connectors := make(map[int]map[int]int) // row → col → seriesID
+
+	for si, pts := range seriesPoints {
+		// Place points
+		for _, p := range pts {
+			row := (chartH - 1) - p.y // flip: row 0 = top
+			if row >= 0 && row < chartH && p.x >= 0 && p.x < plotW {
+				grid[row][p.x] = si
+			}
+		}
+
+		// Draw connections between adjacent points
+		for i := 0; i < len(pts)-1; i++ {
+			p1, p2 := pts[i], pts[i+1]
+			r1 := (chartH - 1) - p1.y
+			r2 := (chartH - 1) - p2.y
+
+			// Interpolate between p1 and p2
+			dx := p2.x - p1.x
+			if dx <= 1 {
+				continue
+			}
+			dy := float64(r2 - r1)
+			for cx := p1.x + 1; cx < p2.x; cx++ {
+				t := float64(cx-p1.x) / float64(dx)
+				cr := r1 + int(math.Round(dy*t))
+				if cr >= 0 && cr < chartH && cx >= 0 && cx < plotW {
+					if grid[cr][cx] == -1 { // don't overwrite actual points
+						if connectors[cr] == nil {
+							connectors[cr] = make(map[int]int)
+						}
+						connectors[cr][cx] = si
+					}
+				}
+			}
+		}
+	}
+
+	// ── 4. Render output ──
+	var sb strings.Builder
+
+	// Series markers (different chars per series)
+	markers := []string{"●", "◆", "■", "▲", "★", "◉", "⬟", "⬢"}
+	connChars := []string{"·", "·", "·", "·", "·", "·", "·", "·"}
+
+	for row := 0; row < chartH; row++ {
+		// Y-axis label
+		yVal := globalMax * float64(chartH-1-row) / float64(chartH-1)
+		yLabel := formatChartValue(yVal)
+		sb.WriteString(fmt.Sprintf("  %*s ┤", yAxisW-2, dimStyle.Render(yLabel)))
+
+		// Plot columns
+		for col := 0; col < plotW; col++ {
+			si := grid[row][col]
+			if si >= 0 && si < len(series) {
+				mk := markers[si%len(markers)]
+				sb.WriteString(lipgloss.NewStyle().Foreground(series[si].Color).Render(mk))
+			} else if cSi, ok := connectors[row][col]; ok && cSi < len(series) {
+				ch := connChars[cSi%len(connChars)]
+				sb.WriteString(lipgloss.NewStyle().Foreground(series[cSi].Color).Render(ch))
+			} else {
+				sb.WriteString(" ")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// X-axis line
+	sb.WriteString(fmt.Sprintf("  %*s └", yAxisW-2, ""))
+	sb.WriteString(strings.Repeat("─", plotW))
+	sb.WriteString("\n")
+
+	// X-axis date labels
+	numLabels := 5
+	if len(allDates) < numLabels {
+		numLabels = len(allDates)
+	}
+	if numLabels > 0 {
+		// Pick evenly spaced dates
+		labelRow := make([]byte, plotW)
+		for i := range labelRow {
+			labelRow[i] = ' '
+		}
+
+		for i := 0; i < numLabels; i++ {
+			var dateIdx int
+			if numLabels == 1 {
+				dateIdx = 0
+			} else {
+				dateIdx = i * (len(allDates) - 1) / (numLabels - 1)
+			}
+			d := allDates[dateIdx]
+			label := formatDateLabel(d)
+			x := dateToX[d]
+
+			// Place label centered at x
+			start := x - len(label)/2
+			if start < 0 {
+				start = 0
+			}
+			if start+len(label) > plotW {
+				start = plotW - len(label)
+			}
+			if start < 0 {
+				start = 0
+			}
+			for j, ch := range []byte(label) {
+				pos := start + j
+				if pos >= 0 && pos < plotW {
+					labelRow[pos] = ch
+				}
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("  %*s  ", yAxisW-2, ""))
+		sb.WriteString(dimStyle.Render(string(labelRow)))
+		sb.WriteString("\n")
+	}
+
+	// ── 5. Legend ──
+	sb.WriteString("\n  ")
+	for i, s := range series {
+		if i > 0 {
+			sb.WriteString("   ")
+		}
+		mk := markers[i%len(markers)]
+		sb.WriteString(lipgloss.NewStyle().Foreground(s.Color).Render(mk))
+		sb.WriteString(" ")
+		sb.WriteString(dimStyle.Render(s.Label))
+	}
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// formatChartValue formats a numeric value for Y-axis labels (compact).
+func formatChartValue(v float64) string {
+	if v >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", v/1_000_000)
+	}
+	if v >= 1_000 {
+		return fmt.Sprintf("%.1fK", v/1_000)
+	}
+	if v == float64(int(v)) {
+		return fmt.Sprintf("%d", int(v))
+	}
+	return fmt.Sprintf("%.1f", v)
+}
+
+// formatDateLabel formats a "2025-01-15" date string as "Jan 15".
+func formatDateLabel(d string) string {
+	if len(d) < 10 {
+		return d
+	}
+	months := map[string]string{
+		"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
+		"05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
+		"09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+	}
+	month := months[d[5:7]]
+	if month == "" {
+		month = d[5:7]
+	}
+	day := d[8:10]
+	// Strip leading zero from day
+	if day[0] == '0' {
+		day = day[1:]
+	}
+	return month + " " + day
+}
+
+// sortStrings is a simple insertion sort for small string slices (avoids
+// importing sort in this file).
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }

@@ -299,13 +299,14 @@ func floorToHour(t time.Time) time.Time {
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
 	snap := core.QuotaSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Status:     core.StatusOK,
-		Metrics:    make(map[string]core.Metric),
-		Raw:        make(map[string]string),
-		Resets:     make(map[string]time.Time),
+		ProviderID:  p.ID(),
+		AccountID:   acct.ID,
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
 	}
 
 	// Determine home / claude directory. ExtraData["claude_dir"] allows
@@ -407,9 +408,20 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 		}
 	}
 
-	// Today's activity
+	// Daily activity — store ALL days as time series + extract today's metrics
 	today := time.Now().Format("2006-01-02")
 	for _, da := range stats.DailyActivity {
+		// Time series: messages per day
+		snap.DailySeries["messages"] = append(snap.DailySeries["messages"], core.TimePoint{
+			Date: da.Date, Value: float64(da.MessageCount),
+		})
+		snap.DailySeries["sessions"] = append(snap.DailySeries["sessions"], core.TimePoint{
+			Date: da.Date, Value: float64(da.SessionCount),
+		})
+		snap.DailySeries["tool_calls"] = append(snap.DailySeries["tool_calls"], core.TimePoint{
+			Date: da.Date, Value: float64(da.ToolCallCount),
+		})
+
 		if da.Date == today {
 			msgs := float64(da.MessageCount)
 			snap.Metrics["messages_today"] = core.Metric{
@@ -429,12 +441,24 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 				Unit:   "sessions",
 				Window: "1d",
 			}
-			break
 		}
 	}
 
-	// Today's token usage by model (from stats-cache)
+	// Daily model tokens — store ALL days as time series per model
 	for _, dt := range stats.DailyModelTokens {
+		totalDayTokens := float64(0)
+		for model, tokens := range dt.TokensByModel {
+			name := sanitizeModelName(model)
+			key := fmt.Sprintf("tokens_%s", name)
+			snap.DailySeries[key] = append(snap.DailySeries[key], core.TimePoint{
+				Date: dt.Date, Value: float64(tokens),
+			})
+			totalDayTokens += float64(tokens)
+		}
+		snap.DailySeries["tokens_total"] = append(snap.DailySeries["tokens_total"], core.TimePoint{
+			Date: dt.Date, Value: totalDayTokens,
+		})
+
 		if dt.Date == today {
 			for model, tokens := range dt.TokensByModel {
 				t := float64(tokens)
@@ -445,7 +469,6 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 					Window: "1d",
 				}
 			}
-			break
 		}
 	}
 

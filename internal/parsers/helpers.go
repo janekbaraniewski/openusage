@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// RateLimitGroup holds a parsed set of rate-limit header values.
+type RateLimitGroup struct {
+	Limit     *float64
+	Remaining *float64
+	ResetTime *time.Time
+}
+
 // ParseFloat attempts to parse a header value as float64.
 func ParseFloat(val string) *float64 {
 	val = strings.TrimSpace(val)
@@ -48,6 +55,21 @@ func ParseResetTime(val string) *time.Time {
 	}
 
 	return nil
+}
+
+// ParseRateLimitGroup extracts limit, remaining, and reset values from HTTP
+// headers using the given header names. Returns nil if no data is found.
+func ParseRateLimitGroup(h http.Header, limitHeader, remainingHeader, resetHeader string) *RateLimitGroup {
+	limit := ParseFloat(h.Get(limitHeader))
+	remaining := ParseFloat(h.Get(remainingHeader))
+	if limit == nil && remaining == nil {
+		return nil
+	}
+	return &RateLimitGroup{
+		Limit:     limit,
+		Remaining: remaining,
+		ResetTime: ParseResetTime(h.Get(resetHeader)),
+	}
 }
 
 // RedactHeaders returns a copy of headers with sensitive values partially redacted.

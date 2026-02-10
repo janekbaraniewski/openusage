@@ -153,12 +153,13 @@ type dailyStats struct {
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
 	snap := core.QuotaSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Status:     core.StatusOK,
-		Metrics:    make(map[string]core.Metric),
-		Raw:        make(map[string]string),
+		ProviderID:  p.ID(),
+		AccountID:   acct.ID,
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
 	}
 
 	snap.Raw["pricing_summary"] = pricingSummary
@@ -551,6 +552,9 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Qu
 		snap.Metrics["composer_accepted_lines"] = core.Metric{Used: &accepted, Unit: "lines", Window: "1d"}
 	}
 
+	// Read daily stats for last 30 days to build time series
+	p.readDailyStatsSeries(ctx, db, snap)
+
 	// Read auth email for display
 	var email string
 	err = db.QueryRowContext(ctx,
@@ -560,6 +564,58 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Qu
 	}
 
 	return nil
+}
+
+// readDailyStatsSeries queries the last 30 days of dailyStats keys from the
+// state DB and builds DailySeries for tab/composer usage.
+func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *core.QuotaSnapshot) {
+	// Query all daily stats keys using LIKE
+	rows, err := db.QueryContext(ctx,
+		`SELECT key, value FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats.v1.5.%' ORDER BY key ASC`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	prefix := "aiCodeTracking.dailyStats.v1.5."
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) != nil {
+			continue
+		}
+		dateStr := strings.TrimPrefix(k, prefix)
+		if len(dateStr) != 10 { // "2025-01-15"
+			continue
+		}
+
+		var ds dailyStats
+		if json.Unmarshal([]byte(v), &ds) != nil {
+			continue
+		}
+
+		// tab_suggested_lines time series
+		if ds.TabSuggestedLines > 0 || ds.TabAcceptedLines > 0 {
+			snap.DailySeries["tab_suggested"] = append(snap.DailySeries["tab_suggested"],
+				core.TimePoint{Date: dateStr, Value: float64(ds.TabSuggestedLines)})
+			snap.DailySeries["tab_accepted"] = append(snap.DailySeries["tab_accepted"],
+				core.TimePoint{Date: dateStr, Value: float64(ds.TabAcceptedLines)})
+		}
+
+		// composer time series
+		if ds.ComposerSuggestedLines > 0 || ds.ComposerAcceptedLines > 0 {
+			snap.DailySeries["composer_suggested"] = append(snap.DailySeries["composer_suggested"],
+				core.TimePoint{Date: dateStr, Value: float64(ds.ComposerSuggestedLines)})
+			snap.DailySeries["composer_accepted"] = append(snap.DailySeries["composer_accepted"],
+				core.TimePoint{Date: dateStr, Value: float64(ds.ComposerAcceptedLines)})
+		}
+
+		// Total lines (suggested + accepted from all sources)
+		totalLines := float64(ds.TabSuggestedLines + ds.ComposerSuggestedLines)
+		if totalLines > 0 {
+			snap.DailySeries["total_lines"] = append(snap.DailySeries["total_lines"],
+				core.TimePoint{Date: dateStr, Value: totalLines})
+		}
+	}
 }
 
 // parseTimestamp tries to parse a string as epoch millis, epoch secs, or ISO-8601.

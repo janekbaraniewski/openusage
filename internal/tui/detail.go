@@ -1316,5 +1316,17 @@ func prettifyKey(key string) string {
 }
 
 func prettifyModelName(name string) string {
-	return strings.ReplaceAll(name, "_", "-")
+	result := strings.ReplaceAll(name, "_", "-")
+
+	// Cursor API returns "modelIntent" names. Some are opaque intent IDs
+	// rather than recognisable model names — annotate them so users aren't confused.
+	switch strings.ToLower(result) {
+	case "default":
+		return "default (auto)"
+	case "composer-1":
+		return "composer-1 (agent)"
+	case "github-bugbot":
+		return "github-bugbot (auto)"
+	}
+	return result
 }
