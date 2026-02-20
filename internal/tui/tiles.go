@@ -212,7 +212,61 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	} else {
 		hdrLine2 = dimStyle.Render(truncate(provID))
 	}
-	header := []string{hdrLine1, hdrLine2, accentSep}
+	// Build a prominent reset-time line for the header showing the most urgent reset.
+	var hdrResetLine string
+	if len(snap.Resets) > 0 {
+		var soonestLabel string
+		var soonestDur time.Duration
+		first := true
+		for key, t := range snap.Resets {
+			dur := time.Until(t)
+			if dur < 0 {
+				continue
+			}
+			if first || dur < soonestDur {
+				soonestDur = dur
+				soonestLabel = resetLabelMap[key]
+				if soonestLabel == "" {
+					if met, ok := snap.Metrics[key]; ok && met.Window != "" {
+						soonestLabel = "Rate " + met.Window
+					} else {
+						soonestLabel = prettifyKey(key)
+					}
+				}
+				first = false
+			}
+		}
+		if !first {
+			clockFrames := []string{"◴", "◷", "◶", "◵"}
+			clock := clockFrames[(m.animFrame/3)%len(clockFrames)]
+
+			durColor := colorTeal
+			if soonestDur < 10*time.Minute {
+				durColor = colorPeach
+			} else if soonestDur < 30*time.Minute {
+				durColor = colorYellow
+			}
+
+			durStr := formatDuration(soonestDur)
+			resetPill := lipgloss.NewStyle().Foreground(durColor).Render(clock) +
+				lipgloss.NewStyle().Foreground(colorSubtext).Render(" "+soonestLabel+" resets in ") +
+				lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(durStr)
+
+			// Right-align the reset pill on the header line
+			pillW := lipgloss.Width(resetPill)
+			pad := innerW - pillW
+			if pad < 0 {
+				pad = 0
+			}
+			hdrResetLine = strings.Repeat(" ", pad) + resetPill
+		}
+	}
+
+	header := []string{hdrLine1, hdrLine2}
+	if hdrResetLine != "" {
+		header = append(header, hdrResetLine)
+	}
+	header = append(header, accentSep)
 
 	age := time.Since(snap.Timestamp)
 	var timeStr string
