@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is this project?
 
-AgentUsage is a terminal dashboard (TUI) for monitoring AI coding tool usage and spend. It auto-detects AI tools and API keys on the workstation and displays live data using [Bubble Tea](https://github.com/charmbracelet/bubbletea). Written in Go, requires CGO enabled (for `mattn/go-sqlite3` used by the Cursor provider).
+OpenUsage is a terminal dashboard (TUI) for monitoring AI coding tool usage and spend. It auto-detects AI tools and API keys on the workstation and displays live data using [Bubble Tea](https://github.com/charmbracelet/bubbletea). Written in Go, requires CGO enabled (for `mattn/go-sqlite3` used by the Cursor provider).
 
 ## Commands
 
 ```bash
-make build          # build binary to ./bin/agentusage (includes version ldflags)
+make build          # build binary to ./bin/openusage (includes version ldflags)
 make test           # run all tests with -race and coverage
 make test-verbose   # verbose test output
 make lint           # golangci-lint (skips gracefully if not installed)
 make fmt            # go fmt ./...
 make vet            # go vet ./...
-make run            # go run cmd/agentusage/main.go
+make run            # go run cmd/openusage/main.go
 
 # Run a single test
 go test ./internal/providers/openai/ -run TestFetch -v
@@ -84,6 +84,6 @@ Scans for installed tools (Cursor, Claude Code, Codex, Copilot, Gemini CLI, Aide
 
 - CGO is required due to `github.com/mattn/go-sqlite3` (Cursor provider reads local SQLite DBs). This affects cross-compilation.
 - `AccountConfig.Binary` and `AccountConfig.BaseURL` are repurposed for non-API providers (e.g., Binary stores file paths for `claude_code`).
-- Config file: `~/.config/agentusage/settings.json`. Reference config: `configs/example_settings.json`.
-- Debug logging: set `AGENTUSAGE_DEBUG=1`.
+- Config file: `~/.config/openusage/settings.json`. Reference config: `configs/example_settings.json`.
+- Debug logging: set `OPENUSAGE_DEBUG=1`.
 - API keys are referenced via `api_key_env` in config (env var name), never stored directly.

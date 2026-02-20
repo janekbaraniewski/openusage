@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -335,5 +335,92 @@ func TestLoadFrom_AutoDetectedAccountsPersist(t *testing.T) {
 	}
 	if cfg.AutoDetectedAccounts[0].ID != "cached-openai" {
 		t.Errorf("auto-detected ID = %q, want 'cached-openai'", cfg.AutoDetectedAccounts[0].ID)
+	}
+}
+
+func TestLoadFrom_DashboardProviders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "dashboard": {
+    "providers": [
+      {"account_id": "openai-personal"},
+      {"account_id": "anthropic-work", "enabled": false},
+      {"account_id": "openai-personal"},
+      {"account_id": "   "}
+    ]
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Dashboard.Providers) != 2 {
+		t.Fatalf("dashboard.providers count = %d, want 2", len(cfg.Dashboard.Providers))
+	}
+
+	first := cfg.Dashboard.Providers[0]
+	if first.AccountID != "openai-personal" {
+		t.Errorf("first account_id = %q, want openai-personal", first.AccountID)
+	}
+	if !first.Enabled {
+		t.Error("missing enabled should default to true")
+	}
+
+	second := cfg.Dashboard.Providers[1]
+	if second.AccountID != "anthropic-work" {
+		t.Errorf("second account_id = %q, want anthropic-work", second.AccountID)
+	}
+	if second.Enabled {
+		t.Error("expected anthropic-work enabled=false")
+	}
+}
+
+func TestSaveDashboardProvidersTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	providers := []DashboardProviderConfig{
+		{AccountID: "openai-personal", Enabled: true},
+		{AccountID: "anthropic-work", Enabled: false},
+		{AccountID: "openai-personal", Enabled: false},
+	}
+	if err := SaveDashboardProvidersTo(path, providers); err != nil {
+		t.Fatalf("SaveDashboardProvidersTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+	if len(loaded.Dashboard.Providers) != 2 {
+		t.Fatalf("dashboard.providers count = %d, want 2", len(loaded.Dashboard.Providers))
+	}
+	if loaded.Dashboard.Providers[0].AccountID != "openai-personal" {
+		t.Errorf("first provider = %q, want openai-personal", loaded.Dashboard.Providers[0].AccountID)
+	}
+	if !loaded.Dashboard.Providers[0].Enabled {
+		t.Error("expected openai-personal enabled=true")
+	}
+	if loaded.Dashboard.Providers[1].AccountID != "anthropic-work" {
+		t.Errorf("second provider = %q, want anthropic-work", loaded.Dashboard.Providers[1].AccountID)
+	}
+	if loaded.Dashboard.Providers[1].Enabled {
+		t.Error("expected anthropic-work enabled=false")
 	}
 }

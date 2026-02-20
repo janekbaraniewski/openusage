@@ -11,15 +11,15 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/janekbaraniewski/agentusage/internal/config"
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/detect"
-	"github.com/janekbaraniewski/agentusage/internal/providers"
-	"github.com/janekbaraniewski/agentusage/internal/tui"
+	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/detect"
+	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
 func main() {
-	if os.Getenv("AGENTUSAGE_DEBUG") == "" {
+	if os.Getenv("OPENUSAGE_DEBUG") == "" {
 		log.SetOutput(io.Discard)
 	} else {
 		log.SetOutput(os.Stderr)
@@ -59,7 +59,7 @@ func main() {
 
 		allAccounts = mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 
-		if os.Getenv("AGENTUSAGE_DEBUG") != "" {
+		if os.Getenv("OPENUSAGE_DEBUG") != "" {
 			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
 				fmt.Fprint(os.Stderr, result.Summary())
 				fmt.Fprintln(os.Stderr)
@@ -68,7 +68,7 @@ func main() {
 	}
 
 	if len(allAccounts) == 0 {
-		fmt.Println("⚡ AgentUsage — No accounts configured or detected.")
+		fmt.Println("⚡ OpenUsage — No accounts configured or detected.")
 		fmt.Println()
 		fmt.Printf("Config path: %s\n\n", config.ConfigPath())
 		fmt.Println("Auto-detection checks for:")
@@ -115,7 +115,13 @@ func main() {
 	}
 	engine.SetAccounts(allAccounts)
 
-	model := tui.NewModel(cfg.UI.WarnThreshold, cfg.UI.CritThreshold, cfg.Experimental.Analytics)
+	model := tui.NewModel(
+		cfg.UI.WarnThreshold,
+		cfg.UI.CritThreshold,
+		cfg.Experimental.Analytics,
+		cfg.Dashboard,
+		allAccounts,
+	)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	engine.OnUpdate(func(snaps map[string]core.QuotaSnapshot) {

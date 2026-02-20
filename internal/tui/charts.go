@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type chartItem struct {

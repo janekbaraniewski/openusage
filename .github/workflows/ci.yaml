@@ -92,10 +92,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc
 
       - name: Build binary
-        run: go build -ldflags="-s -w" -o agentusage ./cmd/agentusage
+        run: go build -ldflags="-s -w" -o openusage ./cmd/openusage
 
       - name: Verify binary
-        run: ls -la agentusage
+        run: ls -la openusage
 
   tidy:
     name: Check go.mod tidiness

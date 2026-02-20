@@ -1,15 +1,15 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `cmd/agentusage/` contains the CLI entry point (`main.go`).
+- `cmd/openusage/` contains the CLI entry point (`main.go`).
 - `internal/` holds the application code: `core/` (engine/types), `config/`, `providers/` (vendor adapters), `tui/` (Bubble Tea UI), `detect/` (auto-detection), and `parsers/` helpers.
 - `configs/example.toml` is the reference configuration file.
-- `agentusage.md` is the design doc with architecture and product notes.
+- `openusage.md` is the design doc with architecture and product notes.
 - Tests live alongside code as `*_test.go` under `internal/`.
 
 ## Build, Test, and Development Commands
-- `go build ./cmd/agentusage` — build the `agentusage` binary.
-- `go run ./cmd/agentusage` — run the TUI locally.
+- `go build ./cmd/openusage` — build the `openusage` binary.
+- `go run ./cmd/openusage` — run the TUI locally.
 - `go test ./...` — run all unit tests.
 - `go test ./internal/providers/...` — run provider-specific tests only.
 
@@ -29,5 +29,5 @@
 - UI changes should include a brief description of the visual impact; include screenshots if the TUI layout changes.
 
 ## Security & Configuration Tips
-- Default config path is `~/.config/agentusage/config.toml` (see `configs/example.toml`).
+- Default config path is `~/.config/openusage/config.toml` (see `configs/example.toml`).
 - Avoid logging secrets; API keys should be provided via env vars and referenced with `api_key_env` in config.

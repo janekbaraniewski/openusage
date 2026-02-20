@@ -1,14 +1,14 @@
-# AgentUsage
+# OpenUsage
 
 A terminal dashboard for monitoring AI coding tool usage and spend — all in one place.
 
-AgentUsage auto-detects the AI tools and API keys on your workstation and displays live usage snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
+OpenUsage auto-detects the AI tools and API keys on your workstation and displays live usage snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
 
-![AgentUsage dashboard screenshot](./assets/dashboard.png)
+![OpenUsage dashboard screenshot](./assets/dashboard.png)
 
 ## Supported Providers
 
-AgentUsage ships with 13 provider adapters covering API services, local IDEs, and CLI tools.
+OpenUsage ships with 13 provider adapters covering API services, local IDEs, and CLI tools.
 
 | Provider | Method | Metrics |
 |---|---|---|
@@ -31,7 +31,7 @@ AgentUsage ships with 13 provider adapters covering API services, local IDEs, an
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install janekbaraniewski/tap/agentusage
+brew install janekbaraniewski/tap/openusage
 ```
 
 ### From source
@@ -39,19 +39,19 @@ brew install janekbaraniewski/tap/agentusage
 Requires Go 1.25+ and a C compiler (CGO is needed for the Cursor provider's SQLite support).
 
 ```bash
-go install github.com/janekbaraniewski/agentusage/cmd/agentusage@latest
+go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
 ```
 
 ### From release binaries
 
-Pre-built binaries are available for macOS (amd64, arm64), Linux (amd64, arm64), and Windows (amd64). Download the archive for your platform from [Releases](https://github.com/janekbaraniewski/agentusage/releases), extract it, and place `agentusage` somewhere on your `PATH`.
+Pre-built binaries are available for macOS (amd64, arm64), Linux (amd64, arm64), and Windows (amd64). Download the archive for your platform from [Releases](https://github.com/janekbaraniewski/openusage/releases), extract it, and place `openusage` somewhere on your `PATH`.
 
 ### Build locally
 
 ```bash
-git clone https://github.com/janekbaraniewski/agentusage.git
-cd agentusage
-make build          # binary appears in ./bin/agentusage
+git clone https://github.com/janekbaraniewski/openusage.git
+cd openusage
+make build          # binary appears in ./bin/openusage
 ```
 
 > **Note:** Building from source requires CGO enabled (`CGO_ENABLED=1`) and a working C compiler, because the Cursor provider reads local SQLite databases via `mattn/go-sqlite3`.
@@ -61,10 +61,10 @@ make build          # binary appears in ./bin/agentusage
 Just run:
 
 ```bash
-agentusage
+openusage
 ```
 
-With **auto-detection enabled** (the default), AgentUsage scans for:
+With **auto-detection enabled** (the default), OpenUsage scans for:
 
 - **Cursor IDE** — reads local AI tracking databases and calls the DashboardService API
 - **Claude Code CLI** — reads `~/.claude/stats-cache.json`, account info, and conversation logs
@@ -74,11 +74,11 @@ With **auto-detection enabled** (the default), AgentUsage scans for:
 - **Aider CLI** — detected on PATH (delegates to underlying API providers)
 - **Environment variables** — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`
 
-If any of the above are present, AgentUsage will immediately start displaying live data.
+If any of the above are present, OpenUsage will immediately start displaying live data.
 
 ## Configuration
 
-Config file location: `~/.config/agentusage/config.toml`
+Config file location: `~/.config/openusage/config.toml`
 
 ```toml
 auto_detect = true
@@ -106,7 +106,7 @@ Auto-detected accounts are merged with manually configured ones — configured a
 
 ## TUI Navigation
 
-AgentUsage has three screens, cycled with `Tab` / `Shift+Tab`:
+OpenUsage has three screens, cycled with `Tab` / `Shift+Tab`:
 
 | Screen | Description |
 |---|---|
@@ -147,7 +147,7 @@ Catppuccin Mocha · Dracula · Nord · Tokyo Night · Gruvbox · Synthwave '84
 
 | Variable | Purpose |
 |---|---|
-| `AGENTUSAGE_DEBUG` | Set to `1` to enable debug logging to stderr |
+| `OPENUSAGE_DEBUG` | Set to `1` to enable debug logging to stderr |
 
 ## Development
 
@@ -194,7 +194,7 @@ Providers fall into four patterns:
 ## Project Structure
 
 ```
-cmd/agentusage/         CLI entry point
+cmd/openusage/         CLI entry point
 internal/
   config/               TOML config loading & defaults
   core/                 Engine, provider interface, snapshot types

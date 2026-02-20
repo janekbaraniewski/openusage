@@ -1,20 +1,20 @@
 package providers
 
 import (
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/providers/anthropic"
-	"github.com/janekbaraniewski/agentusage/internal/providers/claude_code"
-	"github.com/janekbaraniewski/agentusage/internal/providers/codex"
-	"github.com/janekbaraniewski/agentusage/internal/providers/copilot"
-	"github.com/janekbaraniewski/agentusage/internal/providers/cursor"
-	"github.com/janekbaraniewski/agentusage/internal/providers/deepseek"
-	"github.com/janekbaraniewski/agentusage/internal/providers/gemini_api"
-	"github.com/janekbaraniewski/agentusage/internal/providers/gemini_cli"
-	"github.com/janekbaraniewski/agentusage/internal/providers/groq"
-	"github.com/janekbaraniewski/agentusage/internal/providers/mistral"
-	"github.com/janekbaraniewski/agentusage/internal/providers/openai"
-	"github.com/janekbaraniewski/agentusage/internal/providers/openrouter"
-	"github.com/janekbaraniewski/agentusage/internal/providers/xai"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/anthropic"
+	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
+	"github.com/janekbaraniewski/openusage/internal/providers/codex"
+	"github.com/janekbaraniewski/openusage/internal/providers/copilot"
+	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
+	"github.com/janekbaraniewski/openusage/internal/providers/deepseek"
+	"github.com/janekbaraniewski/openusage/internal/providers/gemini_api"
+	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
+	"github.com/janekbaraniewski/openusage/internal/providers/groq"
+	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
+	"github.com/janekbaraniewski/openusage/internal/providers/openai"
+	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
+	"github.com/janekbaraniewski/openusage/internal/providers/xai"
 )
 
 func AllProviders() []core.QuotaProvider {

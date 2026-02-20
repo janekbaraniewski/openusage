@@ -1,6 +1,6 @@
 version: 2
 
-project_name: agentusage
+project_name: openusage
 
 before:
   hooks:
@@ -9,8 +9,8 @@ before:
 builds:
   # --- Linux amd64 ---
   - id: linux-amd64
-    main: ./cmd/agentusage
-    binary: agentusage
+    main: ./cmd/openusage
+    binary: openusage
     goos:
       - linux
     goarch:
@@ -20,14 +20,14 @@ builds:
       - CC=gcc
     ldflags:
       - -s -w
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate={{.Date}}'
 
   # --- Linux arm64 ---
   - id: linux-arm64
-    main: ./cmd/agentusage
-    binary: agentusage
+    main: ./cmd/openusage
+    binary: openusage
     goos:
       - linux
     goarch:
@@ -37,14 +37,14 @@ builds:
       - CC=aarch64-linux-gnu-gcc
     ldflags:
       - -s -w
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate={{.Date}}'
 
   # --- Windows amd64 ---
   - id: windows-amd64
-    main: ./cmd/agentusage
-    binary: agentusage
+    main: ./cmd/openusage
+    binary: openusage
     goos:
       - windows
     goarch:
@@ -54,9 +54,9 @@ builds:
       - CC=x86_64-w64-mingw32-gcc
     ldflags:
       - -s -w
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.Version={{.Version}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash={{.ShortCommit}}'
-      - -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate={{.Date}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.Version={{.Version}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate={{.Date}}'
 
   # --- macOS (built natively on macOS runner for both archs) ---
   # Note: macOS builds are handled separately in the release-macos job
@@ -106,13 +106,13 @@ changelog:
 release:
   github:
     owner: janekbaraniewski
-    name: agentusage
+    name: openusage
   draft: false
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
-    ## AgentUsage {{.Version}}
+    ## OpenUsage {{.Version}}
 
     Monitor your AI coding tool quotas from a single TUI dashboard.
   footer: |
-    **Full Changelog**: https://github.com/janekbaraniewski/agentusage/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/{{ .PreviousTag }}...{{ .Tag }}

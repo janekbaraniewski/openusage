@@ -8,6 +8,22 @@
   "experimental": {
     "analytics": false
   },
+  "dashboard": {
+    "providers": [
+      {
+        "account_id": "openai-personal",
+        "enabled": true
+      },
+      {
+        "account_id": "anthropic-work",
+        "enabled": true
+      },
+      {
+        "account_id": "openrouter",
+        "enabled": false
+      }
+    ]
+  },
   "auto_detect": true,
   "accounts": [
     {

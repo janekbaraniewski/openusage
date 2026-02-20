@@ -1,11 +1,11 @@
-APP_NAME    := agentusage
-MODULE      := github.com/janekbaraniewski/agentusage
+APP_NAME    := openusage
+MODULE      := github.com/janekbaraniewski/openusage
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE  := $(shell date +%Y-%m-%dT%H:%M:%S%z)
 
 BIN_DIR     := bin
-CMD_DIR     := ./cmd/agentusage
+CMD_DIR     := ./cmd/openusage
 
 GO          := go
 GOFLAGS     :=

@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type DetectedTool struct {

@@ -63,10 +63,10 @@ jobs:
           GOARCH: amd64
         run: |
           go build -ldflags="-s -w \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.Version=${{ steps.version.outputs.version }}' \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
-            -o dist/agentusage_darwin_amd64 ./cmd/agentusage
+            -X 'github.com/janekbaraniewski/openusage/internal/version.Version=${{ steps.version.outputs.version }}' \
+            -X 'github.com/janekbaraniewski/openusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
+            -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o dist/openusage_darwin_amd64 ./cmd/openusage
 
       - name: Build macOS arm64
         env:
@@ -75,29 +75,29 @@ jobs:
           GOARCH: arm64
         run: |
           go build -ldflags="-s -w \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.Version=${{ steps.version.outputs.version }}' \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
-            -X 'github.com/janekbaraniewski/agentusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
-            -o dist/agentusage_darwin_arm64 ./cmd/agentusage
+            -X 'github.com/janekbaraniewski/openusage/internal/version.Version=${{ steps.version.outputs.version }}' \
+            -X 'github.com/janekbaraniewski/openusage/internal/version.CommitHash=$(git rev-parse --short HEAD)' \
+            -X 'github.com/janekbaraniewski/openusage/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o dist/openusage_darwin_arm64 ./cmd/openusage
 
       - name: Create macOS archives
         run: |
           VERSION=${{ steps.version.outputs.version }}
           cd dist
 
-          mkdir -p agentusage_${VERSION}_darwin_amd64
-          cp agentusage_darwin_amd64 agentusage_${VERSION}_darwin_amd64/agentusage
-          cp ../configs/example.toml agentusage_${VERSION}_darwin_amd64/
-          [ -f ../LICENSE* ] && cp ../LICENSE* agentusage_${VERSION}_darwin_amd64/ || true
-          [ -f ../README* ] && cp ../README* agentusage_${VERSION}_darwin_amd64/ || true
-          tar czf agentusage_${VERSION}_darwin_amd64.tar.gz agentusage_${VERSION}_darwin_amd64
+          mkdir -p openusage_${VERSION}_darwin_amd64
+          cp openusage_darwin_amd64 openusage_${VERSION}_darwin_amd64/openusage
+          cp ../configs/example.toml openusage_${VERSION}_darwin_amd64/
+          [ -f ../LICENSE* ] && cp ../LICENSE* openusage_${VERSION}_darwin_amd64/ || true
+          [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_amd64/ || true
+          tar czf openusage_${VERSION}_darwin_amd64.tar.gz openusage_${VERSION}_darwin_amd64
 
-          mkdir -p agentusage_${VERSION}_darwin_arm64
-          cp agentusage_darwin_arm64 agentusage_${VERSION}_darwin_arm64/agentusage
-          cp ../configs/example.toml agentusage_${VERSION}_darwin_arm64/
-          [ -f ../LICENSE* ] && cp ../LICENSE* agentusage_${VERSION}_darwin_arm64/ || true
-          [ -f ../README* ] && cp ../README* agentusage_${VERSION}_darwin_arm64/ || true
-          tar czf agentusage_${VERSION}_darwin_arm64.tar.gz agentusage_${VERSION}_darwin_arm64
+          mkdir -p openusage_${VERSION}_darwin_arm64
+          cp openusage_darwin_arm64 openusage_${VERSION}_darwin_arm64/openusage
+          cp ../configs/example.toml openusage_${VERSION}_darwin_arm64/
+          [ -f ../LICENSE* ] && cp ../LICENSE* openusage_${VERSION}_darwin_arm64/ || true
+          [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_arm64/ || true
+          tar czf openusage_${VERSION}_darwin_arm64.tar.gz openusage_${VERSION}_darwin_arm64
 
       - name: Upload macOS binaries to release
         env:
@@ -105,8 +105,8 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.version }}
           gh release upload "${GITHUB_REF_NAME}" \
-            dist/agentusage_${VERSION}_darwin_amd64.tar.gz \
-            dist/agentusage_${VERSION}_darwin_arm64.tar.gz \
+            dist/openusage_${VERSION}_darwin_amd64.tar.gz \
+            dist/openusage_${VERSION}_darwin_arm64.tar.gz \
             --clobber
 
   update-homebrew:
@@ -150,29 +150,29 @@ jobs:
 
           gh release download "${GITHUB_REF_NAME}" \
             --repo "${{ github.repository }}" \
-            --pattern "agentusage_${VERSION}_darwin_amd64.tar.gz" \
-            --pattern "agentusage_${VERSION}_darwin_arm64.tar.gz" \
-            --pattern "agentusage_${VERSION}_linux_amd64.tar.gz" \
-            --pattern "agentusage_${VERSION}_linux_arm64.tar.gz"
+            --pattern "openusage_${VERSION}_darwin_amd64.tar.gz" \
+            --pattern "openusage_${VERSION}_darwin_arm64.tar.gz" \
+            --pattern "openusage_${VERSION}_linux_amd64.tar.gz" \
+            --pattern "openusage_${VERSION}_linux_arm64.tar.gz"
 
-          echo "SHA_DARWIN_AMD64=$(sha256sum agentusage_${VERSION}_darwin_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
-          echo "SHA_DARWIN_ARM64=$(sha256sum agentusage_${VERSION}_darwin_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
-          echo "SHA_LINUX_AMD64=$(sha256sum agentusage_${VERSION}_linux_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
-          echo "SHA_LINUX_ARM64=$(sha256sum agentusage_${VERSION}_linux_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_DARWIN_AMD64=$(sha256sum openusage_${VERSION}_darwin_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_DARWIN_ARM64=$(sha256sum openusage_${VERSION}_darwin_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_AMD64=$(sha256sum openusage_${VERSION}_linux_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_ARM64=$(sha256sum openusage_${VERSION}_linux_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_ENV"
 
       - name: Generate Homebrew formula
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          REPO="janekbaraniewski/agentusage"
+          REPO="janekbaraniewski/openusage"
           BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
           mkdir -p /tmp/homebrew-formula
 
-          cat > /tmp/homebrew-formula/agentusage.rb << FORMULA
+          cat > /tmp/homebrew-formula/openusage.rb << FORMULA
           # typed: false
           # frozen_string_literal: true
 
-          class Agentusage < Formula
+          class Openusage < Formula
             desc "Monitor your AI coding tool quotas from a single TUI dashboard"
             homepage "https://github.com/${REPO}"
             version "${VERSION}"
@@ -180,35 +180,35 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "${BASE_URL}/agentusage_${VERSION}_darwin_arm64.tar.gz"
+                url "${BASE_URL}/openusage_${VERSION}_darwin_arm64.tar.gz"
                 sha256 "${SHA_DARWIN_ARM64}"
               else
-                url "${BASE_URL}/agentusage_${VERSION}_darwin_amd64.tar.gz"
+                url "${BASE_URL}/openusage_${VERSION}_darwin_amd64.tar.gz"
                 sha256 "${SHA_DARWIN_AMD64}"
               end
             end
 
             on_linux do
               if Hardware::CPU.arm?
-                url "${BASE_URL}/agentusage_${VERSION}_linux_arm64.tar.gz"
+                url "${BASE_URL}/openusage_${VERSION}_linux_arm64.tar.gz"
                 sha256 "${SHA_LINUX_ARM64}"
               else
-                url "${BASE_URL}/agentusage_${VERSION}_linux_amd64.tar.gz"
+                url "${BASE_URL}/openusage_${VERSION}_linux_amd64.tar.gz"
                 sha256 "${SHA_LINUX_AMD64}"
               end
             end
 
             def install
-              bin.install "agentusage"
+              bin.install "openusage"
             end
 
             test do
-              assert_match "agentusage", shell_output("#{bin}/agentusage --version 2>&1", 0)
+              assert_match "openusage", shell_output("#{bin}/openusage --version 2>&1", 0)
             end
           end
           FORMULA
 
-          sed -i 's/^          //' /tmp/homebrew-formula/agentusage.rb
+          sed -i 's/^          //' /tmp/homebrew-formula/openusage.rb
 
       - name: Push formula to Homebrew tap
         env:
@@ -216,12 +216,12 @@ jobs:
         run: |
           git clone --branch master "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/janekbaraniewski/homebrew-tap.git" /tmp/homebrew-tap
           mkdir -p /tmp/homebrew-tap/Formula
-          cp /tmp/homebrew-formula/agentusage.rb /tmp/homebrew-tap/Formula/agentusage.rb
+          cp /tmp/homebrew-formula/openusage.rb /tmp/homebrew-tap/Formula/openusage.rb
 
           cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/agentusage.rb
+          git add Formula/openusage.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "Update agentusage to ${{ steps.version.outputs.version }}"
+          git commit -m "Update openusage to ${{ steps.version.outputs.version }}"
           git push

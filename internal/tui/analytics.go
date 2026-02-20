@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 const (
@@ -478,7 +478,7 @@ func sortModels(models []modelCostEntry, mode int) {
 }
 
 func (m Model) renderAnalyticsContent(w, h int) string {
-	data := extractCostData(m.snapshots, m.analyticsFilter)
+	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter)
 	sortProviders(data.providers, m.analyticsSortBy)
 	sortModels(data.models, m.analyticsSortBy)
 

@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestProvider_ID(t *testing.T) {

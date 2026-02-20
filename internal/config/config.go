@@ -6,9 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type UIConfig struct {
@@ -21,10 +22,39 @@ type ExperimentalConfig struct {
 	Analytics bool `json:"analytics"`
 }
 
+type DashboardProviderConfig struct {
+	AccountID string `json:"account_id"`
+	Enabled   bool   `json:"enabled"`
+}
+
+func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
+	type rawDashboardProviderConfig struct {
+		AccountID string `json:"account_id"`
+		Enabled   *bool  `json:"enabled"`
+	}
+
+	var raw rawDashboardProviderConfig
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	p.AccountID = raw.AccountID
+	p.Enabled = true
+	if raw.Enabled != nil {
+		p.Enabled = *raw.Enabled
+	}
+	return nil
+}
+
+type DashboardConfig struct {
+	Providers []DashboardProviderConfig `json:"providers"`
+}
+
 type Config struct {
 	UI                   UIConfig             `json:"ui"`
 	Theme                string               `json:"theme"`
 	Experimental         ExperimentalConfig   `json:"experimental"`
+	Dashboard            DashboardConfig      `json:"dashboard"`
 	AutoDetect           bool                 `json:"auto_detect"`
 	Accounts             []core.AccountConfig `json:"accounts"`
 	AutoDetectedAccounts []core.AccountConfig `json:"auto_detected_accounts"`
@@ -45,10 +75,10 @@ func DefaultConfig() Config {
 
 func ConfigDir() string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("APPDATA"), "agentusage")
+		return filepath.Join(os.Getenv("APPDATA"), "openusage")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "agentusage")
+	return filepath.Join(home, ".config", "openusage")
 }
 
 func ConfigPath() string {
@@ -86,8 +116,30 @@ func LoadFrom(path string) (Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = DefaultConfig().Theme
 	}
+	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 
 	return cfg, nil
+}
+
+func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProviderConfig {
+	if len(in) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(in))
+	out := make([]DashboardProviderConfig, 0, len(in))
+	for _, entry := range in {
+		id := strings.TrimSpace(entry.AccountID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, DashboardProviderConfig{
+			AccountID: id,
+			Enabled:   entry.Enabled,
+		})
+	}
+	return out
 }
 
 // saveMu guards read-modify-write cycles on the config file.
@@ -129,6 +181,23 @@ func SaveThemeTo(path string, theme string) error {
 		cfg = DefaultConfig()
 	}
 	cfg.Theme = theme
+	return SaveTo(path, cfg)
+}
+
+// SaveDashboardProviders persists dashboard provider preferences into the config file (read-modify-write).
+func SaveDashboardProviders(providers []DashboardProviderConfig) error {
+	return SaveDashboardProvidersTo(ConfigPath(), providers)
+}
+
+func SaveDashboardProvidersTo(path string, providers []DashboardProviderConfig) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	cfg.Dashboard.Providers = normalizeDashboardProviders(providers)
 	return SaveTo(path, cfg)
 }
 

@@ -119,13 +119,13 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"⏎ Enter", "Open detail"},
 		{"Esc", "Back"},
 	}
-	if m.experimentalAnalytics {
-		navKeys = append(navKeys, struct{ key, desc string }{"Tab", "Next screen"})
-	}
+	navKeys = append(navKeys, struct{ key, desc string }{"Tab", "Next screen"})
 
 	actionKeys := []struct{ key, desc string }{
 		{"/", "Filter providers"},
 		{"[ ]", "Switch detail tabs"},
+		{"Space", "Toggle provider (settings)"},
+		{"Shift+J/K", "Reorder provider (settings)"},
 	}
 	if m.experimentalAnalytics {
 		actionKeys = append(actionKeys,
@@ -217,7 +217,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	}
 
 	creditLine := fmt.Sprintf("%s  •  %s",
-		dimHintStyle.Render("AgentUsage"),
+		dimHintStyle.Render("OpenUsage"),
 		dimHintStyle.Render(ThemeName()),
 	)
 	creditW := lipgloss.Width(creditLine)

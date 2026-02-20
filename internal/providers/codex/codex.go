@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type Provider struct{}

@@ -1,4 +1,4 @@
-module github.com/janekbaraniewski/agentusage
+module github.com/janekbaraniewski/openusage
 
 go 1.25.4
 

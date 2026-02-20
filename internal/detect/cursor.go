@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func detectCursor(result *Result) {
