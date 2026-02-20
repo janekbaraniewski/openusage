@@ -87,14 +87,14 @@ jobs:
 
           mkdir -p openusage_${VERSION}_darwin_amd64
           cp openusage_darwin_amd64 openusage_${VERSION}_darwin_amd64/openusage
-          cp ../configs/example.toml openusage_${VERSION}_darwin_amd64/
+          cp ../configs/example_settings.json openusage_${VERSION}_darwin_amd64/
           [ -f ../LICENSE* ] && cp ../LICENSE* openusage_${VERSION}_darwin_amd64/ || true
           [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_amd64/ || true
           tar czf openusage_${VERSION}_darwin_amd64.tar.gz openusage_${VERSION}_darwin_amd64
 
           mkdir -p openusage_${VERSION}_darwin_arm64
           cp openusage_darwin_arm64 openusage_${VERSION}_darwin_arm64/openusage
-          cp ../configs/example.toml openusage_${VERSION}_darwin_arm64/
+          cp ../configs/example_settings.json openusage_${VERSION}_darwin_arm64/
           [ -f ../LICENSE* ] && cp ../LICENSE* openusage_${VERSION}_darwin_arm64/ || true
           [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_arm64/ || true
           tar czf openusage_${VERSION}_darwin_arm64.tar.gz openusage_${VERSION}_darwin_arm64
