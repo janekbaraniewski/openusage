@@ -305,73 +305,55 @@ func (p *Provider) readUsageAPI(orgUUID string, snap *core.QuotaSnapshot) error 
 		return fmt.Errorf("API fetch: %w", err)
 	}
 
-	if usage.FiveHour != nil {
-		util := usage.FiveHour.Utilization
-		limit := float64(100)
-		snap.Metrics["usage_five_hour"] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: "5h",
-		}
-		if usage.FiveHour.ResetsAt != "" {
-			if t, err := time.Parse(time.RFC3339, usage.FiveHour.ResetsAt); err == nil {
-				snap.Resets["usage_five_hour"] = t
-			}
-		}
-	}
-
-	if usage.SevenDay != nil {
-		util := usage.SevenDay.Utilization
-		limit := float64(100)
-		snap.Metrics["usage_seven_day"] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: "7d",
-		}
-		if usage.SevenDay.ResetsAt != "" {
-			if t, err := time.Parse(time.RFC3339, usage.SevenDay.ResetsAt); err == nil {
-				snap.Resets["usage_seven_day"] = t
-			}
-		}
-	}
-
-	if usage.SevenDaySonnet != nil {
-		util := usage.SevenDaySonnet.Utilization
-		limit := float64(100)
-		snap.Metrics["usage_seven_day_sonnet"] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: "7d-sonnet",
-		}
-	}
-
-	if usage.SevenDayOpus != nil {
-		util := usage.SevenDayOpus.Utilization
-		limit := float64(100)
-		snap.Metrics["usage_seven_day_opus"] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: "7d-opus",
-		}
-	}
-
-	if usage.SevenDayCowork != nil {
-		util := usage.SevenDayCowork.Utilization
-		limit := float64(100)
-		snap.Metrics["usage_seven_day_cowork"] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: "7d-cowork",
-		}
-	}
+	applyUsageResponse(usage, snap, time.Now())
 
 	snap.Raw["usage_api_ok"] = "true"
 	return nil
+}
+
+func applyUsageResponse(usage *usageResponse, snap *core.QuotaSnapshot, now time.Time) {
+	applyUsageBucket := func(metricKey, window, resetKey string, bucket *usageBucket) {
+		if bucket == nil {
+			return
+		}
+
+		util := bucket.Utilization
+		limit := float64(100)
+		if t, ok := parseReset(bucket.ResetsAt); ok {
+			// Prevent stale "100%" (or other pre-reset values) from persisting
+			// after reset boundary has already passed.
+			if !t.After(now) {
+				util = 0
+			}
+			if resetKey != "" {
+				snap.Resets[resetKey] = t
+			}
+		}
+
+		snap.Metrics[metricKey] = core.Metric{
+			Used:   &util,
+			Limit:  &limit,
+			Unit:   "%",
+			Window: window,
+		}
+	}
+
+	applyUsageBucket("usage_five_hour", "5h", "usage_five_hour", usage.FiveHour)
+	applyUsageBucket("usage_seven_day", "7d", "usage_seven_day", usage.SevenDay)
+	applyUsageBucket("usage_seven_day_sonnet", "7d-sonnet", "", usage.SevenDaySonnet)
+	applyUsageBucket("usage_seven_day_opus", "7d-opus", "", usage.SevenDayOpus)
+	applyUsageBucket("usage_seven_day_cowork", "7d-cowork", "", usage.SevenDayCowork)
+}
+
+func parseReset(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {

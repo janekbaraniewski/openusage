@@ -1,8 +1,8 @@
 # AgentUsage
 
-A terminal dashboard for monitoring AI coding tool quotas, spend, and rate limits — all in one place.
+A terminal dashboard for monitoring AI coding tool usage and spend — all in one place.
 
-AgentUsage auto-detects the AI tools and API keys on your workstation and displays live quota snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
+AgentUsage auto-detects the AI tools and API keys on your workstation and displays live usage snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
 
 ![AgentUsage dashboard screenshot](./assets/dashboard.png)
 
@@ -12,19 +12,19 @@ AgentUsage ships with 13 provider adapters covering API services, local IDEs, an
 
 | Provider | Method | Metrics |
 |---|---|---|
-| **OpenAI** | API header probing | RPM, TPM, RPD rate limits |
-| **Anthropic** | API header probing | RPM, TPM rate limits |
+| **OpenAI** | API header probing | RPM, TPM, RPD usage windows |
+| **Anthropic** | API header probing | RPM, TPM usage windows |
 | **OpenRouter** | REST API | Credits, spend, per-model generation stats |
-| **Groq** | API header probing | RPM, TPM, RPD, TPD rate limits |
-| **Mistral** | REST API | Subscription info, usage, rate limits |
-| **DeepSeek** | REST API | Balance, rate limits |
-| **xAI (Grok)** | REST API | Balance, rate limits |
-| **Gemini API** | REST API | Model token limits, quota remaining |
-| **Gemini CLI** | Local files + OAuth API | CodeAssist quota buckets, conversation counts |
+| **Groq** | API header probing | RPM, TPM, RPD, TPD usage windows |
+| **Mistral** | REST API | Subscription info, usage, usage windows |
+| **DeepSeek** | REST API | Balance, usage windows |
+| **xAI (Grok)** | REST API | Balance, usage windows |
+| **Gemini API** | REST API | Model token limits, usage remaining |
+| **Gemini CLI** | Local files + OAuth API | CodeAssist usage buckets, conversation counts |
 | **GitHub Copilot** | `gh` CLI + API | Seat count, org billing, usage metrics, session state |
 | **Cursor IDE** | DashboardService API + local SQLite | Spend limit, plan usage, per-model stats, daily activity |
 | **Claude Code** | Local files | Daily cost, burn rate, billing blocks, messages, sessions |
-| **OpenAI Codex CLI** | Session files | Rate limits, token usage, session counts |
+| **OpenAI Codex CLI** | Session files | Usage windows, token usage, session counts |
 
 ## Installation
 
@@ -68,9 +68,9 @@ With **auto-detection enabled** (the default), AgentUsage scans for:
 
 - **Cursor IDE** — reads local AI tracking databases and calls the DashboardService API
 - **Claude Code CLI** — reads `~/.claude/stats-cache.json`, account info, and conversation logs
-- **OpenAI Codex CLI** — reads session rate limits and token usage from `~/.codex/sessions/`
+- **OpenAI Codex CLI** — reads session usage windows and token usage from `~/.codex/sessions/`
 - **GitHub Copilot** — via the `gh` CLI extension (checks that `gh copilot` is installed)
-- **Gemini CLI** — reads `~/.gemini/` config files and refreshes OAuth tokens for quota data
+- **Gemini CLI** — reads `~/.gemini/` config files and refreshes OAuth tokens for usage data
 - **Aider CLI** — detected on PATH (delegates to underlying API providers)
 - **Environment variables** — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`
 
@@ -206,14 +206,14 @@ internal/
     codex/              OpenAI Codex CLI session file reader
     copilot/            GitHub Copilot via gh CLI
     cursor/             Cursor IDE API + local SQLite fallback
-    deepseek/           DeepSeek balance + rate limits
-    gemini_api/         Google Gemini API quota probing
-    gemini_cli/         Gemini CLI local config + OAuth quota API
+    deepseek/           DeepSeek balance + usage windows
+    gemini_api/         Google Gemini API usage probing
+    gemini_cli/         Gemini CLI local config + OAuth usage API
     groq/               Groq API header probing
     mistral/            Mistral subscription + usage API
     openai/             OpenAI API header probing
     openrouter/         OpenRouter credits + generation stats
-    xai/                xAI balance + rate limits
+    xai/                xAI balance + usage windows
   tui/                  Bubble Tea UI (views, themes, charts, gauges)
   version/              Build-time version metadata (ldflags)
 configs/                Example configuration file

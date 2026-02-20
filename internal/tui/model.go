@@ -556,7 +556,7 @@ func (m Model) renderList(w, h int) string {
 			"",
 			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching quotas and rate limits."),
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
@@ -682,7 +682,7 @@ func (m Model) renderListItem(snap core.QuotaSnapshot, selected bool, w int) str
 
 type providerDisplayInfo struct {
 	tagEmoji     string  // "💰", "⚡", "📊", "🔥", "💬", "💳", "⏱"
-	tagLabel     string  // "Spend", "Rate", "Quota", "Cost", "Activity", "Credits"
+	tagLabel     string  // "Spend", "Usage", "Activity", "Error", ...
 	summary      string  // Primary summary (e.g. "$4.23 today · $0.82/h")
 	detail       string  // Secondary detail (e.g. "Primary 3% · Secondary 15%")
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
@@ -732,8 +732,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["plan_spend"]; ok && m.Used != nil && m.Limit != nil {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Plan"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f plan", *m.Used, *m.Limit)
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
@@ -745,8 +745,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["plan_total_spend_usd"]; ok && m.Used != nil {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Plan"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if lm, ok2 := snap.Metrics["plan_limit_usd"]; ok2 && lm.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.0f plan", *m.Used, *lm.Limit)
 		} else {
@@ -756,8 +756,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["credits"]; ok {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Credits"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if m.Remaining != nil && m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f credits", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -771,8 +771,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		return info
 	}
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Remaining != nil {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Credits"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -784,8 +784,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		return info
 	}
 	if m, ok := snap.Metrics["total_balance"]; ok && m.Remaining != nil {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Balance"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("%.2f %s available", *m.Remaining, m.Unit)
 		return info
 	}
@@ -814,7 +814,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 	if hasRateLimits {
 		info.tagEmoji = "⚡"
-		info.tagLabel = "Rate"
+		info.tagLabel = "Usage"
 		info.gaugePercent = 100 - worstRatePct
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstRatePct)
 		if len(rateParts) > 0 {
@@ -825,7 +825,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if fh, ok := snap.Metrics["usage_five_hour"]; ok && fh.Used != nil {
-		info.tagEmoji = "🔥"
+		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 
 		info.gaugePercent = *fh.Used
@@ -851,8 +851,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["today_api_cost"]; ok && m.Used != nil {
-		info.tagEmoji = "🔥"
-		info.tagLabel = "Cost"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		parts := []string{fmt.Sprintf("~$%.2f today", *m.Used)}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -877,8 +877,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["5h_block_cost"]; ok && m.Used != nil {
-		info.tagEmoji = "⏱"
-		info.tagLabel = "Block"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("~$%.2f / 5h block", *m.Used)
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			info.detail = fmt.Sprintf("$%.2f/h burn rate", *br.Used)
@@ -900,8 +900,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		}
 	}
 	if hasQuota {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Quota"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		info.gaugePercent = 100 - worstQuotaPct
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstQuotaPct)
 		if quotaKey != "" {
@@ -917,13 +917,13 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["total_cost_usd"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Cost"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("$%.2f total", *m.Used)
 		return info
 	}
 	if m, ok := snap.Metrics["all_time_api_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Cost"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("~$%.2f total (API est.)", *m.Used)
 		return info
 	}

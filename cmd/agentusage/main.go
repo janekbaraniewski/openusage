@@ -74,7 +74,7 @@ func main() {
 		fmt.Println("Auto-detection checks for:")
 		fmt.Println("  • Cursor IDE       (local DBs + API)")
 		fmt.Println("  • Claude Code CLI  (stats-cache.json)")
-		fmt.Println("  • OpenAI Codex CLI (session rate limits + tokens)")
+		fmt.Println("  • OpenAI Codex CLI (session usage windows + tokens)")
 		fmt.Println("  • GitHub Copilot   (gh CLI)")
 		fmt.Println("  • Gemini CLI       (gemini binary)")
 		fmt.Println("  • Aider CLI        (aider binary)")

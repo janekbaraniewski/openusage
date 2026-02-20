@@ -452,11 +452,11 @@ func stableModelColor(modelName, providerID string) lipgloss.Color {
 
 func tagColor(label string) lipgloss.Color {
 	switch label {
-	case "Spend", "Cost":
+	case "Spend":
 		return colorPeach
-	case "Rate":
+	case "Usage":
 		return colorYellow
-	case "Quota", "Plan":
+	case "Plan":
 		return colorSapphire
 	case "Credits", "Balance":
 		return colorTeal

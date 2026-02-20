@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is this project?
 
-AgentUsage is a terminal dashboard (TUI) for monitoring AI coding tool quotas, spend, and rate limits. It auto-detects AI tools and API keys on the workstation and displays live data using [Bubble Tea](https://github.com/charmbracelet/bubbletea). Written in Go, requires CGO enabled (for `mattn/go-sqlite3` used by the Cursor provider).
+AgentUsage is a terminal dashboard (TUI) for monitoring AI coding tool usage and spend. It auto-detects AI tools and API keys on the workstation and displays live data using [Bubble Tea](https://github.com/charmbracelet/bubbletea). Written in Go, requires CGO enabled (for `mattn/go-sqlite3` used by the Cursor provider).
 
 ## Commands
 
