@@ -4,6 +4,8 @@ A terminal dashboard for monitoring AI coding tool quotas, spend, and rate limit
 
 AgentUsage auto-detects the AI tools and API keys on your workstation and displays live quota snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
 
+![AgentUsage dashboard screenshot](./assets/dashboard.png)
+
 ## Supported Providers
 
 AgentUsage ships with 13 provider adapters covering API services, local IDEs, and CLI tools.
