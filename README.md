@@ -1,8 +1,12 @@
-# openusage
+<p align="center">
+  <img src="./assets/logo.gif" alt="logo">
+</p>
 
-Terminal dashboard for AI tool usage and spend.
 
-OpenUsage auto-detects local tools/API keys and shows live quota and cost snapshots in a Bubble Tea TUI.
+<p align="center">The coding agents usage dashboard you've been looking for.</p>
+
+
+OpenUsage auto-detects local tools/API keys and shows live quota and cost snapshots in your terminal.
 
 ![OpenUsage dashboard screenshot](./assets/dashboard.png)
 
