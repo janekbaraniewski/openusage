@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/settings"
+	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type tickMsg time.Time
@@ -26,10 +26,14 @@ type screenTab int
 const (
 	screenDashboard screenTab = iota // tiles grid overview
 	screenAnalytics                  // spend analysis dashboard
-	screenCount                      // sentinel for cycling
+	screenSettings                   // dashboard customization
 )
 
-var screenLabels = []string{"Dashboard", "Analytics"}
+var screenLabelByTab = map[screenTab]string{
+	screenDashboard: "Dashboard",
+	screenAnalytics: "Analytics",
+	screenSettings:  "Settings",
+}
 
 type viewMode int
 
@@ -71,41 +75,56 @@ type Model struct {
 	animFrame  int  // monotonically increasing frame counter
 	refreshing bool // true when a manual refresh is in progress
 
-	experimentalAnalytics bool   // when false, only the Dashboard screen is available
-	settingsPath          string // path to settings.json for persisting preferences
+	experimentalAnalytics bool // when false, only the Dashboard screen is available
+
+	providerOrder    []string
+	providerEnabled  map[string]bool
+	accountProviders map[string]string
+	settingsCursor   int
+	settingsStatus   string
 }
 
-func NewModel(warnThresh, critThresh float64, experimentalAnalytics bool) Model {
-	return Model{
+func NewModel(
+	warnThresh, critThresh float64,
+	experimentalAnalytics bool,
+	dashboardCfg config.DashboardConfig,
+	accounts []core.AccountConfig,
+) Model {
+	model := Model{
 		snapshots:             make(map[string]core.QuotaSnapshot),
 		warnThreshold:         warnThresh,
 		critThreshold:         critThresh,
 		experimentalAnalytics: experimentalAnalytics,
+		providerEnabled:       make(map[string]bool),
+		accountProviders:      make(map[string]string),
 	}
-}
 
-func (m *Model) SetSettingsPath(path string) {
-	m.settingsPath = path
+	model.applyDashboardConfig(dashboardCfg, accounts)
+	return model
 }
 
 type themePersistedMsg struct{}
+type dashboardPrefsPersistedMsg struct {
+	err error
+}
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
-	if m.settingsPath == "" {
-		return nil
-	}
-	path := m.settingsPath
 	return func() tea.Msg {
-		s, err := settings.LoadFrom(path)
-		if err != nil {
-			log.Printf("settings load for theme persist: %v", err)
-			s = settings.DefaultSettings()
-		}
-		s.Theme = themeName
-		if err := settings.SaveTo(path, s); err != nil {
-			log.Printf("settings save for theme persist: %v", err)
+		if err := config.SaveTheme(themeName); err != nil {
+			log.Printf("theme persist: %v", err)
 		}
 		return themePersistedMsg{}
+	}
+}
+
+func (m Model) persistDashboardPrefsCmd() tea.Cmd {
+	providers := m.dashboardConfigProviders()
+	return func() tea.Msg {
+		err := config.SaveDashboardProviders(providers)
+		if err != nil {
+			log.Printf("dashboard settings persist: %v", err)
+		}
+		return dashboardPrefsPersistedMsg{err: err}
 	}
 }
 
@@ -125,7 +144,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
+		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
+		return m, nil
+
+	case dashboardPrefsPersistedMsg:
+		if msg.err != nil {
+			m.settingsStatus = "save failed"
+		} else {
+			m.settingsStatus = "saved"
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -147,18 +175,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.filtering && !m.analyticsFiltering {
 		switch msg.String() {
 		case "tab":
-			if m.experimentalAnalytics {
-				m.screen = (m.screen + 1) % screenCount
-				m.mode = modeList
-				m.detailOffset = 0
-			}
+			m.screen = m.nextScreen(1)
+			m.mode = modeList
+			m.detailOffset = 0
 			return m, nil
 		case "shift+tab":
-			if m.experimentalAnalytics {
-				m.screen = (m.screen - 1 + screenCount) % screenCount
-				m.mode = modeList
-				m.detailOffset = 0
-			}
+			m.screen = m.nextScreen(-1)
+			m.mode = modeList
+			m.detailOffset = 0
 			return m, nil
 		case "t":
 			name := CycleTheme()
@@ -169,6 +193,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenAnalytics:
 		return m.handleAnalyticsKey(msg)
+	case screenSettings:
+		return m.handleSettingsKey(msg)
 	default:
 		return m.handleDashboardTilesKey(msg)
 	}
@@ -219,6 +245,89 @@ func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(msg.String()) == 1 {
 			m.analyticsFilter += msg.String()
 		}
+	}
+	return m, nil
+}
+
+func (m Model) availableScreens() []screenTab {
+	if !m.experimentalAnalytics {
+		return []screenTab{screenDashboard}
+	}
+	return []screenTab{screenDashboard, screenAnalytics, screenSettings}
+}
+
+func (m Model) nextScreen(step int) screenTab {
+	screens := m.availableScreens()
+	if len(screens) == 0 {
+		return screenDashboard
+	}
+
+	idx := 0
+	for i, screen := range screens {
+		if screen == m.screen {
+			idx = i
+			break
+		}
+	}
+
+	next := (idx + step) % len(screens)
+	if next < 0 {
+		next += len(screens)
+	}
+	return screens[next]
+}
+
+func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ids := m.settingsIDs()
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+	case "down", "j":
+		if m.settingsCursor < len(ids)-1 {
+			m.settingsCursor++
+		}
+	case " ", "enter":
+		if len(ids) > 0 {
+			id := ids[m.settingsCursor]
+			m.providerEnabled[id] = !m.isProviderEnabled(id)
+			m.rebuildSortedIDs()
+			m.settingsStatus = "saving..."
+			return m, m.persistDashboardPrefsCmd()
+		}
+	case "K":
+		if len(ids) > 0 && m.settingsCursor > 0 {
+			id := ids[m.settingsCursor]
+			prevID := ids[m.settingsCursor-1]
+			currIdx := m.providerOrderIndex(id)
+			prevIdx := m.providerOrderIndex(prevID)
+			if currIdx >= 0 && prevIdx >= 0 {
+				m.providerOrder[currIdx], m.providerOrder[prevIdx] = m.providerOrder[prevIdx], m.providerOrder[currIdx]
+				m.settingsCursor--
+				m.rebuildSortedIDs()
+				m.settingsStatus = "saving..."
+				return m, m.persistDashboardPrefsCmd()
+			}
+		}
+	case "J":
+		if len(ids) > 0 && m.settingsCursor < len(ids)-1 {
+			id := ids[m.settingsCursor]
+			nextID := ids[m.settingsCursor+1]
+			currIdx := m.providerOrderIndex(id)
+			nextIdx := m.providerOrderIndex(nextID)
+			if currIdx >= 0 && nextIdx >= 0 {
+				m.providerOrder[currIdx], m.providerOrder[nextIdx] = m.providerOrder[nextIdx], m.providerOrder[currIdx]
+				m.settingsCursor++
+				m.rebuildSortedIDs()
+				m.settingsStatus = "saving..."
+				return m, m.persistDashboardPrefsCmd()
+			}
+		}
+	case "r":
+		m.refreshing = true
 	}
 	return m, nil
 }
@@ -366,6 +475,8 @@ func (m Model) renderDashboard() string {
 	switch m.screen {
 	case screenAnalytics:
 		content = m.renderAnalyticsContent(w, contentH)
+	case screenSettings:
+		content = m.renderSettingsContent(w, contentH)
 	default:
 		content = m.renderDashboardContent(w, contentH)
 	}
@@ -380,13 +491,95 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 	return m.renderTiles(w, contentH)
 }
 
+func (m Model) renderSettingsContent(w, h int) string {
+	ids := m.settingsIDs()
+	if len(ids) == 0 {
+		lines := []string{
+			"",
+			dimStyle.Render("  No providers available."),
+			"",
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Add or auto-detect providers to customize dashboard settings."),
+		}
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	active := 0
+	for _, id := range ids {
+		if m.isProviderEnabled(id) {
+			active++
+		}
+	}
+
+	lines := []string{
+		"  " + lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Dashboard Settings"),
+		"  " + dimStyle.Render("Toggle visibility and reorder providers shown on Dashboard/Analytics."),
+		"  " + dimStyle.Render(fmt.Sprintf("Active: %d / %d  ·  Space: toggle  ·  Shift+J/K: move", active, len(ids))),
+		"",
+	}
+
+	listH := h - len(lines)
+	if listH < 1 {
+		listH = 1
+	}
+
+	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	start := 0
+	if cursor >= listH {
+		start = cursor - listH + 1
+	}
+	end := start + listH
+	if end > len(ids) {
+		end = len(ids)
+		start = end - listH
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	for i := start; i < end; i++ {
+		id := ids[i]
+		providerID := m.accountProviders[id]
+		if snap, ok := m.snapshots[id]; ok && snap.ProviderID != "" {
+			providerID = snap.ProviderID
+		}
+		if providerID == "" {
+			providerID = "unknown"
+		}
+
+		enabled := m.isProviderEnabled(id)
+		box := "☐"
+		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		if enabled {
+			box = "☑"
+			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+		}
+
+		provider := dimStyle.Render(providerID)
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+		line := fmt.Sprintf("%s%s %s  %s", prefix, boxStyle.Render(box), id, provider)
+		lines = append(lines, line)
+	}
+
+	if start > 0 {
+		lines = append([]string{lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ more above")}, lines...)
+	}
+	if end < len(ids) {
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ more below"))
+	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
 func (m Model) renderHeader(w int) string {
 	bolt := PulseChar(
 		lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("⚡"),
 		lipgloss.NewStyle().Foreground(colorDim).Bold(true).Render("⚡"),
 		m.animFrame,
 	)
-	brandText := RenderGradientText("AgentUsage", m.animFrame)
+	brandText := RenderGradientText("OpenUsage", m.animFrame)
 
 	tabs := m.renderScreenTabs()
 
@@ -407,6 +600,18 @@ func (m Model) renderHeader(w int) string {
 			info = dimStyle.Render("filtered: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter)
 		} else {
 			info = dimStyle.Render("spend analysis")
+		}
+	case screenSettings:
+		ids := m.settingsIDs()
+		active := 0
+		for _, id := range ids {
+			if m.isProviderEnabled(id) {
+				active++
+			}
+		}
+		info = fmt.Sprintf("⚙ %d active / %d total", active, len(ids))
+		if m.settingsStatus != "" {
+			info += " · " + m.settingsStatus
 		}
 	default:
 		ids := m.filteredIDs()
@@ -493,13 +698,15 @@ func (m Model) renderGradientSeparator(w int) string {
 }
 
 func (m Model) renderScreenTabs() string {
-	if !m.experimentalAnalytics {
+	screens := m.availableScreens()
+	if len(screens) <= 1 {
 		return ""
 	}
 	var parts []string
-	for i, label := range screenLabels {
+	for i, screen := range screens {
+		label := screenLabelByTab[screen]
 		tabStr := fmt.Sprintf("%d:%s", i+1, label)
-		if screenTab(i) == m.screen {
+		if screen == m.screen {
 			parts = append(parts, screenTabActiveStyle.Render(tabStr))
 		} else {
 			parts = append(parts, screenTabInactiveStyle.Render(tabStr))
@@ -525,6 +732,16 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
 			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
 		}
+	case m.screen == screenSettings:
+		keys = []string{
+			helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav"),
+			helpKeyStyle.Render("space") + helpStyle.Render(" toggle"),
+			helpKeyStyle.Render("K/J") + helpStyle.Render(" move"),
+			helpKeyStyle.Render("⇥") + helpStyle.Render(" tab"),
+			themeHint,
+			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
+			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
+		}
 	case m.mode == modeDetail:
 		keys = []string{
 			helpKeyStyle.Render("[/]") + helpStyle.Render(" tab"),
@@ -541,9 +758,7 @@ func (m Model) renderFooter(w int) string {
 			helpKeyStyle.Render("⏎") + helpStyle.Render(" detail"),
 			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
 		}
-		if m.experimentalAnalytics {
-			keys = append(keys, helpKeyStyle.Render("⇥")+helpStyle.Render(" tab"))
-		}
+		keys = append(keys, helpKeyStyle.Render("⇥")+helpStyle.Render(" tab"))
 		keys = append(keys,
 			themeHint,
 			helpKeyStyle.Render("?")+helpStyle.Render(" help"),
@@ -569,10 +784,9 @@ func (m Model) renderList(w, h int) string {
 	if len(ids) == 0 {
 		empty := []string{
 			"",
-			dimStyle.Render("  No providers detected."),
+			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Set API-key env vars"),
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  or install AI tools."),
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
@@ -698,7 +912,7 @@ func (m Model) renderListItem(snap core.QuotaSnapshot, selected bool, w int) str
 
 type providerDisplayInfo struct {
 	tagEmoji     string  // "💰", "⚡", "📊", "🔥", "💬", "💳", "⏱"
-	tagLabel     string  // "Spend", "Rate", "Quota", "Cost", "Activity", "Credits"
+	tagLabel     string  // "Spend", "Usage", "Activity", "Error", ...
 	summary      string  // Primary summary (e.g. "$4.23 today · $0.82/h")
 	detail       string  // Secondary detail (e.g. "Primary 3% · Secondary 15%")
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
@@ -748,8 +962,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["plan_spend"]; ok && m.Used != nil && m.Limit != nil {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Plan"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f plan", *m.Used, *m.Limit)
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
@@ -761,8 +975,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["plan_total_spend_usd"]; ok && m.Used != nil {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Plan"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if lm, ok2 := snap.Metrics["plan_limit_usd"]; ok2 && lm.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.0f plan", *m.Used, *lm.Limit)
 		} else {
@@ -772,8 +986,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["credits"]; ok {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Credits"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if m.Remaining != nil && m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f credits", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -787,8 +1001,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		return info
 	}
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Remaining != nil {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Credits"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		if m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -800,8 +1014,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		return info
 	}
 	if m, ok := snap.Metrics["total_balance"]; ok && m.Remaining != nil {
-		info.tagEmoji = "💳"
-		info.tagLabel = "Balance"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("%.2f %s available", *m.Remaining, m.Unit)
 		return info
 	}
@@ -830,7 +1044,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 	if hasRateLimits {
 		info.tagEmoji = "⚡"
-		info.tagLabel = "Rate"
+		info.tagLabel = "Usage"
 		info.gaugePercent = 100 - worstRatePct
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstRatePct)
 		if len(rateParts) > 0 {
@@ -841,7 +1055,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if fh, ok := snap.Metrics["usage_five_hour"]; ok && fh.Used != nil {
-		info.tagEmoji = "🔥"
+		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 
 		info.gaugePercent = *fh.Used
@@ -867,8 +1081,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["today_api_cost"]; ok && m.Used != nil {
-		info.tagEmoji = "🔥"
-		info.tagLabel = "Cost"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		parts := []string{fmt.Sprintf("~$%.2f today", *m.Used)}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -893,8 +1107,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 
 	if m, ok := snap.Metrics["5h_block_cost"]; ok && m.Used != nil {
-		info.tagEmoji = "⏱"
-		info.tagLabel = "Block"
+		info.tagEmoji = "💰"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("~$%.2f / 5h block", *m.Used)
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			info.detail = fmt.Sprintf("$%.2f/h burn rate", *br.Used)
@@ -916,8 +1130,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		}
 	}
 	if hasQuota {
-		info.tagEmoji = "📊"
-		info.tagLabel = "Quota"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		info.gaugePercent = 100 - worstQuotaPct
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstQuotaPct)
 		if quotaKey != "" {
@@ -933,13 +1147,13 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["total_cost_usd"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Cost"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("$%.2f total", *m.Used)
 		return info
 	}
 	if m, ok := snap.Metrics["all_time_api_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Cost"
+		info.tagLabel = "Spend"
 		info.summary = fmt.Sprintf("~$%.2f total (API est.)", *m.Used)
 		return info
 	}
@@ -1083,12 +1297,147 @@ func renderVerticalSep(h int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) rebuildSortedIDs() {
-	m.sortedIDs = make([]string, 0, len(m.snapshots))
-	for id := range m.snapshots {
-		m.sortedIDs = append(m.sortedIDs, id)
+func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accounts []core.AccountConfig) {
+	accountOrder := make([]string, 0, len(accounts))
+	seenAccounts := make(map[string]bool, len(accounts))
+
+	for _, account := range accounts {
+		if account.ID == "" {
+			continue
+		}
+		if !seenAccounts[account.ID] {
+			accountOrder = append(accountOrder, account.ID)
+			seenAccounts[account.ID] = true
+		}
+		m.accountProviders[account.ID] = account.Provider
+		m.providerEnabled[account.ID] = true
 	}
-	sort.Strings(m.sortedIDs)
+
+	order := make([]string, 0, len(accountOrder))
+	seen := make(map[string]bool, len(accountOrder))
+	for _, pref := range dashboardCfg.Providers {
+		id := pref.AccountID
+		if id == "" || seen[id] || !seenAccounts[id] {
+			continue
+		}
+		seen[id] = true
+		m.providerEnabled[id] = pref.Enabled
+		order = append(order, id)
+	}
+
+	for _, id := range accountOrder {
+		if seen[id] {
+			continue
+		}
+		order = append(order, id)
+	}
+
+	m.providerOrder = order
+}
+
+func (m *Model) ensureSnapshotProvidersKnown() {
+	if len(m.snapshots) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(m.snapshots))
+	for id := range m.snapshots {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+
+	for _, id := range keys {
+		if m.providerOrderIndex(id) >= 0 {
+			if m.accountProviders[id] == "" {
+				m.accountProviders[id] = m.snapshots[id].ProviderID
+			}
+			continue
+		}
+		m.providerOrder = append(m.providerOrder, id)
+		if _, ok := m.providerEnabled[id]; !ok {
+			m.providerEnabled[id] = true
+		}
+		if m.accountProviders[id] == "" {
+			m.accountProviders[id] = m.snapshots[id].ProviderID
+		}
+	}
+}
+
+func (m Model) providerOrderIndex(id string) int {
+	for i, providerID := range m.providerOrder {
+		if providerID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m Model) settingsIDs() []string {
+	ids := make([]string, len(m.providerOrder))
+	copy(ids, m.providerOrder)
+	return ids
+}
+
+func (m Model) dashboardConfigProviders() []config.DashboardProviderConfig {
+	ids := m.settingsIDs()
+	out := make([]config.DashboardProviderConfig, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, config.DashboardProviderConfig{
+			AccountID: id,
+			Enabled:   m.isProviderEnabled(id),
+		})
+	}
+	return out
+}
+
+func (m Model) isProviderEnabled(id string) bool {
+	enabled, ok := m.providerEnabled[id]
+	if !ok {
+		return true
+	}
+	return enabled
+}
+
+func (m Model) visibleSnapshots() map[string]core.QuotaSnapshot {
+	out := make(map[string]core.QuotaSnapshot, len(m.snapshots))
+	for id, snap := range m.snapshots {
+		if m.isProviderEnabled(id) {
+			out[id] = snap
+		}
+	}
+	return out
+}
+
+func (m *Model) rebuildSortedIDs() {
+	ordered := make([]string, 0, len(m.snapshots))
+	seen := make(map[string]bool, len(m.snapshots))
+
+	for _, id := range m.providerOrder {
+		if !m.isProviderEnabled(id) {
+			continue
+		}
+		if _, ok := m.snapshots[id]; !ok {
+			continue
+		}
+		ordered = append(ordered, id)
+		seen[id] = true
+	}
+
+	var extra []string
+	for id := range m.snapshots {
+		if seen[id] || !m.isProviderEnabled(id) {
+			continue
+		}
+		extra = append(extra, id)
+	}
+	sort.Strings(extra)
+
+	m.sortedIDs = append(ordered, extra...)
+	if m.cursor >= len(m.sortedIDs) {
+		m.cursor = len(m.sortedIDs) - 1
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+	}
 }
 
 func (m Model) filteredIDs() []string {

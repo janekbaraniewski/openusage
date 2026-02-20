@@ -23,7 +23,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	lines = append(lines, "")
 
 	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
-		Render("  AI provider quota dashboard")
+		Render("  AI provider usage and spend dashboard")
 	lines = append(lines, subtitle)
 	lines = append(lines, "")
 
@@ -65,12 +65,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		emoji, label, desc string
 	}{
 		{"💰", "Spend", "Hard spending limit — $ used vs $ budget"},
-		{"📊", "Plan", "Plan-level spending — $ used against allowance"},
-		{"💳", "Credits", "Prepaid credit balance — remaining vs total"},
-		{"⚡", "Rate", "Rate limits — requests/tokens remaining"},
-		{"🔥", "Cost", "Running cost tracker — $ spent today or total"},
-		{"⏱", "Block", "Time-block cost — $ spent in rolling window"},
-		{"📊", "Quota", "Generic quota — % remaining of any limit"},
+		{"⚡", "Usage", "Percent-used usage windows — rate/limit/quota normalized"},
 		{"💬", "Activity", "Activity counter — messages, sessions, tools"},
 	}
 
@@ -88,7 +83,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		icon, badge, desc string
 		color             lipgloss.Color
 	}{
-		{"●", "OK", "All good — quota/limits healthy", colorOK},
+		{"●", "OK", "All good — usage/spend healthy", colorOK},
 		{"◐", "WARN", "Approaching limit", colorWarn},
 		{"◌", "LIMIT", "At or over limit", colorCrit},
 		{"◈", "AUTH", "Authentication required", colorAuth},
@@ -124,13 +119,13 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"⏎ Enter", "Open detail"},
 		{"Esc", "Back"},
 	}
-	if m.experimentalAnalytics {
-		navKeys = append(navKeys, struct{ key, desc string }{"Tab", "Next screen"})
-	}
+	navKeys = append(navKeys, struct{ key, desc string }{"Tab", "Next screen"})
 
 	actionKeys := []struct{ key, desc string }{
 		{"/", "Filter providers"},
 		{"[ ]", "Switch detail tabs"},
+		{"Space", "Toggle provider (settings)"},
+		{"Shift+J/K", "Reorder provider (settings)"},
 	}
 	if m.experimentalAnalytics {
 		actionKeys = append(actionKeys,
@@ -222,7 +217,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	}
 
 	creditLine := fmt.Sprintf("%s  •  %s",
-		dimHintStyle.Render("AgentUsage"),
+		dimHintStyle.Render("OpenUsage"),
 		dimHintStyle.Render(ThemeName()),
 	)
 	creditW := lipgloss.Width(creditLine)

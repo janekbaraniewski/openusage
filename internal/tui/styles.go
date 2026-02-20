@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type Theme struct {
@@ -452,11 +452,11 @@ func stableModelColor(modelName, providerID string) lipgloss.Color {
 
 func tagColor(label string) lipgloss.Color {
 	switch label {
-	case "Spend", "Cost":
+	case "Spend":
 		return colorPeach
-	case "Rate":
+	case "Usage":
 		return colorYellow
-	case "Quota", "Plan":
+	case "Plan":
 		return colorSapphire
 	case "Credits", "Balance":
 		return colorTeal

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestFetch_ReadsLocalData(t *testing.T) {

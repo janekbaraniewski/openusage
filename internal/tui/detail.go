@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type DetailTab int
@@ -1282,11 +1282,11 @@ var prettifyKeyOverrides = map[string]string{
 	"total_sessions":   "All-Time Sessions",
 	"total_cost_usd":   "All-Time Cost",
 
-	"usage_five_hour":        "5-Hour Quota",
-	"usage_seven_day":        "7-Day Quota",
-	"usage_seven_day_sonnet": "7d Sonnet Quota",
-	"usage_seven_day_opus":   "7d Opus Quota",
-	"usage_seven_day_cowork": "7d Cowork Quota",
+	"usage_five_hour":        "5-Hour Usage",
+	"usage_seven_day":        "7-Day Usage",
+	"usage_seven_day_sonnet": "7d Sonnet Usage",
+	"usage_seven_day_opus":   "7d Opus Usage",
+	"usage_seven_day_cowork": "7d Cowork Usage",
 }
 
 func prettifyKey(key string) string {

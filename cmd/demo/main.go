@@ -8,8 +8,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/tui"
+	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
 func ptr(v float64) *float64 { return &v }
@@ -17,7 +18,13 @@ func ptr(v float64) *float64 { return &v }
 func main() {
 	log.SetOutput(io.Discard)
 
-	model := tui.NewModel(0.20, 0.05, false)
+	model := tui.NewModel(
+		0.20,
+		0.05,
+		false,
+		config.DashboardConfig{},
+		nil,
+	)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	go func() {

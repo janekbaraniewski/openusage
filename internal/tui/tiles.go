@@ -7,55 +7,67 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 const (
-	tileMinWidth     = 30
-	tileMinHeight    = 7 // minimum content lines inside a tile
-	tileDefaultLines = 7 // default content lines (the 7-line layout)
-	tileGapH         = 2 // horizontal gap between tiles
-	tileGapV         = 1 // vertical gap between tile rows
-	tilePadH         = 1 // horizontal padding inside tile
-	tileBorderV      = 2 // top + bottom border lines
-	tileBorderH      = 2 // left + right border chars
+	tileMinWidth            = 30
+	tileMinHeight           = 7 // minimum content lines inside a tile
+	tileGapH                = 2 // horizontal gap between tiles
+	tileGapV                = 1 // vertical gap between tile rows
+	tilePadH                = 1 // horizontal padding inside tile
+	tileBorderV             = 2 // top + bottom border lines
+	tileBorderH             = 2 // left + right border chars
+	tileMaxColumns          = 3
+	tileMinMultiColumnWidth = 62
 )
 
-func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileContentH int) {
+func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight int) {
 	if n == 0 {
-		return 1, tileMinWidth, tileDefaultLines
+		return 1, tileMinWidth, 0
 	}
 
-	bestCols := 2
-	if n == 1 {
-		bestCols = 1
+	if contentW <= 0 {
+		contentW = tileMinWidth + tileBorderH + 2
 	}
 
-	usableW := contentW - 2 - (bestCols-1)*tileGapH // 2 = outer padding
-	tw := usableW/bestCols - tileBorderH
-	if tw < tileMinWidth {
-		bestCols = 1
-		usableW = contentW - 2
-		tw = usableW - tileBorderH
-		if tw < tileMinWidth {
-			tw = tileMinWidth
+	usableW := contentW - 2
+	maxCols := tileMaxColumns
+	if n < maxCols {
+		maxCols = n
+	}
+
+	for c := maxCols; c >= 1; c-- {
+		perCol := (usableW-(c-1)*tileGapH)/c - tileBorderH
+		if perCol < tileMinWidth {
+			continue
 		}
+
+		if c == 1 {
+			return 1, perCol, 0
+		}
+		if perCol < tileMinMultiColumnWidth {
+			continue
+		}
+
+		rows := (n + c - 1) / c
+		usableH := contentH - (rows-1)*tileGapV
+		if usableH <= tileBorderV {
+			continue
+		}
+		perRowContentH := usableH/rows - tileBorderV
+		if perRowContentH < tileMinHeight {
+			continue
+		}
+
+		return c, perCol, perRowContentH
 	}
 
-	rows := (n + bestCols - 1) / bestCols
-	usableW = contentW - 2 - (bestCols-1)*tileGapH
-	tileW = usableW/bestCols - tileBorderH
-	if tileW < tileMinWidth {
-		tileW = tileMinWidth
+	fallbackW := usableW - tileBorderH
+	if fallbackW < tileMinWidth {
+		fallbackW = tileMinWidth
 	}
-
-	usableH := contentH - (rows-1)*tileGapV
-	tileContentH = usableH/rows - tileBorderV
-	if tileContentH < tileMinHeight {
-		tileContentH = tileMinHeight
-	}
-
-	return bestCols, tileW, tileContentH
+	return 1, fallbackW, 0
 }
 
 func (m Model) tileCols() int {
@@ -73,23 +85,27 @@ func (m Model) renderTiles(w, h int) string {
 	if len(ids) == 0 {
 		empty := []string{
 			"",
-			dimStyle.Render("  No providers detected."),
+			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Set API-key env vars or install AI tools."),
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
 
-	cols, tileW, tileContentH := m.tileGrid(w, h, len(ids))
+	cols, tileW, tileMaxHeight := m.tileGrid(w, h, len(ids))
 
-	var tiles []string
+	var tiles [][]string
 	for i, id := range ids {
 		snap := m.snapshots[id]
 		selected := i == m.cursor
-		tiles = append(tiles, m.renderTile(snap, selected, tileW, tileContentH))
+		rendered := m.renderTile(snap, selected, tileW, tileMaxHeight)
+		tiles = append(tiles, strings.Split(rendered, "\n"))
 	}
 
 	var rows []string
+	var rowHeights []int
+	gap := strings.Repeat("\n", tileGapV)
+
 	for i := 0; i < len(tiles); i += cols {
 		end := i + cols
 		if end > len(tiles) {
@@ -98,15 +114,33 @@ func (m Model) renderTiles(w, h int) string {
 		rowTiles := tiles[i:end]
 
 		for len(rowTiles) < cols {
-			spacer := strings.Repeat(" ", tileW+tileBorderH)
-			rowTiles = append(rowTiles, spacer)
+			rowTiles = append(rowTiles, []string{strings.Repeat(" ", tileW+tileBorderH)})
 		}
 
-		row := lipgloss.JoinHorizontal(lipgloss.Top, intersperse(rowTiles, strings.Repeat(" ", tileGapH))...)
+		maxLines := 0
+		for _, tile := range rowTiles {
+			if len(tile) > maxLines {
+				maxLines = len(tile)
+			}
+		}
+		if maxLines < tileMinHeight {
+			maxLines = tileMinHeight
+		}
+
+		var padded []string
+		for _, tile := range rowTiles {
+			lines := append([]string(nil), tile...)
+			for len(lines) < maxLines {
+				lines = append(lines, strings.Repeat(" ", tileW+tileBorderH))
+			}
+			padded = append(padded, strings.Join(lines, "\n"))
+		}
+
+		row := lipgloss.JoinHorizontal(lipgloss.Top, intersperse(padded, strings.Repeat(" ", tileGapH))...)
 		rows = append(rows, row)
+		rowHeights = append(rowHeights, maxLines)
 	}
 
-	gap := strings.Repeat("\n", tileGapV)
 	joined := strings.Join(rows, "\n"+gap)
 	joinedLines := strings.Split(joined, "\n")
 	for i, line := range joinedLines {
@@ -121,11 +155,26 @@ func (m Model) renderTiles(w, h int) string {
 		return padToSize(content, w, h)
 	}
 
-	cursorRow := m.cursor / cols
-	totalRows := (len(ids) + cols - 1) / cols
-	rowHeight := tileContentH + tileBorderV + tileGapV
+	totalRows := len(rowHeights)
+	rowOffsets := make([]int, totalRows)
+	acc := 0
+	for idx, cnt := range rowHeights {
+		rowOffsets[idx] = acc
+		acc += cnt
+		if idx < totalRows-1 {
+			acc += tileGapV
+		}
+	}
 
-	scrollLine := cursorRow * rowHeight
+	cursorRow := m.cursor / cols
+	if cursorRow >= totalRows {
+		cursorRow = totalRows - 1
+	}
+	if cursorRow < 0 {
+		cursorRow = 0
+	}
+
+	scrollLine := rowOffsets[cursorRow]
 	if scrollLine > totalLines-h {
 		scrollLine = totalLines - h
 	}
@@ -212,7 +261,61 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	} else {
 		hdrLine2 = dimStyle.Render(truncate(provID))
 	}
-	header := []string{hdrLine1, hdrLine2, accentSep}
+	// Build a prominent reset-time line for the header showing the most urgent reset.
+	var hdrResetLine string
+	if len(snap.Resets) > 0 {
+		var soonestLabel string
+		var soonestDur time.Duration
+		first := true
+		for key, t := range snap.Resets {
+			dur := time.Until(t)
+			if dur < 0 {
+				continue
+			}
+			if first || dur < soonestDur {
+				soonestDur = dur
+				soonestLabel = resetLabelMap[key]
+				if soonestLabel == "" {
+					if met, ok := snap.Metrics[key]; ok && met.Window != "" {
+						soonestLabel = "Usage " + met.Window
+					} else {
+						soonestLabel = prettifyKey(key)
+					}
+				}
+				first = false
+			}
+		}
+		if !first {
+			clockFrames := []string{"◴", "◷", "◶", "◵"}
+			clock := clockFrames[(m.animFrame/3)%len(clockFrames)]
+
+			durColor := colorTeal
+			if soonestDur < 10*time.Minute {
+				durColor = colorPeach
+			} else if soonestDur < 30*time.Minute {
+				durColor = colorYellow
+			}
+
+			durStr := formatDuration(soonestDur)
+			resetPill := lipgloss.NewStyle().Foreground(durColor).Render(clock) +
+				lipgloss.NewStyle().Foreground(colorSubtext).Render(" "+soonestLabel+" resets in ") +
+				lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(durStr)
+
+			// Right-align the reset pill on the header line
+			pillW := lipgloss.Width(resetPill)
+			pad := innerW - pillW
+			if pad < 0 {
+				pad = 0
+			}
+			hdrResetLine = strings.Repeat(" ", pad) + resetPill
+		}
+	}
+
+	header := []string{hdrLine1, hdrLine2}
+	if hdrResetLine != "" {
+		header = append(header, hdrResetLine)
+	}
+	header = append(header, accentSep)
 
 	age := time.Since(snap.Timestamp)
 	var timeStr string
@@ -224,9 +327,12 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	footerLine := tileTimestampStyle.Render(timeStr)
 	footer := []string{dimSep, footerLine}
 
-	bodyBudget := tileContentH - len(header) - len(footer)
-	if bodyBudget < 1 {
-		bodyBudget = 1
+	bodyBudget := -1
+	if tileContentH > 0 {
+		bodyBudget = tileContentH - len(header) - len(footer)
+		if bodyBudget < 0 {
+			bodyBudget = 0
+		}
 	}
 
 	type section struct {
@@ -293,22 +399,30 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 
 	var body []string
 	for _, sec := range sections {
+		if bodyBudget < 0 {
+			body = append(body, sec.lines...)
+			continue
+		}
+
 		if len(body)+len(sec.lines) <= bodyBudget {
 			body = append(body, sec.lines...)
-		} else {
-			remaining := bodyBudget - len(body)
-			if remaining > 0 {
-				body = append(body, sec.lines[:remaining]...)
-			}
-			break
+			continue
+		}
+
+		remaining := bodyBudget - len(body)
+		if remaining > 0 {
+			body = append(body, sec.lines[:remaining]...)
+		}
+		break
+	}
+
+	if bodyBudget >= 0 {
+		for len(body) < bodyBudget {
+			body = append(body, "")
 		}
 	}
 
-	for len(body) < bodyBudget {
-		body = append(body, "")
-	}
-
-	all := make([]string, 0, tileContentH)
+	all := make([]string, 0, len(header)+len(body)+len(footer))
 	all = append(all, header...)
 	all = append(all, body...)
 	all = append(all, footer...)
@@ -384,9 +498,9 @@ func gaugeLabel(key string, window ...string) string {
 			w = window[0]
 		}
 		if w != "" {
-			return "Rate " + w
+			return "Usage " + w
 		}
-		return "Rate " + prettifyKey(strings.TrimPrefix(key, "rate_limit_"))
+		return "Usage " + prettifyKey(strings.TrimPrefix(key, "rate_limit_"))
 	}
 	if label, ok := overrides[key]; ok {
 		return label
@@ -518,8 +632,8 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 
 var resetLabelMap = map[string]string{
 	"billing_block":   "5h Block",
-	"usage_five_hour": "5h Quota",
-	"usage_seven_day": "7d Quota",
+	"usage_five_hour": "5h Usage",
+	"usage_seven_day": "7d Usage",
 }
 
 func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
@@ -547,7 +661,7 @@ func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []s
 		label := resetLabelMap[key]
 		if label == "" {
 			if met, ok := snap.Metrics[key]; ok && met.Window != "" {
-				label = "Rate " + met.Window
+				label = "Usage " + met.Window
 			} else {
 				label = prettifyKey(key)
 			}

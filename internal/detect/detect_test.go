@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestAutoDetect_Runs(t *testing.T) {

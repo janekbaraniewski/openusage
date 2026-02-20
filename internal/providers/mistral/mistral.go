@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/parsers"
 )
 
 const defaultBaseURL = "https://api.mistral.ai/v1"

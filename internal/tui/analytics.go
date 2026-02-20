@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 const (
@@ -478,7 +478,7 @@ func sortModels(models []modelCostEntry, mode int) {
 }
 
 func (m Model) renderAnalyticsContent(w, h int) string {
-	data := extractCostData(m.snapshots, m.analyticsFilter)
+	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter)
 	sortProviders(data.providers, m.analyticsSortBy)
 	sortModels(data.models, m.analyticsSortBy)
 
@@ -945,7 +945,7 @@ func renderRateLimitsSection(data costData, w int) string {
 
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorYellow)
-	sb.WriteString("  " + sectionStyle.Render("RATE LIMITS") + "\n")
+	sb.WriteString("  " + sectionStyle.Render("USAGE WINDOWS") + "\n")
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
 
 	provW := 16
@@ -971,7 +971,7 @@ func renderRateLimitsSection(data costData, w int) string {
 
 		name := g.name
 		if g.count > 1 {
-			name = fmt.Sprintf("%d quotas", g.count)
+			name = fmt.Sprintf("%d usage windows", g.count)
 		}
 		name = truncStr(name, nameW)
 

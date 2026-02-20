@@ -11,16 +11,15 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/janekbaraniewski/agentusage/internal/config"
-	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/detect"
-	"github.com/janekbaraniewski/agentusage/internal/providers"
-	"github.com/janekbaraniewski/agentusage/internal/settings"
-	"github.com/janekbaraniewski/agentusage/internal/tui"
+	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/detect"
+	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
 func main() {
-	if os.Getenv("AGENTUSAGE_DEBUG") == "" {
+	if os.Getenv("OPENUSAGE_DEBUG") == "" {
 		log.SetOutput(io.Discard)
 	} else {
 		log.SetOutput(os.Stderr)
@@ -33,28 +32,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	userSettings, err := settings.Load()
-	if err != nil {
-		log.Printf("Warning: could not load settings: %v", err)
-		userSettings = settings.DefaultSettings()
-	}
+	tui.SetThemeByName(cfg.Theme)
 
-	tui.SetThemeByName(userSettings.Theme)
+	// Combine manual + cached auto-detected accounts for immediate display
+	allAccounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 
 	if cfg.AutoDetect {
 		result := detect.AutoDetect()
 
-		existingIDs := make(map[string]bool, len(cfg.Accounts))
+		// Manual account IDs take precedence
+		manualIDs := make(map[string]bool, len(cfg.Accounts))
 		for _, acct := range cfg.Accounts {
-			existingIDs[acct.ID] = true
+			manualIDs[acct.ID] = true
 		}
+		var autoDetected []core.AccountConfig
 		for _, acct := range result.Accounts {
-			if !existingIDs[acct.ID] {
-				cfg.Accounts = append(cfg.Accounts, acct)
+			if !manualIDs[acct.ID] {
+				autoDetected = append(autoDetected, acct)
 			}
 		}
 
-		if os.Getenv("AGENTUSAGE_DEBUG") != "" {
+		cfg.AutoDetectedAccounts = autoDetected
+		if err := config.SaveAutoDetected(autoDetected); err != nil {
+			log.Printf("Warning: could not persist auto-detected accounts: %v", err)
+		}
+
+		allAccounts = mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
+
+		if os.Getenv("OPENUSAGE_DEBUG") != "" {
 			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
 				fmt.Fprint(os.Stderr, result.Summary())
 				fmt.Fprintln(os.Stderr)
@@ -62,14 +67,14 @@ func main() {
 		}
 	}
 
-	if len(cfg.Accounts) == 0 {
-		fmt.Println("⚡ AgentUsage — No accounts configured or detected.")
+	if len(allAccounts) == 0 {
+		fmt.Println("⚡ OpenUsage — No accounts configured or detected.")
 		fmt.Println()
 		fmt.Printf("Config path: %s\n\n", config.ConfigPath())
 		fmt.Println("Auto-detection checks for:")
 		fmt.Println("  • Cursor IDE       (local DBs + API)")
 		fmt.Println("  • Claude Code CLI  (stats-cache.json)")
-		fmt.Println("  • OpenAI Codex CLI (session rate limits + tokens)")
+		fmt.Println("  • OpenAI Codex CLI (session usage windows + tokens)")
 		fmt.Println("  • GitHub Copilot   (gh CLI)")
 		fmt.Println("  • Gemini CLI       (gemini binary)")
 		fmt.Println("  • Aider CLI        (aider binary)")
@@ -81,18 +86,22 @@ func main() {
 		fmt.Println("Set any of the above env vars, install a tool, or create a config:")
 		fmt.Printf("  mkdir -p %s\n", config.ConfigDir())
 		fmt.Printf("  cat > %s <<'EOF'\n", config.ConfigPath())
-		fmt.Print(`auto_detect = true
-
-[ui]
-refresh_interval_seconds = 30
-warn_threshold = 0.20
-crit_threshold = 0.05
-
-[[accounts]]
-id = "openai-personal"
-provider = "openai"
-api_key_env = "OPENAI_API_KEY"
-probe_model = "gpt-4.1-mini"
+		fmt.Print(`{
+  "auto_detect": true,
+  "ui": {
+    "refresh_interval_seconds": 30,
+    "warn_threshold": 0.20,
+    "crit_threshold": 0.05
+  },
+  "accounts": [
+    {
+      "id": "openai-personal",
+      "provider": "openai",
+      "api_key_env": "OPENAI_API_KEY",
+      "probe_model": "gpt-4.1-mini"
+    }
+  ]
+}
 `)
 		fmt.Println("EOF")
 		os.Exit(0)
@@ -104,10 +113,15 @@ probe_model = "gpt-4.1-mini"
 	for _, p := range providers.AllProviders() {
 		engine.RegisterProvider(p)
 	}
-	engine.SetAccounts(cfg.Accounts)
+	engine.SetAccounts(allAccounts)
 
-	model := tui.NewModel(cfg.UI.WarnThreshold, cfg.UI.CritThreshold, userSettings.Experimental.Analytics)
-	model.SetSettingsPath(settings.Path())
+	model := tui.NewModel(
+		cfg.UI.WarnThreshold,
+		cfg.UI.CritThreshold,
+		cfg.Experimental.Analytics,
+		cfg.Dashboard,
+		allAccounts,
+	)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	engine.OnUpdate(func(snaps map[string]core.QuotaSnapshot) {
@@ -131,4 +145,20 @@ probe_model = "gpt-4.1-mini"
 		log.SetOutput(os.Stderr)
 		log.Fatalf("TUI error: %v", err)
 	}
+}
+
+// mergeAccounts combines manual and auto-detected accounts, with manual taking precedence by ID.
+func mergeAccounts(manual, autoDetected []core.AccountConfig) []core.AccountConfig {
+	seen := make(map[string]bool, len(manual))
+	result := make([]core.AccountConfig, 0, len(manual)+len(autoDetected))
+	for _, acct := range manual {
+		seen[acct.ID] = true
+		result = append(result, acct)
+	}
+	for _, acct := range autoDetected {
+		if !seen[acct.ID] {
+			result = append(result, acct)
+		}
+	}
+	return result
 }

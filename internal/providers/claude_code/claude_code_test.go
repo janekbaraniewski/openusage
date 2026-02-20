@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestSanitizeModelName(t *testing.T) {
@@ -397,5 +397,70 @@ func TestFloorToHour(t *testing.T) {
 	got := floorToHour(input)
 	if !got.Equal(expected) {
 		t.Errorf("floorToHour(%v) = %v, want %v", input, got, expected)
+	}
+}
+
+func TestApplyUsageResponse_ClampsExpiredBucketToZero(t *testing.T) {
+	now := time.Date(2026, 2, 20, 20, 0, 0, 0, time.UTC)
+	past := now.Add(-10 * time.Second).Format(time.RFC3339)
+	future := now.Add(6 * time.Hour).Format(time.RFC3339)
+
+	snap := core.QuotaSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+	}
+	usage := &usageResponse{
+		FiveHour: &usageBucket{
+			Utilization: 100,
+			ResetsAt:    past,
+		},
+		SevenDay: &usageBucket{
+			Utilization: 88,
+			ResetsAt:    future,
+		},
+	}
+
+	applyUsageResponse(usage, &snap, now)
+
+	fh, ok := snap.Metrics["usage_five_hour"]
+	if !ok || fh.Used == nil {
+		t.Fatalf("missing usage_five_hour metric")
+	}
+	if *fh.Used != 0 {
+		t.Fatalf("expected usage_five_hour to be clamped to 0, got %.1f", *fh.Used)
+	}
+
+	sd, ok := snap.Metrics["usage_seven_day"]
+	if !ok || sd.Used == nil {
+		t.Fatalf("missing usage_seven_day metric")
+	}
+	if *sd.Used != 88 {
+		t.Fatalf("expected usage_seven_day to stay at 88, got %.1f", *sd.Used)
+	}
+}
+
+func TestApplyUsageResponse_KeepsFutureBucketValue(t *testing.T) {
+	now := time.Date(2026, 2, 20, 20, 0, 0, 0, time.UTC)
+	future := now.Add(2 * time.Hour).Format(time.RFC3339)
+
+	snap := core.QuotaSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+	}
+	usage := &usageResponse{
+		FiveHour: &usageBucket{
+			Utilization: 73,
+			ResetsAt:    future,
+		},
+	}
+
+	applyUsageResponse(usage, &snap, now)
+
+	fh, ok := snap.Metrics["usage_five_hour"]
+	if !ok || fh.Used == nil {
+		t.Fatalf("missing usage_five_hour metric")
+	}
+	if *fh.Used != 73 {
+		t.Fatalf("expected usage_five_hour to remain 73, got %.1f", *fh.Used)
 	}
 }

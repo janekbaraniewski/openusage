@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/janekbaraniewski/agentusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestFetch_BalanceAndHeaders(t *testing.T) {
