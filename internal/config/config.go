@@ -22,12 +22,12 @@ type ExperimentalConfig struct {
 }
 
 type Config struct {
-	UI                    UIConfig             `json:"ui"`
-	Theme                 string               `json:"theme"`
-	Experimental          ExperimentalConfig   `json:"experimental"`
-	AutoDetect            bool                 `json:"auto_detect"`
-	Accounts              []core.AccountConfig `json:"accounts"`
-	AutoDetectedAccounts  []core.AccountConfig `json:"auto_detected_accounts"`
+	UI                   UIConfig             `json:"ui"`
+	Theme                string               `json:"theme"`
+	Experimental         ExperimentalConfig   `json:"experimental"`
+	AutoDetect           bool                 `json:"auto_detect"`
+	Accounts             []core.AccountConfig `json:"accounts"`
+	AutoDetectedAccounts []core.AccountConfig `json:"auto_detected_accounts"`
 }
 
 func DefaultConfig() Config {
