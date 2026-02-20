@@ -237,6 +237,57 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	return result
 }
 
+func (m Model) renderSplash(screenW, screenH int) string {
+	banner := ASCIIBanner(m.animFrame)
+	bannerLines := strings.Split(banner, "\n")
+
+	spinnerIdx := m.animFrame % len(SpinnerFrames)
+	spinner := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).
+		Render(SpinnerFrames[spinnerIdx])
+	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
+		Render("Discovering providers…")
+	statusLine := "  " + spinner + " " + subtitle
+
+	// Collect all lines: banner + blank + status
+	var lines []string
+	for _, bl := range bannerLines {
+		lines = append(lines, "  "+bl)
+	}
+	lines = append(lines, "")
+	lines = append(lines, statusLine)
+
+	blockH := len(lines)
+	padTop := (screenH - blockH) / 2
+	if padTop < 0 {
+		padTop = 0
+	}
+
+	// Find widest line for horizontal centering
+	maxW := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > maxW {
+			maxW = w
+		}
+	}
+	padLeft := (screenW - maxW) / 2
+	if padLeft < 0 {
+		padLeft = 0
+	}
+
+	var out strings.Builder
+	for i := 0; i < padTop; i++ {
+		out.WriteRune('\n')
+	}
+	for i, line := range lines {
+		if i > 0 {
+			out.WriteRune('\n')
+		}
+		out.WriteString(strings.Repeat(" ", padLeft))
+		out.WriteString(line)
+	}
+	return out.String()
+}
+
 func padRight(s string, width int) string {
 	vw := lipgloss.Width(s)
 	if vw >= width {
