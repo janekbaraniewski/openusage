@@ -72,6 +72,7 @@ type Model struct {
 
 	animFrame  int  // monotonically increasing frame counter
 	refreshing bool // true when a manual refresh is in progress
+	hasData    bool // true after the first SnapshotsMsg arrives
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
@@ -148,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
+		m.hasData = true
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
 		return m, nil
@@ -423,6 +425,9 @@ func (m Model) View() string {
 		return lipgloss.NewStyle().
 			Foreground(colorDim).
 			Render("\n  Terminal too small. Resize to at least 30×8.")
+	}
+	if !m.hasData {
+		return m.renderSplash(m.width, m.height)
 	}
 	if m.showHelp {
 		return m.renderHelpOverlay(m.width, m.height)
