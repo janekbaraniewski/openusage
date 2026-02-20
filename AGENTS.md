@@ -100,7 +100,7 @@ configs/                Example configuration file
   Fields that must never be serialized use `json:"-"` (e.g., `Token`, `ExtraData`).
 - **Maps initialized with `make`**: `Metrics: make(map[string]core.Metric)`.
 - **Core interface**: All providers implement `core.QuotaProvider` (ID, Describe, Fetch).
-- **Config**: JSON-based (`settings.json`), not TOML. `DefaultConfig()` provides zero-value defaults.
+- **Config**: JSON-based (`settings.json`). `DefaultConfig()` provides zero-value defaults.
 
 ### Error Handling
 

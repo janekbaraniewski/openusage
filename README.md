@@ -82,29 +82,33 @@ If any of the above are present, OpenUsage will immediately start displaying liv
 
 ## Configuration
 
-Config file location: `~/.config/openusage/config.toml`
+Config file location: `~/.config/openusage/settings.json`
 
-```toml
-auto_detect = true
-
-[ui]
-refresh_interval_seconds = 30
-warn_threshold = 0.20    # 20% remaining → yellow
-crit_threshold = 0.05    # 5% remaining → red
-
-[[accounts]]
-id = "openai-personal"
-provider = "openai"
-api_key_env = "OPENAI_API_KEY"
-probe_model = "gpt-4.1-mini"
-
-[[accounts]]
-id = "anthropic-work"
-provider = "anthropic"
-api_key_env = "ANTHROPIC_API_KEY"
+```json
+{
+  "auto_detect": true,
+  "ui": {
+    "refresh_interval_seconds": 30,
+    "warn_threshold": 0.2,
+    "crit_threshold": 0.05
+  },
+  "accounts": [
+    {
+      "id": "openai-personal",
+      "provider": "openai",
+      "api_key_env": "OPENAI_API_KEY",
+      "probe_model": "gpt-4.1-mini"
+    },
+    {
+      "id": "anthropic-work",
+      "provider": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    }
+  ]
+}
 ```
 
-See [`configs/example.toml`](configs/example.toml) for a full reference with all providers.
+See [`configs/example_settings.json`](configs/example_settings.json) for a full reference with all providers.
 
 Auto-detected accounts are merged with manually configured ones — configured accounts take precedence.
 
@@ -200,7 +204,7 @@ Providers fall into four patterns:
 ```
 cmd/openusage/         CLI entry point
 internal/
-  config/               TOML config loading & defaults
+  config/               JSON config loading & defaults
   core/                 Engine, provider interface, snapshot types
   detect/               Auto-detection of tools & API keys
   parsers/              Shared rate-limit header parsing helpers

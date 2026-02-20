@@ -76,7 +76,7 @@ archives:
     files:
       - LICENSE*
       - README*
-      - configs/example.toml
+      - configs/example_settings.json
 
 checksum:
   name_template: "checksums.txt"
