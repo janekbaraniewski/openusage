@@ -73,9 +73,9 @@ func (m Model) renderTiles(w, h int) string {
 	if len(ids) == 0 {
 		empty := []string{
 			"",
-			dimStyle.Render("  No providers detected."),
+			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Set API-key env vars or install AI tools."),
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching quotas and rate limits."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}

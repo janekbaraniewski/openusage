@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/agentusage/internal/config"
 	"github.com/janekbaraniewski/agentusage/internal/core"
-	"github.com/janekbaraniewski/agentusage/internal/settings"
 )
 
 type tickMsg time.Time
@@ -71,8 +71,7 @@ type Model struct {
 	animFrame  int  // monotonically increasing frame counter
 	refreshing bool // true when a manual refresh is in progress
 
-	experimentalAnalytics bool   // when false, only the Dashboard screen is available
-	settingsPath          string // path to settings.json for persisting preferences
+	experimentalAnalytics bool // when false, only the Dashboard screen is available
 }
 
 func NewModel(warnThresh, critThresh float64, experimentalAnalytics bool) Model {
@@ -84,26 +83,12 @@ func NewModel(warnThresh, critThresh float64, experimentalAnalytics bool) Model 
 	}
 }
 
-func (m *Model) SetSettingsPath(path string) {
-	m.settingsPath = path
-}
-
 type themePersistedMsg struct{}
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
-	if m.settingsPath == "" {
-		return nil
-	}
-	path := m.settingsPath
 	return func() tea.Msg {
-		s, err := settings.LoadFrom(path)
-		if err != nil {
-			log.Printf("settings load for theme persist: %v", err)
-			s = settings.DefaultSettings()
-		}
-		s.Theme = themeName
-		if err := settings.SaveTo(path, s); err != nil {
-			log.Printf("settings save for theme persist: %v", err)
+		if err := config.SaveTheme(themeName); err != nil {
+			log.Printf("theme persist: %v", err)
 		}
 		return themePersistedMsg{}
 	}
@@ -569,10 +554,9 @@ func (m Model) renderList(w, h int) string {
 	if len(ids) == 0 {
 		empty := []string{
 			"",
-			dimStyle.Render("  No providers detected."),
+			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Set API-key env vars"),
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  or install AI tools."),
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching quotas and rate limits."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}

@@ -1,0 +1,68 @@
+{
+  "ui": {
+    "refresh_interval_seconds": 30,
+    "warn_threshold": 0.20,
+    "crit_threshold": 0.05
+  },
+  "theme": "Catppuccin Mocha",
+  "experimental": {
+    "analytics": false
+  },
+  "auto_detect": true,
+  "accounts": [
+    {
+      "id": "openai-personal",
+      "provider": "openai",
+      "api_key_env": "OPENAI_API_KEY",
+      "probe_model": "gpt-4.1-mini"
+    },
+    {
+      "id": "anthropic-work",
+      "provider": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    },
+    {
+      "id": "openrouter",
+      "provider": "openrouter",
+      "api_key_env": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "groq",
+      "provider": "groq",
+      "api_key_env": "GROQ_API_KEY",
+      "probe_model": "llama-3.3-70b-versatile"
+    },
+    {
+      "id": "mistral",
+      "provider": "mistral",
+      "api_key_env": "MISTRAL_API_KEY"
+    },
+    {
+      "id": "deepseek",
+      "provider": "deepseek",
+      "api_key_env": "DEEPSEEK_API_KEY"
+    },
+    {
+      "id": "xai-grok",
+      "provider": "xai",
+      "api_key_env": "XAI_API_KEY"
+    },
+    {
+      "id": "gemini-api",
+      "provider": "gemini_api",
+      "api_key_env": "GEMINI_API_KEY",
+      "probe_model": "gemini-2.0-flash"
+    },
+    {
+      "id": "gemini-cli",
+      "provider": "gemini_cli",
+      "binary": "gemini"
+    },
+    {
+      "id": "copilot",
+      "provider": "copilot",
+      "binary": "gh"
+    }
+  ],
+  "auto_detected_accounts": []
+}
