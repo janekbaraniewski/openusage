@@ -26,13 +26,11 @@ type screenTab int
 const (
 	screenDashboard screenTab = iota // tiles grid overview
 	screenAnalytics                  // spend analysis dashboard
-	screenSettings                   // dashboard customization
 )
 
 var screenLabelByTab = map[screenTab]string{
 	screenDashboard: "Dashboard",
 	screenAnalytics: "Analytics",
-	screenSettings:  "Settings",
 }
 
 type viewMode int
@@ -77,11 +75,14 @@ type Model struct {
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
-	providerOrder    []string
-	providerEnabled  map[string]bool
-	accountProviders map[string]string
-	settingsCursor   int
-	settingsStatus   string
+	providerOrder       []string
+	providerEnabled     map[string]bool
+	accountProviders    map[string]string
+	showSettingsModal   bool
+	settingsModalTab    settingsModalTab
+	settingsCursor      int
+	settingsThemeCursor int
+	settingsStatus      string
 }
 
 func NewModel(
@@ -103,17 +104,20 @@ func NewModel(
 	return model
 }
 
-type themePersistedMsg struct{}
+type themePersistedMsg struct {
+	err error
+}
 type dashboardPrefsPersistedMsg struct {
 	err error
 }
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
 	return func() tea.Msg {
-		if err := config.SaveTheme(themeName); err != nil {
+		err := config.SaveTheme(themeName)
+		if err != nil {
 			log.Printf("theme persist: %v", err)
 		}
-		return themePersistedMsg{}
+		return themePersistedMsg{err: err}
 	}
 }
 
@@ -156,6 +160,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case themePersistedMsg:
+		if msg.err != nil {
+			m.settingsStatus = "theme save failed"
+		} else {
+			m.settingsStatus = "theme saved"
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -163,7 +175,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "?" && !m.filtering && !m.analyticsFiltering {
+	if msg.String() == "?" && !m.filtering && !m.analyticsFiltering && !m.showSettingsModal {
 		m.showHelp = !m.showHelp
 		return m, nil
 	}
@@ -172,8 +184,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.showSettingsModal {
+		return m.handleSettingsModalKey(msg)
+	}
+
 	if !m.filtering && !m.analyticsFiltering {
 		switch msg.String() {
+		case ",", "S":
+			m.openSettingsModal()
+			return m, nil
 		case "tab":
 			m.screen = m.nextScreen(1)
 			m.mode = modeList
@@ -193,8 +212,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenAnalytics:
 		return m.handleAnalyticsKey(msg)
-	case screenSettings:
-		return m.handleSettingsKey(msg)
 	default:
 		return m.handleDashboardTilesKey(msg)
 	}
@@ -235,8 +252,11 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", "esc":
+	case "enter":
 		m.analyticsFiltering = false
+	case "esc":
+		m.analyticsFiltering = false
+		m.analyticsFilter = ""
 	case "backspace":
 		if len(m.analyticsFilter) > 0 {
 			m.analyticsFilter = m.analyticsFilter[:len(m.analyticsFilter)-1]
@@ -253,7 +273,7 @@ func (m Model) availableScreens() []screenTab {
 	if !m.experimentalAnalytics {
 		return []screenTab{screenDashboard}
 	}
-	return []screenTab{screenDashboard, screenAnalytics, screenSettings}
+	return []screenTab{screenDashboard, screenAnalytics}
 }
 
 func (m Model) nextScreen(step int) screenTab {
@@ -275,61 +295,6 @@ func (m Model) nextScreen(step int) screenTab {
 		next += len(screens)
 	}
 	return screens[next]
-}
-
-func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	ids := m.settingsIDs()
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "up", "k":
-		if m.settingsCursor > 0 {
-			m.settingsCursor--
-		}
-	case "down", "j":
-		if m.settingsCursor < len(ids)-1 {
-			m.settingsCursor++
-		}
-	case " ", "enter":
-		if len(ids) > 0 {
-			id := ids[m.settingsCursor]
-			m.providerEnabled[id] = !m.isProviderEnabled(id)
-			m.rebuildSortedIDs()
-			m.settingsStatus = "saving..."
-			return m, m.persistDashboardPrefsCmd()
-		}
-	case "K":
-		if len(ids) > 0 && m.settingsCursor > 0 {
-			id := ids[m.settingsCursor]
-			prevID := ids[m.settingsCursor-1]
-			currIdx := m.providerOrderIndex(id)
-			prevIdx := m.providerOrderIndex(prevID)
-			if currIdx >= 0 && prevIdx >= 0 {
-				m.providerOrder[currIdx], m.providerOrder[prevIdx] = m.providerOrder[prevIdx], m.providerOrder[currIdx]
-				m.settingsCursor--
-				m.rebuildSortedIDs()
-				m.settingsStatus = "saving..."
-				return m, m.persistDashboardPrefsCmd()
-			}
-		}
-	case "J":
-		if len(ids) > 0 && m.settingsCursor < len(ids)-1 {
-			id := ids[m.settingsCursor]
-			nextID := ids[m.settingsCursor+1]
-			currIdx := m.providerOrderIndex(id)
-			nextIdx := m.providerOrderIndex(nextID)
-			if currIdx >= 0 && nextIdx >= 0 {
-				m.providerOrder[currIdx], m.providerOrder[nextIdx] = m.providerOrder[nextIdx], m.providerOrder[currIdx]
-				m.settingsCursor++
-				m.rebuildSortedIDs()
-				m.settingsStatus = "saving..."
-				return m, m.persistDashboardPrefsCmd()
-			}
-		}
-	case "r":
-		m.refreshing = true
-	}
-	return m, nil
 }
 
 func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -395,7 +360,11 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", "esc":
+	case "enter":
+		m.filtering = false
+		m.cursor = 0
+	case "esc":
+		m.filter = ""
 		m.filtering = false
 		m.cursor = 0
 	case "backspace":
@@ -438,6 +407,11 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		m.filter = ""
+	case "esc":
+		if m.filter != "" {
+			m.filter = ""
+			m.cursor = 0
+		}
 	case "r":
 		m.refreshing = true
 	}
@@ -453,7 +427,11 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.renderHelpOverlay(m.width, m.height)
 	}
-	return m.renderDashboard()
+	view := m.renderDashboard()
+	if m.showSettingsModal {
+		return m.renderSettingsModalOverlay()
+	}
+	return view
 }
 
 func (m Model) renderDashboard() string {
@@ -475,8 +453,6 @@ func (m Model) renderDashboard() string {
 	switch m.screen {
 	case screenAnalytics:
 		content = m.renderAnalyticsContent(w, contentH)
-	case screenSettings:
-		content = m.renderSettingsContent(w, contentH)
 	default:
 		content = m.renderDashboardContent(w, contentH)
 	}
@@ -489,88 +465,6 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 		return m.renderDetailPanel(w, contentH)
 	}
 	return m.renderTiles(w, contentH)
-}
-
-func (m Model) renderSettingsContent(w, h int) string {
-	ids := m.settingsIDs()
-	if len(ids) == 0 {
-		lines := []string{
-			"",
-			dimStyle.Render("  No providers available."),
-			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Add or auto-detect providers to customize dashboard settings."),
-		}
-		return padToSize(strings.Join(lines, "\n"), w, h)
-	}
-
-	active := 0
-	for _, id := range ids {
-		if m.isProviderEnabled(id) {
-			active++
-		}
-	}
-
-	lines := []string{
-		"  " + lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Dashboard Settings"),
-		"  " + dimStyle.Render("Toggle visibility and reorder providers shown on Dashboard/Analytics."),
-		"  " + dimStyle.Render(fmt.Sprintf("Active: %d / %d  ·  Space: toggle  ·  Shift+J/K: move", active, len(ids))),
-		"",
-	}
-
-	listH := h - len(lines)
-	if listH < 1 {
-		listH = 1
-	}
-
-	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
-	start := 0
-	if cursor >= listH {
-		start = cursor - listH + 1
-	}
-	end := start + listH
-	if end > len(ids) {
-		end = len(ids)
-		start = end - listH
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	for i := start; i < end; i++ {
-		id := ids[i]
-		providerID := m.accountProviders[id]
-		if snap, ok := m.snapshots[id]; ok && snap.ProviderID != "" {
-			providerID = snap.ProviderID
-		}
-		if providerID == "" {
-			providerID = "unknown"
-		}
-
-		enabled := m.isProviderEnabled(id)
-		box := "☐"
-		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
-		if enabled {
-			box = "☑"
-			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
-		}
-
-		provider := dimStyle.Render(providerID)
-		prefix := "  "
-		if i == cursor {
-			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
-		}
-		line := fmt.Sprintf("%s%s %s  %s", prefix, boxStyle.Render(box), id, provider)
-		lines = append(lines, line)
-	}
-
-	if start > 0 {
-		lines = append([]string{lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ more above")}, lines...)
-	}
-	if end < len(ids) {
-		lines = append(lines, lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ more below"))
-	}
-
-	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderHeader(w int) string {
@@ -591,37 +485,21 @@ func (m Model) renderHeader(w int) string {
 
 	var info string
 
-	switch m.screen {
-	case screenAnalytics:
-		if m.analyticsFiltering {
-			cursor := PulseChar("█", "▌", m.animFrame)
-			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter+cursor)
-		} else if m.analyticsFilter != "" {
-			info = dimStyle.Render("filtered: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.analyticsFilter)
-		} else {
+	if m.showSettingsModal {
+		info = m.settingsModalInfo()
+	} else {
+		switch m.screen {
+		case screenAnalytics:
 			info = dimStyle.Render("spend analysis")
-		}
-	case screenSettings:
-		ids := m.settingsIDs()
-		active := 0
-		for _, id := range ids {
-			if m.isProviderEnabled(id) {
-				active++
+			if m.analyticsFilter != "" {
+				info += " (filtered)"
 			}
-		}
-		info = fmt.Sprintf("⚙ %d active / %d total", active, len(ids))
-		if m.settingsStatus != "" {
-			info += " · " + m.settingsStatus
-		}
-	default:
-		ids := m.filteredIDs()
-		info = fmt.Sprintf("⊞ %d providers", len(ids))
-
-		if m.filtering {
-			cursor := PulseChar("█", "▌", m.animFrame)
-			info = dimStyle.Render("search: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.filter+cursor)
-		} else if m.filter != "" {
-			info = dimStyle.Render("filtered: ") + lipgloss.NewStyle().Foreground(colorSapphire).Render(m.filter)
+		default:
+			ids := m.filteredIDs()
+			info = fmt.Sprintf("⊞ %d providers", len(ids))
+			if m.filter != "" {
+				info += " (filtered)"
+			}
 		}
 	}
 
@@ -717,66 +595,38 @@ func (m Model) renderScreenTabs() string {
 
 func (m Model) renderFooter(w int) string {
 	sep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("━", w))
+	statusLine := m.renderFooterStatusLine()
+	return sep + "\n" + statusLine
+}
 
-	var keys []string
-
-	themeHint := helpKeyStyle.Render("t") + helpStyle.Render(" theme")
+func (m Model) renderFooterStatusLine() string {
+	searchStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 
 	switch {
+	case m.showSettingsModal:
+		if m.settingsStatus != "" {
+			return " " + dimStyle.Render(m.settingsStatus)
+		}
+		return " " + helpStyle.Render("? help")
 	case m.screen == screenAnalytics:
-		keys = []string{
-			helpKeyStyle.Render("s") + helpStyle.Render(" sort"),
-			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
-			helpKeyStyle.Render("⇥") + helpStyle.Render(" tab"),
-			themeHint,
-			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
-			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
+		if m.analyticsFiltering {
+			cursor := PulseChar("█", "▌", m.animFrame)
+			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.analyticsFilter+cursor)
 		}
-	case m.screen == screenSettings:
-		keys = []string{
-			helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav"),
-			helpKeyStyle.Render("space") + helpStyle.Render(" toggle"),
-			helpKeyStyle.Render("K/J") + helpStyle.Render(" move"),
-			helpKeyStyle.Render("⇥") + helpStyle.Render(" tab"),
-			themeHint,
-			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
-			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
-		}
-	case m.mode == modeDetail:
-		keys = []string{
-			helpKeyStyle.Render("[/]") + helpStyle.Render(" tab"),
-			helpKeyStyle.Render("↑↓") + helpStyle.Render(" scroll"),
-			helpKeyStyle.Render("g/G") + helpStyle.Render(" top/btm"),
-			helpKeyStyle.Render("esc") + helpStyle.Render(" back"),
-			themeHint,
-			helpKeyStyle.Render("?") + helpStyle.Render(" help"),
-			helpKeyStyle.Render("q") + helpStyle.Render(" quit"),
+		if m.analyticsFilter != "" {
+			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter)
 		}
 	default:
-		keys = []string{
-			helpKeyStyle.Render("←↑↓→") + helpStyle.Render(" nav"),
-			helpKeyStyle.Render("⏎") + helpStyle.Render(" detail"),
-			helpKeyStyle.Render("/") + helpStyle.Render(" filter"),
+		if m.filtering {
+			cursor := PulseChar("█", "▌", m.animFrame)
+			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.filter+cursor)
 		}
-		keys = append(keys, helpKeyStyle.Render("⇥")+helpStyle.Render(" tab"))
-		keys = append(keys,
-			themeHint,
-			helpKeyStyle.Render("?")+helpStyle.Render(" help"),
-			helpKeyStyle.Render("q")+helpStyle.Render(" quit"),
-		)
+		if m.filter != "" {
+			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter)
+		}
 	}
 
-	help := " " + strings.Join(keys, "   ")
-
-	themeName := lipgloss.NewStyle().Foreground(colorAccent).Render(ThemeName())
-	helpW := lipgloss.Width(help)
-	themeW := lipgloss.Width(themeName)
-	gap := w - helpW - themeW - 1
-	if gap < 1 {
-		return sep + "\n" + help
-	}
-
-	return sep + "\n" + help + strings.Repeat(" ", gap) + themeName
+	return " " + helpStyle.Render("? help")
 }
 
 func (m Model) renderList(w, h int) string {

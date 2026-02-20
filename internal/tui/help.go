@@ -119,13 +119,15 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"⏎ Enter", "Open detail"},
 		{"Esc", "Back"},
 	}
-	navKeys = append(navKeys, struct{ key, desc string }{"Tab", "Next screen"})
+	navKeys = append(navKeys, struct{ key, desc string }{"Tab / Shift+Tab", "Switch screen"})
 
 	actionKeys := []struct{ key, desc string }{
+		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
 		{"[ ]", "Switch detail tabs"},
-		{"Space", "Toggle provider (settings)"},
-		{"Shift+J/K", "Reorder provider (settings)"},
+		{"1-3 / ←→", "Switch settings tabs"},
+		{"Space / Enter", "Apply setting in modal"},
+		{"Shift+J/K", "Reorder providers (order tab)"},
 	}
 	if m.experimentalAnalytics {
 		actionKeys = append(actionKeys,
