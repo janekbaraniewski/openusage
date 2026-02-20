@@ -131,7 +131,7 @@ func RenderGradientText(text string, frame int) string {
 		return text
 	}
 	var b strings.Builder
-	shift := frame / 2 // slower scroll for elegance
+	shift := frame / 2
 	for i, ch := range text {
 		c := BrandGradient[(i+shift)%len(BrandGradient)]
 		b.WriteString(lipgloss.NewStyle().Foreground(c).Bold(true).Render(string(ch)))
