@@ -1,10 +1,14 @@
-# OpenUsage
+# openusage
 
 A terminal dashboard for monitoring AI coding tool usage and spend — all in one place.
 
 OpenUsage auto-detects the AI tools and API keys on your workstation and displays live usage snapshots in a [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI with dashboard, list, and analytics views. Six built-in color themes keep it looking good in any terminal.
 
 ![OpenUsage dashboard screenshot](./assets/dashboard.png)
+
+Or side by side with your agent
+
+![OpenUsage side by side](./assets/sidebyside.png)
 
 ## Supported Providers
 
