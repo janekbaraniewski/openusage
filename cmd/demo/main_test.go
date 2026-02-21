@@ -292,14 +292,14 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		"claude_code": {
 			metrics: []string{
 				"tool_read_calls",
-				"client_janekbaraniewski_total_tokens",
+				"client_demo_alpha_total_tokens",
 			},
 			raw: []string{
 				"block_start",
 				"block_end",
 			},
 			series: []string{
-				"tokens_client_janekbaraniewski",
+				"tokens_client_demo_alpha",
 			},
 		},
 		"codex": {

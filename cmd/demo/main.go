@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -376,7 +377,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 		},
 		Raw: map[string]string{
 			"api_key_name": "prod-key",
-			"team_id":      "team_7f4a2",
+			"team_id":      "team_demo",
 		},
 		Message: "$372.19 remaining",
 	}
@@ -472,8 +473,8 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"usage_one_day":   now.Add(7*time.Hour + 18*time.Minute),
 		},
 		Attributes: map[string]string{
-			"account_email":       "dev@acme-corp.io",
-			"account_name":        "Acme Dev",
+			"account_email":       "demo.user@example.test",
+			"account_name":        "Demo User",
 			"plan_name":           "pro",
 			"selected_model":      "qwen2.5-coder:32b",
 			"cloud_disabled":      "false",
@@ -595,27 +596,27 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			},
 			"client_desktop_app_total_tokens": {Used: ptr(78130), Unit: "tokens", Window: "7d"},
 			"client_desktop_app_sessions":     {Used: ptr(11), Unit: "sessions", Window: "7d"},
-			"client_janekbaraniewski_total_tokens": {
+			"client_demo_alpha_total_tokens": {
 				Used: ptr(97200), Unit: "tokens", Window: "7d",
 			},
-			"client_janekbaraniewski_sessions": {Used: ptr(8), Unit: "sessions", Window: "7d"},
-			"client_perf_trading_s_total_tokens": {
+			"client_demo_alpha_sessions": {Used: ptr(8), Unit: "sessions", Window: "7d"},
+			"client_demo_beta_total_tokens": {
 				Used: ptr(73100), Unit: "tokens", Window: "7d",
 			},
-			"client_perf_trading_s_sessions": {Used: ptr(5), Unit: "sessions", Window: "7d"},
-			"client_agentusage_total_tokens": {
+			"client_demo_beta_sessions": {Used: ptr(5), Unit: "sessions", Window: "7d"},
+			"client_demo_delta_total_tokens": {
 				Used: ptr(55700), Unit: "tokens", Window: "7d",
 			},
-			"client_agentusage_sessions": {Used: ptr(10), Unit: "sessions", Window: "7d"},
-			"client_kubesreai_total_tokens": {
+			"client_demo_delta_sessions": {Used: ptr(10), Unit: "sessions", Window: "7d"},
+			"client_demo_gamma_total_tokens": {
 				Used: ptr(35300), Unit: "tokens", Window: "7d",
 			},
-			"client_kubesreai_sessions": {Used: ptr(3), Unit: "sessions", Window: "7d"},
-			"tool_read_calls":           {Used: ptr(1420), Unit: "calls", Window: "7d"},
-			"tool_bash_calls":           {Used: ptr(870), Unit: "calls", Window: "7d"},
-			"tool_edit_calls":           {Used: ptr(560), Unit: "calls", Window: "7d"},
-			"tool_webfetch_calls":       {Used: ptr(330), Unit: "calls", Window: "7d"},
-			"tool_websearch_calls":      {Used: ptr(96), Unit: "calls", Window: "7d"},
+			"client_demo_gamma_sessions": {Used: ptr(3), Unit: "sessions", Window: "7d"},
+			"tool_read_calls":            {Used: ptr(1420), Unit: "calls", Window: "7d"},
+			"tool_bash_calls":            {Used: ptr(870), Unit: "calls", Window: "7d"},
+			"tool_edit_calls":            {Used: ptr(560), Unit: "calls", Window: "7d"},
+			"tool_webfetch_calls":        {Used: ptr(330), Unit: "calls", Window: "7d"},
+			"tool_websearch_calls":       {Used: ptr(96), Unit: "calls", Window: "7d"},
 		},
 		Resets: map[string]time.Time{
 			"billing_block":   now.Add(3*time.Hour + 12*time.Minute),
@@ -623,7 +624,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"usage_seven_day": now.Add(5*24*time.Hour + 6*time.Hour),
 		},
 		Raw: map[string]string{
-			"account_email":      "dev@acme-corp.io",
+			"account_email":      "demo.user@example.test",
 			"model_usage":        "claude-sonnet-4-5: 62%, claude-opus-4-6: 30%, claude-haiku-4-1: 8%",
 			"model_usage_window": "7d",
 			"model_count":        "3",
@@ -632,20 +633,20 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"cache_usage":        "read 62k, write 13k",
 			"tool_usage":         "web_fetch: 119, web_search: 39",
 			"tool_count":         "31",
-			"client_usage":       "CLI 27%, Perf Trading S 21%, Agentusage 15%, Kubesreai 14%, Janekbaraniewski 23%",
+			"client_usage":       "CLI 27%, Demo Beta 21%, Demo Delta 15%, Demo Gamma 14%, Demo Alpha 23%",
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"cost":                           demoSeries(now, 44, 61, 53, 72, 84, 89, 109),
-			"requests":                       demoSeries(now, 288, 301, 336, 354, 382, 415, 441),
-			"tokens_client_cli":              demoSeries(now, 21300, 24700, 25900, 28100, 29400, 31800, 34600),
-			"tokens_client_desktop_app":      demoSeries(now, 6100, 7200, 8000, 8700, 8900, 9800, 11100),
-			"tokens_client_janekbaraniewski": demoSeries(now, 10200, 11400, 12600, 13200, 14100, 15200, 16500),
-			"tokens_client_perf_trading_s":   demoSeries(now, 7600, 8100, 8700, 9300, 10100, 10800, 11700),
-			"tokens_client_agentusage":       demoSeries(now, 5200, 6100, 6800, 7200, 7900, 8600, 9400),
-			"tokens_client_kubesreai":        demoSeries(now, 3600, 4000, 4300, 4700, 5100, 5600, 6000),
-			"usage_model_claude-opus-4-6":    demoSeries(now, 15, 17, 19, 20, 22, 24, 26),
-			"usage_model_claude-sonnet-4-5":  demoSeries(now, 23, 26, 29, 31, 33, 35, 37),
-			"tokens_model_claude_sonnet_4":   demoSeries(now, 12700, 13800, 15100, 16400, 17300, 18200, 19500),
+			"cost":                          demoSeries(now, 44, 61, 53, 72, 84, 89, 109),
+			"requests":                      demoSeries(now, 288, 301, 336, 354, 382, 415, 441),
+			"tokens_client_cli":             demoSeries(now, 21300, 24700, 25900, 28100, 29400, 31800, 34600),
+			"tokens_client_desktop_app":     demoSeries(now, 6100, 7200, 8000, 8700, 8900, 9800, 11100),
+			"tokens_client_demo_alpha":      demoSeries(now, 10200, 11400, 12600, 13200, 14100, 15200, 16500),
+			"tokens_client_demo_beta":       demoSeries(now, 7600, 8100, 8700, 9300, 10100, 10800, 11700),
+			"tokens_client_demo_delta":      demoSeries(now, 5200, 6100, 6800, 7200, 7900, 8600, 9400),
+			"tokens_client_demo_gamma":      demoSeries(now, 3600, 4000, 4300, 4700, 5100, 5600, 6000),
+			"usage_model_claude-opus-4-6":   demoSeries(now, 15, 17, 19, 20, 22, 24, 26),
+			"usage_model_claude-sonnet-4-5": demoSeries(now, 23, 26, 29, 31, 33, 35, 37),
+			"tokens_model_claude_sonnet_4":  demoSeries(now, 12700, 13800, 15100, 16400, 17300, 18200, 19500),
 		},
 		Message: "~$246.47 today · $4.80/h",
 	}
@@ -747,7 +748,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"rate_limit_code_review_primary": now.Add(58 * time.Minute),
 		},
 		Raw: map[string]string{
-			"account_email": "dev@acme-corp.io",
+			"account_email": "demo.user@example.test",
 			"model_usage":   "gpt-5.1-codex-max: 55%, gpt-5.1-codex-mini: 31%, gpt-5.2-codex: 11%, gpt-5.2-codex-mini: 3%",
 			"client_usage":  "Desktop App 70%, CLI 25%, IDE 5%",
 		},
@@ -797,10 +798,10 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"cli_response_chars":  {Used: ptr(204), Unit: "chars", Window: "7d"},
 			"cli_tokens":          {Used: ptr(51300), Unit: "tokens", Window: "7d"},
 			"cli_input_tokens":    {Used: ptr(11200), Unit: "tokens", Window: "today"},
-			"org_acme_total_seats": {
+			"org_demo_total_seats": {
 				Used: ptr(56), Unit: "seats", Window: "current",
 			},
-			"org_acme_active_seats": {
+			"org_demo_active_seats": {
 				Used: ptr(44), Unit: "seats", Window: "current",
 			},
 			"model_gpt_5_mini_input_tokens": {
@@ -834,12 +835,12 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"model_claude_haiku_4_5_response_chars": {
 				Used: ptr(42), Unit: "chars", Window: "7d",
 			},
-			"client_owner_repo_total_tokens": {Used: ptr(90400), Unit: "tokens", Window: "7d"},
-			"client_owner_repo_input_tokens": {Used: ptr(74200), Unit: "tokens", Window: "7d"},
-			"client_owner_repo_output_tokens": {
+			"client_demo_repo_total_tokens": {Used: ptr(90400), Unit: "tokens", Window: "7d"},
+			"client_demo_repo_input_tokens": {Used: ptr(74200), Unit: "tokens", Window: "7d"},
+			"client_demo_repo_output_tokens": {
 				Used: ptr(16200), Unit: "tokens", Window: "7d",
 			},
-			"client_owner_repo_sessions": {Used: ptr(14), Unit: "sessions", Window: "7d"},
+			"client_demo_repo_sessions":  {Used: ptr(14), Unit: "sessions", Window: "7d"},
 			"client_vscode_total_tokens": {Used: ptr(22600), Unit: "tokens", Window: "7d"},
 			"client_vscode_input_tokens": {Used: ptr(18800), Unit: "tokens", Window: "7d"},
 			"client_vscode_output_tokens": {
@@ -872,12 +873,12 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"quota_reset":          now.Add(24*24*time.Hour + 12*time.Hour),
 		},
 		Raw: map[string]string{
-			"github_login":    "acme-dev",
+			"github_login":    "demo-user",
 			"access_type_sku": "business",
 			"copilot_plan":    "business",
 			"premium_interactions_quota_overage_permitted": "true",
 			"model_usage":           "gpt-5-mini: 61%, claude-sonnet-4.6: 39%",
-			"client_usage":          "owner/repo 72%, vscode 18%, cli 10%",
+			"client_usage":          "demo/repo 72%, vscode 18%, cli 10%",
 			"model_turns":           "gpt-5-mini: 730, claude-sonnet-4.6: 410",
 			"model_sessions":        "gpt-5-mini: 28, claude-sonnet-4.6: 17",
 			"model_tool_calls":      "gpt-5-mini: 112, claude-sonnet-4.6: 49",
@@ -885,9 +886,9 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"model_reasoning_chars": "gpt-5-mini: 24k, claude-sonnet-4.6: 17k",
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"tokens_client_owner_repo": demoSeries(now, 8300, 9200, 11100, 12400, 13800, 15700, 17700),
-			"tokens_client_vscode":     demoSeries(now, 2100, 2400, 2900, 3300, 3800, 4100, 4600),
-			"tokens_client_cli":        demoSeries(now, 900, 1200, 1400, 1700, 1800, 2200, 2500),
+			"tokens_client_demo_repo": demoSeries(now, 8300, 9200, 11100, 12400, 13800, 15700, 17700),
+			"tokens_client_vscode":    demoSeries(now, 2100, 2400, 2900, 3300, 3800, 4100, 4600),
+			"tokens_client_cli":       demoSeries(now, 900, 1200, 1400, 1700, 1800, 2200, 2500),
 		},
 		Message: "",
 	}
@@ -941,7 +942,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"billing_cycle_end": now.Add(16*24*time.Hour + 20*time.Hour),
 		},
 		Raw: map[string]string{
-			"account_email":       "dev@acme-corp.io",
+			"account_email":       "demo.user@example.test",
 			"plan_name":           "pro",
 			"team_membership":     "team",
 			"billing_cycle_start": now.Add(-13 * 24 * time.Hour).UTC().Format(time.RFC3339),
@@ -1271,7 +1272,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 		Raw: map[string]string{
 			"activity_models":       "32",
 			"is_management_key":     "false",
-			"key_label":             "team-prod",
+			"key_label":             "demo-key",
 			"tier":                  "premium",
 			"is_free_tier":          "false",
 			"include_byok_in_limit": "true",
@@ -1365,11 +1366,11 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"billing_out_of_credits":         {Used: ptr(0), Unit: "flag", Window: "account"},
 		},
 		Raw: map[string]string{
-			"workspace_id":             "wrk_9Xx4kL2aBc3",
+			"workspace_id":             "demo_workspace_01",
 			"subscription_status":      "active",
 			"billing_status":           "active",
 			"payment_required":         "false",
-			"billing_url":              "https://opencode.ai/workspace/wrk_9Xx4kL2aBc3/billing",
+			"billing_url":              "https://demo.example/billing",
 			"team_billing_policy":      "charges_applied_to_workspace_owner",
 			"team_model_access":        "role_based_admin_member",
 			"models_count":             "216",
@@ -1387,8 +1388,8 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"billing_probe_model":      "gpt-5.1-codex-mini",
 			"billing_probe_request_id": "req_demo_paid_02",
 			"billing_probe_skipped":    "false",
-			"provider_docs":            "https://opencode.ai/docs/zen/",
-			"pricing_docs":             "https://opencode.ai/docs/zen/#pricing",
+			"provider_docs":            "https://demo.example/docs/zen/",
+			"pricing_docs":             "https://demo.example/docs/zen/#pricing",
 			"pricing_last_verified":    "2026-02-21",
 			"billing_model":            "prepaid_payg",
 			"billing_fee_policy":       "4.4% + $0.30 on card top-ups",
@@ -1398,7 +1399,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"auto_reload_supported":    "true",
 			"team_roles_supported":     "true",
 			"byok_supported":           "true",
-			"api_base_url":             "https://opencode.ai/zen/v1",
+			"api_base_url":             "https://api.demo.example/v1",
 		},
 		DailySeries: map[string][]core.TimePoint{
 			"free_probe_tokens":    demoSeries(now, 29, 31, 33, 34, 35),
@@ -1570,7 +1571,7 @@ func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.Usage
 func randomizeDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time, rng *rand.Rand) {
 	for accountID, snap := range snaps {
 		for key, metric := range snap.Metrics {
-			snap.Metrics[key] = randomizeDemoMetric(metric, rng)
+			snap.Metrics[key] = randomizeDemoMetric(key, metric, rng)
 		}
 
 		for key, resetAt := range snap.Resets {
@@ -1586,21 +1587,14 @@ func randomizeDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time, 
 	}
 }
 
-func randomizeDemoMetric(metric core.Metric, rng *rand.Rand) core.Metric {
+func randomizeDemoMetric(key string, metric core.Metric, rng *rand.Rand) core.Metric {
 	hasLimit := metric.Limit != nil && *metric.Limit > 0
 	hasRemaining := metric.Remaining != nil
 	hasUsed := metric.Used != nil
 
 	if hasLimit && (hasRemaining || hasUsed) {
 		limit := *metric.Limit
-		used := limit * 0.5
-		switch {
-		case hasUsed:
-			used = *metric.Used
-		case hasRemaining:
-			used = limit - *metric.Remaining
-		}
-		used = randomizeValue(used, 0.18, rng)
+		used := limit * (0.12 + rng.Float64()*0.8)
 		if used < 0 {
 			used = 0
 		}
@@ -1624,14 +1618,14 @@ func randomizeDemoMetric(metric core.Metric, rng *rand.Rand) core.Metric {
 	}
 
 	if hasUsed {
-		used := randomizeValue(*metric.Used, 0.2, rng)
+		used := syntheticMetricValue(key, metric.Unit, rng)
 		if used < 0 {
 			used = 0
 		}
 		metric.Used = ptr(roundLike(*metric.Used, used))
 	}
 	if hasRemaining {
-		remaining := randomizeValue(*metric.Remaining, 0.2, rng)
+		remaining := syntheticMetricValue(key, metric.Unit, rng)
 		if remaining < 0 {
 			remaining = 0
 		}
@@ -1641,8 +1635,45 @@ func randomizeDemoMetric(metric core.Metric, rng *rand.Rand) core.Metric {
 	return metric
 }
 
+func syntheticMetricValue(key, unit string, rng *rand.Rand) float64 {
+	lkey := strings.ToLower(key)
+	lunit := strings.ToLower(unit)
+
+	switch {
+	case lunit == "flag":
+		if rng.Float64() < 0.82 {
+			return 0
+		}
+		return 1
+	case strings.Contains(lkey, "price_") || strings.Contains(lunit, "/1mtok"):
+		return 0.01 + rng.Float64()*25
+	case strings.Contains(lkey, "cost") || strings.Contains(lunit, "usd") || strings.Contains(lunit, "eur") || strings.Contains(lunit, "cny"):
+		return 0.1 + rng.Float64()*700
+	case strings.Contains(lunit, "token") || strings.Contains(lunit, "char"):
+		return 1000 + rng.Float64()*9_000_000
+	case strings.Contains(lunit, "bytes"):
+		return 5_000_000 + rng.Float64()*120_000_000_000
+	case strings.Contains(lunit, "request") || strings.Contains(lunit, "message") || strings.Contains(lunit, "session") || strings.Contains(lunit, "call") || strings.Contains(lunit, "turn"):
+		return 1 + rng.Float64()*6000
+	case strings.Contains(lunit, "models"):
+		return 1 + rng.Float64()*120
+	case strings.Contains(lunit, "seats"):
+		return 1 + rng.Float64()*80
+	case strings.Contains(lunit, "ms"):
+		return 20 + rng.Float64()*950
+	case lunit == "%":
+		return 1 + rng.Float64()*98
+	case strings.Contains(lunit, "lines"):
+		return 1 + rng.Float64()*500
+	case strings.Contains(lunit, "days"):
+		return 1 + rng.Float64()*31
+	default:
+		return 1 + rng.Float64()*5000
+	}
+}
+
 func randomizeValue(value, maxDelta float64, rng *rand.Rand) float64 {
-	if value == 0 {
+	if value == 0 || maxDelta <= 0 {
 		return 0
 	}
 	factor := 1 + ((rng.Float64()*2 - 1) * maxDelta)
