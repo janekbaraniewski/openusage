@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -316,6 +317,64 @@ func TestProvider_Fetch_WithJSONL(t *testing.T) {
 	} else {
 		t.Error("Expected 5h_block_msgs metric")
 	}
+
+	if m, ok := snap.Metrics["model_claude_opus_4_6_input_tokens"]; ok {
+		if m.Used == nil || *m.Used != 5000 {
+			t.Errorf("Expected model input tokens=5000, got %v", m.Used)
+		}
+	} else {
+		t.Error("Expected canonical per-model input metric")
+	}
+
+	if m, ok := snap.Metrics["model_claude_opus_4_6_output_tokens"]; ok {
+		if m.Used == nil || *m.Used != 2500 {
+			t.Errorf("Expected model output tokens=2500, got %v", m.Used)
+		}
+	} else {
+		t.Error("Expected canonical per-model output metric")
+	}
+
+	if usage := snap.Raw["model_usage"]; usage == "" {
+		t.Error("Expected model_usage raw summary")
+	} else if !strings.Contains(usage, "claude-opus-4-6") {
+		t.Errorf("Expected model_usage to include claude-opus-4-6, got %q", usage)
+	}
+}
+
+func TestNormalizeModelUsage_ConvertsLegacyKeys(t *testing.T) {
+	snap := core.QuotaSnapshot{
+		Metrics: map[string]core.Metric{
+			"input_tokens_claude_opus_4_6":  {Used: float64Ptr(1200), Unit: "tokens", Window: "all-time"},
+			"output_tokens_claude_opus_4_6": {Used: float64Ptr(300), Unit: "tokens", Window: "all-time"},
+		},
+		Raw: make(map[string]string),
+	}
+
+	normalizeModelUsage(&snap)
+
+	if _, ok := snap.Metrics["input_tokens_claude_opus_4_6"]; ok {
+		t.Fatalf("expected legacy input_tokens metric to be removed")
+	}
+	if _, ok := snap.Metrics["output_tokens_claude_opus_4_6"]; ok {
+		t.Fatalf("expected legacy output_tokens metric to be removed")
+	}
+
+	inputMetric, ok := snap.Metrics["model_claude_opus_4_6_input_tokens"]
+	if !ok || inputMetric.Used == nil || *inputMetric.Used != 1200 {
+		t.Fatalf("expected normalized input metric=1200, got %+v", inputMetric)
+	}
+	outputMetric, ok := snap.Metrics["model_claude_opus_4_6_output_tokens"]
+	if !ok || outputMetric.Used == nil || *outputMetric.Used != 300 {
+		t.Fatalf("expected normalized output metric=300, got %+v", outputMetric)
+	}
+
+	if usage := snap.Raw["model_usage"]; usage == "" {
+		t.Fatalf("expected model_usage summary to be present")
+	}
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
 }
 
 func TestReadSettings(t *testing.T) {

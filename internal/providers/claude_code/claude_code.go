@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,7 +214,16 @@ func estimateCost(model string, u *jsonlUsage) float64 {
 	return cost
 }
 
-const billingBlockDuration = 5 * time.Hour
+type modelUsageTotals struct {
+	input  float64
+	output float64
+	cost   float64
+}
+
+const (
+	billingBlockDuration      = 5 * time.Hour
+	maxModelUsageSummaryItems = 6
+)
 
 func floorToHour(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
@@ -283,6 +293,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 			hasData = true
 		}
 	}
+
+	normalizeModelUsage(&snap)
 
 	if !hasData {
 		snap.Status = core.StatusError
@@ -451,29 +463,28 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 		outTokens := float64(usage.OutputTokens)
 		inTokens := float64(usage.InputTokens)
 		name := sanitizeModelName(model)
+		modelPrefix := "model_" + name
 
-		snap.Metrics[fmt.Sprintf("output_tokens_%s", name)] = core.Metric{
-			Used:   &outTokens,
-			Unit:   "tokens",
-			Window: "all-time",
-		}
-		snap.Metrics[fmt.Sprintf("input_tokens_%s", name)] = core.Metric{
-			Used:   &inTokens,
-			Unit:   "tokens",
-			Window: "all-time",
-		}
+		setMetricMax(snap, modelPrefix+"_input_tokens", inTokens, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_output_tokens", outTokens, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cached_tokens", float64(usage.CacheReadInputTokens), "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cache_creation_tokens", float64(usage.CacheCreationInputTokens), "tokens", "all-time")
 
 		snap.Raw[fmt.Sprintf("model_%s_cache_read", name)] = fmt.Sprintf("%d tokens", usage.CacheReadInputTokens)
 		snap.Raw[fmt.Sprintf("model_%s_cache_create", name)] = fmt.Sprintf("%d tokens", usage.CacheCreationInputTokens)
+		if usage.WebSearchRequests > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_web_search_requests", name)] = fmt.Sprintf("%d", usage.WebSearchRequests)
+		}
+		if usage.ContextWindow > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_context_window", name)] = fmt.Sprintf("%d", usage.ContextWindow)
+		}
+		if usage.MaxOutputTokens > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_max_output_tokens", name)] = fmt.Sprintf("%d", usage.MaxOutputTokens)
+		}
 
 		if usage.CostUSD > 0 {
 			totalCostUSD += usage.CostUSD
-			modelCost := usage.CostUSD
-			snap.Metrics[fmt.Sprintf("model_%s_cost_usd", name)] = core.Metric{
-				Used:   &modelCost,
-				Unit:   "USD",
-				Window: "all-time",
-			}
+			setMetricMax(snap, modelPrefix+"_cost_usd", usage.CostUSD, "USD", "all-time")
 		}
 	}
 
@@ -633,6 +644,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 
 	var allUsages []parsedUsage
+	modelTotals := make(map[string]*modelUsageTotals)
 
 	for _, fpath := range jsonlFiles {
 		entries := parseJSONLFile(fpath)
@@ -673,9 +685,17 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 
 	for _, u := range allUsages {
+		modelID := sanitizeModelName(u.model)
+		if _, ok := modelTotals[modelID]; !ok {
+			modelTotals[modelID] = &modelUsageTotals{}
+		}
+
 		cost := estimateCost(u.model, u.usage)
 		allTimeCostUSD += cost
 		allTimeEntries++
+		modelTotals[modelID].input += float64(u.usage.InputTokens)
+		modelTotals[modelID].output += float64(u.usage.OutputTokens)
+		modelTotals[modelID].cost += cost
 
 		if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
 			todayCostUSD += cost
@@ -684,7 +704,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			todayCacheRead += u.usage.CacheReadInputTokens
 			todayCacheCreate += u.usage.CacheCreationInputTokens
 			todayMessages++
-			todayModels[u.model] = true
+			todayModels[modelID] = true
 		}
 
 		if u.timestamp.After(weekStart) {
@@ -701,8 +721,15 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			blockCacheRead += u.usage.CacheReadInputTokens
 			blockCacheCreate += u.usage.CacheCreationInputTokens
 			blockMessages++
-			blockModels[u.model] = true
+			blockModels[modelID] = true
 		}
+	}
+
+	for model, totals := range modelTotals {
+		modelPrefix := "model_" + model
+		setMetricMax(snap, modelPrefix+"_input_tokens", totals.input, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_output_tokens", totals.output, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cost_usd", totals.cost, "USD", "all-time estimate")
 	}
 
 	if snap.DailySeries == nil {
@@ -777,6 +804,42 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			Unit:   "USD",
 			Window: "since midnight",
 		}
+	}
+	if todayInputTokens > 0 {
+		in := float64(todayInputTokens)
+		snap.Metrics["today_input_tokens"] = core.Metric{
+			Used:   &in,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayOutputTokens > 0 {
+		out := float64(todayOutputTokens)
+		snap.Metrics["today_output_tokens"] = core.Metric{
+			Used:   &out,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheRead > 0 {
+		cacheRead := float64(todayCacheRead)
+		snap.Metrics["today_cache_read_tokens"] = core.Metric{
+			Used:   &cacheRead,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheCreate > 0 {
+		cacheCreate := float64(todayCacheCreate)
+		snap.Metrics["today_cache_create_tokens"] = core.Metric{
+			Used:   &cacheCreate,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayMessages > 0 {
+		msgs := float64(todayMessages)
+		setMetricMax(snap, "messages_today", msgs, "messages", "since midnight")
 	}
 
 	if weeklyCostUSD > 0 {
@@ -893,6 +956,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	snap.Raw["jsonl_total_entries"] = fmt.Sprintf("%d", allTimeEntries)
 	snap.Raw["jsonl_total_blocks"] = fmt.Sprintf("%d", len(blockStartCandidates))
+	buildModelUsageSummaryRaw(snap)
 
 	return nil
 }
@@ -944,6 +1008,11 @@ func parseJSONLFile(path string) []jsonlEntry {
 }
 
 func sanitizeModelName(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return "unknown"
+	}
+
 	result := make([]byte, 0, len(model))
 	for _, c := range model {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
@@ -952,9 +1021,242 @@ func sanitizeModelName(model string) string {
 			result = append(result, '_')
 		}
 	}
-	return string(result)
+
+	out := strings.Trim(string(result), "_")
+	if out == "" {
+		return "unknown"
+	}
+	return out
 }
 
 func floatPtr(v float64) *float64 {
 	return &v
+}
+
+func setMetricMax(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+	if value <= 0 {
+		return
+	}
+	if existing, ok := snap.Metrics[key]; ok && existing.Used != nil && *existing.Used >= value {
+		return
+	}
+	v := value
+	snap.Metrics[key] = core.Metric{
+		Used:   &v,
+		Unit:   unit,
+		Window: window,
+	}
+}
+
+func normalizeModelUsage(snap *core.QuotaSnapshot) {
+	modelTotals := make(map[string]*modelUsageTotals)
+	legacyMetricKeys := make([]string, 0, 16)
+
+	ensureModel := func(name string) *modelUsageTotals {
+		if _, ok := modelTotals[name]; !ok {
+			modelTotals[name] = &modelUsageTotals{}
+		}
+		return modelTotals[name]
+	}
+
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens")
+			ensureModel(model).input += *metric.Used
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens")
+			ensureModel(model).output += *metric.Used
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost_usd"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd")
+			ensureModel(model).cost += *metric.Used
+		case strings.HasPrefix(key, "input_tokens_"):
+			model := sanitizeModelName(strings.TrimPrefix(key, "input_tokens_"))
+			ensureModel(model).input += *metric.Used
+			legacyMetricKeys = append(legacyMetricKeys, key)
+		case strings.HasPrefix(key, "output_tokens_"):
+			model := sanitizeModelName(strings.TrimPrefix(key, "output_tokens_"))
+			ensureModel(model).output += *metric.Used
+			legacyMetricKeys = append(legacyMetricKeys, key)
+		}
+	}
+
+	for key, value := range snap.Raw {
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_read"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_read")
+			if parsed, ok := parseMetricNumber(value); ok {
+				setMetricMax(snap, "model_"+model+"_cached_tokens", parsed, "tokens", "all-time")
+			}
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_create"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_create")
+			if parsed, ok := parseMetricNumber(value); ok {
+				setMetricMax(snap, "model_"+model+"_cache_creation_tokens", parsed, "tokens", "all-time")
+			}
+		}
+	}
+
+	for _, key := range legacyMetricKeys {
+		delete(snap.Metrics, key)
+	}
+
+	for model, totals := range modelTotals {
+		modelPrefix := "model_" + sanitizeModelName(model)
+		setMetricMax(snap, modelPrefix+"_input_tokens", totals.input, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_output_tokens", totals.output, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cost_usd", totals.cost, "USD", "all-time")
+	}
+
+	buildModelUsageSummaryRaw(snap)
+}
+
+func parseMetricNumber(raw string) (float64, bool) {
+	clean := strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
+	if clean == "" {
+		return 0, false
+	}
+	fields := strings.Fields(clean)
+	if len(fields) == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+func buildModelUsageSummaryRaw(snap *core.QuotaSnapshot) {
+	type entry struct {
+		name   string
+		input  float64
+		output float64
+		cost   float64
+	}
+
+	byModel := make(map[string]*entry)
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil || !strings.HasPrefix(key, "model_") {
+			continue
+		}
+
+		switch {
+		case strings.HasSuffix(key, "_input_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].input += *metric.Used
+		case strings.HasSuffix(key, "_output_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].output += *metric.Used
+		case strings.HasSuffix(key, "_cost_usd"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].cost += *metric.Used
+		}
+	}
+
+	entries := make([]entry, 0, len(byModel))
+	totalTokens := float64(0)
+	totalCost := float64(0)
+	for _, model := range byModel {
+		if model.input <= 0 && model.output <= 0 && model.cost <= 0 {
+			continue
+		}
+		entries = append(entries, *model)
+		totalTokens += model.input + model.output
+		totalCost += model.cost
+	}
+	if len(entries) == 0 {
+		delete(snap.Raw, "model_usage")
+		delete(snap.Raw, "model_usage_window")
+		delete(snap.Raw, "model_count")
+		return
+	}
+
+	useCost := totalCost > 0
+	total := totalTokens
+	if useCost {
+		total = totalCost
+	}
+	if total <= 0 {
+		delete(snap.Raw, "model_usage")
+		delete(snap.Raw, "model_usage_window")
+		delete(snap.Raw, "model_count")
+		return
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i].input + entries[i].output
+		right := entries[j].input + entries[j].output
+		if useCost {
+			left = entries[i].cost
+			right = entries[j].cost
+		}
+		if left == right {
+			return entries[i].name < entries[j].name
+		}
+		return left > right
+	})
+
+	limit := maxModelUsageSummaryItems
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		value := entries[i].input + entries[i].output
+		if useCost {
+			value = entries[i].cost
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		tokens := entries[i].input + entries[i].output
+		modelName := strings.ReplaceAll(entries[i].name, "_", "-")
+
+		if useCost {
+			parts = append(parts, fmt.Sprintf("%s %s %s tok (%.0f%%)", modelName, formatUSDSummary(entries[i].cost), shortTokenCount(tokens), pct))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %s tok (%.0f%%)", modelName, shortTokenCount(tokens), pct))
+		}
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+
+	snap.Raw["model_usage"] = strings.Join(parts, ", ")
+	snap.Raw["model_usage_window"] = "all-time"
+	snap.Raw["model_count"] = fmt.Sprintf("%d", len(entries))
+}
+
+func shortTokenCount(v float64) string {
+	switch {
+	case v >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", v/1_000_000_000)
+	case v >= 1_000_000:
+		return fmt.Sprintf("%.1fM", v/1_000_000)
+	case v >= 1_000:
+		return fmt.Sprintf("%.1fK", v/1_000)
+	default:
+		return fmt.Sprintf("%.0f", v)
+	}
+}
+
+func formatUSDSummary(v float64) string {
+	if v >= 1000 {
+		return fmt.Sprintf("$%.0f", v)
+	}
+	return fmt.Sprintf("$%.2f", v)
 }

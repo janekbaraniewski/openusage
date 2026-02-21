@@ -4,15 +4,23 @@ import "github.com/janekbaraniewski/openusage/internal/core"
 
 func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
-	cfg.ColorRole = core.DashboardColorRoleTeal
+	cfg.ColorRole = core.DashboardColorRoleGreen
 	cfg.GaugePriority = []string{
-		"usage_five_hour", "usage_seven_day", "plan_percent_used",
+		"usage_five_hour", "usage_seven_day", "usage_seven_day_sonnet", "usage_seven_day_opus",
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
-		{Label: "Credits", Keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "burn_rate"}, MaxSegments: 4},
+		{Label: "Session", Keys: []string{"5h_block_input", "5h_block_output", "5h_block_msgs", "burn_rate"}, MaxSegments: 4},
+		{Label: "Credits", Keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "all_time_api_cost"}, MaxSegments: 4},
 		{Label: "Activity", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "7d_messages"}, MaxSegments: 4},
-		{Label: "Tokens", Keys: []string{"5h_block_input", "5h_block_output", "7d_input_tokens", "7d_output_tokens"}, MaxSegments: 4},
+		{Label: "Tokens", Keys: []string{"7d_input_tokens", "7d_output_tokens", "today_cache_read_tokens", "today_cache_create_tokens"}, MaxSegments: 4},
 	}
+	cfg.HideMetricPrefixes = []string{"tokens_today_", "input_tokens_", "output_tokens_", "model_"}
+	cfg.RawGroups = append(cfg.RawGroups,
+		core.DashboardRawGroup{
+			Label: "Usage Split",
+			Keys:  []string{"model_usage", "model_usage_window", "model_count"},
+		},
+	)
 	cfg.MetricLabelOverrides["5h_block_cost"] = "5h Block Cost≈"
 	cfg.MetricLabelOverrides["5h_block_input"] = "5h Block In"
 	cfg.MetricLabelOverrides["5h_block_output"] = "5h Block Out"
@@ -41,6 +49,8 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["5h_block_input"] = "5h in"
 	cfg.CompactMetricLabelOverrides["5h_block_output"] = "5h out"
 	cfg.CompactMetricLabelOverrides["5h_block_msgs"] = "5h msgs"
+	cfg.CompactMetricLabelOverrides["today_cache_read_tokens"] = "cache read"
+	cfg.CompactMetricLabelOverrides["today_cache_create_tokens"] = "cache write"
 	cfg.CompactMetricLabelOverrides["7d_input_tokens"] = "7d in"
 	cfg.CompactMetricLabelOverrides["7d_output_tokens"] = "7d out"
 	cfg.CompactMetricLabelOverrides["7d_messages"] = "7d msgs"
