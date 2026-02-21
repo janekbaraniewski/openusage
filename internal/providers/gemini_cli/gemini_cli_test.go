@@ -333,6 +333,14 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["tool_calls_today"]; !ok || m.Used == nil || *m.Used != 3 {
 		t.Fatalf("tool_calls_today = %v, want 3", m.Used)
 	}
+	// New tool metric checks
+	if m, ok := snap.Metrics["tool_run_command"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("tool_run_command = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_web_search"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("tool_web_search = %v, want 1", m.Used)
+	}
+
 	if m, ok := snap.Metrics["7d_tokens"]; !ok || m.Used == nil || *m.Used != 220 {
 		t.Fatalf("7d_tokens = %v, want 220", m.Used)
 	}
@@ -341,6 +349,10 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	}
 	if !strings.Contains(snap.Raw["model_usage"], "gemini-3-flash-preview") {
 		t.Fatalf("model_usage = %q, expected model name", snap.Raw["model_usage"])
+	}
+	
+	if m, ok := snap.Metrics["context_window"]; !ok || m.Used == nil || *m.Used != 220 {
+		t.Fatalf("context_window used = %v, want 220", m.Used)
 	}
 
 	modelSeries := snap.DailySeries["tokens_model_gemini_3_flash_preview"]

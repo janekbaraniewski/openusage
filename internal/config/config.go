@@ -51,13 +51,14 @@ type DashboardConfig struct {
 }
 
 type Config struct {
-	UI                   UIConfig             `json:"ui"`
-	Theme                string               `json:"theme"`
-	Experimental         ExperimentalConfig   `json:"experimental"`
-	Dashboard            DashboardConfig      `json:"dashboard"`
-	AutoDetect           bool                 `json:"auto_detect"`
-	Accounts             []core.AccountConfig `json:"accounts"`
-	AutoDetectedAccounts []core.AccountConfig `json:"auto_detected_accounts"`
+	UI                   UIConfig                      `json:"ui"`
+	Theme                string                        `json:"theme"`
+	Experimental         ExperimentalConfig            `json:"experimental"`
+	Dashboard            DashboardConfig               `json:"dashboard"`
+	ModelNormalization   core.ModelNormalizationConfig `json:"model_normalization"`
+	AutoDetect           bool                          `json:"auto_detect"`
+	Accounts             []core.AccountConfig          `json:"accounts"`
+	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
 }
 
 var legacyAccountIDAliases = map[string]string{
@@ -83,7 +84,8 @@ func DefaultConfig() Config {
 			WarnThreshold:          0.20,
 			CritThreshold:          0.05,
 		},
-		Experimental: ExperimentalConfig{Analytics: false},
+		Experimental:       ExperimentalConfig{Analytics: false},
+		ModelNormalization: core.DefaultModelNormalizationConfig(),
 	}
 }
 
@@ -130,6 +132,7 @@ func LoadFrom(path string) (Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = DefaultConfig().Theme
 	}
+	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)

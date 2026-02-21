@@ -15,6 +15,7 @@ type Engine struct {
 	snapshots map[string]UsageSnapshot // keyed by account ID
 	interval  time.Duration
 	timeout   time.Duration
+	modelNorm ModelNormalizationConfig
 
 	onUpdate func(map[string]UsageSnapshot)
 }
@@ -25,6 +26,7 @@ func NewEngine(interval time.Duration) *Engine {
 		snapshots: make(map[string]UsageSnapshot),
 		interval:  interval,
 		timeout:   5 * time.Second,
+		modelNorm: DefaultModelNormalizationConfig(),
 	}
 }
 
@@ -38,6 +40,12 @@ func (e *Engine) SetAccounts(accounts []AccountConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.accounts = accounts
+}
+
+func (e *Engine) SetModelNormalizationConfig(cfg ModelNormalizationConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.modelNorm = NormalizeModelNormalizationConfig(cfg)
 }
 
 // AddAccount appends an account (if not already present) and triggers a refresh for it.
@@ -97,6 +105,7 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 
 			e.mu.RLock()
 			provider, ok := e.providers[a.Provider]
+			modelNorm := e.modelNorm
 			e.mu.RUnlock()
 
 			var snap UsageSnapshot
@@ -123,13 +132,13 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 						Message:    err.Error(),
 					}
 				}
-				snap = NormalizeUsageSnapshot(snap)
+				snap = NormalizeUsageSnapshotWithConfig(snap, modelNorm)
 				missing := provider.DashboardWidget().MissingMetrics(snap)
 				if len(missing) > 0 {
 					snap.SetDiagnostic("widget_missing_metrics", fmt.Sprintf("%v", missing))
 				}
 			}
-			snap = NormalizeUsageSnapshot(snap)
+			snap = NormalizeUsageSnapshotWithConfig(snap, modelNorm)
 
 			results <- struct {
 				id       string

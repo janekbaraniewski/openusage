@@ -603,6 +603,22 @@ func (p *Provider) readStats(path string, snap *core.UsageSnapshot) error {
 			totalCostUSD += usage.CostUSD
 			setMetricMax(snap, modelPrefix+"_cost_usd", usage.CostUSD, "USD", "all-time")
 		}
+
+		rec := core.ModelUsageRecord{
+			RawModelID:   model,
+			RawSource:    "stats_cache",
+			Window:       "all-time",
+			InputTokens:  core.Float64Ptr(inTokens),
+			OutputTokens: core.Float64Ptr(outTokens),
+			TotalTokens:  core.Float64Ptr(inTokens + outTokens),
+		}
+		if usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+			rec.CachedTokens = core.Float64Ptr(float64(usage.CacheReadInputTokens + usage.CacheCreationInputTokens))
+		}
+		if usage.CostUSD > 0 {
+			rec.CostUSD = core.Float64Ptr(usage.CostUSD)
+		}
+		core.AppendModelUsageRecord(snap, rec)
 	}
 
 	if totalCostUSD > 0 {
@@ -1556,6 +1572,12 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 	if allTimeToolCalls > 0 {
 		setMetricMax(snap, "all_time_tool_calls", float64(allTimeToolCalls), "calls", "all-time estimate")
+	}
+	for toolName, count := range toolUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setMetricMax(snap, "tool_"+sanitizeModelName(toolName), float64(count), "calls", "all-time estimate")
 	}
 	if allTimeWebSearch > 0 {
 		setMetricMax(snap, "all_time_web_search_requests", float64(allTimeWebSearch), "requests", "all-time estimate")

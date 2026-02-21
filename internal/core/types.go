@@ -47,6 +47,7 @@ type UsageSnapshot struct {
 	Attributes  map[string]string      `json:"attributes,omitempty"`   // normalized provider/account metadata
 	Diagnostics map[string]string      `json:"diagnostics,omitempty"`  // non-fatal errors, warnings, probe/debug notes
 	Raw         map[string]string      `json:"raw,omitempty"`          // deprecated compatibility bag (use Attributes/Diagnostics)
+	ModelUsage  []ModelUsageRecord     `json:"model_usage,omitempty"`  // per-model usage rows with canonical IDs
 	DailySeries map[string][]TimePoint `json:"daily_series,omitempty"` // time-indexed data (e.g. "messages", "cost", "tokens_<model>")
 	Message     string                 `json:"message,omitempty"`      // human-readable summary
 }

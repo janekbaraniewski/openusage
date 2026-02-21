@@ -815,6 +815,24 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 			seriesKey := "tokens_" + prefix + "_" + sanitizeMetricName(entry.Name)
 			snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDay)
 		}
+
+		if prefix == "model" {
+			rec := core.ModelUsageRecord{
+				RawModelID:   entry.Name,
+				RawSource:    "jsonl",
+				Window:       defaultUsageWindowLabel,
+				InputTokens:  core.Float64Ptr(float64(entry.Data.InputTokens)),
+				OutputTokens: core.Float64Ptr(float64(entry.Data.OutputTokens)),
+				TotalTokens:  core.Float64Ptr(float64(entry.Data.TotalTokens)),
+			}
+			if entry.Data.CachedInputTokens > 0 {
+				rec.CachedTokens = core.Float64Ptr(float64(entry.Data.CachedInputTokens))
+			}
+			if entry.Data.ReasoningOutputTokens > 0 {
+				rec.ReasoningTokens = core.Float64Ptr(float64(entry.Data.ReasoningOutputTokens))
+			}
+			core.AppendModelUsageRecord(snap, rec)
+		}
 	}
 
 	rawKey := prefix + "_usage"

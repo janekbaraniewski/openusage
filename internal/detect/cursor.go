@@ -81,7 +81,7 @@ func detectCursor(result *Result) {
 }
 
 func extractCursorAuth(stateDBPath string) (token, email, membership string) {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro&_journal_mode=WAL", stateDBPath))
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", stateDBPath))
 	if err != nil {
 		log.Printf("[detect] Cannot open state.vscdb: %v", err)
 		return "", "", ""

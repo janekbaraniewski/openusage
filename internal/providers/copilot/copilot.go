@@ -862,6 +862,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	dailyModelMessages := make(map[string]map[string]float64)
 	dailyModelTokens := make(map[string]map[string]float64)
 	modelInputTokens := make(map[string]float64)
+	toolUsageCounts := make(map[string]int)
 	clientLabels := make(map[string]string)
 	clientTokens := make(map[string]float64)
 	clientSessions := make(map[string]int)
@@ -974,6 +975,13 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 							si.toolCalls += len(tools)
 							if currentModel != "" {
 								modelToolCalls[currentModel] += len(tools)
+							}
+							for _, toolReq := range tools {
+								toolName := extractCopilotToolName(toolReq)
+								if toolName == "" {
+									toolName = "unknown"
+								}
+								toolUsageCounts[toolName]++
 							}
 							day := parseDayFromTimestamp(evt.Timestamp)
 							if day != "" {
@@ -1124,13 +1132,23 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	topModels := topModelNames(modelInputTokens, modelMessages, maxCopilotModels)
 	for _, model := range topModels {
 		prefix := "model_" + sanitizeMetricName(model)
+		rec := core.ModelUsageRecord{
+			RawModelID: model,
+			RawSource:  "json",
+			Window:     copilotAllTimeWindow,
+		}
 		setUsedMetric(snap, prefix+"_input_tokens", modelInputTokens[model], "tokens", copilotAllTimeWindow)
+		if modelInputTokens[model] > 0 {
+			rec.InputTokens = core.Float64Ptr(modelInputTokens[model])
+			rec.TotalTokens = core.Float64Ptr(modelInputTokens[model])
+		}
 		setUsedMetric(snap, prefix+"_messages", float64(modelMessages[model]), "messages", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_turns", float64(modelTurns[model]), "turns", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_sessions", float64(modelSessions[model]), "sessions", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_tool_calls", float64(modelToolCalls[model]), "calls", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_response_chars", float64(modelResponseChars[model]), "chars", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_reasoning_chars", float64(modelReasoningChars[model]), "chars", copilotAllTimeWindow)
+		core.AppendModelUsageRecord(snap, rec)
 	}
 
 	topClients := topCopilotClientNames(clientTokens, clientSessions, clientMessages, maxCopilotClients)
@@ -1144,6 +1162,13 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		}
 	}
 	setRawStr(snap, "client_usage", formatCopilotClientUsage(topClients, clientLabels, clientTokens, clientSessions))
+	setRawStr(snap, "tool_usage", formatModelMap(toolUsageCounts, "calls"))
+	for toolName, count := range toolUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setUsedMetric(snap, "tool_"+sanitizeMetricName(toolName), float64(count), "calls", copilotAllTimeWindow)
+	}
 
 	if len(sessions) > 0 {
 		r := sessions[0]
@@ -1605,6 +1630,30 @@ func extractModelFromInfoMsg(msg string) string {
 		m = m[:pIdx]
 	}
 	return m
+}
+
+func extractCopilotToolName(raw json.RawMessage) string {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return ""
+	}
+
+	var tool struct {
+		Name     string `json:"name"`
+		ToolName string `json:"toolName"`
+		Tool     string `json:"tool"`
+	}
+	if err := json.Unmarshal(raw, &tool); err != nil {
+		return ""
+	}
+
+	candidates := []string{tool.Name, tool.ToolName, tool.Tool}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func formatModelMap(m map[string]int, unit string) string {

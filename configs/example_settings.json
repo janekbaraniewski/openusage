@@ -8,6 +8,18 @@
   "experimental": {
     "analytics": false
   },
+  "model_normalization": {
+    "enabled": true,
+    "group_by": "lineage",
+    "min_confidence": 0.80,
+    "overrides": [
+      {
+        "provider": "cursor",
+        "raw_model_id": "claude-4.6-opus-high-thinking",
+        "canonical_lineage_id": "anthropic/claude-opus-4.6"
+      }
+    ]
+  },
   "dashboard": {
     "providers": [
       {

@@ -61,6 +61,16 @@ type modelCostEntry struct {
 	inputTokens  float64
 	outputTokens float64
 	color        lipgloss.Color
+	providers    []modelProviderSplit
+	confidence   float64
+	window       string
+}
+
+type modelProviderSplit struct {
+	provider     string
+	cost         float64
+	inputTokens  float64
+	outputTokens float64
 }
 
 type budgetEntry struct {
@@ -159,9 +169,7 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 		}
 	}
 
-	for _, p := range data.providers {
-		data.models = append(data.models, p.models...)
-	}
+	data.models = aggregateCanonicalModels(data.providers)
 
 	return data
 }
@@ -219,6 +227,10 @@ func extract7DayCost(snap core.UsageSnapshot) float64 {
 }
 
 func extractAllModels(snap core.UsageSnapshot, provColor lipgloss.Color) []modelCostEntry {
+	if len(snap.ModelUsage) > 0 {
+		return extractAllModelsFromRecords(snap)
+	}
+
 	type md struct {
 		cost   float64
 		input  float64
@@ -318,6 +330,195 @@ func extractAllModels(snap core.UsageSnapshot, provColor lipgloss.Color) []model
 			})
 		}
 	}
+	return result
+}
+
+func extractAllModelsFromRecords(snap core.UsageSnapshot) []modelCostEntry {
+	type md struct {
+		cost       float64
+		input      float64
+		output     float64
+		confidence float64
+		window     string
+	}
+	models := make(map[string]*md)
+	var order []string
+
+	ensure := func(name string) *md {
+		if _, ok := models[name]; !ok {
+			models[name] = &md{}
+			order = append(order, name)
+		}
+		return models[name]
+	}
+
+	for _, rec := range snap.ModelUsage {
+		name := modelRecordDisplayName(rec)
+		if name == "" {
+			continue
+		}
+		md := ensure(name)
+		if rec.CostUSD != nil && *rec.CostUSD > 0 {
+			md.cost += *rec.CostUSD
+		}
+		if rec.InputTokens != nil {
+			md.input += *rec.InputTokens
+		}
+		if rec.OutputTokens != nil {
+			md.output += *rec.OutputTokens
+		}
+		if rec.TotalTokens != nil && rec.InputTokens == nil && rec.OutputTokens == nil {
+			md.input += *rec.TotalTokens
+		}
+		if rec.Confidence > md.confidence {
+			md.confidence = rec.Confidence
+		}
+		if md.window == "" {
+			md.window = rec.Window
+		}
+	}
+
+	result := make([]modelCostEntry, 0, len(order))
+	for _, name := range order {
+		md := models[name]
+		if md.cost <= 0 && md.input <= 0 && md.output <= 0 {
+			continue
+		}
+		result = append(result, modelCostEntry{
+			name:         prettifyModelName(name),
+			provider:     snap.AccountID,
+			cost:         md.cost,
+			inputTokens:  md.input,
+			outputTokens: md.output,
+			color:        stableModelColor(name, snap.AccountID),
+			confidence:   md.confidence,
+			window:       md.window,
+		})
+	}
+	return result
+}
+
+func modelRecordDisplayName(rec core.ModelUsageRecord) string {
+	if rec.Dimensions != nil {
+		if groupID := strings.TrimSpace(rec.Dimensions["canonical_group_id"]); groupID != "" {
+			return groupID
+		}
+	}
+	if strings.TrimSpace(rec.RawModelID) != "" {
+		return rec.RawModelID
+	}
+	if strings.TrimSpace(rec.CanonicalLineageID) != "" {
+		return rec.CanonicalLineageID
+	}
+	return "unknown"
+}
+
+func aggregateCanonicalModels(providers []providerCostEntry) []modelCostEntry {
+	type splitAgg struct {
+		cost   float64
+		input  float64
+		output float64
+	}
+	type modelAgg struct {
+		cost       float64
+		input      float64
+		output     float64
+		confidence float64
+		window     string
+		splits     map[string]*splitAgg
+	}
+
+	byModel := make(map[string]*modelAgg)
+	order := make([]string, 0, len(providers))
+
+	ensureModel := func(name string) *modelAgg {
+		if agg, ok := byModel[name]; ok {
+			return agg
+		}
+		agg := &modelAgg{splits: make(map[string]*splitAgg)}
+		byModel[name] = agg
+		order = append(order, name)
+		return agg
+	}
+	ensureSplit := func(m *modelAgg, provider string) *splitAgg {
+		if s, ok := m.splits[provider]; ok {
+			return s
+		}
+		s := &splitAgg{}
+		m.splits[provider] = s
+		return s
+	}
+
+	for _, provider := range providers {
+		for _, model := range provider.models {
+			name := strings.TrimSpace(model.name)
+			if name == "" {
+				continue
+			}
+			agg := ensureModel(name)
+			agg.cost += model.cost
+			agg.input += model.inputTokens
+			agg.output += model.outputTokens
+			if model.confidence > agg.confidence {
+				agg.confidence = model.confidence
+			}
+			if agg.window == "" {
+				agg.window = model.window
+			}
+			split := ensureSplit(agg, provider.name)
+			split.cost += model.cost
+			split.input += model.inputTokens
+			split.output += model.outputTokens
+		}
+	}
+
+	result := make([]modelCostEntry, 0, len(byModel))
+	for _, name := range order {
+		agg := byModel[name]
+		if agg.cost <= 0 && agg.input <= 0 && agg.output <= 0 {
+			continue
+		}
+
+		splits := make([]modelProviderSplit, 0, len(agg.splits))
+		for provider, split := range agg.splits {
+			splits = append(splits, modelProviderSplit{
+				provider:     provider,
+				cost:         split.cost,
+				inputTokens:  split.input,
+				outputTokens: split.output,
+			})
+		}
+		sort.Slice(splits, func(i, j int) bool {
+			left := splits[i].cost
+			right := splits[j].cost
+			if left == 0 && right == 0 {
+				left = splits[i].inputTokens + splits[i].outputTokens
+				right = splits[j].inputTokens + splits[j].outputTokens
+			}
+			if left == right {
+				return splits[i].provider < splits[j].provider
+			}
+			return left > right
+		})
+
+		topProvider := ""
+		if len(splits) > 0 {
+			topProvider = splits[0].provider
+		}
+
+		result = append(result, modelCostEntry{
+			name:         name,
+			provider:     topProvider,
+			cost:         agg.cost,
+			inputTokens:  agg.input,
+			outputTokens: agg.output,
+			color:        stableModelColor(name, "all"),
+			providers:    splits,
+			confidence:   agg.confidence,
+			window:       agg.window,
+		})
+	}
+
 	return result
 }
 
@@ -846,18 +1047,18 @@ func renderModelsTable(data costData, w int) string {
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
 
 	nameW := 32
-	provW := 16
+	provW := 24
 	colW := 10
 	effW := 12
 
 	if nameW+provW+colW*3+effW+10 > w {
-		nameW = 24
-		provW = 12
+		nameW = 22
+		provW = 18
 	}
 
 	headerStyle := dimStyle.Copy().Bold(true)
 	sb.WriteString("  " + padRight(headerStyle.Render("Model"), nameW) + " " +
-		padRight(headerStyle.Render("Provider"), provW) + " " +
+		padRight(headerStyle.Render("Provider split"), provW) + " " +
 		padLeft(headerStyle.Render("Input"), colW) + " " +
 		padLeft(headerStyle.Render("Output"), colW) + " " +
 		padLeft(headerStyle.Render("Cost"), colW) + " " +
@@ -865,7 +1066,7 @@ func renderModelsTable(data costData, w int) string {
 
 	for _, m := range sorted {
 		nameStyle := lipgloss.NewStyle().Foreground(m.color)
-		provStyle := lipgloss.NewStyle().Foreground(m.color)
+		splitStyle := lipgloss.NewStyle().Foreground(m.color)
 
 		inputStr := dimStyle.Render("—")
 		if m.inputTokens > 0 {
@@ -888,9 +1089,10 @@ func renderModelsTable(data costData, w int) string {
 			costPer1K := m.cost / totalTok * 1000
 			effStr = lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf("$%.4f", costPer1K))
 		}
+		splitStr := formatModelProviderSplit(m)
 
 		sb.WriteString("  " + padRight(nameStyle.Render(truncStr(m.name, nameW)), nameW) + " " +
-			padRight(provStyle.Render(truncStr(m.provider, provW)), provW) + " " +
+			padRight(splitStyle.Render(truncStr(splitStr, provW)), provW) + " " +
 			padLeft(inputStr, colW) + " " +
 			padLeft(outputStr, colW) + " " +
 			padLeft(costStr, colW) + " " +
@@ -898,6 +1100,45 @@ func renderModelsTable(data costData, w int) string {
 	}
 
 	return sb.String()
+}
+
+func formatModelProviderSplit(entry modelCostEntry) string {
+	if len(entry.providers) == 0 {
+		if entry.provider == "" {
+			return "—"
+		}
+		return entry.provider
+	}
+	if len(entry.providers) == 1 {
+		return entry.providers[0].provider
+	}
+
+	total := entry.cost
+	if total <= 0 {
+		total = entry.inputTokens + entry.outputTokens
+	}
+	if total <= 0 {
+		total = 1
+	}
+
+	parts := make([]string, 0, 3)
+	limit := 2
+	if len(entry.providers) < limit {
+		limit = len(entry.providers)
+	}
+	for i := 0; i < limit; i++ {
+		s := entry.providers[i]
+		base := s.cost
+		if base <= 0 {
+			base = s.inputTokens + s.outputTokens
+		}
+		pct := base / total * 100
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", s.provider, pct))
+	}
+	if len(entry.providers) > limit {
+		parts = append(parts, fmt.Sprintf("+%d", len(entry.providers)-limit))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func renderBottomSection(data costData, w int) string {

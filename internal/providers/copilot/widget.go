@@ -6,6 +6,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleSapphire
 	cfg.ShowClientComposition = true
+	cfg.ShowToolComposition = true
 	cfg.GaugePriority = []string{
 		"chat_quota", "completions_quota", "premium_interactions_quota", "context_window",
 		"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm",

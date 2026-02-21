@@ -6,6 +6,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleGreen
 	cfg.ShowClientComposition = true
+	cfg.ShowToolComposition = true
 	cfg.GaugePriority = []string{
 		"usage_five_hour", "usage_seven_day", "usage_seven_day_sonnet", "usage_seven_day_opus", "usage_seven_day_cowork",
 	}
@@ -39,12 +40,12 @@ func dashboardWidget() core.DashboardWidget {
 			Keys:  []string{"stats_path", "stats_candidates", "stats_last_computed"},
 		},
 	)
-	cfg.MetricLabelOverrides["5h_block_cost"] = "5h Block Cost≈"
-	cfg.MetricLabelOverrides["5h_block_input"] = "5h Block In"
-	cfg.MetricLabelOverrides["5h_block_output"] = "5h Block Out"
-	cfg.MetricLabelOverrides["5h_block_cache_read_tokens"] = "5h Block Cache Read"
-	cfg.MetricLabelOverrides["5h_block_cache_create_tokens"] = "5h Block Cache Write"
-	cfg.MetricLabelOverrides["5h_block_msgs"] = "5h Block Msgs"
+	cfg.MetricLabelOverrides["5h_block_cost"] = "Usage 5h Cost≈"
+	cfg.MetricLabelOverrides["5h_block_input"] = "Usage 5h In"
+	cfg.MetricLabelOverrides["5h_block_output"] = "Usage 5h Out"
+	cfg.MetricLabelOverrides["5h_block_cache_read_tokens"] = "Usage 5h Cache Read"
+	cfg.MetricLabelOverrides["5h_block_cache_create_tokens"] = "Usage 5h Cache Write"
+	cfg.MetricLabelOverrides["5h_block_msgs"] = "Usage 5h Msgs"
 	cfg.MetricLabelOverrides["today_api_cost"] = "Today Cost≈"
 	cfg.MetricLabelOverrides["7d_api_cost"] = "7-Day Cost≈"
 	cfg.MetricLabelOverrides["7d_messages"] = "7-Day Messages"

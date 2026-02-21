@@ -310,7 +310,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
+	return m, nil
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp || m.showSettingsModal {
+		return m, nil
+	}
+	if m.filtering || m.analyticsFiltering {
+		return m, nil
+	}
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	scroll := 0
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		scroll = -m.mouseScrollStep()
+	case tea.MouseButtonWheelDown:
+		scroll = m.mouseScrollStep()
+	default:
+		return m, nil
+	}
+
+	if m.screen != screenDashboard {
+		return m, nil
+	}
+
+	if m.mode == modeDetail {
+		m.detailOffset += scroll
+		if m.detailOffset < 0 {
+			m.detailOffset = 0
+		}
+		return m, nil
+	}
+
+	if m.mode == modeList && m.tileCols() == 1 {
+		m.tileOffset += scroll
+		if m.tileOffset < 0 {
+			m.tileOffset = 0
+		}
+	}
+
 	return m, nil
 }
 
@@ -596,6 +641,14 @@ func (m Model) selectedTileID(ids []string) string {
 
 func (m Model) tileScrollStep() int {
 	step := m.height / 4
+	if step < 3 {
+		step = 3
+	}
+	return step
+}
+
+func (m Model) mouseScrollStep() int {
+	step := m.height / 10
 	if step < 3 {
 		step = 3
 	}
@@ -1041,6 +1094,27 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("%.2f %s available", *m.Remaining, m.Unit)
+		return info
+	}
+
+	if m, ok := snap.Metrics["context_window"]; ok && m.Used != nil && m.Limit != nil {
+		info.tagEmoji = "🧠"
+		info.tagLabel = "Context"
+		if pct := m.Percent(); pct >= 0 {
+			info.gaugePercent = pct
+			info.summary = fmt.Sprintf("%.0f%% context used", pct)
+		}
+		info.detail = fmt.Sprintf("%s / %s tokens", shortCompact(*m.Used), shortCompact(*m.Limit))
+		return info
+	}
+
+	if m, ok := snap.Metrics["quota"]; ok && m.Used != nil && m.Limit != nil {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Quota"
+		if pct := m.Percent(); pct >= 0 {
+			info.gaugePercent = pct
+			info.summary = fmt.Sprintf("%.0f%% quota used", pct)
+		}
 		return info
 	}
 

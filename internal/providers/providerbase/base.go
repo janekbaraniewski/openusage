@@ -67,6 +67,7 @@ func isZeroDashboardWidget(w core.DashboardWidget) bool {
 		w.ResetStyle == "" &&
 		w.ColorRole == "" &&
 		!w.ShowClientComposition &&
+		!w.ShowToolComposition &&
 		w.APIKeyEnv == "" &&
 		w.DefaultAccountID == "" &&
 		w.ResetCompactThreshold == 0 &&
@@ -82,6 +83,7 @@ func isZeroDashboardWidget(w core.DashboardWidget) bool {
 		!w.HideCreditsWhenBalancePresent &&
 		len(w.SuppressZeroMetricKeys) == 0 &&
 		!w.SuppressZeroNonUsageMetrics &&
+		len(w.StandardSectionOrder) == 0 &&
 		len(w.DataSpec.RequiredMetricKeys) == 0 &&
 		len(w.DataSpec.OptionalMetricKeys) == 0 &&
 		len(w.DataSpec.MetricPrefixes) == 0

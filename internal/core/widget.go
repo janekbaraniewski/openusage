@@ -65,12 +65,57 @@ type WidgetDataSpec struct {
 	MetricPrefixes     []string
 }
 
+// DashboardStandardSection identifies a normalized tile section.
+type DashboardStandardSection string
+
+const (
+	DashboardSectionHeader           DashboardStandardSection = "header"
+	DashboardSectionTopUsageProgress DashboardStandardSection = "top_usage_progress"
+	DashboardSectionModelBurn        DashboardStandardSection = "model_burn"
+	DashboardSectionClientBurn       DashboardStandardSection = "client_burn"
+	DashboardSectionToolUsage        DashboardStandardSection = "tool_usage"
+	DashboardSectionDailyUsage       DashboardStandardSection = "daily_usage"
+	DashboardSectionProviderBurn     DashboardStandardSection = "provider_burn"
+	DashboardSectionOtherData        DashboardStandardSection = "other_data"
+)
+
+func defaultDashboardSectionOrder() []DashboardStandardSection {
+	return []DashboardStandardSection{
+		DashboardSectionHeader,
+		DashboardSectionTopUsageProgress,
+		DashboardSectionModelBurn,
+		DashboardSectionClientBurn,
+		DashboardSectionToolUsage,
+		DashboardSectionDailyUsage,
+		DashboardSectionProviderBurn,
+		DashboardSectionOtherData,
+	}
+}
+
+func isKnownDashboardSection(section DashboardStandardSection) bool {
+	switch section {
+	case DashboardSectionHeader,
+		DashboardSectionTopUsageProgress,
+		DashboardSectionModelBurn,
+		DashboardSectionClientBurn,
+		DashboardSectionToolUsage,
+		DashboardSectionDailyUsage,
+		DashboardSectionProviderBurn,
+		DashboardSectionOtherData:
+		return true
+	default:
+		return false
+	}
+}
+
 type DashboardWidget struct {
 	DisplayStyle DashboardDisplayStyle
 	ResetStyle   DashboardResetStyle
 	ColorRole    DashboardColorRole
 	// Opt-in client composition panel (client share + trend) in tile view.
 	ShowClientComposition bool
+	// Opt-in tool composition panel (tool share) in tile view.
+	ShowToolComposition bool
 
 	// API key provider metadata. APIKeyEnv marks a provider as configurable in API Keys tab.
 	APIKeyEnv        string
@@ -98,14 +143,19 @@ type DashboardWidget struct {
 	// Hide all zero-valued non-quota metrics.
 	SuppressZeroNonUsageMetrics bool
 
+	// StandardSectionOrder controls normalized tile section ordering and visibility.
+	// Unknown values are ignored; omitted sections are hidden.
+	StandardSectionOrder []DashboardStandardSection
+
 	DataSpec WidgetDataSpec
 }
 
 func DefaultDashboardWidget() DashboardWidget {
 	return DashboardWidget{
-		DisplayStyle: DashboardDisplayStyleDefault,
-		ResetStyle:   DashboardResetStyleDefault,
-		ColorRole:    DashboardColorRoleAuto,
+		DisplayStyle:        DashboardDisplayStyleDefault,
+		ResetStyle:          DashboardResetStyleDefault,
+		ColorRole:           DashboardColorRoleAuto,
+		ShowToolComposition: true,
 		GaugePriority: []string{
 			"spend_limit", "plan_spend", "credits", "credit_balance",
 		},
@@ -192,6 +242,7 @@ func DefaultDashboardWidget() DashboardWidget {
 			"total_conversations":  "conv",
 			"recent_requests":      "recent",
 		},
+		StandardSectionOrder: defaultDashboardSectionOrder(),
 		DataSpec: WidgetDataSpec{
 			OptionalMetricKeys: []string{
 				"rpm", "tpm", "rpd", "tpd",
@@ -204,6 +255,23 @@ func DefaultDashboardWidget() DashboardWidget {
 			},
 		},
 	}
+}
+
+func (w DashboardWidget) EffectiveStandardSectionOrder() []DashboardStandardSection {
+	if len(w.StandardSectionOrder) == 0 {
+		return defaultDashboardSectionOrder()
+	}
+
+	seen := make(map[DashboardStandardSection]bool, len(w.StandardSectionOrder))
+	out := make([]DashboardStandardSection, 0, len(w.StandardSectionOrder))
+	for _, section := range w.StandardSectionOrder {
+		if !isKnownDashboardSection(section) || seen[section] {
+			continue
+		}
+		out = append(out, section)
+		seen[section] = true
+	}
+	return out
 }
 
 func (w DashboardWidget) MissingMetrics(snap UsageSnapshot) []string {

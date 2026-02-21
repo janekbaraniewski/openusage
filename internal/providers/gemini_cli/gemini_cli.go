@@ -143,7 +143,11 @@ type geminiChatMessage struct {
 	Timestamp string              `json:"timestamp"`
 	Model     string              `json:"model"`
 	Tokens    *geminiMessageToken `json:"tokens,omitempty"`
-	ToolCalls []struct{}          `json:"toolCalls,omitempty"`
+	ToolCalls []geminiToolCall    `json:"toolCalls,omitempty"`
+}
+
+type geminiToolCall struct {
+	Name string `json:"name"`
 }
 
 type geminiMessageToken struct {
@@ -391,6 +395,8 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	snap.Raw["quota_api"] = fmt.Sprintf("ok (%d buckets)", len(quota.Buckets))
 
 	worstFraction := 1.0
+	var worstMetric *core.Metric
+
 	for _, bucket := range quota.Buckets {
 		if bucket.ModelID == "" || bucket.RemainingFraction == nil {
 			continue
@@ -425,17 +431,26 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 			unit = strings.ToLower(strings.TrimSpace(bucket.TokenType))
 		}
 
-		snap.Metrics[metricKey] = core.Metric{
+		metric := core.Metric{
 			Limit:     &limit,
 			Remaining: &remaining,
 			Unit:      unit,
 			Window:    window,
 		}
+		snap.Metrics[metricKey] = metric
 
 		if fraction < worstFraction {
 			worstFraction = fraction
+			worstMetric = &metric
 		}
 	}
+
+	if worstMetric != nil {
+		// Expose the most constrained quota as the primary "quota" metric
+		// so it can be reliably prioritized in the dashboard gauge.
+		snap.Metrics["quota"] = *worstMetric
+	}
+
 	if worstFraction <= 0 {
 		snap.Status = core.StatusLimited
 	} else if worstFraction < 0.15 {
@@ -626,6 +641,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 
 	modelTotals := make(map[string]tokenUsage)
 	clientTotals := make(map[string]tokenUsage)
+	toolTotals := make(map[string]int)
 	modelDaily := make(map[string]map[string]float64)
 	clientDaily := make(map[string]map[string]float64)
 	clientSessions := make(map[string]int)
@@ -640,6 +656,10 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	totalMessages := 0
 	totalTurns := 0
 	totalToolCalls := 0
+
+	var lastModelName string
+	var lastModelTokens int
+	foundLatest := false
 
 	for _, path := range files {
 		chat, err := readGeminiChatFile(path)
@@ -667,6 +687,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 
 		var previous tokenUsage
 		var hasPrevious bool
+		fileHasUsage := false
 
 		for _, msg := range chat.Messages {
 			day := dayFromTimestamp(msg.Timestamp)
@@ -681,12 +702,32 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 				}
 			}
 
+			if len(msg.ToolCalls) > 0 {
+				totalToolCalls += len(msg.ToolCalls)
+				if day != "" {
+					dailyToolCalls[day] += float64(len(msg.ToolCalls))
+				}
+				for _, tc := range msg.ToolCalls {
+					if tc.Name != "" {
+						toolTotals[tc.Name]++
+					}
+				}
+			}
+
 			if msg.Tokens == nil {
 				continue
 			}
 
 			modelName := normalizeModelName(msg.Model)
 			total := msg.Tokens.toUsage()
+			
+			// Track latest model usage from the most recent session file
+			if !foundLatest {
+				lastModelName = modelName
+				lastModelTokens = total.TotalTokens
+				fileHasUsage = true
+			}
+
 			delta := total
 			if hasPrevious {
 				delta = usageDelta(total, previous)
@@ -711,13 +752,10 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 			}
 
 			totalTurns++
-
-			if toolCalls := len(msg.ToolCalls); toolCalls > 0 {
-				totalToolCalls += toolCalls
-				if day != "" {
-					dailyToolCalls[day] += float64(toolCalls)
-				}
-			}
+		}
+		
+		if fileHasUsage {
+			foundLatest = true
 		}
 	}
 
@@ -725,9 +763,25 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 		return 0, nil
 	}
 
+	if lastModelName != "" && lastModelTokens > 0 {
+		limit := getModelContextLimit(lastModelName)
+		if limit > 0 {
+			used := float64(lastModelTokens)
+			lim := float64(limit)
+			snap.Metrics["context_window"] = core.Metric{
+				Used:   &used,
+				Limit:  &lim,
+				Unit:   "tokens",
+				Window: "current",
+			}
+			snap.Raw["active_model"] = lastModelName
+		}
+	}
+
 	emitBreakdownMetrics("model", modelTotals, modelDaily, snap)
 	emitBreakdownMetrics("client", clientTotals, clientDaily, snap)
 	emitClientSessionMetrics(clientSessions, snap)
+	emitToolMetrics(toolTotals, snap)
 
 	storeSeries(snap, "messages", dailyMessages)
 	storeSeries(snap, "sessions", dailySessions)
@@ -860,6 +914,24 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 			seriesKey := "tokens_" + prefix + "_" + sanitizeMetricName(entry.Name)
 			snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDay)
 		}
+
+		if prefix == "model" {
+			rec := core.ModelUsageRecord{
+				RawModelID:   entry.Name,
+				RawSource:    "json",
+				Window:       defaultUsageWindowLabel,
+				InputTokens:  core.Float64Ptr(float64(entry.Data.InputTokens)),
+				OutputTokens: core.Float64Ptr(float64(entry.Data.OutputTokens)),
+				TotalTokens:  core.Float64Ptr(float64(entry.Data.TotalTokens)),
+			}
+			if entry.Data.CachedInputTokens > 0 {
+				rec.CachedTokens = core.Float64Ptr(float64(entry.Data.CachedInputTokens))
+			}
+			if entry.Data.ReasoningTokens > 0 {
+				rec.ReasoningTokens = core.Float64Ptr(float64(entry.Data.ReasoningTokens))
+			}
+			core.AppendModelUsageRecord(snap, rec)
+		}
 	}
 
 	snap.Raw[prefix+"_usage"] = formatUsageSummary(entries, maxBreakdownRaw)
@@ -893,6 +965,48 @@ func emitClientSessionMetrics(clientSessions map[string]int, snap *core.UsageSna
 			Unit:   "sessions",
 			Window: defaultUsageWindowLabel,
 		}
+	}
+}
+
+func emitToolMetrics(toolTotals map[string]int, snap *core.UsageSnapshot) {
+	type entry struct {
+		name  string
+		count int
+	}
+	var all []entry
+	for name, count := range toolTotals {
+		if count > 0 {
+			all = append(all, entry{name: name, count: count})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].count == all[j].count {
+			return all[i].name < all[j].name
+		}
+		return all[i].count > all[j].count
+	})
+
+	var parts []string
+	limit := maxBreakdownRaw
+	for i, item := range all {
+		if i < limit {
+			parts = append(parts, fmt.Sprintf("%s (%d)", item.name, item.count))
+		}
+		
+		val := float64(item.count)
+		snap.Metrics["tool_"+sanitizeMetricName(item.name)] = core.Metric{
+			Used:   &val,
+			Unit:   "calls",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+	
+	if len(all) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(all)-limit))
+	}
+	
+	if len(parts) > 0 {
+		snap.Raw["tool_usage"] = strings.Join(parts, ", ")
 	}
 }
 
@@ -1046,6 +1160,35 @@ func sanitizeMetricName(name string) string {
 		return "unknown"
 	}
 	return out
+}
+
+// getModelContextLimit returns the known context window size for a given Gemini model.
+// Since the Gemini CLI's internal API does not expose model metadata like context limits
+// in the session payload, we fallback to static configuration based on public documentation.
+//
+// Sources:
+// - Gemini 1.5 Pro (2M): https://blog.google/technology/ai/google-gemini-update-flash-ai-assistant-io-2024/#gemini-1-5-pro
+// - Gemini 1.5 Flash (1M): https://blog.google/technology/ai/google-gemini-update-flash-ai-assistant-io-2024/#gemini-1-5-flash
+// - Gemini 2.0 Flash (1M): https://ai.google.dev/gemini-api/docs/models/gemini-v2
+func getModelContextLimit(model string) int {
+	model = strings.ToLower(model)
+	switch {
+	case strings.Contains(model, "1.5-pro"), strings.Contains(model, "1.5-flash-8b"):
+		return 2_000_000
+	case strings.Contains(model, "1.5-flash"):
+		return 1_000_000
+	case strings.Contains(model, "2.0-flash"):
+		return 1_000_000
+	case strings.Contains(model, "gemini-3"), strings.Contains(model, "gemini-exp"):
+		// Assuming recent experimental/v3 models follow the 2M trend of 1.5 Pro/Exp.
+		// Subject to change as these are preview models.
+		return 2_000_000 
+	case strings.Contains(model, "pro"):
+		return 32_000 // Legacy Gemini 1.0 Pro
+	case strings.Contains(model, "flash"):
+		return 32_000 // Fallback for older flash-like models if any
+	}
+	return 0
 }
 
 func dayFromTimestamp(timestamp string) string {

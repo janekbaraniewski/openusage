@@ -346,6 +346,7 @@ func classifyMetric(key string, m core.Metric, widget core.DashboardWidget, deta
 		if label == "" {
 			label = metricLabel(widget, key)
 		}
+		label = normalizeWidgetLabel(label)
 		order = override.Order
 		if order <= 0 {
 			order = groupOrder(details, override.Group, 4)
@@ -392,10 +393,32 @@ func groupOrder(details core.DetailWidget, group string, fallback int) int {
 func metricLabel(widget core.DashboardWidget, key string) string {
 	if widget.MetricLabelOverrides != nil {
 		if label, ok := widget.MetricLabelOverrides[key]; ok && label != "" {
-			return label
+			return normalizeWidgetLabel(label)
 		}
 	}
-	return prettifyKey(key)
+	return normalizeWidgetLabel(prettifyKey(key))
+}
+
+func normalizeWidgetLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return label
+	}
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"5h Block", "Usage 5h"},
+		{"5-Hour Usage", "Usage 5h"},
+		{"5h Usage", "Usage 5h"},
+		{"7-Day Usage", "Usage 7d"},
+		{"7d Usage", "Usage 7d"},
+	}
+	for _, repl := range replacements {
+		label = strings.ReplaceAll(label, repl.old, repl.new)
+	}
+	return label
 }
 
 func prettifyUsageKey(key string, widget core.DashboardWidget) string {

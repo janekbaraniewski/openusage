@@ -6,8 +6,9 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleBlue
 	cfg.ShowClientComposition = true
+	cfg.ShowToolComposition = true
 	cfg.GaugePriority = []string{
-		"tokens_today", "7d_tokens", "messages_today", "sessions_today", "tool_calls_today",
+		"context_window", "quota", "tokens_today", "7d_tokens", "messages_today", "sessions_today", "tool_calls_today",
 		"client_cli_total_tokens", "client_cli_input_tokens",
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{

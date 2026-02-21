@@ -989,25 +989,38 @@ func emitAnalyticsPerModelMetrics(
 	for model := range modelSet {
 		safe := sanitizeName(model)
 		prefix := "model_" + safe
+		rec := core.ModelUsageRecord{
+			RawModelID: model,
+			RawSource:  "api",
+			Window:     "activity",
+		}
 
 		if v := modelCost[model]; v > 0 {
 			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+			rec.CostUSD = core.Float64Ptr(v)
 		}
 		if v := modelByokCost[model]; v > 0 {
 			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
 		}
 		if v := modelInputTokens[model]; v > 0 {
 			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+			rec.InputTokens = core.Float64Ptr(v)
 		}
 		if v := modelOutputTokens[model]; v > 0 {
 			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+			rec.OutputTokens = core.Float64Ptr(v)
 		}
 		if v := modelReasoningTokens[model]; v > 0 {
 			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+			rec.ReasoningTokens = core.Float64Ptr(v)
 		}
 		if v := modelRequests[model]; v > 0 {
 			snap.Metrics[prefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "activity"}
 			snap.Raw[prefix+"_requests"] = fmt.Sprintf("%.0f", v)
+			rec.Requests = core.Float64Ptr(v)
+		}
+		if rec.InputTokens != nil || rec.OutputTokens != nil || rec.CostUSD != nil || rec.Requests != nil || rec.ReasoningTokens != nil {
+			core.AppendModelUsageRecord(snap, rec)
 		}
 	}
 }
@@ -1627,20 +1640,29 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageS
 	for _, e := range sorted {
 		safeName := sanitizeName(e.name)
 		prefix := "model_" + safeName
+		rec := core.ModelUsageRecord{
+			RawModelID: e.name,
+			RawSource:  "api",
+			Window:     "today",
+		}
 
 		inputTokens := float64(e.stats.PromptTokens)
 		snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &inputTokens, Unit: "tokens", Window: "today"}
+		rec.InputTokens = core.Float64Ptr(inputTokens)
 
 		outputTokens := float64(e.stats.CompletionTokens)
 		snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &outputTokens, Unit: "tokens", Window: "today"}
+		rec.OutputTokens = core.Float64Ptr(outputTokens)
 
 		if e.stats.ReasoningTokens > 0 {
 			reasoningTokens := float64(e.stats.ReasoningTokens)
 			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &reasoningTokens, Unit: "tokens", Window: "today"}
+			rec.ReasoningTokens = core.Float64Ptr(reasoningTokens)
 		}
 		if e.stats.CachedTokens > 0 {
 			cachedTokens := float64(e.stats.CachedTokens)
 			snap.Metrics[prefix+"_cached_tokens"] = core.Metric{Used: &cachedTokens, Unit: "tokens", Window: "today"}
+			rec.CachedTokens = core.Float64Ptr(cachedTokens)
 		}
 		if e.stats.ImageTokens > 0 {
 			imageTokens := float64(e.stats.ImageTokens)
@@ -1649,8 +1671,10 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageS
 
 		costUSD := e.stats.TotalCost
 		snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &costUSD, Unit: "USD", Window: "today"}
+		rec.CostUSD = core.Float64Ptr(costUSD)
 		requests := float64(e.stats.Requests)
 		snap.Metrics[prefix+"_requests"] = core.Metric{Used: &requests, Unit: "requests", Window: "today"}
+		rec.Requests = core.Float64Ptr(requests)
 		if e.stats.NativePrompt > 0 {
 			nativeInput := float64(e.stats.NativePrompt)
 			snap.Metrics[prefix+"_native_input_tokens"] = core.Metric{Used: &nativeInput, Unit: "tokens", Window: "today"}
@@ -1690,6 +1714,12 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageS
 			}
 			sort.Strings(provList)
 			snap.Raw[prefix+"_providers"] = strings.Join(provList, ", ")
+			if len(provList) > 0 {
+				rec.SetDimension("upstream_providers", strings.Join(provList, ","))
+			}
+		}
+		if rec.InputTokens != nil || rec.OutputTokens != nil || rec.CostUSD != nil || rec.Requests != nil || rec.ReasoningTokens != nil || rec.CachedTokens != nil {
+			core.AppendModelUsageRecord(snap, rec)
 		}
 	}
 }

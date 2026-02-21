@@ -659,4 +659,10 @@ func TestReadConversationJSONL_DedupesRequestUsageAndToolCalls(t *testing.T) {
 	if *tm.Used != 2 {
 		t.Fatalf("expected all_time_tool_calls=2, got %.0f", *tm.Used)
 	}
+	if m := snap.Metrics["tool_read"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected tool_read=1, got %+v", m)
+	}
+	if m := snap.Metrics["tool_bash"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected tool_bash=1, got %+v", m)
+	}
 }

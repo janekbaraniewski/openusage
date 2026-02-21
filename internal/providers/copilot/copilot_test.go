@@ -903,6 +903,9 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	if m := snap.Metrics["messages_today"]; m.Used == nil || *m.Used <= 0 {
 		t.Fatalf("messages_today missing/zero: %+v", m)
 	}
+	if m := snap.Metrics["tool_read_file"]; m.Used == nil || *m.Used != 2 {
+		t.Fatalf("tool_read_file = %+v, want 2 calls", m)
+	}
 	if _, ok := snap.Metrics["context_window"]; !ok {
 		t.Fatal("missing context_window metric")
 	}
