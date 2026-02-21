@@ -19,6 +19,7 @@ import (
 const (
 	copilotAllTimeWindow = "all-time"
 	maxCopilotModels     = 8
+	maxCopilotClients    = 6
 )
 
 type Provider struct{}
@@ -817,8 +818,10 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		id             string
 		createdAt      time.Time
 		updatedAt      time.Time
+		cwd            string
 		repo           string
 		branch         string
+		client         string
 		summary        string
 		messages       int
 		turns          int
@@ -845,6 +848,11 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	dailyModelMessages := make(map[string]map[string]float64)
 	dailyModelTokens := make(map[string]map[string]float64)
 	modelInputTokens := make(map[string]float64)
+	clientLabels := make(map[string]string)
+	clientTokens := make(map[string]float64)
+	clientSessions := make(map[string]int)
+	clientMessages := make(map[string]int)
+	dailyClientTokens := make(map[string]map[string]float64)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -855,6 +863,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 
 		if wsData, err := os.ReadFile(filepath.Join(sessPath, "workspace.yaml")); err == nil {
 			ws := parseSimpleYAML(string(wsData))
+			si.cwd = ws["cwd"]
 			si.repo = ws["repository"]
 			si.branch = ws["branch"]
 			si.summary = ws["summary"]
@@ -884,6 +893,23 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 				}
 
 				switch evt.Type {
+				case "session.start":
+					var start sessionStartData
+					if json.Unmarshal(evt.Data, &start) == nil {
+						if si.cwd == "" {
+							si.cwd = start.Context.CWD
+						}
+						if si.repo == "" {
+							si.repo = start.Context.Repository
+						}
+						if si.branch == "" {
+							si.branch = start.Context.Branch
+						}
+						if si.createdAt.IsZero() {
+							si.createdAt = flexParseTime(start.StartTime)
+						}
+					}
+
 				case "session.model_change":
 					var mc modelChangeData
 					if json.Unmarshal(evt.Data, &mc) == nil && mc.NewModel != "" {
@@ -954,13 +980,30 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 			dailySessions[day]++
 		}
 
+		clientLabel := normalizeCopilotClient(si.repo, si.cwd)
+		clientKey := sanitizeMetricName(clientLabel)
+		if clientKey == "" {
+			clientKey = "cli"
+		}
+		si.client = clientLabel
+		if _, ok := clientLabels[clientKey]; !ok {
+			clientLabels[clientKey] = clientLabel
+		}
+		clientSessions[clientKey]++
+		clientMessages[clientKey] += si.messages
+
 		sessionTokens := float64(si.tokenUsed)
 		if si.tokenBurn > 0 {
 			sessionTokens = si.tokenBurn
 		}
 		if sessionTokens > 0 {
+			clientTokens[clientKey] += sessionTokens
 			if day != "" {
 				dailyTokens[day] += sessionTokens
+				if dailyClientTokens[clientKey] == nil {
+					dailyClientTokens[clientKey] = make(map[string]float64)
+				}
+				dailyClientTokens[clientKey][day] += sessionTokens
 			}
 			if si.model != "" {
 				modelInputTokens[si.model] += sessionTokens
@@ -1038,14 +1081,14 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	setUsedMetric(snap, "total_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_conversations", float64(len(sessions)), "sessions", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_messages", float64(totalMessages), "messages", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_turns", float64(totalTurns), "turns", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_sessions", float64(len(sessions)), "sessions", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_tool_calls", float64(totalTools), "calls", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_input_tokens", totalTokens, "tokens", copilotAllTimeWindow)
-	setUsedMetric(snap, "client_cli_total_tokens", totalTokens, "tokens", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_messages", float64(totalMessages), "messages", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_turns", float64(totalTurns), "turns", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_sessions", float64(len(sessions)), "sessions", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_tool_calls", float64(totalTools), "calls", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_input_tokens", totalTokens, "tokens", copilotAllTimeWindow)
+	setUsedMetric(snap, "cli_total_tokens", totalTokens, "tokens", copilotAllTimeWindow)
 
 	if _, v := latestSeriesValue(dailyMessages); v > 0 {
 		setUsedMetric(snap, "messages_today", v, "messages", "today")
@@ -1076,8 +1119,23 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		setUsedMetric(snap, prefix+"_reasoning_chars", float64(modelReasoningChars[model]), "chars", copilotAllTimeWindow)
 	}
 
+	topClients := topCopilotClientNames(clientTokens, clientSessions, clientMessages, maxCopilotClients)
+	for _, client := range topClients {
+		clientPrefix := "client_" + client
+		setUsedMetric(snap, clientPrefix+"_total_tokens", clientTokens[client], "tokens", copilotAllTimeWindow)
+		setUsedMetric(snap, clientPrefix+"_input_tokens", clientTokens[client], "tokens", copilotAllTimeWindow)
+		setUsedMetric(snap, clientPrefix+"_sessions", float64(clientSessions[client]), "sessions", copilotAllTimeWindow)
+		if byDay := dailyClientTokens[client]; len(byDay) > 0 {
+			storeSeries(snap, "tokens_client_"+client, byDay)
+		}
+	}
+	setRawStr(snap, "client_usage", formatCopilotClientUsage(topClients, clientLabels, clientTokens, clientSessions))
+
 	if len(sessions) > 0 {
 		r := sessions[0]
+		if r.client != "" {
+			snap.Raw["last_session_client"] = r.client
+		}
 		snap.Raw["last_session_repo"] = r.repo
 		snap.Raw["last_session_branch"] = r.branch
 		if r.summary != "" {
@@ -1352,6 +1410,128 @@ func topModelNames(tokenMap map[string]float64, messageMap map[string]int, limit
 		out = append(out, rows[i].model)
 	}
 	return out
+}
+
+func topCopilotClientNames(tokenMap map[string]float64, sessionMap, messageMap map[string]int, limit int) []string {
+	type row struct {
+		client   string
+		tokens   float64
+		sessions int
+		messages int
+	}
+
+	seen := make(map[string]bool)
+	var rows []row
+	for client, tokens := range tokenMap {
+		seen[client] = true
+		rows = append(rows, row{
+			client:   client,
+			tokens:   tokens,
+			sessions: sessionMap[client],
+			messages: messageMap[client],
+		})
+	}
+	for client, sessions := range sessionMap {
+		if seen[client] {
+			continue
+		}
+		seen[client] = true
+		rows = append(rows, row{
+			client:   client,
+			sessions: sessions,
+			messages: messageMap[client],
+		})
+	}
+	for client, messages := range messageMap {
+		if seen[client] {
+			continue
+		}
+		rows = append(rows, row{
+			client:   client,
+			messages: messages,
+		})
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].tokens == rows[j].tokens {
+			if rows[i].sessions == rows[j].sessions {
+				if rows[i].messages == rows[j].messages {
+					return rows[i].client < rows[j].client
+				}
+				return rows[i].messages > rows[j].messages
+			}
+			return rows[i].sessions > rows[j].sessions
+		}
+		return rows[i].tokens > rows[j].tokens
+	})
+
+	if limit <= 0 || len(rows) <= limit {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.client)
+		}
+		return out
+	}
+
+	out := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		out = append(out, rows[i].client)
+	}
+	return out
+}
+
+func normalizeCopilotClient(repo, cwd string) string {
+	repo = strings.TrimSpace(repo)
+	if repo != "" && repo != "." {
+		return repo
+	}
+
+	cwd = strings.TrimSpace(cwd)
+	if cwd != "" {
+		base := strings.TrimSpace(filepath.Base(cwd))
+		if base != "" && base != "." && base != string(filepath.Separator) {
+			return base
+		}
+	}
+
+	return "cli"
+}
+
+func formatCopilotClientUsage(clients []string, labels map[string]string, tokens map[string]float64, sessions map[string]int) string {
+	if len(clients) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(clients))
+	for _, client := range clients {
+		label := labels[client]
+		if label == "" {
+			label = client
+		}
+
+		value := tokens[client]
+		sessionCount := sessions[client]
+
+		item := fmt.Sprintf("%s %s tok", label, formatCopilotTokenCount(value))
+		if sessionCount > 0 {
+			item += fmt.Sprintf(" · %d sess", sessionCount)
+		}
+		parts = append(parts, item)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatCopilotTokenCount(value float64) string {
+	switch {
+	case value >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", value/1_000_000_000)
+	case value >= 1_000_000:
+		return fmt.Sprintf("%.1fM", value/1_000_000)
+	case value >= 1_000:
+		return fmt.Sprintf("%.1fK", value/1_000)
+	default:
+		return fmt.Sprintf("%.0f", value)
+	}
 }
 
 func parseDayFromTimestamp(ts string) string {

@@ -699,6 +699,27 @@ func TestExtractModelFromInfoMsg(t *testing.T) {
 	}
 }
 
+func TestNormalizeCopilotClient(t *testing.T) {
+	tests := []struct {
+		name string
+		repo string
+		cwd  string
+		want string
+	}{
+		{name: "repo preferred", repo: "owner/repo", cwd: "/tmp/project", want: "owner/repo"},
+		{name: "cwd fallback", repo: "", cwd: "/tmp/project", want: "project"},
+		{name: "default cli", repo: "", cwd: "", want: "cli"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeCopilotClient(tt.repo, tt.cwd); got != tt.want {
+				t.Fatalf("normalizeCopilotClient(%q, %q) = %q, want %q", tt.repo, tt.cwd, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFlexParseTime(t *testing.T) {
 	tests := []struct {
 		input string
@@ -864,8 +885,20 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	if _, ok := snap.DailySeries["tokens_gpt_5_mini"]; !ok {
 		t.Fatal("missing tokens_gpt_5_mini series")
 	}
-	if m := snap.Metrics["client_cli_input_tokens"]; m.Used == nil || *m.Used <= 0 {
-		t.Fatalf("client_cli_input_tokens missing/zero: %+v", m)
+	if m := snap.Metrics["cli_input_tokens"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("cli_input_tokens missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["client_owner_repo_total_tokens"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("client_owner_repo_total_tokens missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["client_owner_repo_sessions"]; m.Used == nil || *m.Used != 2 {
+		t.Fatalf("client_owner_repo_sessions = %+v, want 2", m)
+	}
+	if _, ok := snap.DailySeries["tokens_client_owner_repo"]; !ok {
+		t.Fatal("missing tokens_client_owner_repo series")
+	}
+	if got := snap.Raw["client_usage"]; !strings.Contains(got, "owner/repo") {
+		t.Fatalf("client_usage = %q, want owner/repo", got)
 	}
 	if m := snap.Metrics["messages_today"]; m.Used == nil || *m.Used <= 0 {
 		t.Fatalf("messages_today missing/zero: %+v", m)
