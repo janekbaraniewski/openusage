@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenUsage</title>
+    <meta name="description" content="OpenUsage terminal dashboard for AI tool usage and spend." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell-wrap">
+      <section class="shell" aria-label="OpenUsage terminal card">
+        <header class="shell-titlebar">
+          <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="shell-name">openusage</p>
+          <a class="github-link" href="https://github.com/janekbaraniewski/openusage">github</a>
+        </header>
+
+        <div class="shell-body">
+          <p class="boot-line"><span class="spinner" aria-hidden="true">⠋</span> openusage --live <span class="cursor" aria-hidden="true">▌</span></p>
+
+          <div class="banner-frame">
+            <pre class="banner" aria-label="OpenUsage ASCII banner"> █▀█ █▀█ █▀▀ █▄░█   █░█ █▀ ▄▀█ █▀▀ █▀▀
+ █▄█ █▀▀ ██▄ █░▀█   █▄█ ▄█ █▀█ █▄█ ██▄</pre>
+          </div>
+
+          <p class="subtitle">AI provider usage and spend dashboard.</p>
+
+          <div class="install">
+            <span class="label">INSTALL</span>
+            <code id="install-cmd">brew install janekbaraniewski/tap/openusage</code>
+            <button class="copy-btn" data-copy-target="install-cmd">copy</button>
+          </div>
+
+          <section class="output" aria-label="Demo output">
+            <p class="section-title">demo snapshot (7 providers)</p>
+            <div class="row"><span class="provider">openai</span><span class="meter">████████░░</span><span class="metric">$4.21 / $20</span><span class="status ok">OK</span></div>
+            <div class="row"><span class="provider">anthropic</span><span class="meter">███████░░░</span><span class="metric">71%</span><span class="status warn">WARN</span></div>
+            <div class="row"><span class="provider">openrouter</span><span class="meter">██████░░░░</span><span class="metric">$12.40 / $50</span><span class="status ok">OK</span></div>
+            <div class="row"><span class="provider">groq</span><span class="meter">█████░░░░░</span><span class="metric">53%</span><span class="status ok">OK</span></div>
+            <div class="row"><span class="provider">gemini_cli</span><span class="meter">████░░░░░░</span><span class="metric">41%</span><span class="status ok">OK</span></div>
+            <div class="row"><span class="provider">copilot</span><span class="meter">███░░░░░░░</span><span class="metric">34%</span><span class="status ok">OK</span></div>
+            <div class="row"><span class="provider">cursor</span><span class="meter">██░░░░░░░░</span><span class="metric">reconnect</span><span class="status auth">AUTH</span></div>
+          </section>
+
+          <section class="providers" aria-label="Supported providers">
+            <p class="section-title">supported providers</p>
+            <ul class="provider-grid">
+              <li class="provider-card" data-name="OpenAI"><img src="https://cdn.simpleicons.org/openai/E7E7EF" alt="OpenAI logo" loading="lazy" /><span>OpenAI</span></li>
+              <li class="provider-card" data-name="Anthropic"><img src="https://cdn.simpleicons.org/anthropic/E7E7EF" alt="Anthropic logo" loading="lazy" /><span>Anthropic</span></li>
+              <li class="provider-card" data-name="OpenRouter"><img src="https://cdn.simpleicons.org/openrouter/E7E7EF" alt="OpenRouter logo" loading="lazy" /><span>OpenRouter</span></li>
+              <li class="provider-card" data-name="Groq"><img src="https://cdn.simpleicons.org/groq/E7E7EF" alt="Groq logo" loading="lazy" /><span>Groq</span></li>
+              <li class="provider-card" data-name="Mistral"><img src="https://cdn.simpleicons.org/mistralai/E7E7EF" alt="Mistral logo" loading="lazy" /><span>Mistral</span></li>
+              <li class="provider-card" data-name="DeepSeek"><img src="https://cdn.simpleicons.org/deepseek/E7E7EF" alt="DeepSeek logo" loading="lazy" /><span>DeepSeek</span></li>
+              <li class="provider-card" data-name="xAI"><img src="https://cdn.simpleicons.org/xai/E7E7EF" alt="xAI logo" loading="lazy" /><span>xAI</span></li>
+              <li class="provider-card" data-name="Gemini API"><img src="https://cdn.simpleicons.org/googlegemini/E7E7EF" alt="Gemini logo" loading="lazy" /><span>Gemini API</span></li>
+              <li class="provider-card" data-name="Gemini CLI"><img src="https://cdn.simpleicons.org/googlegemini/E7E7EF" alt="Gemini logo" loading="lazy" /><span>Gemini CLI</span></li>
+              <li class="provider-card" data-name="GitHub Copilot"><img src="https://cdn.simpleicons.org/githubcopilot/E7E7EF" alt="GitHub Copilot logo" loading="lazy" /><span>GitHub Copilot</span></li>
+              <li class="provider-card" data-name="Cursor"><img src="https://cdn.simpleicons.org/cursor/E7E7EF" alt="Cursor logo" loading="lazy" /><span>Cursor</span></li>
+              <li class="provider-card" data-name="Claude Code"><img src="https://cdn.simpleicons.org/claude/E7E7EF" alt="Claude logo" loading="lazy" /><span>Claude Code</span></li>
+              <li class="provider-card" data-name="OpenAI Codex CLI"><img src="https://cdn.simpleicons.org/openai/E7E7EF" alt="OpenAI logo" loading="lazy" /><span>OpenAI Codex CLI</span></li>
+            </ul>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
