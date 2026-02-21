@@ -309,21 +309,6 @@ func applyTheme(t Theme) {
 		t.Accent, t.Blue, t.Sapphire, t.Teal, t.Green, t.Lavender,
 	}
 
-	providerColorMap = map[string]lipgloss.Color{
-		"openai":      colorGreen,
-		"anthropic":   colorPeach,
-		"cursor":      colorLavender,
-		"gemini_api":  colorBlue,
-		"gemini_cli":  colorBlue,
-		"claude_code": colorTeal,
-		"groq":        colorYellow,
-		"deepseek":    colorSky,
-		"copilot":     colorSapphire,
-		"xai":         colorMaroon,
-		"mistral":     colorFlamingo,
-		"openrouter":  colorRosewater,
-		"codex":       colorGreen,
-	}
 	modelColorPalette = []lipgloss.Color{
 		colorPeach, colorTeal, colorSapphire, colorGreen,
 		colorYellow, colorLavender, colorSky, colorFlamingo,
@@ -413,13 +398,32 @@ func init() {
 	applyTheme(Themes[ActiveThemeIdx])
 }
 
-var providerColorMap map[string]lipgloss.Color
-
 var modelColorPalette []lipgloss.Color
 
 func ProviderColor(providerID string) lipgloss.Color {
-	if c, ok := providerColorMap[providerID]; ok {
-		return c
+	switch dashboardWidget(providerID).ColorRole {
+	case core.DashboardColorRoleGreen:
+		return colorGreen
+	case core.DashboardColorRolePeach:
+		return colorPeach
+	case core.DashboardColorRoleLavender:
+		return colorLavender
+	case core.DashboardColorRoleBlue:
+		return colorBlue
+	case core.DashboardColorRoleTeal:
+		return colorTeal
+	case core.DashboardColorRoleYellow:
+		return colorYellow
+	case core.DashboardColorRoleSky:
+		return colorSky
+	case core.DashboardColorRoleSapphire:
+		return colorSapphire
+	case core.DashboardColorRoleMaroon:
+		return colorMaroon
+	case core.DashboardColorRoleFlamingo:
+		return colorFlamingo
+	case core.DashboardColorRoleRosewater:
+		return colorRosewater
 	}
 	h := 0
 	for _, ch := range providerID {

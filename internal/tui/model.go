@@ -1025,9 +1025,9 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 		return info
 	}
 
-	// Provider-specific display style hooks run before generic credits handling.
-	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter {
-		return computeOpenRouterDisplayInfo(snap, info)
+	// Style hooks for richer credit summaries.
+	if widget.DisplayStyle == core.DashboardDisplayStyleDetailedCredits {
+		return computeDetailedCreditsDisplayInfo(snap, info)
 	}
 
 	if m, ok := snap.Metrics["credits"]; ok {
@@ -1244,9 +1244,10 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 	return info
 }
 
-// computeOpenRouterDisplayInfo creates display info specifically for OpenRouter with all its rich metrics
-func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayInfo) providerDisplayInfo {
-	// Prefer account-level purchased credits from /credits.
+// computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view
+// for providers that expose both balance and usage dimensions.
+func computeDetailedCreditsDisplayInfo(snap core.QuotaSnapshot, info providerDisplayInfo) providerDisplayInfo {
+	// Prefer account-level purchased credits when available.
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
@@ -1273,7 +1274,7 @@ func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayI
 		return info
 	}
 
-	// Fallback: key-level credits/usage from /key.
+	// Fallback to key-level credits/usage.
 	if m, ok := snap.Metrics["credits"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"

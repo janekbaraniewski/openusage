@@ -38,6 +38,7 @@ func DetailTabs(snap core.QuotaSnapshot) []string {
 
 func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh float64, activeTab int) string {
 	var sb strings.Builder
+	widget := dashboardWidget(snap.ProviderID)
 
 	renderDetailHeader(&sb, snap, w)
 	sb.WriteString("\n")
@@ -81,7 +82,7 @@ func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh 
 		sb.WriteString("\n")
 		count := len(snap.Raw)
 		renderDetailSectionHeader(&sb, fmt.Sprintf("› Details (%d entries)", count), w)
-		renderRawData(&sb, snap.Raw, w)
+		renderRawData(&sb, snap.Raw, widget, w)
 	}
 
 	age := time.Since(snap.Timestamp)
@@ -371,7 +372,7 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case key == "context_window":
 		return "Usage", "Context Window", 1
 
-	// OpenRouter time-bucketed usage (daily, weekly, monthly)
+	// Time-bucketed usage (daily, weekly, monthly)
 	case key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly":
 		return "Usage", prettifyKey(key), 1
 	case key == "limit_remaining":
@@ -399,7 +400,7 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case key == "individual_spend":
 		return "Spending", "Individual Spend", 2
 
-	// OpenRouter BYOK spending metrics
+	// BYOK spending metrics
 	case strings.HasPrefix(key, "byok_") && strings.Contains(lk, "cost"):
 		return "Spending", prettifyKey(key), 2
 	case strings.HasPrefix(key, "today_byok_") || strings.HasPrefix(key, "7d_byok_") || strings.HasPrefix(key, "30d_byok_"):
@@ -426,7 +427,7 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 		(strings.HasSuffix(key, "_input_tokens") || strings.HasSuffix(key, "_output_tokens")):
 		return "Tokens", key, 3
 
-	// OpenRouter per-model reasoning and cached tokens
+	// Per-model reasoning and cached tokens
 	case strings.HasPrefix(key, "model_") &&
 		(strings.HasSuffix(key, "_reasoning_tokens") || strings.HasSuffix(key, "_cached_tokens") || strings.HasSuffix(key, "_image_tokens")):
 		return "Tokens", prettifyKey(key), 3
@@ -434,7 +435,7 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case strings.HasPrefix(key, "session_"):
 		return "Tokens", prettifyKey(strings.TrimPrefix(key, "session_")), 3
 
-	// OpenRouter today metrics
+	// Additional today metrics
 	case strings.HasPrefix(key, "today_") && strings.Contains(lk, "token"):
 		return "Tokens", prettifyKey(key), 3
 
@@ -444,7 +445,7 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case strings.HasPrefix(key, "tab_") || strings.HasPrefix(key, "composer_"):
 		return "Activity", prettifyKey(key), 4
 
-	// OpenRouter media and request metrics
+	// Media and request metrics
 	case strings.HasPrefix(key, "today_") && (strings.Contains(lk, "media") || strings.Contains(lk, "audio") || strings.Contains(lk, "cancelled")):
 		return "Activity", prettifyKey(key), 4
 	case key == "recent_requests" || key == "daily_projected":
@@ -1049,7 +1050,7 @@ func renderQuotaTable(sb *strings.Builder, entries []metricEntry, w int, warnThr
 	}
 }
 
-func renderRawData(sb *strings.Builder, raw map[string]string, w int) {
+func renderRawData(sb *strings.Builder, raw map[string]string, widget core.DashboardWidget, w int) {
 	labelW := sectionLabelWidth(w)
 
 	maxValW := w - labelW - 6
@@ -1060,42 +1061,11 @@ func renderRawData(sb *strings.Builder, raw map[string]string, w int) {
 		maxValW = 45
 	}
 
-	type rawGroup struct {
-		label string
-		keys  []string
-	}
-
-	groups := []rawGroup{
-		{"Account", []string{
-			"account_email", "account_name", "plan_name", "plan_type", "plan_price",
-			"membership_type", "team_membership", "organization_name",
-		}},
-		{"Billing", []string{
-			"billing_cycle_start", "billing_cycle_end", "billing_type",
-			"subscription_status", "credits", "usage_based_billing",
-			"spend_limit_type", "limit_policy_type",
-		}},
-		{"Tool", []string{
-			"cli_version", "oauth_status", "auth_type", "install_method",
-			"binary", "project_id", "quota_api",
-		}},
-		// OpenRouter-specific groups
-		{"OpenRouter Key", []string{
-			"key_label", "key_name", "key_type", "key_disabled", "tier", "is_free_tier", "is_management_key", "is_provisioning_key",
-			"key_created_at", "key_updated_at", "key_hash_prefix", "key_lookup",
-			"expires_at", "limit_reset", "include_byok_in_limit", "rate_limit_note", "byok_in_use",
-		}},
-		{"OpenRouter Providers", []string{
-			"generations_fetched", "activity_endpoint", "activity_rows", "activity_date_range",
-			"activity_models", "activity_providers", "keys_total", "keys_active",
-		}},
-	}
-
 	rendered := make(map[string]bool)
 
-	for _, g := range groups {
+	for _, g := range widget.RawGroups {
 		hasAny := false
-		for _, key := range g.keys {
+		for _, key := range g.Keys {
 			if v, ok := raw[key]; ok && v != "" {
 				hasAny = true
 				_ = v
@@ -1105,7 +1075,7 @@ func renderRawData(sb *strings.Builder, raw map[string]string, w int) {
 		if !hasAny {
 			continue
 		}
-		for _, key := range g.keys {
+		for _, key := range g.Keys {
 			v, ok := raw[key]
 			if !ok || v == "" {
 				continue
@@ -1327,7 +1297,7 @@ var prettifyKeyOverrides = map[string]string{
 	"usage_seven_day_opus":   "7d Opus Usage",
 	"usage_seven_day_cowork": "7d Cowork Usage",
 
-	// OpenRouter-specific metrics
+	// Extended usage and billing metrics
 	"usage_daily":                "Today Usage",
 	"usage_weekly":               "This Week",
 	"usage_monthly":              "This Month",

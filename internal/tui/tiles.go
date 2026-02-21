@@ -317,27 +317,18 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bo
 
 	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLines(snap, widget, innerW)
 
-	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter {
-		modelMixLines := buildOpenRouterModelCompositionLines(snap, innerW, modelMixExpanded)
-		if len(modelMixLines) > 0 {
-			s := []string{""}
-			s = append(s, modelMixLines...)
-			sections = append(sections, section{s})
+	modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW, modelMixExpanded)
+	if len(modelBurnLines) > 0 {
+		s := []string{""}
+		s = append(s, modelBurnLines...)
+		sections = append(sections, section{s})
+	}
+	if len(modelBurnKeys) > 0 {
+		if compactMetricKeys == nil {
+			compactMetricKeys = make(map[string]bool)
 		}
-	} else {
-		modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW, modelMixExpanded)
-		if len(modelBurnLines) > 0 {
-			s := []string{""}
-			s = append(s, modelBurnLines...)
-			sections = append(sections, section{s})
-		}
-		if len(modelBurnKeys) > 0 {
-			if compactMetricKeys == nil {
-				compactMetricKeys = make(map[string]bool)
-			}
-			for k := range modelBurnKeys {
-				compactMetricKeys[k] = true
-			}
+		for k := range modelBurnKeys {
+			compactMetricKeys[k] = true
 		}
 	}
 
@@ -868,7 +859,7 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, widget core.Dashboa
 func shouldSuppressMetricLine(widget core.DashboardWidget, key string, met core.Metric, all map[string]core.Metric) bool {
 	// Key-level usage on /key is often zero/no-limit even when account has non-zero /credits totals.
 	// Hide noisy zero rows and prefer the higher-signal credit_balance summary.
-	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter && key == "credits" {
+	if widget.HideCreditsWhenBalancePresent && key == "credits" {
 		if _, hasBalance := all["credit_balance"]; hasBalance {
 			return true
 		}
@@ -1125,8 +1116,8 @@ func collectActiveResetEntries(snap core.QuotaSnapshot, widget core.DashboardWid
 }
 
 func resetLabelForKey(snap core.QuotaSnapshot, widget core.DashboardWidget, key string) string {
-	if widget.ResetStyle == core.DashboardResetStyleGeminiCompact {
-		if label := compactGeminiResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
+	if widget.ResetStyle == core.DashboardResetStyleCompactModelResets {
+		if label := compactModelResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
 			return label
 		}
 	}
@@ -1146,7 +1137,7 @@ func resetLabelForKey(snap core.QuotaSnapshot, widget core.DashboardWidget, key 
 	return prettifyKey(trimmed)
 }
 
-func compactGeminiResetLabel(key string) string {
+func compactModelResetLabel(key string) string {
 	model := key
 	token := ""
 	if idx := strings.LastIndex(key, "_"); idx > 0 {
@@ -1155,9 +1146,6 @@ func compactGeminiResetLabel(key string) string {
 	}
 
 	model = strings.ToLower(model)
-	model = strings.TrimPrefix(model, "gemini-")
-	model = strings.TrimSuffix(model, "-vertex")
-	model = strings.TrimSuffix(model, "-preview")
 	model = strings.ReplaceAll(model, "_", "-")
 
 	model = truncateToWidth(model, 18)
@@ -1197,7 +1185,7 @@ func formatHeaderDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd%02dh", totalHours/24, totalHours%24)
 }
 
-func buildGeminiResetPills(entries []resetEntry) []string {
+func buildCompactModelResetPills(entries []resetEntry) []string {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -1237,11 +1225,11 @@ func buildGeminiResetPills(entries []resetEntry) []string {
 			durColor = colorYellow
 		}
 
-		label := "Gemini quotas"
+		label := "Model quotas"
 		if len(g.labels) <= 2 {
 			label = strings.Join(g.labels, ", ")
 		} else {
-			label = fmt.Sprintf("Gemini quotas (%d models)", len(g.labels))
+			label = fmt.Sprintf("Model quotas (%d models)", len(g.labels))
 		}
 
 		pill := lipgloss.NewStyle().Foreground(colorSubtext).Render("◷ "+label+" ") +
@@ -1258,13 +1246,13 @@ func buildTileResetPills(snap core.QuotaSnapshot, widget core.DashboardWidget, a
 		return nil
 	}
 
-	if widget.ResetStyle == core.DashboardResetStyleGeminiCompact {
+	if widget.ResetStyle == core.DashboardResetStyleCompactModelResets {
 		threshold := widget.ResetCompactThreshold
 		if threshold <= 0 {
 			threshold = 4
 		}
 		if len(entries) >= threshold {
-			return buildGeminiResetPills(entries)
+			return buildCompactModelResetPills(entries)
 		}
 	}
 
@@ -1325,87 +1313,11 @@ func prioritizeMetricKeys(keys, priority []string) []string {
 	return ordered
 }
 
-type openRouterModelMix struct {
+type modelMixEntry struct {
 	name   string
 	cost   float64
 	input  float64
 	output float64
-}
-
-func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) []string {
-	allModels := collectOpenRouterModelMix(snap)
-	if len(allModels) == 0 {
-		return nil
-	}
-	models, hiddenCount := limitModelMix(allModels, expanded, 5)
-
-	totalCost := float64(0)
-	totalTokens := float64(0)
-	for _, m := range allModels {
-		totalCost += m.cost
-		totalTokens += m.input + m.output
-	}
-
-	useCost := totalCost > 0
-	metricTotal := totalTokens
-	if useCost {
-		metricTotal = totalCost
-	}
-	if metricTotal <= 0 {
-		return nil
-	}
-
-	top := models
-
-	barW := innerW - 2
-	if barW < 12 {
-		barW = 12
-	}
-	if barW > 40 {
-		barW = 40
-	}
-
-	heading := "Model Mix (by cost)"
-	if !useCost {
-		heading = "Model Mix (by tokens)"
-	}
-	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
-		"  " + renderOpenRouterMixBar(top, metricTotal, barW, useCost, snap.AccountID),
-	}
-
-	for idx, model := range top {
-		value := model.input + model.output
-		if useCost {
-			value = model.cost
-		}
-		if value <= 0 {
-			continue
-		}
-		pct := value / metricTotal * 100
-		label := prettifyModelName(model.name)
-		colorDot := lipgloss.NewStyle().Foreground(stableModelColor(model.name, snap.AccountID)).Render("■")
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
-		if len(label) > maxLabelLen {
-			label = label[:maxLabelLen-1] + "…"
-		}
-		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
-		valueStr := fmt.Sprintf("%2.0f%% %s %s/%s tok",
-			pct,
-			formatUSD(model.cost),
-			shortCompact(model.input),
-			shortCompact(model.output),
-		)
-		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
-	}
-	if hiddenCount > 0 {
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more models (Ctrl+O)", hiddenCount)))
-	}
-
-	return lines
 }
 
 func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
@@ -1446,7 +1358,7 @@ func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, exp
 
 	lines := []string{
 		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
-		"  " + renderOpenRouterMixBar(models, total, barW, useCost, snap.AccountID),
+		"  " + renderModelMixBar(models, total, barW, useCost, snap.AccountID),
 	}
 
 	for idx, model := range models {
@@ -1486,14 +1398,14 @@ func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, exp
 	return lines, usedKeys
 }
 
-func limitModelMix(models []openRouterModelMix, expanded bool, maxVisible int) ([]openRouterModelMix, int) {
+func limitModelMix(models []modelMixEntry, expanded bool, maxVisible int) ([]modelMixEntry, int) {
 	if expanded || maxVisible <= 0 || len(models) <= maxVisible {
 		return models, 0
 	}
 	return models[:maxVisible], len(models) - maxVisible
 }
 
-func collectProviderModelMix(snap core.QuotaSnapshot) ([]openRouterModelMix, map[string]bool) {
+func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[string]bool) {
 	type agg struct {
 		cost   float64
 		input  float64
@@ -1555,12 +1467,12 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]openRouterModelMix, map
 		}
 	}
 
-	models := make([]openRouterModelMix, 0, len(byModel))
+	models := make([]modelMixEntry, 0, len(byModel))
 	for name, v := range byModel {
 		if v.cost <= 0 && v.input <= 0 && v.output <= 0 {
 			continue
 		}
-		models = append(models, openRouterModelMix{
+		models = append(models, modelMixEntry{
 			name:   name,
 			cost:   v.cost,
 			input:  v.input,
@@ -1589,7 +1501,7 @@ func parseTileNumeric(raw string) (float64, bool) {
 	return v, true
 }
 
-func renderOpenRouterMixBar(top []openRouterModelMix, total float64, barW int, useCost bool, providerID string) string {
+func renderModelMixBar(top []modelMixEntry, total float64, barW int, useCost bool, providerID string) string {
 	if len(top) == 0 || total <= 0 {
 		return ""
 	}
@@ -1655,64 +1567,6 @@ func renderOpenRouterMixBar(top []openRouterModelMix, total float64, barW int, u
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
 	}
 	return sb.String()
-}
-
-func collectOpenRouterModelMix(snap core.QuotaSnapshot) []openRouterModelMix {
-	type agg struct {
-		cost   float64
-		input  float64
-		output float64
-	}
-	byModel := make(map[string]*agg)
-
-	ensure := func(name string) *agg {
-		if _, ok := byModel[name]; !ok {
-			byModel[name] = &agg{}
-		}
-		return byModel[name]
-	}
-
-	for key, met := range snap.Metrics {
-		if !strings.HasPrefix(key, "model_") || met.Used == nil {
-			continue
-		}
-		name := strings.TrimPrefix(key, "model_")
-		switch {
-		case strings.HasSuffix(name, "_cost_usd"):
-			name = strings.TrimSuffix(name, "_cost_usd")
-			ensure(name).cost += *met.Used
-		case strings.HasSuffix(name, "_cost"):
-			name = strings.TrimSuffix(name, "_cost")
-			ensure(name).cost += *met.Used
-		case strings.HasSuffix(name, "_input_tokens"):
-			name = strings.TrimSuffix(name, "_input_tokens")
-			ensure(name).input += *met.Used
-		case strings.HasSuffix(name, "_output_tokens"):
-			name = strings.TrimSuffix(name, "_output_tokens")
-			ensure(name).output += *met.Used
-		}
-	}
-
-	models := make([]openRouterModelMix, 0, len(byModel))
-	for name, v := range byModel {
-		if v.cost <= 0 && v.input <= 0 && v.output <= 0 {
-			continue
-		}
-		models = append(models, openRouterModelMix{
-			name:   name,
-			cost:   v.cost,
-			input:  v.input,
-			output: v.output,
-		})
-	}
-
-	sort.Slice(models, func(i, j int) bool {
-		if models[i].cost != models[j].cost {
-			return models[i].cost > models[j].cost
-		}
-		return (models[i].input + models[i].output) > (models[j].input + models[j].output)
-	})
-	return models
 }
 
 func shortCompact(v float64) string {
