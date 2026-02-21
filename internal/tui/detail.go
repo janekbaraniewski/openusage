@@ -22,7 +22,7 @@ const (
 func DetailTabs(snap core.QuotaSnapshot) []string {
 	tabs := []string{"All"}
 	if len(snap.Metrics) > 0 {
-		groups := groupMetrics(snap.Metrics, dashboardWidget(snap.ProviderID))
+		groups := groupMetrics(snap.Metrics, dashboardWidget(snap.ProviderID), detailWidget(snap.ProviderID))
 		for _, g := range groups {
 			tabs = append(tabs, g.title)
 		}
@@ -39,6 +39,7 @@ func DetailTabs(snap core.QuotaSnapshot) []string {
 func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh float64, activeTab int) string {
 	var sb strings.Builder
 	widget := dashboardWidget(snap.ProviderID)
+	details := detailWidget(snap.ProviderID)
 
 	renderDetailHeader(&sb, snap, w)
 	sb.WriteString("\n")
@@ -65,10 +66,10 @@ func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh 
 	showInfo := tabName == "Info" || showAll
 
 	if len(snap.Metrics) > 0 {
-		groups := groupMetrics(snap.Metrics, widget)
+		groups := groupMetrics(snap.Metrics, widget, details)
 		for _, group := range groups {
 			if showAll || group.title == tabName {
-				renderMetricGroup(&sb, group, widget, w, warnThresh, critThresh, snap.DailySeries)
+				renderMetricGroup(&sb, group, widget, details, w, warnThresh, critThresh, snap.DailySeries)
 			}
 		}
 	}
@@ -308,11 +309,11 @@ type metricEntry struct {
 	metric core.Metric
 }
 
-func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget) []metricGroup {
+func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget, details core.DetailWidget) []metricGroup {
 	groups := make(map[string]*metricGroup)
 
 	for key, m := range metrics {
-		groupName, label, order := classifyMetric(key, m, widget)
+		groupName, label, order := classifyMetric(key, m, widget, details)
 		g, ok := groups[groupName]
 		if !ok {
 			g = &metricGroup{title: groupName, order: order}
@@ -338,7 +339,7 @@ func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget) [
 	return result
 }
 
-func classifyMetric(key string, m core.Metric, widget core.DashboardWidget) (group, label string, order int) {
+func classifyMetric(key string, m core.Metric, widget core.DashboardWidget, details core.DetailWidget) (group, label string, order int) {
 	if override, ok := widget.MetricGroupOverrides[key]; ok && override.Group != "" {
 		label = override.Label
 		if label == "" {
@@ -346,7 +347,7 @@ func classifyMetric(key string, m core.Metric, widget core.DashboardWidget) (gro
 		}
 		order = override.Order
 		if order <= 0 {
-			order = 4
+			order = groupOrder(details, override.Group, 4)
 		}
 		return override.Group, label, order
 	}
@@ -356,107 +357,114 @@ func classifyMetric(key string, m core.Metric, widget core.DashboardWidget) (gro
 	switch {
 
 	case key == "rpm" || key == "tpm" || key == "rpd" || key == "tpd":
-		return "Usage", strings.ToUpper(key), 1
+		return "Usage", strings.ToUpper(key), groupOrder(details, "Usage", 1)
 	case strings.HasPrefix(key, "rate_limit_"):
-		return "Usage", metricLabel(widget, strings.TrimPrefix(key, "rate_limit_")), 1
+		return "Usage", metricLabel(widget, strings.TrimPrefix(key, "rate_limit_")), groupOrder(details, "Usage", 1)
 	case key == "rpm_headers" || key == "tpm_headers":
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 	case key == "gh_api_rpm" || key == "copilot_chat":
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 
 	case key == "plan_percent_used":
-		return "Usage", "Plan Used", 1
+		return "Usage", "Plan Used", groupOrder(details, "Usage", 1)
 
 	case key == "spend_limit":
-		return "Usage", "Spend Limit", 1
+		return "Usage", "Spend Limit", groupOrder(details, "Usage", 1)
 
 	case key == "plan_spend":
-		return "Usage", "Plan Spend", 1
+		return "Usage", "Plan Spend", groupOrder(details, "Usage", 1)
 
 	case key == "monthly_spend" && m.Limit != nil:
-		return "Usage", "Monthly Spend", 1
+		return "Usage", "Monthly Spend", groupOrder(details, "Usage", 1)
 	case key == "monthly_budget" && m.Limit != nil:
-		return "Usage", "Monthly Budget", 1
+		return "Usage", "Monthly Budget", groupOrder(details, "Usage", 1)
 
 	case (key == "credits" || key == "credit_balance") && m.Limit != nil:
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 
 	case key == "context_window":
-		return "Usage", "Context Window", 1
+		return "Usage", "Context Window", groupOrder(details, "Usage", 1)
 
 	// Time-bucketed usage (daily, weekly, monthly)
 	case key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly":
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 	case key == "limit_remaining":
-		return "Usage", "Limit Remaining", 1
+		return "Usage", "Limit Remaining", groupOrder(details, "Usage", 1)
 
 	case m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", prettifyQuotaKey(key, widget), 1
+		return "Usage", prettifyQuotaKey(key, widget), groupOrder(details, "Usage", 1)
 
 	case m.Unit == "%" && (m.Used != nil || m.Remaining != nil):
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 
 	case m.Used != nil && m.Limit != nil &&
 		!strings.Contains(lk, "token") && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", metricLabel(widget, key), 1
+		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
 
 	case strings.HasPrefix(key, "model_") &&
 		!strings.HasSuffix(key, "_input_tokens") &&
 		!strings.HasSuffix(key, "_output_tokens"):
-		return "Spending", strings.TrimPrefix(key, "model_"), 2
+		return "Spending", strings.TrimPrefix(key, "model_"), groupOrder(details, "Spending", 2)
 
 	case key == "plan_included" || key == "plan_bonus" ||
 		key == "plan_total_spend_usd" || key == "plan_limit_usd":
-		return "Spending", metricLabel(widget, strings.TrimPrefix(key, "plan_")), 2
+		return "Spending", metricLabel(widget, strings.TrimPrefix(key, "plan_")), groupOrder(details, "Spending", 2)
 
 	case key == "individual_spend":
-		return "Spending", "Individual Spend", 2
+		return "Spending", "Individual Spend", groupOrder(details, "Spending", 2)
 
 	case strings.Contains(lk, "cost") || strings.Contains(lk, "burn_rate"):
-		return "Spending", metricLabel(widget, key), 2
+		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
 
 	case key == "credits" || key == "credit_balance":
-		return "Spending", metricLabel(widget, key), 2
+		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
 
 	case key == "monthly_spend" || key == "monthly_budget":
-		return "Spending", metricLabel(widget, key), 2
+		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
 
 	case strings.HasSuffix(key, "_balance"):
-		return "Spending", metricLabel(widget, key), 2
+		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
 
 	case strings.HasPrefix(key, "input_tokens_") || strings.HasPrefix(key, "output_tokens_"):
-		return "Tokens", key, 3
+		return "Tokens", key, groupOrder(details, "Tokens", 3)
 
 	case strings.HasPrefix(key, "model_") &&
 		(strings.HasSuffix(key, "_input_tokens") || strings.HasSuffix(key, "_output_tokens")):
-		return "Tokens", key, 3
+		return "Tokens", key, groupOrder(details, "Tokens", 3)
 
 	// Per-model reasoning and cached tokens
 	case strings.HasPrefix(key, "model_") &&
 		(strings.HasSuffix(key, "_reasoning_tokens") || strings.HasSuffix(key, "_cached_tokens") || strings.HasSuffix(key, "_image_tokens")):
-		return "Tokens", metricLabel(widget, key), 3
+		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
 
 	case strings.HasPrefix(key, "session_"):
-		return "Tokens", metricLabel(widget, strings.TrimPrefix(key, "session_")), 3
+		return "Tokens", metricLabel(widget, strings.TrimPrefix(key, "session_")), groupOrder(details, "Tokens", 3)
 
 	// Additional today metrics
 	case strings.HasPrefix(key, "today_") && strings.Contains(lk, "token"):
-		return "Tokens", metricLabel(widget, key), 3
+		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
 
 	case strings.Contains(lk, "token"):
-		return "Tokens", metricLabel(widget, key), 3
+		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
 
 	case strings.HasPrefix(key, "tab_") || strings.HasPrefix(key, "composer_"):
-		return "Activity", metricLabel(widget, key), 4
+		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
 
 	case strings.Contains(lk, "message") || strings.Contains(lk, "session") ||
 		strings.Contains(lk, "conversation") || strings.Contains(lk, "tool_call") ||
 		strings.Contains(lk, "request"):
-		return "Activity", metricLabel(widget, key), 4
+		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
 
 	default:
-		return "Activity", metricLabel(widget, key), 4
+		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
 	}
+}
+
+func groupOrder(details core.DetailWidget, group string, fallback int) int {
+	if order := details.SectionOrder(group); order > 0 {
+		return order
+	}
+	return fallback
 }
 
 func metricLabel(widget core.DashboardWidget, key string) string {
@@ -501,19 +509,30 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint) {
+func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, details core.DetailWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint) {
 	sb.WriteString("\n")
 	renderDetailSectionHeader(sb, group.title, w)
 
-	switch group.title {
-	case "Usage":
+	switch details.SectionStyle(group.title) {
+	case core.DetailSectionStyleUsage:
 		renderUsageSection(sb, group.entries, w, warnThresh, critThresh)
-	case "Spending":
+	case core.DetailSectionStyleSpending:
 		renderSpendingSection(sb, group.entries, w)
-	case "Tokens":
+	case core.DetailSectionStyleTokens:
 		renderTokensSection(sb, group.entries, widget, w, series)
-	case "Activity":
+	case core.DetailSectionStyleActivity:
 		renderActivitySection(sb, group.entries, widget, w, series)
+	default:
+		renderListSection(sb, group.entries, w)
+	}
+}
+
+func renderListSection(sb *strings.Builder, entries []metricEntry, w int) {
+	labelW := sectionLabelWidth(w)
+	for _, e := range entries {
+		val := formatMetricValue(e.metric)
+		sb.WriteString(fmt.Sprintf("  %s %s\n",
+			labelStyle.Width(labelW).Render(e.label), valueStyle.Render(val)))
 	}
 }
 

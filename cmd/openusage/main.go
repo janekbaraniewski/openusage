@@ -88,7 +88,7 @@ func main() {
 		fmt.Println("  • Environment variables:")
 		fmt.Println("    OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY,")
 		fmt.Println("    GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,")
-		fmt.Println("    XAI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY")
+		fmt.Println("    XAI_API_KEY, ZEN_API_KEY, OPENCODE_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY")
 		fmt.Println()
 		fmt.Println("Set any of the above env vars, install a tool, or create a config:")
 		fmt.Printf("  mkdir -p %s\n", config.ConfigDir())

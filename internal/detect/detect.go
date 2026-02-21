@@ -230,6 +230,8 @@ var envKeyMapping = []struct {
 	{"MISTRAL_API_KEY", "mistral", "mistral"},
 	{"DEEPSEEK_API_KEY", "deepseek", "deepseek"},
 	{"XAI_API_KEY", "xai", "xai"},
+	{"ZEN_API_KEY", "zen", "zen"},
+	{"OPENCODE_API_KEY", "zen", "zen"},
 	{"GEMINI_API_KEY", "gemini_api", "gemini-api"},
 	{"GOOGLE_API_KEY", "gemini_api", "gemini-google"},
 }

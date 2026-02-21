@@ -3,8 +3,11 @@ package codex
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +235,232 @@ func TestFetchNoSessions(t *testing.T) {
 	}
 }
 
+func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(sessionsDir, "rollout-test.jsonl")
+	sessionContent := `{"timestamp":"2026-02-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":88.0,"window_minutes":300,"resets_at":1770700000},"secondary":{"used_percent":91.0,"window_minutes":10080,"resets_at":1770934095}}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	authPath := filepath.Join(tmpDir, "auth.json")
+	authContent := `{"tokens":{"access_token":"test-token","account_id":"acct-123"}}`
+	if err := os.WriteFile(authPath, []byte(authContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/wham/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization header = %q, want Bearer test-token", got)
+		}
+		if got := r.Header.Get("ChatGPT-Account-Id"); got != "acct-123" {
+			t.Fatalf("ChatGPT-Account-Id header = %q, want acct-123", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"account_id":"acct-123",
+			"email":"live@example.com",
+			"plan_type":"team",
+			"rate_limit":{
+				"allowed":true,
+				"limit_reached":false,
+				"primary_window":{"used_percent":3,"limit_window_seconds":18000,"reset_at":1771688636},
+				"secondary_window":{"used_percent":33,"limit_window_seconds":604800,"reset_at":1772218274}
+			},
+			"code_review_rate_limit":{
+				"allowed":true,
+				"limit_reached":false,
+				"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_at":1772275686},
+				"secondary_window":null
+			},
+			"additional_rate_limits":[
+				{
+					"limit_name":"codex_other",
+					"metered_feature":"codex_other",
+					"rate_limit":{
+						"allowed":true,
+						"limit_reached":false,
+						"primary_window":{"used_percent":55,"limit_window_seconds":3600,"reset_at":1771700000},
+						"secondary_window":null
+					}
+				}
+			],
+			"credits":{"has_credits":true,"unlimited":false,"balance":"9.99"}
+		}`)
+	}))
+	defer server.Close()
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:       "codex-live",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":       tmpDir,
+			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
+			"auth_file":        authPath,
+			"chatgpt_base_url": server.URL + "/backend-api",
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 3 {
+		t.Fatalf("rate_limit_primary used = %.1f, want 3", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_secondary"); got != 33 {
+		t.Fatalf("rate_limit_secondary used = %.1f, want 33", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_code_review_primary"); got != 1 {
+		t.Fatalf("rate_limit_code_review_primary used = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_codex_other_primary"); got != 55 {
+		t.Fatalf("rate_limit_codex_other_primary used = %.1f, want 55", got)
+	}
+	if snap.Raw["account_email"] != "live@example.com" {
+		t.Fatalf("account_email = %q, want live@example.com", snap.Raw["account_email"])
+	}
+	if snap.Raw["quota_api"] != "live" {
+		t.Fatalf("quota_api = %q, want live", snap.Raw["quota_api"])
+	}
+	if snap.Raw["credit_balance"] != "$9.99" {
+		t.Fatalf("credit_balance = %q, want $9.99", snap.Raw["credit_balance"])
+	}
+}
+
+func TestFetchFallsBackToSessionWhenLiveUsageFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(sessionsDir, "rollout-test.jsonl")
+	sessionContent := `{"timestamp":"2026-02-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":150},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1770700000},"secondary":{"used_percent":80.0,"window_minutes":10080,"resets_at":1770934095}}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	authPath := filepath.Join(tmpDir, "auth.json")
+	authContent := `{"tokens":{"access_token":"test-token","account_id":"acct-123"}}`
+	if err := os.WriteFile(authPath, []byte(authContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/wham/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":"boom"}`)
+	}))
+	defer server.Close()
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:       "codex-fallback",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":       tmpDir,
+			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
+			"auth_file":        authPath,
+			"chatgpt_base_url": server.URL + "/backend-api",
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 20 {
+		t.Fatalf("rate_limit_primary used = %.1f, want 20", got)
+	}
+	if !strings.Contains(snap.Raw["quota_api_error"], "HTTP 500") {
+		t.Fatalf("quota_api_error = %q, want HTTP 500", snap.Raw["quota_api_error"])
+	}
+}
+
+func TestFetchBuildsModelAndClientUsageSplits(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "02", "10")
+	if err := os.MkdirAll(dayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cliSession := filepath.Join(dayDir, "rollout-cli.jsonl")
+	cliContent := `{"timestamp":"2026-02-10T00:00:01Z","type":"session_meta","payload":{"id":"cli-1","source":"cli","originator":"codex_cli_rs"}}
+{"timestamp":"2026-02-10T00:00:02Z","type":"turn_context","payload":{"model":"gpt-5-codex"}}
+{"timestamp":"2026-02-10T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":80,"cached_input_tokens":20,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":100},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":1.0,"window_minutes":300,"resets_at":1770700000}}}}
+{"timestamp":"2026-02-10T00:00:04Z","type":"turn_context","payload":{"model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-10T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"cached_input_tokens":30,"output_tokens":40,"reasoning_output_tokens":0,"total_tokens":160},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":2.0,"window_minutes":300,"resets_at":1770700001}}}}
+`
+	if err := os.WriteFile(cliSession, []byte(cliContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	desktopSession := filepath.Join(dayDir, "rollout-desktop.jsonl")
+	desktopContent := `{"timestamp":"2026-02-10T01:00:01Z","type":"session_meta","payload":{"id":"desktop-1","source":"vscode","originator":"Codex Desktop"}}
+{"timestamp":"2026-02-10T01:00:02Z","type":"turn_context","payload":{"model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-10T01:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"cached_input_tokens":5,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":50},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":3.0,"window_minutes":300,"resets_at":1770700002}}}}
+`
+	if err := os.WriteFile(desktopSession, []byte(desktopContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-split",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "model_gpt_5_codex_total_tokens"); got != 100 {
+		t.Fatalf("model_gpt_5_codex_total_tokens = %.1f, want 100", got)
+	}
+	if got := metricUsed(t, snap, "model_gpt_5_3_codex_total_tokens"); got != 110 {
+		t.Fatalf("model_gpt_5_3_codex_total_tokens = %.1f, want 110", got)
+	}
+	if got := metricUsed(t, snap, "client_cli_total_tokens"); got != 160 {
+		t.Fatalf("client_cli_total_tokens = %.1f, want 160", got)
+	}
+	if got := metricUsed(t, snap, "client_desktop_app_total_tokens"); got != 50 {
+		t.Fatalf("client_desktop_app_total_tokens = %.1f, want 50", got)
+	}
+	if !strings.Contains(snap.Raw["model_usage"], "gpt-5.3-codex") || !strings.Contains(snap.Raw["model_usage"], "gpt-5-codex") {
+		t.Fatalf("model_usage = %q, expected both models", snap.Raw["model_usage"])
+	}
+	if !strings.Contains(snap.Raw["client_usage"], "CLI") || !strings.Contains(snap.Raw["client_usage"], "Desktop App") {
+		t.Fatalf("client_usage = %q, expected CLI and Desktop App", snap.Raw["client_usage"])
+	}
+}
+
 func TestFormatWindow(t *testing.T) {
 	tests := []struct {
 		minutes  int
@@ -279,4 +508,16 @@ func TestFindLatestSessionFile(t *testing.T) {
 	if found != newerFile {
 		t.Errorf("expected %q, got %q", newerFile, found)
 	}
+}
+
+func metricUsed(t *testing.T, snap core.QuotaSnapshot, key string) float64 {
+	t.Helper()
+	metric, ok := snap.Metrics[key]
+	if !ok {
+		t.Fatalf("missing metric %q", key)
+	}
+	if metric.Used == nil {
+		t.Fatalf("metric %q has nil Used", key)
+	}
+	return *metric.Used
 }

@@ -37,6 +37,8 @@ type QuotaProvider interface {
 
 	// DashboardWidget defines how provider metrics should be presented in dashboard tiles.
 	DashboardWidget() DashboardWidget
+	// DetailWidget defines how sections should be rendered in the details panel.
+	DetailWidget() DetailWidget
 
 	Fetch(ctx context.Context, acct AccountConfig) (QuotaSnapshot, error)
 }

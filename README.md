@@ -20,13 +20,15 @@ Or side by side with your agent
 brew install janekbaraniewski/tap/openusage
 ```
 
+Pre-built binaries for macOS, Linux, and Windows are available on the [GitHub Releases](https://github.com/janekbaraniewski/openusage/releases) page.
+
 Or from source (Go 1.25+):
 
 ```bash
 go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
 ```
 
-CGO is required (`CGO_ENABLED=1`) because the Cursor provider uses SQLite via `mattn/go-sqlite3`.
+Building from source requires CGO (`CGO_ENABLED=1`) because the Cursor provider uses SQLite via `mattn/go-sqlite3`.
 
 ## Run
 
@@ -72,7 +74,22 @@ Configured accounts are merged with auto-detected accounts, and configured ones 
 
 ## Supported Providers
 
-OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Gemini API, Gemini CLI, GitHub Copilot, Cursor, Claude Code, and OpenAI Codex CLI.
+| Provider | Detection | Tested |
+|---|---|:---:|
+| Claude Code CLI | `claude` binary + `~/.claude` | ✅ |
+| Cursor IDE | `cursor` binary + local SQLite DBs | ✅ |
+| GitHub Copilot | `gh` CLI + Copilot extension | ✅ |
+| Gemini CLI | `gemini` binary + `~/.gemini` | ✅ |
+| OpenRouter | `OPENROUTER_API_KEY` | ✅ |
+| OpenAI Codex CLI | `codex` binary + `~/.codex` | ✅ |
+| OpenAI | `OPENAI_API_KEY` | |
+| Anthropic | `ANTHROPIC_API_KEY` | |
+| Groq | `GROQ_API_KEY` | |
+| Mistral AI | `MISTRAL_API_KEY` | |
+| DeepSeek | `DEEPSEEK_API_KEY` | |
+| xAI (Grok) | `XAI_API_KEY` | |
+| OpenCode Zen | `ZEN_API_KEY` / `OPENCODE_API_KEY` | |
+| Google Gemini API | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | |
 
 ## Keybindings
 

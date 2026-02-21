@@ -737,29 +737,8 @@ func (m Model) renderGradientSeparator(w int) string {
 	if w <= 0 {
 		return ""
 	}
-	dimBar := lipgloss.NewStyle().Foreground(colorSurface1)
-	accentBar := lipgloss.NewStyle().Foreground(colorAccent)
-
-	if w < 20 {
-		return dimBar.Render(strings.Repeat("━", w))
-	}
-
-	glowW := 8
-	pos := (m.animFrame * 2) % (w + glowW)
-
-	var b strings.Builder
-	for i := 0; i < w; i++ {
-		dist := i - (pos - glowW/2)
-		if dist < 0 {
-			dist = -dist
-		}
-		if dist <= glowW/2 {
-			b.WriteString(accentBar.Render("━"))
-		} else {
-			b.WriteString(dimBar.Render("━"))
-		}
-	}
-	return b.String()
+	sepStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	return sepStyle.Render(strings.Repeat("━", w))
 }
 
 func (m Model) renderScreenTabs() string {
@@ -1164,7 +1143,9 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 	hasQuota := false
 	worstQuotaPct := float64(100)
 	var quotaKey string
-	for key, m := range snap.Metrics {
+	quotaKeys := sortedMetricKeys(snap.Metrics)
+	for _, key := range quotaKeys {
+		m := snap.Metrics[key]
 		pct := m.Percent()
 		if pct >= 0 {
 			hasQuota = true
@@ -1179,6 +1160,17 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 		info.tagLabel = "Usage"
 		info.gaugePercent = 100 - worstQuotaPct
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstQuotaPct)
+		if snap.ProviderID == "gemini_cli" {
+			if m, ok := snap.Metrics["total_conversations"]; ok && m.Used != nil {
+				info.detail = fmt.Sprintf("%.0f conversations", *m.Used)
+				return info
+			}
+			if m, ok := snap.Metrics["messages_today"]; ok && m.Used != nil {
+				info.detail = fmt.Sprintf("%.0f msgs today", *m.Used)
+				return info
+			}
+			return info
+		}
 		if quotaKey != "" {
 			qm := snap.Metrics[quotaKey]
 			parts := []string{metricLabel(widget, quotaKey)}

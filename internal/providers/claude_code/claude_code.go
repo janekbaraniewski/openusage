@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,16 +35,17 @@ func (p *Provider) Describe() core.ProviderInfo {
 }
 
 type statsCache struct {
-	Version          int                   `json:"version"`
-	LastComputedDate string                `json:"lastComputedDate"`
-	DailyActivity    []dailyActivity       `json:"dailyActivity"`
-	DailyModelTokens []dailyTokens         `json:"dailyModelTokens"`
-	ModelUsage       map[string]modelUsage `json:"modelUsage"`
-	TotalSessions    int                   `json:"totalSessions"`
-	TotalMessages    int                   `json:"totalMessages"`
-	LongestSession   *longestSession       `json:"longestSession"`
-	FirstSessionDate string                `json:"firstSessionDate"`
-	HourCounts       map[string]int        `json:"hourCounts"`
+	Version                     int                   `json:"version"`
+	LastComputedDate            string                `json:"lastComputedDate"`
+	DailyActivity               []dailyActivity       `json:"dailyActivity"`
+	DailyModelTokens            []dailyTokens         `json:"dailyModelTokens"`
+	ModelUsage                  map[string]modelUsage `json:"modelUsage"`
+	TotalSessions               int                   `json:"totalSessions"`
+	TotalMessages               int                   `json:"totalMessages"`
+	TotalSpeculationTimeSavedMs int64                 `json:"totalSpeculationTimeSavedMs"`
+	LongestSession              *longestSession       `json:"longestSession"`
+	FirstSessionDate            string                `json:"firstSessionDate"`
+	HourCounts                  map[string]int        `json:"hourCounts"`
 }
 
 type dailyActivity struct {
@@ -130,6 +132,8 @@ type jsonlEntry struct {
 	Type      string    `json:"type"`
 	SessionID string    `json:"sessionId"`
 	Timestamp string    `json:"timestamp"`
+	RequestID string    `json:"requestId,omitempty"`
+	UUID      string    `json:"uuid,omitempty"`
 	Message   *jsonlMsg `json:"message,omitempty"`
 	Subtype   string    `json:"subtype,omitempty"`
 	Version   string    `json:"version,omitempty"`
@@ -137,10 +141,18 @@ type jsonlEntry struct {
 }
 
 type jsonlMsg struct {
-	Model      string      `json:"model"`
-	Role       string      `json:"role"`
-	StopReason *string     `json:"stop_reason"`
-	Usage      *jsonlUsage `json:"usage,omitempty"`
+	ID         string         `json:"id,omitempty"`
+	Model      string         `json:"model"`
+	Role       string         `json:"role"`
+	StopReason *string        `json:"stop_reason"`
+	Usage      *jsonlUsage    `json:"usage,omitempty"`
+	Content    []jsonlContent `json:"content,omitempty"`
+}
+
+type jsonlContent struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type jsonlUsage struct {
@@ -148,6 +160,7 @@ type jsonlUsage struct {
 	CacheCreationInputTokens int              `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int              `json:"cache_read_input_tokens"`
 	OutputTokens             int              `json:"output_tokens"`
+	ReasoningTokens          int              `json:"reasoning_tokens"`
 	ServiceTier              string           `json:"service_tier"`
 	InferenceGeo             string           `json:"inference_geo"`
 	CacheCreation            *cacheBreakdown  `json:"cache_creation,omitempty"`
@@ -161,6 +174,7 @@ type cacheBreakdown struct {
 
 type serverToolUsage struct {
 	WebSearchRequests int `json:"web_search_requests"`
+	WebFetchRequests  int `json:"web_fetch_requests"`
 }
 
 type pricing struct {
@@ -213,10 +227,53 @@ func estimateCost(model string, u *jsonlUsage) float64 {
 	return cost
 }
 
-const billingBlockDuration = 5 * time.Hour
+type modelUsageTotals struct {
+	input       float64
+	output      float64
+	cached      float64
+	cacheCreate float64
+	cache5m     float64
+	cache1h     float64
+	reasoning   float64
+	cost        float64
+	webSearch   float64
+	webFetch    float64
+	sessions    float64
+}
+
+const (
+	billingBlockDuration      = 5 * time.Hour
+	maxModelUsageSummaryItems = 6
+)
 
 func floorToHour(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
+}
+
+func buildStatsCandidates(explicitPath, claudeDir, home string) []string {
+	if explicitPath != "" {
+		return []string{explicitPath}
+	}
+
+	candidates := []string{
+		filepath.Join(claudeDir, "stats-cache.json"),
+		filepath.Join(claudeDir, ".claude-backup", "stats-cache.json"),
+		filepath.Join(home, ".claude-backup", "stats-cache.json"),
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
@@ -241,19 +298,27 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	statsPath := acct.Binary    // repurposed field — path to stats-cache.json
 	accountPath := acct.BaseURL // repurposed field — path to .claude.json
 
-	if statsPath == "" {
-		statsPath = filepath.Join(claudeDir, "stats-cache.json")
-	}
 	if accountPath == "" {
 		accountPath = filepath.Join(home, ".claude.json")
 	}
 
 	var hasData bool
 
-	if err := p.readStats(statsPath, &snap); err != nil {
-		snap.Raw["stats_error"] = err.Error()
-	} else {
+	statsCandidates := buildStatsCandidates(statsPath, claudeDir, home)
+	snap.Raw["stats_candidates"] = strings.Join(statsCandidates, ", ")
+	var statsErr error
+	for _, candidate := range statsCandidates {
+		if err := p.readStats(candidate, &snap); err != nil {
+			statsErr = err
+			continue
+		}
 		hasData = true
+		snap.Raw["stats_path"] = candidate
+		statsErr = nil
+		break
+	}
+	if statsErr != nil {
+		snap.Raw["stats_error"] = statsErr.Error()
 	}
 
 	if err := p.readAccount(accountPath, &snap); err != nil {
@@ -283,6 +348,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 			hasData = true
 		}
 	}
+
+	normalizeModelUsage(&snap)
 
 	if !hasData {
 		snap.Status = core.StatusError
@@ -385,7 +452,21 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 		}
 	}
 
-	today := time.Now().Format("2006-01-02")
+	if stats.TotalSpeculationTimeSavedMs > 0 {
+		hoursSaved := float64(stats.TotalSpeculationTimeSavedMs) / float64(time.Hour/time.Millisecond)
+		snap.Metrics["speculation_time_saved_hours"] = core.Metric{
+			Used:   &hoursSaved,
+			Unit:   "hours",
+			Window: "all-time",
+		}
+	}
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	weekStart := now.Add(-7 * 24 * time.Hour)
+	var weeklyMessages int
+	var weeklyToolCalls int
+	var weeklySessions int
 	for _, da := range stats.DailyActivity {
 		snap.DailySeries["messages"] = append(snap.DailySeries["messages"], core.TimePoint{
 			Date: da.Date, Value: float64(da.MessageCount),
@@ -416,6 +497,37 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 				Unit:   "sessions",
 				Window: "1d",
 			}
+		}
+
+		if day, err := time.Parse("2006-01-02", da.Date); err == nil && (day.After(weekStart) || day.Equal(weekStart)) {
+			weeklyMessages += da.MessageCount
+			weeklyToolCalls += da.ToolCallCount
+			weeklySessions += da.SessionCount
+		}
+	}
+
+	if weeklyMessages > 0 {
+		wm := float64(weeklyMessages)
+		snap.Metrics["7d_messages"] = core.Metric{
+			Used:   &wm,
+			Unit:   "messages",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyToolCalls > 0 {
+		wt := float64(weeklyToolCalls)
+		snap.Metrics["7d_tool_calls"] = core.Metric{
+			Used:   &wt,
+			Unit:   "calls",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklySessions > 0 {
+		ws := float64(weeklySessions)
+		snap.Metrics["7d_sessions"] = core.Metric{
+			Used:   &ws,
+			Unit:   "sessions",
+			Window: "rolling 7 days",
 		}
 	}
 
@@ -451,29 +563,31 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 		outTokens := float64(usage.OutputTokens)
 		inTokens := float64(usage.InputTokens)
 		name := sanitizeModelName(model)
+		modelPrefix := "model_" + name
 
-		snap.Metrics[fmt.Sprintf("output_tokens_%s", name)] = core.Metric{
-			Used:   &outTokens,
-			Unit:   "tokens",
-			Window: "all-time",
-		}
-		snap.Metrics[fmt.Sprintf("input_tokens_%s", name)] = core.Metric{
-			Used:   &inTokens,
-			Unit:   "tokens",
-			Window: "all-time",
-		}
+		setMetricMax(snap, modelPrefix+"_input_tokens", inTokens, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_output_tokens", outTokens, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cached_tokens", float64(usage.CacheReadInputTokens), "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cache_creation_tokens", float64(usage.CacheCreationInputTokens), "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_web_search_requests", float64(usage.WebSearchRequests), "requests", "all-time")
+		setMetricMax(snap, modelPrefix+"_context_window_tokens", float64(usage.ContextWindow), "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_max_output_tokens", float64(usage.MaxOutputTokens), "tokens", "all-time")
 
 		snap.Raw[fmt.Sprintf("model_%s_cache_read", name)] = fmt.Sprintf("%d tokens", usage.CacheReadInputTokens)
 		snap.Raw[fmt.Sprintf("model_%s_cache_create", name)] = fmt.Sprintf("%d tokens", usage.CacheCreationInputTokens)
+		if usage.WebSearchRequests > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_web_search_requests", name)] = fmt.Sprintf("%d", usage.WebSearchRequests)
+		}
+		if usage.ContextWindow > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_context_window", name)] = fmt.Sprintf("%d", usage.ContextWindow)
+		}
+		if usage.MaxOutputTokens > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_max_output_tokens", name)] = fmt.Sprintf("%d", usage.MaxOutputTokens)
+		}
 
 		if usage.CostUSD > 0 {
 			totalCostUSD += usage.CostUSD
-			modelCost := usage.CostUSD
-			snap.Metrics[fmt.Sprintf("model_%s_cost_usd", name)] = core.Metric{
-				Used:   &modelCost,
-				Unit:   "USD",
-				Window: "all-time",
-			}
+			setMetricMax(snap, modelPrefix+"_cost_usd", usage.CostUSD, "USD", "all-time")
 		}
 	}
 
@@ -489,6 +603,44 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 	snap.Raw["stats_last_computed"] = stats.LastComputedDate
 	if stats.FirstSessionDate != "" {
 		snap.Raw["first_session"] = stats.FirstSessionDate
+	}
+	if stats.LongestSession != nil {
+		if stats.LongestSession.Duration > 0 {
+			minutes := float64(stats.LongestSession.Duration) / float64(time.Minute/time.Millisecond)
+			snap.Metrics["longest_session_minutes"] = core.Metric{
+				Used:   &minutes,
+				Unit:   "minutes",
+				Window: "all-time",
+			}
+		}
+		if stats.LongestSession.MessageCount > 0 {
+			msgs := float64(stats.LongestSession.MessageCount)
+			snap.Metrics["longest_session_messages"] = core.Metric{
+				Used:   &msgs,
+				Unit:   "messages",
+				Window: "all-time",
+			}
+		}
+		if stats.LongestSession.SessionID != "" {
+			snap.Raw["longest_session_id"] = stats.LongestSession.SessionID
+		}
+		if stats.LongestSession.Timestamp != "" {
+			snap.Raw["longest_session_timestamp"] = stats.LongestSession.Timestamp
+		}
+	}
+	if len(stats.HourCounts) > 0 {
+		peakHour := ""
+		peakCount := 0
+		for h, c := range stats.HourCounts {
+			if c > peakCount {
+				peakHour = h
+				peakCount = c
+			}
+		}
+		if peakHour != "" {
+			snap.Raw["peak_hour"] = peakHour
+			snap.Raw["peak_hour_messages"] = fmt.Sprintf("%d", peakCount)
+		}
 	}
 
 	return nil
@@ -545,13 +697,27 @@ func (p *Provider) readAccount(path string, snap *core.QuotaSnapshot) error {
 
 	for orgID, access := range acct.S1MAccessCache {
 		if access.HasAccess {
-			snap.Raw[fmt.Sprintf("s1m_access_%s", orgID[:8])] = "true"
+			shortID := orgID
+			if len(shortID) > 8 {
+				shortID = shortID[:8]
+			}
+			snap.Raw[fmt.Sprintf("s1m_access_%s", shortID)] = "true"
 		}
 	}
 
 	snap.Raw["num_startups"] = fmt.Sprintf("%d", acct.NumStartups)
 	if acct.InstallMethod != "" {
 		snap.Raw["install_method"] = acct.InstallMethod
+	}
+	if acct.ClientDataCache != nil && acct.ClientDataCache.Timestamp > 0 {
+		snap.Raw["client_data_cache_ts"] = strconv.FormatInt(acct.ClientDataCache.Timestamp, 10)
+	}
+	if len(acct.SkillUsage) > 0 {
+		counts := make(map[string]int, len(acct.SkillUsage))
+		for skill, usage := range acct.SkillUsage {
+			counts[sanitizeModelName(skill)] = usage.UsageCount
+		}
+		snap.Raw["skill_usage"] = summarizeCountMap(counts, 6)
 	}
 
 	return nil
@@ -583,6 +749,8 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	if altProjectsDir != "" {
 		jsonlFiles = append(jsonlFiles, collectJSONLFiles(altProjectsDir)...)
 	}
+	jsonlFiles = dedupeStringSlice(jsonlFiles)
+	sort.Strings(jsonlFiles)
 
 	if len(jsonlFiles) == 0 {
 		return fmt.Errorf("no JSONL conversation files found")
@@ -627,30 +795,158 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	blockStartCandidates := []time.Time{}
 
 	type parsedUsage struct {
-		timestamp time.Time
-		model     string
-		usage     *jsonlUsage
+		timestamp  time.Time
+		model      string
+		usage      *jsonlUsage
+		requestID  string
+		messageID  string
+		sessionID  string
+		cwd        string
+		sourcePath string
+		content    []jsonlContent
 	}
 
 	var allUsages []parsedUsage
+	modelTotals := make(map[string]*modelUsageTotals)
+	clientTotals := make(map[string]*modelUsageTotals)
+	projectTotals := make(map[string]*modelUsageTotals)
+	agentTotals := make(map[string]*modelUsageTotals)
+	serviceTierTotals := make(map[string]float64)
+	inferenceGeoTotals := make(map[string]float64)
+	toolUsageCounts := make(map[string]int)
+	clientSessions := make(map[string]map[string]bool)
+	projectSessions := make(map[string]map[string]bool)
+	agentSessions := make(map[string]map[string]bool)
+	seenUsageKeys := make(map[string]bool)
+	seenToolKeys := make(map[string]bool)
+	dailyClientTokens := make(map[string]map[string]float64)
+	dailyTokenTotals := make(map[string]int)
+	dailyMessages := make(map[string]int)
+	dailyCost := make(map[string]float64)
+	dailyModelTokens := make(map[string]map[string]int)
+	todaySessions := make(map[string]bool)
+	weeklySessions := make(map[string]bool)
+	var (
+		todayCacheCreate5m   int
+		todayCacheCreate1h   int
+		todayReasoning       int
+		todayToolCalls       int
+		todayWebSearch       int
+		todayWebFetch        int
+		weeklyCacheRead      int
+		weeklyCacheCreate    int
+		weeklyCacheCreate5m  int
+		weeklyCacheCreate1h  int
+		weeklyReasoning      int
+		weeklyToolCalls      int
+		weeklyWebSearch      int
+		weeklyWebFetch       int
+		allTimeInputTokens   int
+		allTimeOutputTokens  int
+		allTimeCacheRead     int
+		allTimeCacheCreate   int
+		allTimeCacheCreate5m int
+		allTimeCacheCreate1h int
+		allTimeReasoning     int
+		allTimeToolCalls     int
+		allTimeWebSearch     int
+		allTimeWebFetch      int
+	)
+
+	ensureTotals := func(m map[string]*modelUsageTotals, key string) *modelUsageTotals {
+		if _, ok := m[key]; !ok {
+			m[key] = &modelUsageTotals{}
+		}
+		return m[key]
+	}
+	ensureSessionSet := func(m map[string]map[string]bool, key string) map[string]bool {
+		if _, ok := m[key]; !ok {
+			m[key] = make(map[string]bool)
+		}
+		return m[key]
+	}
+	normalizeAgent := func(path string) string {
+		if strings.Contains(path, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
+			return "subagents"
+		}
+		return "main"
+	}
+	normalizeProject := func(cwd, sourcePath string) string {
+		if cwd != "" {
+			base := filepath.Base(cwd)
+			if base != "" && base != "." && base != string(filepath.Separator) {
+				return sanitizeModelName(base)
+			}
+			return sanitizeModelName(cwd)
+		}
+		dir := filepath.Base(filepath.Dir(sourcePath))
+		if dir == "" || dir == "." {
+			return "unknown"
+		}
+		return sanitizeModelName(dir)
+	}
+	usageDedupKey := func(u parsedUsage) string {
+		if u.requestID != "" {
+			return "req:" + u.requestID
+		}
+		if u.messageID != "" {
+			return "msg:" + u.messageID
+		}
+		if u.usage == nil {
+			return ""
+		}
+		return fmt.Sprintf("%s|%s|%d|%d|%d|%d|%d",
+			u.sessionID,
+			u.timestamp.UTC().Format(time.RFC3339Nano),
+			u.usage.InputTokens,
+			u.usage.OutputTokens,
+			u.usage.CacheReadInputTokens,
+			u.usage.CacheCreationInputTokens,
+			u.usage.ReasoningTokens,
+		)
+	}
+	toolDedupKey := func(u parsedUsage, idx int, item jsonlContent) string {
+		base := u.requestID
+		if base == "" {
+			base = u.messageID
+		}
+		if base == "" {
+			base = u.sessionID + "|" + u.timestamp.UTC().Format(time.RFC3339Nano)
+		}
+		if item.ID != "" {
+			return base + "|tool|" + item.ID
+		}
+		name := strings.ToLower(strings.TrimSpace(item.Name))
+		if name == "" {
+			name = "unknown"
+		}
+		return fmt.Sprintf("%s|tool|%s|%d", base, name, idx)
+	}
 
 	for _, fpath := range jsonlFiles {
 		entries := parseJSONLFile(fpath)
 		for _, entry := range entries {
-			if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+			if entry.Type != "assistant" || entry.Message == nil {
 				continue
 			}
-			ts, err := time.Parse(time.RFC3339, entry.Timestamp)
-			if err != nil {
-				ts, err = time.Parse("2006-01-02T15:04:05.000Z", entry.Timestamp)
-				if err != nil {
-					continue
-				}
+			ts, ok := parseJSONLTimestamp(entry.Timestamp)
+			if !ok {
+				continue
+			}
+			model := entry.Message.Model
+			if model == "" {
+				model = "unknown"
 			}
 			allUsages = append(allUsages, parsedUsage{
-				timestamp: ts,
-				model:     entry.Message.Model,
-				usage:     entry.Message.Usage,
+				timestamp:  ts,
+				model:      model,
+				usage:      entry.Message.Usage,
+				requestID:  entry.RequestID,
+				messageID:  entry.Message.ID,
+				sessionID:  entry.SessionID,
+				cwd:        entry.CWD,
+				sourcePath: fpath,
+				content:    entry.Message.Content,
 			})
 		}
 	}
@@ -659,7 +955,18 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		return allUsages[i].timestamp.Before(allUsages[j].timestamp)
 	})
 
+	seenForBlock := make(map[string]bool)
 	for _, u := range allUsages {
+		if u.usage == nil {
+			continue
+		}
+		key := usageDedupKey(u)
+		if key != "" {
+			if seenForBlock[key] {
+				continue
+			}
+			seenForBlock[key] = true
+		}
 		if currentBlockEnd.IsZero() || u.timestamp.After(currentBlockEnd) {
 			currentBlockStart = floorToHour(u.timestamp)
 			currentBlockEnd = currentBlockStart.Add(billingBlockDuration)
@@ -673,9 +980,136 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 
 	for _, u := range allUsages {
+		for idx, item := range u.content {
+			if item.Type != "tool_use" {
+				continue
+			}
+			toolKey := toolDedupKey(u, idx, item)
+			if seenToolKeys[toolKey] {
+				continue
+			}
+			seenToolKeys[toolKey] = true
+			toolName := strings.ToLower(strings.TrimSpace(item.Name))
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			toolUsageCounts[toolName]++
+			allTimeToolCalls++
+
+			if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
+				todayToolCalls++
+			}
+			if u.timestamp.After(weekStart) || u.timestamp.Equal(weekStart) {
+				weeklyToolCalls++
+			}
+		}
+
+		if u.usage == nil {
+			continue
+		}
+		usageKey := usageDedupKey(u)
+		if usageKey != "" && seenUsageKeys[usageKey] {
+			continue
+		}
+		if usageKey != "" {
+			seenUsageKeys[usageKey] = true
+		}
+
+		modelID := sanitizeModelName(u.model)
+		modelTotalsEntry := ensureTotals(modelTotals, modelID)
+		projectID := normalizeProject(u.cwd, u.sourcePath)
+		clientID := projectID
+		clientTotalsEntry := ensureTotals(clientTotals, clientID)
+		projectTotalsEntry := ensureTotals(projectTotals, projectID)
+		agentID := normalizeAgent(u.sourcePath)
+		agentTotalsEntry := ensureTotals(agentTotals, agentID)
+
+		if u.sessionID != "" {
+			ensureSessionSet(clientSessions, clientID)[u.sessionID] = true
+			ensureSessionSet(projectSessions, projectID)[u.sessionID] = true
+			ensureSessionSet(agentSessions, agentID)[u.sessionID] = true
+			if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
+				todaySessions[u.sessionID] = true
+			}
+			if u.timestamp.After(weekStart) || u.timestamp.Equal(weekStart) {
+				weeklySessions[u.sessionID] = true
+			}
+		}
+
 		cost := estimateCost(u.model, u.usage)
 		allTimeCostUSD += cost
 		allTimeEntries++
+		modelTotalsEntry.input += float64(u.usage.InputTokens)
+		modelTotalsEntry.output += float64(u.usage.OutputTokens)
+		modelTotalsEntry.cached += float64(u.usage.CacheReadInputTokens)
+		modelTotalsEntry.cacheCreate += float64(u.usage.CacheCreationInputTokens)
+		modelTotalsEntry.reasoning += float64(u.usage.ReasoningTokens)
+		modelTotalsEntry.cost += cost
+		if u.usage.CacheCreation != nil {
+			modelTotalsEntry.cache5m += float64(u.usage.CacheCreation.Ephemeral5mInputTokens)
+			modelTotalsEntry.cache1h += float64(u.usage.CacheCreation.Ephemeral1hInputTokens)
+			allTimeCacheCreate5m += u.usage.CacheCreation.Ephemeral5mInputTokens
+			allTimeCacheCreate1h += u.usage.CacheCreation.Ephemeral1hInputTokens
+		}
+		if u.usage.ServerToolUse != nil {
+			modelTotalsEntry.webSearch += float64(u.usage.ServerToolUse.WebSearchRequests)
+			modelTotalsEntry.webFetch += float64(u.usage.ServerToolUse.WebFetchRequests)
+		}
+
+		tokenVolume := float64(u.usage.InputTokens + u.usage.OutputTokens + u.usage.CacheReadInputTokens + u.usage.CacheCreationInputTokens + u.usage.ReasoningTokens)
+		clientTotalsEntry.input += float64(u.usage.InputTokens)
+		clientTotalsEntry.output += float64(u.usage.OutputTokens)
+		clientTotalsEntry.cached += float64(u.usage.CacheReadInputTokens)
+		clientTotalsEntry.cacheCreate += float64(u.usage.CacheCreationInputTokens)
+		clientTotalsEntry.reasoning += float64(u.usage.ReasoningTokens)
+		clientTotalsEntry.cost += cost
+		clientTotalsEntry.sessions = float64(len(clientSessions[clientID]))
+
+		projectTotalsEntry.input += float64(u.usage.InputTokens)
+		projectTotalsEntry.output += float64(u.usage.OutputTokens)
+		projectTotalsEntry.cached += float64(u.usage.CacheReadInputTokens)
+		projectTotalsEntry.cacheCreate += float64(u.usage.CacheCreationInputTokens)
+		projectTotalsEntry.reasoning += float64(u.usage.ReasoningTokens)
+		projectTotalsEntry.cost += cost
+		projectTotalsEntry.sessions = float64(len(projectSessions[projectID]))
+
+		agentTotalsEntry.input += float64(u.usage.InputTokens)
+		agentTotalsEntry.output += float64(u.usage.OutputTokens)
+		agentTotalsEntry.cached += float64(u.usage.CacheReadInputTokens)
+		agentTotalsEntry.cacheCreate += float64(u.usage.CacheCreationInputTokens)
+		agentTotalsEntry.reasoning += float64(u.usage.ReasoningTokens)
+		agentTotalsEntry.cost += cost
+		agentTotalsEntry.sessions = float64(len(agentSessions[agentID]))
+
+		allTimeInputTokens += u.usage.InputTokens
+		allTimeOutputTokens += u.usage.OutputTokens
+		allTimeCacheRead += u.usage.CacheReadInputTokens
+		allTimeCacheCreate += u.usage.CacheCreationInputTokens
+		allTimeReasoning += u.usage.ReasoningTokens
+		if u.usage.ServerToolUse != nil {
+			allTimeWebSearch += u.usage.ServerToolUse.WebSearchRequests
+			allTimeWebFetch += u.usage.ServerToolUse.WebFetchRequests
+		}
+
+		day := u.timestamp.Format("2006-01-02")
+		dailyTokenTotals[day] += u.usage.InputTokens + u.usage.OutputTokens
+		dailyMessages[day]++
+		dailyCost[day] += cost
+		if dailyModelTokens[day] == nil {
+			dailyModelTokens[day] = make(map[string]int)
+		}
+		dailyModelTokens[day][u.model] += u.usage.InputTokens + u.usage.OutputTokens
+		if dailyClientTokens[day] == nil {
+			dailyClientTokens[day] = make(map[string]float64)
+		}
+		dailyClientTokens[day][clientID] += tokenVolume
+
+		if tier := strings.ToLower(strings.TrimSpace(u.usage.ServiceTier)); tier != "" {
+			serviceTierTotals[tier] += tokenVolume
+		}
+		if geo := strings.ToLower(strings.TrimSpace(u.usage.InferenceGeo)); geo != "" {
+			inferenceGeoTotals[geo] += tokenVolume
+		}
 
 		if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
 			todayCostUSD += cost
@@ -683,14 +1117,34 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			todayOutputTokens += u.usage.OutputTokens
 			todayCacheRead += u.usage.CacheReadInputTokens
 			todayCacheCreate += u.usage.CacheCreationInputTokens
+			todayReasoning += u.usage.ReasoningTokens
+			if u.usage.CacheCreation != nil {
+				todayCacheCreate5m += u.usage.CacheCreation.Ephemeral5mInputTokens
+				todayCacheCreate1h += u.usage.CacheCreation.Ephemeral1hInputTokens
+			}
+			if u.usage.ServerToolUse != nil {
+				todayWebSearch += u.usage.ServerToolUse.WebSearchRequests
+				todayWebFetch += u.usage.ServerToolUse.WebFetchRequests
+			}
 			todayMessages++
-			todayModels[u.model] = true
+			todayModels[modelID] = true
 		}
 
-		if u.timestamp.After(weekStart) {
+		if u.timestamp.After(weekStart) || u.timestamp.Equal(weekStart) {
 			weeklyCostUSD += cost
 			weeklyInputTokens += u.usage.InputTokens
 			weeklyOutputTokens += u.usage.OutputTokens
+			weeklyCacheRead += u.usage.CacheReadInputTokens
+			weeklyCacheCreate += u.usage.CacheCreationInputTokens
+			weeklyReasoning += u.usage.ReasoningTokens
+			if u.usage.CacheCreation != nil {
+				weeklyCacheCreate5m += u.usage.CacheCreation.Ephemeral5mInputTokens
+				weeklyCacheCreate1h += u.usage.CacheCreation.Ephemeral1hInputTokens
+			}
+			if u.usage.ServerToolUse != nil {
+				weeklyWebSearch += u.usage.ServerToolUse.WebSearchRequests
+				weeklyWebFetch += u.usage.ServerToolUse.WebFetchRequests
+			}
 			weeklyMessages++
 		}
 
@@ -701,48 +1155,52 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			blockCacheRead += u.usage.CacheReadInputTokens
 			blockCacheCreate += u.usage.CacheCreationInputTokens
 			blockMessages++
-			blockModels[u.model] = true
+			blockModels[modelID] = true
 		}
+	}
+
+	for model, totals := range modelTotals {
+		modelPrefix := "model_" + model
+		setMetricMax(snap, modelPrefix+"_input_tokens", totals.input, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_output_tokens", totals.output, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cached_tokens", totals.cached, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cache_creation_tokens", totals.cacheCreate, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cache_creation_5m_tokens", totals.cache5m, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cache_creation_1h_tokens", totals.cache1h, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_reasoning_tokens", totals.reasoning, "tokens", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_web_search_requests", totals.webSearch, "requests", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_web_fetch_requests", totals.webFetch, "requests", "all-time estimate")
+		setMetricMax(snap, modelPrefix+"_cost_usd", totals.cost, "USD", "all-time estimate")
+	}
+
+	for client, totals := range clientTotals {
+		key := "client_" + client
+		setMetricMax(snap, key+"_input_tokens", totals.input, "tokens", "all-time")
+		setMetricMax(snap, key+"_output_tokens", totals.output, "tokens", "all-time")
+		setMetricMax(snap, key+"_cached_tokens", totals.cached, "tokens", "all-time")
+		setMetricMax(snap, key+"_reasoning_tokens", totals.reasoning, "tokens", "all-time")
+		setMetricMax(snap, key+"_total_tokens", totals.input+totals.output+totals.cached+totals.cacheCreate+totals.reasoning, "tokens", "all-time")
+		setMetricMax(snap, key+"_sessions", totals.sessions, "sessions", "all-time")
 	}
 
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
-	if len(snap.DailySeries["messages"]) == 0 && len(allUsages) > 0 {
-		dailyTokens := make(map[string]int)
-		dailyMsgs := make(map[string]int)
-		dailyCost := make(map[string]float64)
-		dailyModelTok := make(map[string]map[string]int)
+	dates := make([]string, 0, len(dailyTokenTotals))
+	for d := range dailyTokenTotals {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
 
-		for _, u := range allUsages {
-			day := u.timestamp.Format("2006-01-02")
-			totalTok := u.usage.InputTokens + u.usage.OutputTokens
-			dailyTokens[day] += totalTok
-			dailyMsgs[day]++
-			dailyCost[day] += estimateCost(u.model, u.usage)
-			if dailyModelTok[day] == nil {
-				dailyModelTok[day] = make(map[string]int)
-			}
-			dailyModelTok[day][u.model] += totalTok
-		}
-
-		dates := make([]string, 0, len(dailyTokens))
-		for d := range dailyTokens {
-			dates = append(dates, d)
-		}
-		sort.Strings(dates)
-
+	if len(snap.DailySeries["messages"]) == 0 && len(dates) > 0 {
 		for _, d := range dates {
-			snap.DailySeries["messages"] = append(snap.DailySeries["messages"],
-				core.TimePoint{Date: d, Value: float64(dailyMsgs[d])})
-			snap.DailySeries["tokens_total"] = append(snap.DailySeries["tokens_total"],
-				core.TimePoint{Date: d, Value: float64(dailyTokens[d])})
-			snap.DailySeries["cost"] = append(snap.DailySeries["cost"],
-				core.TimePoint{Date: d, Value: dailyCost[d]})
+			snap.DailySeries["messages"] = append(snap.DailySeries["messages"], core.TimePoint{Date: d, Value: float64(dailyMessages[d])})
+			snap.DailySeries["tokens_total"] = append(snap.DailySeries["tokens_total"], core.TimePoint{Date: d, Value: float64(dailyTokenTotals[d])})
+			snap.DailySeries["cost"] = append(snap.DailySeries["cost"], core.TimePoint{Date: d, Value: dailyCost[d]})
 		}
 
 		allModels := make(map[string]int64)
-		for _, dm := range dailyModelTok {
+		for _, dm := range dailyModelTokens {
 			for model, tokens := range dm {
 				allModels[model] += int64(tokens)
 			}
@@ -764,9 +1222,27 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			model := mv[i].name
 			key := fmt.Sprintf("tokens_%s", sanitizeModelName(model))
 			for _, d := range dates {
-				tokens := dailyModelTok[d][model]
+				tokens := dailyModelTokens[d][model]
 				snap.DailySeries[key] = append(snap.DailySeries[key],
 					core.TimePoint{Date: d, Value: float64(tokens)})
+			}
+		}
+	}
+
+	if len(dates) > 0 {
+		clientNames := make(map[string]bool)
+		for _, byClient := range dailyClientTokens {
+			for client := range byClient {
+				clientNames[client] = true
+			}
+		}
+		for client := range clientNames {
+			key := "tokens_client_" + client
+			for _, d := range dates {
+				snap.DailySeries[key] = append(snap.DailySeries[key], core.TimePoint{
+					Date:  d,
+					Value: dailyClientTokens[d][client],
+				})
 			}
 		}
 	}
@@ -775,6 +1251,88 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Metrics["today_api_cost"] = core.Metric{
 			Used:   floatPtr(todayCostUSD),
 			Unit:   "USD",
+			Window: "since midnight",
+		}
+	}
+	if todayInputTokens > 0 {
+		in := float64(todayInputTokens)
+		snap.Metrics["today_input_tokens"] = core.Metric{
+			Used:   &in,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayOutputTokens > 0 {
+		out := float64(todayOutputTokens)
+		snap.Metrics["today_output_tokens"] = core.Metric{
+			Used:   &out,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheRead > 0 {
+		cacheRead := float64(todayCacheRead)
+		snap.Metrics["today_cache_read_tokens"] = core.Metric{
+			Used:   &cacheRead,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheCreate > 0 {
+		cacheCreate := float64(todayCacheCreate)
+		snap.Metrics["today_cache_create_tokens"] = core.Metric{
+			Used:   &cacheCreate,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayMessages > 0 {
+		msgs := float64(todayMessages)
+		setMetricMax(snap, "messages_today", msgs, "messages", "since midnight")
+	}
+	if len(todaySessions) > 0 {
+		setMetricMax(snap, "sessions_today", float64(len(todaySessions)), "sessions", "since midnight")
+	}
+	if todayToolCalls > 0 {
+		setMetricMax(snap, "tool_calls_today", float64(todayToolCalls), "calls", "since midnight")
+	}
+	if todayReasoning > 0 {
+		v := float64(todayReasoning)
+		snap.Metrics["today_reasoning_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheCreate5m > 0 {
+		v := float64(todayCacheCreate5m)
+		snap.Metrics["today_cache_create_5m_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayCacheCreate1h > 0 {
+		v := float64(todayCacheCreate1h)
+		snap.Metrics["today_cache_create_1h_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "since midnight",
+		}
+	}
+	if todayWebSearch > 0 {
+		v := float64(todayWebSearch)
+		snap.Metrics["today_web_search_requests"] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
+			Window: "since midnight",
+		}
+	}
+	if todayWebFetch > 0 {
+		v := float64(todayWebFetch)
+		snap.Metrics["today_web_fetch_requests"] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
 			Window: "since midnight",
 		}
 	}
@@ -806,6 +1364,68 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			Window: "rolling 7 days",
 		}
 	}
+	if weeklyCacheRead > 0 {
+		v := float64(weeklyCacheRead)
+		snap.Metrics["7d_cache_read_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyCacheCreate > 0 {
+		v := float64(weeklyCacheCreate)
+		snap.Metrics["7d_cache_create_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyCacheCreate5m > 0 {
+		v := float64(weeklyCacheCreate5m)
+		snap.Metrics["7d_cache_create_5m_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyCacheCreate1h > 0 {
+		v := float64(weeklyCacheCreate1h)
+		snap.Metrics["7d_cache_create_1h_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyReasoning > 0 {
+		v := float64(weeklyReasoning)
+		snap.Metrics["7d_reasoning_tokens"] = core.Metric{
+			Used:   &v,
+			Unit:   "tokens",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyToolCalls > 0 {
+		setMetricMax(snap, "7d_tool_calls", float64(weeklyToolCalls), "calls", "rolling 7 days")
+	}
+	if weeklyWebSearch > 0 {
+		v := float64(weeklyWebSearch)
+		snap.Metrics["7d_web_search_requests"] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
+			Window: "rolling 7 days",
+		}
+	}
+	if weeklyWebFetch > 0 {
+		v := float64(weeklyWebFetch)
+		snap.Metrics["7d_web_fetch_requests"] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
+			Window: "rolling 7 days",
+		}
+	}
+	if len(weeklySessions) > 0 {
+		setMetricMax(snap, "7d_sessions", float64(len(weeklySessions)), "sessions", "rolling 7 days")
+	}
 
 	if todayMessages > 0 {
 		snap.Raw["jsonl_today_date"] = today
@@ -814,6 +1434,9 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Raw["jsonl_today_output_tokens"] = fmt.Sprintf("%d", todayOutputTokens)
 		snap.Raw["jsonl_today_cache_read_tokens"] = fmt.Sprintf("%d", todayCacheRead)
 		snap.Raw["jsonl_today_cache_create_tokens"] = fmt.Sprintf("%d", todayCacheCreate)
+		snap.Raw["jsonl_today_reasoning_tokens"] = fmt.Sprintf("%d", todayReasoning)
+		snap.Raw["jsonl_today_web_search_requests"] = fmt.Sprintf("%d", todayWebSearch)
+		snap.Raw["jsonl_today_web_fetch_requests"] = fmt.Sprintf("%d", todayWebFetch)
 
 		models := make([]string, 0, len(todayModels))
 		for m := range todayModels {
@@ -849,6 +1472,12 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			Used:   &blockMsgs,
 			Unit:   "messages",
 			Window: "current 5h block",
+		}
+		if blockCacheRead > 0 {
+			setMetricMax(snap, "5h_block_cache_read_tokens", float64(blockCacheRead), "tokens", "current 5h block")
+		}
+		if blockCacheCreate > 0 {
+			setMetricMax(snap, "5h_block_cache_create_tokens", float64(blockCacheCreate), "tokens", "current 5h block")
 		}
 
 		remaining := currentBlockEnd.Sub(now)
@@ -890,11 +1519,217 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			Window: "all-time estimate",
 		}
 	}
+	if allTimeInputTokens > 0 {
+		setMetricMax(snap, "all_time_input_tokens", float64(allTimeInputTokens), "tokens", "all-time estimate")
+	}
+	if allTimeOutputTokens > 0 {
+		setMetricMax(snap, "all_time_output_tokens", float64(allTimeOutputTokens), "tokens", "all-time estimate")
+	}
+	if allTimeCacheRead > 0 {
+		setMetricMax(snap, "all_time_cache_read_tokens", float64(allTimeCacheRead), "tokens", "all-time estimate")
+	}
+	if allTimeCacheCreate > 0 {
+		setMetricMax(snap, "all_time_cache_create_tokens", float64(allTimeCacheCreate), "tokens", "all-time estimate")
+	}
+	if allTimeCacheCreate5m > 0 {
+		setMetricMax(snap, "all_time_cache_create_5m_tokens", float64(allTimeCacheCreate5m), "tokens", "all-time estimate")
+	}
+	if allTimeCacheCreate1h > 0 {
+		setMetricMax(snap, "all_time_cache_create_1h_tokens", float64(allTimeCacheCreate1h), "tokens", "all-time estimate")
+	}
+	if allTimeReasoning > 0 {
+		setMetricMax(snap, "all_time_reasoning_tokens", float64(allTimeReasoning), "tokens", "all-time estimate")
+	}
+	if allTimeToolCalls > 0 {
+		setMetricMax(snap, "all_time_tool_calls", float64(allTimeToolCalls), "calls", "all-time estimate")
+	}
+	if allTimeWebSearch > 0 {
+		setMetricMax(snap, "all_time_web_search_requests", float64(allTimeWebSearch), "requests", "all-time estimate")
+	}
+	if allTimeWebFetch > 0 {
+		setMetricMax(snap, "all_time_web_fetch_requests", float64(allTimeWebFetch), "requests", "all-time estimate")
+	}
+
+	snap.Raw["tool_usage"] = summarizeCountMap(toolUsageCounts, 6)
+	snap.Raw["project_usage"] = summarizeTotalsMap(projectTotals, true, 6)
+	snap.Raw["agent_usage"] = summarizeTotalsMap(agentTotals, false, 4)
+	snap.Raw["service_tier_usage"] = summarizeFloatMap(serviceTierTotals, "tok", 4)
+	snap.Raw["inference_geo_usage"] = summarizeFloatMap(inferenceGeoTotals, "tok", 4)
+	if allTimeCacheRead > 0 || allTimeCacheCreate > 0 {
+		snap.Raw["cache_usage"] = fmt.Sprintf("read %s · create %s (1h %s, 5m %s)",
+			shortTokenCount(float64(allTimeCacheRead)),
+			shortTokenCount(float64(allTimeCacheCreate)),
+			shortTokenCount(float64(allTimeCacheCreate1h)),
+			shortTokenCount(float64(allTimeCacheCreate5m)),
+		)
+	}
+	snap.Raw["project_count"] = fmt.Sprintf("%d", len(projectTotals))
+	snap.Raw["tool_count"] = fmt.Sprintf("%d", len(toolUsageCounts))
 
 	snap.Raw["jsonl_total_entries"] = fmt.Sprintf("%d", allTimeEntries)
 	snap.Raw["jsonl_total_blocks"] = fmt.Sprintf("%d", len(blockStartCandidates))
+	snap.Raw["jsonl_unique_requests"] = fmt.Sprintf("%d", len(seenUsageKeys))
+	buildModelUsageSummaryRaw(snap)
 
 	return nil
+}
+
+func parseJSONLTimestamp(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.000Z",
+	}
+	for _, layout := range layouts {
+		if ts, err := time.Parse(layout, raw); err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func dedupeStringSlice(items []string) []string {
+	seen := make(map[string]bool, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func summarizeCountMap(values map[string]int, limit int) string {
+	type entry struct {
+		name  string
+		value int
+	}
+	entries := make([]entry, 0, len(values))
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		entries = append(entries, entry{name: name, value: value})
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return entries[i].name < entries[j].name
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit <= 0 || limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		name := strings.ReplaceAll(entries[i].name, "_", "-")
+		parts = append(parts, fmt.Sprintf("%s %d", name, entries[i].value))
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func summarizeFloatMap(values map[string]float64, unit string, limit int) string {
+	type entry struct {
+		name  string
+		value float64
+	}
+	entries := make([]entry, 0, len(values))
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		entries = append(entries, entry{name: name, value: value})
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return entries[i].name < entries[j].name
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit <= 0 || limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		name := strings.ReplaceAll(entries[i].name, "_", "-")
+		value := shortTokenCount(entries[i].value)
+		if unit != "" {
+			value += " " + unit
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", name, value))
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func summarizeTotalsMap(values map[string]*modelUsageTotals, preferCost bool, limit int) string {
+	type entry struct {
+		name   string
+		tokens float64
+		cost   float64
+	}
+	entries := make([]entry, 0, len(values))
+	totalCost := 0.0
+	for name, totals := range values {
+		if totals == nil {
+			continue
+		}
+		tokens := totals.input + totals.output + totals.cached + totals.cacheCreate + totals.reasoning
+		cost := totals.cost
+		if tokens <= 0 && cost <= 0 {
+			continue
+		}
+		totalCost += cost
+		entries = append(entries, entry{name: name, tokens: tokens, cost: cost})
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	useCost := preferCost && totalCost > 0
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i].tokens
+		right := entries[j].tokens
+		if useCost {
+			left = entries[i].cost
+			right = entries[j].cost
+		}
+		if left == right {
+			return entries[i].name < entries[j].name
+		}
+		return left > right
+	})
+	if limit <= 0 || limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		name := strings.ReplaceAll(entries[i].name, "_", "-")
+		if useCost {
+			parts = append(parts, fmt.Sprintf("%s %s %s tok", name, formatUSDSummary(entries[i].cost), shortTokenCount(entries[i].tokens)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %s tok", name, shortTokenCount(entries[i].tokens)))
+		}
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func collectJSONLFiles(dir string) []string {
@@ -944,6 +1779,11 @@ func parseJSONLFile(path string) []jsonlEntry {
 }
 
 func sanitizeModelName(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return "unknown"
+	}
+
 	result := make([]byte, 0, len(model))
 	for _, c := range model {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
@@ -952,9 +1792,242 @@ func sanitizeModelName(model string) string {
 			result = append(result, '_')
 		}
 	}
-	return string(result)
+
+	out := strings.Trim(string(result), "_")
+	if out == "" {
+		return "unknown"
+	}
+	return out
 }
 
 func floatPtr(v float64) *float64 {
 	return &v
+}
+
+func setMetricMax(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+	if value <= 0 {
+		return
+	}
+	if existing, ok := snap.Metrics[key]; ok && existing.Used != nil && *existing.Used >= value {
+		return
+	}
+	v := value
+	snap.Metrics[key] = core.Metric{
+		Used:   &v,
+		Unit:   unit,
+		Window: window,
+	}
+}
+
+func normalizeModelUsage(snap *core.QuotaSnapshot) {
+	modelTotals := make(map[string]*modelUsageTotals)
+	legacyMetricKeys := make([]string, 0, 16)
+
+	ensureModel := func(name string) *modelUsageTotals {
+		if _, ok := modelTotals[name]; !ok {
+			modelTotals[name] = &modelUsageTotals{}
+		}
+		return modelTotals[name]
+	}
+
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens")
+			ensureModel(model).input += *metric.Used
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens")
+			ensureModel(model).output += *metric.Used
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost_usd"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd")
+			ensureModel(model).cost += *metric.Used
+		case strings.HasPrefix(key, "input_tokens_"):
+			model := sanitizeModelName(strings.TrimPrefix(key, "input_tokens_"))
+			ensureModel(model).input += *metric.Used
+			legacyMetricKeys = append(legacyMetricKeys, key)
+		case strings.HasPrefix(key, "output_tokens_"):
+			model := sanitizeModelName(strings.TrimPrefix(key, "output_tokens_"))
+			ensureModel(model).output += *metric.Used
+			legacyMetricKeys = append(legacyMetricKeys, key)
+		}
+	}
+
+	for key, value := range snap.Raw {
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_read"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_read")
+			if parsed, ok := parseMetricNumber(value); ok {
+				setMetricMax(snap, "model_"+model+"_cached_tokens", parsed, "tokens", "all-time")
+			}
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_create"):
+			model := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_create")
+			if parsed, ok := parseMetricNumber(value); ok {
+				setMetricMax(snap, "model_"+model+"_cache_creation_tokens", parsed, "tokens", "all-time")
+			}
+		}
+	}
+
+	for _, key := range legacyMetricKeys {
+		delete(snap.Metrics, key)
+	}
+
+	for model, totals := range modelTotals {
+		modelPrefix := "model_" + sanitizeModelName(model)
+		setMetricMax(snap, modelPrefix+"_input_tokens", totals.input, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_output_tokens", totals.output, "tokens", "all-time")
+		setMetricMax(snap, modelPrefix+"_cost_usd", totals.cost, "USD", "all-time")
+	}
+
+	buildModelUsageSummaryRaw(snap)
+}
+
+func parseMetricNumber(raw string) (float64, bool) {
+	clean := strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
+	if clean == "" {
+		return 0, false
+	}
+	fields := strings.Fields(clean)
+	if len(fields) == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+func buildModelUsageSummaryRaw(snap *core.QuotaSnapshot) {
+	type entry struct {
+		name   string
+		input  float64
+		output float64
+		cost   float64
+	}
+
+	byModel := make(map[string]*entry)
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil || !strings.HasPrefix(key, "model_") {
+			continue
+		}
+
+		switch {
+		case strings.HasSuffix(key, "_input_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].input += *metric.Used
+		case strings.HasSuffix(key, "_output_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].output += *metric.Used
+		case strings.HasSuffix(key, "_cost_usd"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd")
+			if _, ok := byModel[name]; !ok {
+				byModel[name] = &entry{name: name}
+			}
+			byModel[name].cost += *metric.Used
+		}
+	}
+
+	entries := make([]entry, 0, len(byModel))
+	totalTokens := float64(0)
+	totalCost := float64(0)
+	for _, model := range byModel {
+		if model.input <= 0 && model.output <= 0 && model.cost <= 0 {
+			continue
+		}
+		entries = append(entries, *model)
+		totalTokens += model.input + model.output
+		totalCost += model.cost
+	}
+	if len(entries) == 0 {
+		delete(snap.Raw, "model_usage")
+		delete(snap.Raw, "model_usage_window")
+		delete(snap.Raw, "model_count")
+		return
+	}
+
+	useCost := totalCost > 0
+	total := totalTokens
+	if useCost {
+		total = totalCost
+	}
+	if total <= 0 {
+		delete(snap.Raw, "model_usage")
+		delete(snap.Raw, "model_usage_window")
+		delete(snap.Raw, "model_count")
+		return
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i].input + entries[i].output
+		right := entries[j].input + entries[j].output
+		if useCost {
+			left = entries[i].cost
+			right = entries[j].cost
+		}
+		if left == right {
+			return entries[i].name < entries[j].name
+		}
+		return left > right
+	})
+
+	limit := maxModelUsageSummaryItems
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		value := entries[i].input + entries[i].output
+		if useCost {
+			value = entries[i].cost
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		tokens := entries[i].input + entries[i].output
+		modelName := strings.ReplaceAll(entries[i].name, "_", "-")
+
+		if useCost {
+			parts = append(parts, fmt.Sprintf("%s %s %s tok (%.0f%%)", modelName, formatUSDSummary(entries[i].cost), shortTokenCount(tokens), pct))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %s tok (%.0f%%)", modelName, shortTokenCount(tokens), pct))
+		}
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+
+	snap.Raw["model_usage"] = strings.Join(parts, ", ")
+	snap.Raw["model_usage_window"] = "all-time"
+	snap.Raw["model_count"] = fmt.Sprintf("%d", len(entries))
+}
+
+func shortTokenCount(v float64) string {
+	switch {
+	case v >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", v/1_000_000_000)
+	case v >= 1_000_000:
+		return fmt.Sprintf("%.1fM", v/1_000_000)
+	case v >= 1_000:
+		return fmt.Sprintf("%.1fK", v/1_000)
+	default:
+		return fmt.Sprintf("%.0f", v)
+	}
+}
+
+func formatUSDSummary(v float64) string {
+	if v >= 1000 {
+		return fmt.Sprintf("$%.0f", v)
+	}
+	return fmt.Sprintf("$%.2f", v)
 }

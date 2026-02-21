@@ -61,6 +61,8 @@ type DashboardWidget struct {
 	DisplayStyle DashboardDisplayStyle
 	ResetStyle   DashboardResetStyle
 	ColorRole    DashboardColorRole
+	// Opt-in client composition panel (client share + trend) in tile view.
+	ShowClientComposition bool
 
 	// API key provider metadata. APIKeyEnv marks a provider as configurable in API Keys tab.
 	APIKeyEnv        string

@@ -10,15 +10,18 @@ import (
 var (
 	providerSpecsOnce sync.Once
 	providerWidgets   map[string]core.DashboardWidget
+	providerDetails   map[string]core.DetailWidget
 	providerOrder     []string
 )
 
 func loadProviderSpecs() {
 	providerSpecsOnce.Do(func() {
 		providerWidgets = make(map[string]core.DashboardWidget)
+		providerDetails = make(map[string]core.DetailWidget)
 		for _, p := range providers.AllProviders() {
 			id := p.ID()
 			providerWidgets[id] = p.DashboardWidget()
+			providerDetails[id] = p.DetailWidget()
 			providerOrder = append(providerOrder, id)
 		}
 	})
@@ -31,6 +34,15 @@ func dashboardWidget(providerID string) core.DashboardWidget {
 		return cfg
 	}
 	return core.DefaultDashboardWidget()
+}
+
+func detailWidget(providerID string) core.DetailWidget {
+	loadProviderSpecs()
+
+	if cfg, ok := providerDetails[providerID]; ok {
+		return cfg
+	}
+	return core.DefaultDetailWidget()
 }
 
 type apiKeyProviderEntry struct {

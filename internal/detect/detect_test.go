@@ -33,6 +33,44 @@ func TestDetectEnvKeys_FindsSetKey(t *testing.T) {
 	}
 }
 
+func TestDetectEnvKeys_FindsZenKeys(t *testing.T) {
+	os.Setenv("ZEN_API_KEY", "zen-test-key-123456")
+	defer os.Unsetenv("ZEN_API_KEY")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	found := false
+	for _, acct := range result.Accounts {
+		if acct.Provider == "zen" && acct.APIKeyEnv == "ZEN_API_KEY" && acct.ID == "zen" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected ZEN_API_KEY to be detected")
+	}
+}
+
+func TestDetectEnvKeys_FindsOpenCodeKey(t *testing.T) {
+	os.Setenv("OPENCODE_API_KEY", "opencode-test-key-123456")
+	defer os.Unsetenv("OPENCODE_API_KEY")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	found := false
+	for _, acct := range result.Accounts {
+		if acct.Provider == "zen" && acct.APIKeyEnv == "OPENCODE_API_KEY" && acct.ID == "zen" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected OPENCODE_API_KEY to be detected")
+	}
+}
+
 func TestDetectEnvKeys_SkipsEmpty(t *testing.T) {
 	os.Unsetenv("OPENAI_API_KEY")
 

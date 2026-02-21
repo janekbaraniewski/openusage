@@ -89,13 +89,109 @@ var synthwave = Theme{
 	Rosewater: "#F97E72", Lavender: "#CF8DFB", Sky: "#36F9F6", Maroon: "#FE4450",
 }
 
+var oneDark = Theme{
+	Name: "One Dark", Icon: "🧪",
+	Base: "#282C34", Mantle: "#21252B",
+	Surface0: "#2C313C", Surface1: "#3E4451", Surface2: "#4B5263", Overlay: "#3E4451",
+	Text: "#ABB2BF", Subtext: "#98A2B3", Dim: "#5C6370",
+	Accent: "#C678DD", Blue: "#61AFEF", Sapphire: "#56B6C2",
+	Green: "#98C379", Yellow: "#E5C07B", Red: "#E06C75",
+	Peach: "#D19A66", Teal: "#56B6C2", Flamingo: "#BE5046",
+	Rosewater: "#E5C07B", Lavender: "#C678DD", Sky: "#61AFEF", Maroon: "#BE5046",
+}
+
+var solarizedDark = Theme{
+	Name: "Solarized Dark", Icon: "🌅",
+	Base: "#002B36", Mantle: "#073642",
+	Surface0: "#073642", Surface1: "#0E3A45", Surface2: "#144754", Overlay: "#0E3A45",
+	Text: "#93A1A1", Subtext: "#839496", Dim: "#586E75",
+	Accent: "#D33682", Blue: "#268BD2", Sapphire: "#2AA198",
+	Green: "#859900", Yellow: "#B58900", Red: "#DC322F",
+	Peach: "#CB4B16", Teal: "#2AA198", Flamingo: "#D33682",
+	Rosewater: "#EEE8D5", Lavender: "#6C71C4", Sky: "#268BD2", Maroon: "#DC322F",
+}
+
+var monokai = Theme{
+	Name: "Monokai", Icon: "🦎",
+	Base: "#272822", Mantle: "#1E1F1C",
+	Surface0: "#3E3D32", Surface1: "#575642", Surface2: "#75715E", Overlay: "#575642",
+	Text: "#F8F8F2", Subtext: "#CFCFC2", Dim: "#75715E",
+	Accent: "#AE81FF", Blue: "#66D9EF", Sapphire: "#78DCE8",
+	Green: "#A6E22E", Yellow: "#E6DB74", Red: "#F92672",
+	Peach: "#FD971F", Teal: "#66D9EF", Flamingo: "#F92672",
+	Rosewater: "#F8F8F2", Lavender: "#AE81FF", Sky: "#78DCE8", Maroon: "#D14A68",
+}
+
+var everforest = Theme{
+	Name: "Everforest", Icon: "🌲",
+	Base: "#2D353B", Mantle: "#232A2E",
+	Surface0: "#343F44", Surface1: "#3D484D", Surface2: "#475258", Overlay: "#3D484D",
+	Text: "#D3C6AA", Subtext: "#A7C080", Dim: "#859289",
+	Accent: "#D699B6", Blue: "#7FBBB3", Sapphire: "#83C092",
+	Green: "#A7C080", Yellow: "#DBBC7F", Red: "#E67E80",
+	Peach: "#E69875", Teal: "#83C092", Flamingo: "#D699B6",
+	Rosewater: "#D3C6AA", Lavender: "#D699B6", Sky: "#7FBBB3", Maroon: "#E67E80",
+}
+
+var kanagawa = Theme{
+	Name: "Kanagawa", Icon: "⛩",
+	Base: "#1F1F28", Mantle: "#16161D",
+	Surface0: "#2A2A37", Surface1: "#363646", Surface2: "#54546D", Overlay: "#363646",
+	Text: "#DCD7BA", Subtext: "#C8C093", Dim: "#727169",
+	Accent: "#957FB8", Blue: "#7E9CD8", Sapphire: "#7FB4CA",
+	Green: "#76946A", Yellow: "#C0A36E", Red: "#C34043",
+	Peach: "#FFA066", Teal: "#6A9589", Flamingo: "#D27E99",
+	Rosewater: "#DCD7BA", Lavender: "#957FB8", Sky: "#7FB4CA", Maroon: "#E46876",
+}
+
+var rosePine = Theme{
+	Name: "Rose Pine", Icon: "🌹",
+	Base: "#191724", Mantle: "#16141F",
+	Surface0: "#1F1D2E", Surface1: "#26233A", Surface2: "#403D52", Overlay: "#26233A",
+	Text: "#E0DEF4", Subtext: "#908CAA", Dim: "#6E6A86",
+	Accent: "#C4A7E7", Blue: "#9CCFD8", Sapphire: "#31748F",
+	Green: "#9CCFD8", Yellow: "#F6C177", Red: "#EB6F92",
+	Peach: "#EA9A97", Teal: "#9CCFD8", Flamingo: "#EBBCBA",
+	Rosewater: "#E0DEF4", Lavender: "#C4A7E7", Sky: "#9CCFD8", Maroon: "#B4637A",
+}
+
+var ayuDark = Theme{
+	Name: "Ayu Dark", Icon: "🌙",
+	Base: "#0B0E14", Mantle: "#090B10",
+	Surface0: "#11151C", Surface1: "#1B2330", Surface2: "#2A3547", Overlay: "#1B2330",
+	Text: "#BFBDB6", Subtext: "#A6A49D", Dim: "#626A73",
+	Accent: "#D2A6FF", Blue: "#59C2FF", Sapphire: "#95E6CB",
+	Green: "#AAD94C", Yellow: "#FFB454", Red: "#F07178",
+	Peach: "#FF8F40", Teal: "#95E6CB", Flamingo: "#F29668",
+	Rosewater: "#E6E1CF", Lavender: "#D2A6FF", Sky: "#73D0FF", Maroon: "#E06C75",
+}
+
+var nightfox = Theme{
+	Name: "Nightfox", Icon: "🦊",
+	Base: "#192330", Mantle: "#131A24",
+	Surface0: "#29394F", Surface1: "#394B70", Surface2: "#4E5F82", Overlay: "#394B70",
+	Text: "#CDCECF", Subtext: "#9DA9BC", Dim: "#738091",
+	Accent: "#9D79D6", Blue: "#719CD6", Sapphire: "#63CDCF",
+	Green: "#81B29A", Yellow: "#DBC074", Red: "#C94F6D",
+	Peach: "#F4A261", Teal: "#63CDCF", Flamingo: "#9D79D6",
+	Rosewater: "#CDCECF", Lavender: "#9D79D6", Sky: "#63CDCF", Maroon: "#C94F6D",
+}
+
 var Themes = []Theme{
+	gruvbox,
 	catppuccinMocha,
 	dracula,
 	nord,
 	tokyoNight,
-	gruvbox,
 	synthwave,
+	oneDark,
+	solarizedDark,
+	monokai,
+	everforest,
+	kanagawa,
+	rosePine,
+	ayuDark,
+	nightfox,
 }
 
 var ActiveThemeIdx int

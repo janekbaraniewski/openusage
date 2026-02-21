@@ -96,6 +96,7 @@ type generationEntry struct {
 	ID                     string   `json:"id"`
 	Model                  string   `json:"model"`
 	TotalCost              float64  `json:"total_cost"`
+	Usage                  float64  `json:"usage"`
 	IsByok                 bool     `json:"is_byok"`
 	UpstreamInferenceCost  *float64 `json:"upstream_inference_cost"`
 	Cancelled              bool     `json:"cancelled"`
@@ -119,8 +120,12 @@ type generationEntry struct {
 	NumInputAudioPrompt    *int     `json:"num_input_audio_prompt"`
 	NumSearchResults       *int     `json:"num_search_results"`
 	Finish                 string   `json:"finish_reason"`
+	NativeFinish           string   `json:"native_finish_reason"`
 	UpstreamID             string   `json:"upstream_id"`
 	ModerationLatency      *int     `json:"moderation_latency"`
+	ExternalUser           string   `json:"external_user"`
+	APIType                string   `json:"api_type"`
+	Router                 string   `json:"router"`
 }
 
 type generationStatsResponse struct {
@@ -160,12 +165,18 @@ type modelStats struct {
 	Requests         int
 	PromptTokens     int
 	CompletionTokens int
+	NativePrompt     int
+	NativeCompletion int
 	ReasoningTokens  int
 	CachedTokens     int
 	ImageTokens      int
 	TotalCost        float64
 	TotalLatencyMs   int
 	LatencyCount     int
+	TotalGenMs       int
+	GenerationCount  int
+	TotalModeration  int
+	ModerationCount  int
 	CacheDiscountUSD float64
 	Providers        map[string]int
 }
@@ -174,8 +185,21 @@ type providerStats struct {
 	Requests         int
 	PromptTokens     int
 	CompletionTokens int
+	ReasoningTokens  int
+	ByokCost         float64
 	TotalCost        float64
 	Models           map[string]int
+}
+
+type endpointStats struct {
+	Requests         int
+	PromptTokens     int
+	CompletionTokens int
+	ReasoningTokens  int
+	ByokCost         float64
+	TotalCost        float64
+	Model            string
+	Provider         string
 }
 
 type Provider struct{}
@@ -479,45 +503,75 @@ func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey strin
 }
 
 func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
-	url := baseURL + "/keys"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	const (
+		pageSizeHint = 100
+		maxPages     = 20
+	)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	var allKeys []keyListEntry
+	offset := 0
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	for page := 0; page < maxPages; page++ {
+		url := fmt.Sprintf("%s/keys?include_disabled=true&offset=%d", baseURL, offset)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode == http.StatusForbidden {
+			return nil
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+
+		var pageResp keysResponse
+		if err := json.Unmarshal(body, &pageResp); err != nil {
+			return fmt.Errorf("parsing keys list: %w", err)
+		}
+		if len(pageResp.Data) == 0 {
+			break
+		}
+
+		allKeys = append(allKeys, pageResp.Data...)
+		offset += len(pageResp.Data)
+		if len(pageResp.Data) < pageSizeHint {
+			break
+		}
 	}
 
-	if resp.StatusCode == http.StatusForbidden {
-		return nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	var keys keysResponse
-	if err := json.Unmarshal(body, &keys); err != nil {
-		return fmt.Errorf("parsing keys list: %w", err)
-	}
-
-	snap.Raw["keys_total"] = fmt.Sprintf("%d", len(keys.Data))
+	snap.Raw["keys_total"] = fmt.Sprintf("%d", len(allKeys))
 
 	active := 0
-	for _, k := range keys.Data {
+	for _, k := range allKeys {
 		if !k.Disabled {
 			active++
 		}
 	}
 	snap.Raw["keys_active"] = fmt.Sprintf("%d", active)
+	disabled := len(allKeys) - active
+	snap.Raw["keys_disabled"] = fmt.Sprintf("%d", disabled)
+
+	totalF := float64(len(allKeys))
+	activeF := float64(active)
+	disabledF := float64(disabled)
+	snap.Metrics["keys_total"] = core.Metric{Used: &totalF, Unit: "keys", Window: "account"}
+	snap.Metrics["keys_active"] = core.Metric{Used: &activeF, Unit: "keys", Window: "account"}
+	if disabled > 0 {
+		snap.Metrics["keys_disabled"] = core.Metric{Used: &disabledF, Unit: "keys", Window: "account"}
+	}
 
 	currentLabel := snap.Raw["key_label"]
 	if currentLabel == "" {
@@ -525,9 +579,9 @@ func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, sn
 	}
 
 	var current *keyListEntry
-	for i := range keys.Data {
-		if keys.Data[i].Label == currentLabel {
-			current = &keys.Data[i]
+	for i := range allKeys {
+		if allKeys[i].Label == currentLabel {
+			current = &allKeys[i]
 			break
 		}
 	}
@@ -622,18 +676,26 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	modelReasoningTokens := make(map[string]float64)
 	modelRequests := make(map[string]float64)
 	providerCost := make(map[string]float64)
+	providerByokCost := make(map[string]float64)
 	providerInputTokens := make(map[string]float64)
 	providerOutputTokens := make(map[string]float64)
 	providerReasoningTokens := make(map[string]float64)
 	providerRequests := make(map[string]float64)
+	endpointStatsMap := make(map[string]*endpointStats)
 	models := make(map[string]struct{})
 	providers := make(map[string]struct{})
+	endpoints := make(map[string]struct{})
+	activeDays := make(map[string]struct{})
 
 	now := time.Now().UTC()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	thirtyDaysAgo := now.AddDate(0, 0, -30)
 
+	var totalCost, totalByok, totalRequests float64
+	var totalInput, totalOutput, totalReasoning, totalTokens float64
+	var cost7d, byok7d, requests7d float64
+	var input7d, output7d, reasoning7d, tokens7d float64
 	var todayByok, cost7dByok, cost30dByok float64
 	var minDate, maxDate string
 
@@ -651,6 +713,9 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		if tokens == 0 {
 			tokens = float64(entry.PromptTokens + entry.CompletionTokens + entry.ReasoningTokens)
 		}
+		inputTokens := float64(entry.PromptTokens)
+		outputTokens := float64(entry.CompletionTokens)
+		requests := float64(entry.Requests)
 		byokCost := entry.ByokUsageInference
 		reasoningTokens := float64(entry.ReasoningTokens)
 		modelName := entry.Model
@@ -664,26 +729,47 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		if providerName == "" {
 			providerName = "unknown"
 		}
+		endpointID := strings.TrimSpace(entry.EndpointID)
+		if endpointID == "" {
+			endpointID = "unknown"
+		}
 
 		costByDate[date] += cost
 		tokensByDate[date] += tokens
-		requestsByDate[date] += float64(entry.Requests)
+		requestsByDate[date] += requests
 		byokCostByDate[date] += byokCost
 		reasoningTokensByDate[date] += reasoningTokens
 		modelCost[modelName] += cost
 		modelByokCost[modelName] += byokCost
-		modelInputTokens[modelName] += float64(entry.PromptTokens)
-		modelOutputTokens[modelName] += float64(entry.CompletionTokens)
+		modelInputTokens[modelName] += inputTokens
+		modelOutputTokens[modelName] += outputTokens
 		modelReasoningTokens[modelName] += reasoningTokens
-		modelRequests[modelName] += float64(entry.Requests)
+		modelRequests[modelName] += requests
 		providerCost[providerName] += cost
-		providerInputTokens[providerName] += float64(entry.PromptTokens)
-		providerOutputTokens[providerName] += float64(entry.CompletionTokens)
+		providerByokCost[providerName] += byokCost
+		providerInputTokens[providerName] += inputTokens
+		providerOutputTokens[providerName] += outputTokens
 		providerReasoningTokens[providerName] += reasoningTokens
-		providerRequests[providerName] += float64(entry.Requests)
+		providerRequests[providerName] += requests
+
+		es, ok := endpointStatsMap[endpointID]
+		if !ok {
+			es = &endpointStats{Model: modelName, Provider: providerName}
+			endpointStatsMap[endpointID] = es
+		}
+		es.Requests += entry.Requests
+		es.TotalCost += cost
+		es.ByokCost += byokCost
+		es.PromptTokens += entry.PromptTokens
+		es.CompletionTokens += entry.CompletionTokens
+		es.ReasoningTokens += entry.ReasoningTokens
 
 		models[modelName] = struct{}{}
 		providers[providerName] = struct{}{}
+		if endpointID != "unknown" {
+			endpoints[endpointID] = struct{}{}
+		}
+		activeDays[date] = struct{}{}
 
 		if minDate == "" || date < minDate {
 			minDate = date
@@ -691,6 +777,14 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		if maxDate == "" || date > maxDate {
 			maxDate = date
 		}
+
+		totalCost += cost
+		totalByok += byokCost
+		totalRequests += requests
+		totalInput += inputTokens
+		totalOutput += outputTokens
+		totalReasoning += reasoningTokens
+		totalTokens += tokens
 
 		if !hasParsedDate {
 			continue
@@ -705,6 +799,15 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		if entryDate.After(thirtyDaysAgo) {
 			cost30dByok += byokCost
 		}
+		if entryDate.After(sevenDaysAgo) {
+			cost7d += cost
+			byok7d += byokCost
+			requests7d += requests
+			input7d += inputTokens
+			output7d += outputTokens
+			reasoning7d += reasoningTokens
+			tokens7d += tokens
+		}
 	}
 
 	snap.Raw["activity_rows"] = fmt.Sprintf("%d", len(analytics.Data))
@@ -716,6 +819,12 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	}
 	if len(providers) > 0 {
 		snap.Raw["activity_providers"] = fmt.Sprintf("%d", len(providers))
+	}
+	if len(endpoints) > 0 {
+		snap.Raw["activity_endpoints"] = fmt.Sprintf("%d", len(endpoints))
+	}
+	if len(activeDays) > 0 {
+		snap.Raw["activity_days"] = fmt.Sprintf("%d", len(activeDays))
 	}
 
 	if len(costByDate) > 0 {
@@ -733,8 +842,73 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	if len(reasoningTokensByDate) > 0 {
 		snap.DailySeries["analytics_reasoning_tokens"] = mapToSortedTimePoints(reasoningTokensByDate)
 	}
+
+	if totalCost > 0 {
+		snap.Metrics["analytics_30d_cost"] = core.Metric{Used: &totalCost, Unit: "USD", Window: "30d"}
+	}
+	if totalByok > 0 {
+		snap.Metrics["analytics_30d_byok_cost"] = core.Metric{Used: &totalByok, Unit: "USD", Window: "30d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if totalRequests > 0 {
+		snap.Metrics["analytics_30d_requests"] = core.Metric{Used: &totalRequests, Unit: "requests", Window: "30d"}
+	}
+	if totalInput > 0 {
+		snap.Metrics["analytics_30d_input_tokens"] = core.Metric{Used: &totalInput, Unit: "tokens", Window: "30d"}
+	}
+	if totalOutput > 0 {
+		snap.Metrics["analytics_30d_output_tokens"] = core.Metric{Used: &totalOutput, Unit: "tokens", Window: "30d"}
+	}
+	if totalReasoning > 0 {
+		snap.Metrics["analytics_30d_reasoning_tokens"] = core.Metric{Used: &totalReasoning, Unit: "tokens", Window: "30d"}
+	}
+	if totalTokens > 0 {
+		snap.Metrics["analytics_30d_tokens"] = core.Metric{Used: &totalTokens, Unit: "tokens", Window: "30d"}
+	}
+
+	if cost7d > 0 {
+		snap.Metrics["analytics_7d_cost"] = core.Metric{Used: &cost7d, Unit: "USD", Window: "7d"}
+	}
+	if byok7d > 0 {
+		snap.Metrics["analytics_7d_byok_cost"] = core.Metric{Used: &byok7d, Unit: "USD", Window: "7d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if requests7d > 0 {
+		snap.Metrics["analytics_7d_requests"] = core.Metric{Used: &requests7d, Unit: "requests", Window: "7d"}
+	}
+	if input7d > 0 {
+		snap.Metrics["analytics_7d_input_tokens"] = core.Metric{Used: &input7d, Unit: "tokens", Window: "7d"}
+	}
+	if output7d > 0 {
+		snap.Metrics["analytics_7d_output_tokens"] = core.Metric{Used: &output7d, Unit: "tokens", Window: "7d"}
+	}
+	if reasoning7d > 0 {
+		snap.Metrics["analytics_7d_reasoning_tokens"] = core.Metric{Used: &reasoning7d, Unit: "tokens", Window: "7d"}
+	}
+	if tokens7d > 0 {
+		snap.Metrics["analytics_7d_tokens"] = core.Metric{Used: &tokens7d, Unit: "tokens", Window: "7d"}
+	}
+
+	if days := len(activeDays); days > 0 {
+		v := float64(days)
+		snap.Metrics["analytics_active_days"] = core.Metric{Used: &v, Unit: "days", Window: "30d"}
+	}
+	if count := len(models); count > 0 {
+		v := float64(count)
+		snap.Metrics["analytics_models"] = core.Metric{Used: &v, Unit: "models", Window: "30d"}
+	}
+	if count := len(providers); count > 0 {
+		v := float64(count)
+		snap.Metrics["analytics_providers"] = core.Metric{Used: &v, Unit: "providers", Window: "30d"}
+	}
+	if count := len(endpoints); count > 0 {
+		v := float64(count)
+		snap.Metrics["analytics_endpoints"] = core.Metric{Used: &v, Unit: "endpoints", Window: "30d"}
+	}
+
 	emitAnalyticsPerModelMetrics(snap, modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelRequests)
-	emitAnalyticsPerProviderRaw(snap, providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
+	emitAnalyticsPerProviderMetrics(snap, providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
+	emitAnalyticsEndpointMetrics(snap, endpointStatsMap)
 
 	if todayByok > 0 {
 		snap.Metrics["today_byok_cost"] = core.Metric{Used: &todayByok, Unit: "USD", Window: "1d"}
@@ -779,7 +953,27 @@ func emitAnalyticsPerModelMetrics(
 	snap *core.QuotaSnapshot,
 	modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelRequests map[string]float64,
 ) {
+	modelSet := make(map[string]struct{})
 	for model := range modelCost {
+		modelSet[model] = struct{}{}
+	}
+	for model := range modelByokCost {
+		modelSet[model] = struct{}{}
+	}
+	for model := range modelInputTokens {
+		modelSet[model] = struct{}{}
+	}
+	for model := range modelOutputTokens {
+		modelSet[model] = struct{}{}
+	}
+	for model := range modelReasoningTokens {
+		modelSet[model] = struct{}{}
+	}
+	for model := range modelRequests {
+		modelSet[model] = struct{}{}
+	}
+
+	for model := range modelSet {
 		safe := sanitizeName(model)
 		prefix := "model_" + safe
 
@@ -799,23 +993,129 @@ func emitAnalyticsPerModelMetrics(
 			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
 		}
 		if v := modelRequests[model]; v > 0 {
+			snap.Metrics[prefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "activity"}
 			snap.Raw[prefix+"_requests"] = fmt.Sprintf("%.0f", v)
 		}
 	}
 }
 
-func emitAnalyticsPerProviderRaw(
+func emitAnalyticsPerProviderMetrics(
 	snap *core.QuotaSnapshot,
-	providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
+	providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
 ) {
+	providerSet := make(map[string]struct{})
 	for provider := range providerCost {
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerByokCost {
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerInputTokens {
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerOutputTokens {
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerReasoningTokens {
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerRequests {
+		providerSet[provider] = struct{}{}
+	}
+
+	for provider := range providerSet {
 		prefix := "provider_" + sanitizeName(strings.ToLower(provider))
+		if v := providerCost[provider]; v > 0 {
+			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if v := providerByokCost[provider]; v > 0 {
+			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if v := providerInputTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerOutputTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerReasoningTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerRequests[provider]; v > 0 {
+			snap.Metrics[prefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "activity"}
+		}
+
 		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%.0f", providerRequests[provider])
 		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", providerCost[provider])
+		if providerByokCost[provider] > 0 {
+			snap.Raw[prefix+"_byok_cost"] = fmt.Sprintf("$%.6f", providerByokCost[provider])
+		}
 		snap.Raw[prefix+"_prompt_tokens"] = fmt.Sprintf("%.0f", providerInputTokens[provider])
 		snap.Raw[prefix+"_completion_tokens"] = fmt.Sprintf("%.0f", providerOutputTokens[provider])
 		if providerReasoningTokens[provider] > 0 {
 			snap.Raw[prefix+"_reasoning_tokens"] = fmt.Sprintf("%.0f", providerReasoningTokens[provider])
+		}
+	}
+}
+
+func emitAnalyticsEndpointMetrics(snap *core.QuotaSnapshot, endpointStatsMap map[string]*endpointStats) {
+	type endpointEntry struct {
+		id    string
+		stats *endpointStats
+	}
+
+	var entries []endpointEntry
+	for id, stats := range endpointStatsMap {
+		if id == "unknown" {
+			continue
+		}
+		entries = append(entries, endpointEntry{id: id, stats: stats})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].stats.TotalCost != entries[j].stats.TotalCost {
+			return entries[i].stats.TotalCost > entries[j].stats.TotalCost
+		}
+		return entries[i].stats.Requests > entries[j].stats.Requests
+	})
+
+	const maxEndpointMetrics = 8
+	limit := maxEndpointMetrics
+	if len(entries) < limit {
+		limit = len(entries)
+	}
+	for _, entry := range entries[:limit] {
+		safe := sanitizeName(entry.id)
+		prefix := "endpoint_" + safe
+
+		req := float64(entry.stats.Requests)
+		if req > 0 {
+			snap.Metrics[prefix+"_requests"] = core.Metric{Used: &req, Unit: "requests", Window: "activity"}
+		}
+		if entry.stats.TotalCost > 0 {
+			v := entry.stats.TotalCost
+			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if entry.stats.ByokCost > 0 {
+			v := entry.stats.ByokCost
+			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if entry.stats.PromptTokens > 0 {
+			v := float64(entry.stats.PromptTokens)
+			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if entry.stats.CompletionTokens > 0 {
+			v := float64(entry.stats.CompletionTokens)
+			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if entry.stats.ReasoningTokens > 0 {
+			v := float64(entry.stats.ReasoningTokens)
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+
+		if entry.stats.Provider != "" {
+			snap.Raw[prefix+"_provider"] = entry.stats.Provider
+		}
+		if entry.stats.Model != "" {
+			snap.Raw[prefix+"_model"] = entry.stats.Model
 		}
 	}
 }
@@ -858,11 +1158,19 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	providerStatsMap := make(map[string]*providerStats)
 
 	var todayPrompt, todayCompletion, todayRequests int
+	var todayNativePrompt, todayNativeCompletion int
 	var todayReasoning, todayCached, todayImageTokens int
 	var todayMediaPrompt, todayMediaCompletion, todayAudioInputs, todaySearchResults, todayCancelled int
+	var todayStreamed int
 	var todayCost float64
 	var todayLatencyMs, todayLatencyCount int
+	var todayGenerationMs, todayGenerationCount int
+	var todayModerationMs, todayModerationCount int
 	var totalRequests int
+	apiTypeCounts := make(map[string]int)
+	finishReasonCounts := make(map[string]int)
+	originCounts := make(map[string]int)
+	routerCounts := make(map[string]int)
 
 	var cost7d, cost30d, burnCost float64
 	var todayByokCost, cost7dByok, cost30dByok float64
@@ -873,6 +1181,10 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 
 	for _, g := range allGenerations {
 		totalRequests++
+		generationCost := g.TotalCost
+		if generationCost == 0 && g.Usage > 0 {
+			generationCost = g.Usage
+		}
 
 		ts, err := time.Parse(time.RFC3339, g.CreatedAt)
 		if err != nil {
@@ -883,9 +1195,9 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		}
 
 		// Period cost aggregation (all fetched generations, up to 30 days)
-		cost30d += g.TotalCost
+		cost30d += generationCost
 		if ts.After(sevenDaysAgo) {
-			cost7d += g.TotalCost
+			cost7d += generationCost
 		}
 		byokCost := generationByokCost(g)
 		cost30dByok += byokCost
@@ -895,12 +1207,12 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 
 		// Burn rate: last 60 minutes
 		if ts.After(burnCutoff) {
-			burnCost += g.TotalCost
+			burnCost += generationCost
 		}
 
 		// Daily aggregation
 		dateKey := ts.UTC().Format("2006-01-02")
-		dailyCost[dateKey] += g.TotalCost
+		dailyCost[dateKey] += generationCost
 		dailyRequests[dateKey]++
 
 		modelKey := g.Model
@@ -919,10 +1231,19 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		todayRequests++
 		todayPrompt += g.PromptTokens
 		todayCompletion += g.CompletionTokens
-		todayCost += g.TotalCost
+		if g.NativePromptTokens != nil {
+			todayNativePrompt += *g.NativePromptTokens
+		}
+		if g.NativeCompletionTokens != nil {
+			todayNativeCompletion += *g.NativeCompletionTokens
+		}
+		todayCost += generationCost
 		todayByokCost += byokCost
 		if g.Cancelled {
 			todayCancelled++
+		}
+		if g.Streamed {
+			todayStreamed++
 		}
 		if g.NativeReasoningTokens != nil {
 			todayReasoning += *g.NativeReasoningTokens
@@ -950,6 +1271,26 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 			todayLatencyMs += *g.Latency
 			todayLatencyCount++
 		}
+		if g.GenerationTime != nil && *g.GenerationTime > 0 {
+			todayGenerationMs += *g.GenerationTime
+			todayGenerationCount++
+		}
+		if g.ModerationLatency != nil && *g.ModerationLatency > 0 {
+			todayModerationMs += *g.ModerationLatency
+			todayModerationCount++
+		}
+		if g.APIType != "" {
+			apiTypeCounts[g.APIType]++
+		}
+		if g.Finish != "" {
+			finishReasonCounts[g.Finish]++
+		}
+		if g.Origin != "" {
+			originCounts[g.Origin]++
+		}
+		if g.Router != "" {
+			routerCounts[g.Router]++
+		}
 
 		ms, ok := modelStatsMap[modelKey]
 		if !ok {
@@ -959,6 +1300,12 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		ms.Requests++
 		ms.PromptTokens += g.PromptTokens
 		ms.CompletionTokens += g.CompletionTokens
+		if g.NativePromptTokens != nil {
+			ms.NativePrompt += *g.NativePromptTokens
+		}
+		if g.NativeCompletionTokens != nil {
+			ms.NativeCompletion += *g.NativeCompletionTokens
+		}
 		if g.NativeReasoningTokens != nil {
 			ms.ReasoningTokens += *g.NativeReasoningTokens
 		}
@@ -968,10 +1315,18 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		if g.NativeImageTokens != nil {
 			ms.ImageTokens += *g.NativeImageTokens
 		}
-		ms.TotalCost += g.TotalCost
+		ms.TotalCost += generationCost
 		if g.Latency != nil && *g.Latency > 0 {
 			ms.TotalLatencyMs += *g.Latency
 			ms.LatencyCount++
+		}
+		if g.GenerationTime != nil && *g.GenerationTime > 0 {
+			ms.TotalGenMs += *g.GenerationTime
+			ms.GenerationCount++
+		}
+		if g.ModerationLatency != nil && *g.ModerationLatency > 0 {
+			ms.TotalModeration += *g.ModerationLatency
+			ms.ModerationCount++
 		}
 		if g.CacheDiscount != nil && *g.CacheDiscount > 0 {
 			ms.CacheDiscountUSD += *g.CacheDiscount
@@ -992,7 +1347,11 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		ps.Requests++
 		ps.PromptTokens += g.PromptTokens
 		ps.CompletionTokens += g.CompletionTokens
-		ps.TotalCost += g.TotalCost
+		if g.NativeReasoningTokens != nil {
+			ps.ReasoningTokens += *g.NativeReasoningTokens
+		}
+		ps.ByokCost += byokCost
+		ps.TotalCost += generationCost
 		ps.Models[modelKey]++
 	}
 
@@ -1005,6 +1364,14 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 
 		out := float64(todayCompletion)
 		snap.Metrics["today_output_tokens"] = core.Metric{Used: &out, Unit: "tokens", Window: "today"}
+		if todayNativePrompt > 0 {
+			v := float64(todayNativePrompt)
+			snap.Metrics["today_native_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if todayNativeCompletion > 0 {
+			v := float64(todayNativeCompletion)
+			snap.Metrics["today_native_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
 
 		snap.Metrics["today_cost"] = core.Metric{Used: &todayCost, Unit: "USD", Window: "today"}
 		if todayByokCost > 0 {
@@ -1043,11 +1410,42 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 			v := float64(todayCancelled)
 			snap.Metrics["today_cancelled"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
 		}
+		if todayStreamed > 0 {
+			v := float64(todayStreamed)
+			snap.Metrics["today_streamed_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "today"}
+			pct := v / reqs * 100
+			snap.Metrics["today_streamed_percent"] = core.Metric{Used: &pct, Unit: "%", Window: "today"}
+		}
 
 		if todayLatencyCount > 0 {
 			avgLatency := float64(todayLatencyMs) / float64(todayLatencyCount) / 1000.0
 			snap.Metrics["today_avg_latency"] = core.Metric{Used: &avgLatency, Unit: "seconds", Window: "today"}
 		}
+		if todayGenerationCount > 0 {
+			avgGeneration := float64(todayGenerationMs) / float64(todayGenerationCount) / 1000.0
+			snap.Metrics["today_avg_generation_time"] = core.Metric{Used: &avgGeneration, Unit: "seconds", Window: "today"}
+		}
+		if todayModerationCount > 0 {
+			avgModeration := float64(todayModerationMs) / float64(todayModerationCount) / 1000.0
+			snap.Metrics["today_avg_moderation_latency"] = core.Metric{Used: &avgModeration, Unit: "seconds", Window: "today"}
+		}
+	}
+
+	for apiType, count := range apiTypeCounts {
+		if count <= 0 {
+			continue
+		}
+		v := float64(count)
+		snap.Metrics["today_"+sanitizeName(apiType)+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "today"}
+	}
+	if len(finishReasonCounts) > 0 {
+		snap.Raw["today_finish_reasons"] = summarizeTopCounts(finishReasonCounts, 4)
+	}
+	if len(originCounts) > 0 {
+		snap.Raw["today_origins"] = summarizeTopCounts(originCounts, 3)
+	}
+	if len(routerCounts) > 0 {
+		snap.Raw["today_routers"] = summarizeTopCounts(routerCounts, 3)
 	}
 
 	reqs := float64(totalRequests)
@@ -1186,7 +1584,10 @@ func generationByokCost(g generationEntry) float64 {
 	if g.UpstreamInferenceCost != nil && *g.UpstreamInferenceCost > 0 {
 		return *g.UpstreamInferenceCost
 	}
-	return g.TotalCost
+	if g.TotalCost > 0 {
+		return g.TotalCost
+	}
+	return g.Usage
 }
 
 func parseAPIErrorMessage(body []byte) string {
@@ -1235,12 +1636,34 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaS
 
 		costUSD := e.stats.TotalCost
 		snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &costUSD, Unit: "USD", Window: "today"}
+		requests := float64(e.stats.Requests)
+		snap.Metrics[prefix+"_requests"] = core.Metric{Used: &requests, Unit: "requests", Window: "today"}
+		if e.stats.NativePrompt > 0 {
+			nativeInput := float64(e.stats.NativePrompt)
+			snap.Metrics[prefix+"_native_input_tokens"] = core.Metric{Used: &nativeInput, Unit: "tokens", Window: "today"}
+		}
+		if e.stats.NativeCompletion > 0 {
+			nativeOutput := float64(e.stats.NativeCompletion)
+			snap.Metrics[prefix+"_native_output_tokens"] = core.Metric{Used: &nativeOutput, Unit: "tokens", Window: "today"}
+		}
 
 		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%d", e.stats.Requests)
 
 		if e.stats.LatencyCount > 0 {
 			avgMs := float64(e.stats.TotalLatencyMs) / float64(e.stats.LatencyCount)
 			snap.Raw[prefix+"_avg_latency_ms"] = fmt.Sprintf("%.0f", avgMs)
+			avgSeconds := avgMs / 1000.0
+			snap.Metrics[prefix+"_avg_latency"] = core.Metric{Used: &avgSeconds, Unit: "seconds", Window: "today"}
+		}
+		if e.stats.GenerationCount > 0 {
+			avgMs := float64(e.stats.TotalGenMs) / float64(e.stats.GenerationCount)
+			avgSeconds := avgMs / 1000.0
+			snap.Metrics[prefix+"_avg_generation_time"] = core.Metric{Used: &avgSeconds, Unit: "seconds", Window: "today"}
+		}
+		if e.stats.ModerationCount > 0 {
+			avgMs := float64(e.stats.TotalModeration) / float64(e.stats.ModerationCount)
+			avgSeconds := avgMs / 1000.0
+			snap.Metrics[prefix+"_avg_moderation_latency"] = core.Metric{Used: &avgSeconds, Unit: "seconds", Window: "today"}
 		}
 
 		if e.stats.CacheDiscountUSD > 0 {
@@ -1273,15 +1696,93 @@ func emitPerProviderMetrics(providerStatsMap map[string]*providerStats, snap *co
 
 	for _, e := range sorted {
 		prefix := "provider_" + sanitizeName(strings.ToLower(e.name))
+		requests := float64(e.stats.Requests)
+		snap.Metrics[prefix+"_requests"] = core.Metric{Used: &requests, Unit: "requests", Window: "today"}
+		if e.stats.TotalCost > 0 {
+			v := e.stats.TotalCost
+			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "today"}
+		}
+		if e.stats.ByokCost > 0 {
+			v := e.stats.ByokCost
+			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &v, Unit: "USD", Window: "today"}
+		}
+		if e.stats.PromptTokens > 0 {
+			v := float64(e.stats.PromptTokens)
+			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if e.stats.CompletionTokens > 0 {
+			v := float64(e.stats.CompletionTokens)
+			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if e.stats.ReasoningTokens > 0 {
+			v := float64(e.stats.ReasoningTokens)
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
 		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%d", e.stats.Requests)
 		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", e.stats.TotalCost)
+		if e.stats.ByokCost > 0 {
+			snap.Raw[prefix+"_byok_cost"] = fmt.Sprintf("$%.6f", e.stats.ByokCost)
+		}
 		snap.Raw[prefix+"_prompt_tokens"] = fmt.Sprintf("%d", e.stats.PromptTokens)
 		snap.Raw[prefix+"_completion_tokens"] = fmt.Sprintf("%d", e.stats.CompletionTokens)
+		if e.stats.ReasoningTokens > 0 {
+			snap.Raw[prefix+"_reasoning_tokens"] = fmt.Sprintf("%d", e.stats.ReasoningTokens)
+		}
 	}
 }
 
+func summarizeTopCounts(counts map[string]int, limit int) string {
+	type kv struct {
+		name  string
+		count int
+	}
+	items := make([]kv, 0, len(counts))
+	for name, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		items = append(items, kv{name: name, count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count != items[j].count {
+			return items[i].count > items[j].count
+		}
+		return items[i].name < items[j].name
+	})
+	if limit <= 0 || limit > len(items) {
+		limit = len(items)
+	}
+	parts := make([]string, 0, limit)
+	for _, item := range items[:limit] {
+		parts = append(parts, fmt.Sprintf("%s=%d", item.name, item.count))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func sanitizeName(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, " ", "_")
-	return name
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	safe := strings.Trim(b.String(), "_")
+	if safe == "" {
+		return "unknown"
+	}
+	return safe
 }

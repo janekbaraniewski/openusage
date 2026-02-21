@@ -21,8 +21,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.UI.CritThreshold != 0.05 {
 		t.Errorf("default crit = %f, want 0.05", cfg.UI.CritThreshold)
 	}
-	if cfg.Theme != "Catppuccin Mocha" {
-		t.Errorf("default theme = %q, want 'Catppuccin Mocha'", cfg.Theme)
+	if cfg.Theme != "Gruvbox" {
+		t.Errorf("default theme = %q, want 'Gruvbox'", cfg.Theme)
 	}
 	if cfg.Experimental.Analytics {
 		t.Error("expected experimental analytics to be false by default")
@@ -40,7 +40,7 @@ func TestLoadFrom_MissingFile(t *testing.T) {
 	if cfg.UI.RefreshIntervalSeconds != 30 {
 		t.Error("should return defaults for missing file")
 	}
-	if cfg.Theme != "Catppuccin Mocha" {
+	if cfg.Theme != "Gruvbox" {
 		t.Errorf("expected default theme, got %q", cfg.Theme)
 	}
 }
@@ -116,7 +116,7 @@ func TestLoadFrom_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
-	if cfg.Theme != "Catppuccin Mocha" {
+	if cfg.Theme != "Gruvbox" {
 		t.Errorf("expected default theme on error, got %q", cfg.Theme)
 	}
 }
@@ -134,7 +134,7 @@ func TestLoadFrom_EmptyThemeFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Theme != "Catppuccin Mocha" {
+	if cfg.Theme != "Gruvbox" {
 		t.Errorf("expected default theme for empty string, got %q", cfg.Theme)
 	}
 }
@@ -283,7 +283,7 @@ func TestSaveThemeTo_ThreadSafety(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	themes := []string{"Nord", "Dracula", "Synthwave '84", "Catppuccin Mocha"}
+	themes := []string{"Nord", "Dracula", "Synthwave '84", "Gruvbox"}
 
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
