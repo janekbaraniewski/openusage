@@ -23,7 +23,7 @@ func TestDetectEnvKeys_FindsSetKey(t *testing.T) {
 
 	found := false
 	for _, acct := range result.Accounts {
-		if acct.Provider == "openai" && acct.APIKeyEnv == "OPENAI_API_KEY" {
+		if acct.Provider == "openai" && acct.APIKeyEnv == "OPENAI_API_KEY" && acct.ID == "openai" {
 			found = true
 			break
 		}

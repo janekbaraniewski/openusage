@@ -60,6 +60,20 @@ type Config struct {
 	AutoDetectedAccounts []core.AccountConfig `json:"auto_detected_accounts"`
 }
 
+var legacyAccountIDAliases = map[string]string{
+	"openai-auto":        "openai",
+	"anthropic-auto":     "anthropic",
+	"openrouter-auto":    "openrouter",
+	"groq-auto":          "groq",
+	"mistral-auto":       "mistral",
+	"deepseek-auto":      "deepseek",
+	"xai-auto":           "xai",
+	"gemini-api-auto":    "gemini-api",
+	"gemini-google-auto": "gemini-google",
+	"copilot-auto":       "copilot",
+	"gemini-cli-auto":    "gemini-cli",
+}
+
 func DefaultConfig() Config {
 	return Config{
 		AutoDetect: true,
@@ -116,9 +130,38 @@ func LoadFrom(path string) (Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = DefaultConfig().Theme
 	}
+	cfg.Accounts = normalizeAccounts(cfg.Accounts)
+	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 
 	return cfg, nil
+}
+
+func normalizeAccountID(id string) string {
+	trimmed := strings.TrimSpace(id)
+	if canonical, ok := legacyAccountIDAliases[trimmed]; ok {
+		return canonical
+	}
+	return trimmed
+}
+
+func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
+	if len(in) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(in))
+	out := make([]core.AccountConfig, 0, len(in))
+	for _, acct := range in {
+		acct.ID = normalizeAccountID(acct.ID)
+		if acct.ID == "" || seen[acct.ID] {
+			continue
+		}
+		seen[acct.ID] = true
+		out = append(out, acct)
+	}
+
+	return out
 }
 
 func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProviderConfig {
@@ -129,7 +172,7 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 	seen := make(map[string]bool, len(in))
 	out := make([]DashboardProviderConfig, 0, len(in))
 	for _, entry := range in {
-		id := strings.TrimSpace(entry.AccountID)
+		id := normalizeAccountID(entry.AccountID)
 		if id == "" || seen[id] {
 			continue
 		}

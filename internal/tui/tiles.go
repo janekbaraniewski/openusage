@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -256,59 +257,11 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	} else {
 		hdrLine2 = dimStyle.Render(truncate(provID))
 	}
-	// Build a prominent reset-time line for the header showing the most urgent reset.
-	var hdrResetLine string
-	if len(snap.Resets) > 0 {
-		var soonestLabel string
-		var soonestDur time.Duration
-		first := true
-		for key, t := range snap.Resets {
-			dur := time.Until(t)
-			if dur < 0 {
-				continue
-			}
-			if first || dur < soonestDur {
-				soonestDur = dur
-				soonestLabel = resetLabelMap[key]
-				if soonestLabel == "" {
-					if met, ok := snap.Metrics[key]; ok && met.Window != "" {
-						soonestLabel = "Usage " + met.Window
-					} else {
-						soonestLabel = prettifyKey(key)
-					}
-				}
-				first = false
-			}
-		}
-		if !first {
-			clockFrames := []string{"◴", "◷", "◶", "◵"}
-			clock := clockFrames[(m.animFrame/3)%len(clockFrames)]
-
-			durColor := colorTeal
-			if soonestDur < 10*time.Minute {
-				durColor = colorPeach
-			} else if soonestDur < 30*time.Minute {
-				durColor = colorYellow
-			}
-
-			durStr := formatDuration(soonestDur)
-			resetPill := lipgloss.NewStyle().Foreground(durColor).Render(clock) +
-				lipgloss.NewStyle().Foreground(colorSubtext).Render(" "+soonestLabel+" resets in ") +
-				lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(durStr)
-
-			// Right-align the reset pill on the header line
-			pillW := lipgloss.Width(resetPill)
-			pad := innerW - pillW
-			if pad < 0 {
-				pad = 0
-			}
-			hdrResetLine = strings.Repeat(" ", pad) + resetPill
-		}
-	}
+	headerMeta := buildTileHeaderMetaLines(snap, innerW, m.animFrame)
 
 	header := []string{hdrLine1, hdrLine2}
-	if hdrResetLine != "" {
-		header = append(header, hdrResetLine)
+	if len(headerMeta) > 0 {
+		header = append(header, headerMeta...)
 	}
 	header = append(header, accentSep)
 
@@ -360,6 +313,8 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		}})
 	}
 
+	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLines(snap, innerW)
+
 	if snap.ProviderID == "openrouter" {
 		modelMixLines := buildOpenRouterModelCompositionLines(snap, innerW)
 		if len(modelMixLines) > 0 {
@@ -367,9 +322,30 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 			s = append(s, modelMixLines...)
 			sections = append(sections, section{s})
 		}
+	} else {
+		modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW)
+		if len(modelBurnLines) > 0 {
+			s := []string{""}
+			s = append(s, modelBurnLines...)
+			sections = append(sections, section{s})
+		}
+		if len(modelBurnKeys) > 0 {
+			if compactMetricKeys == nil {
+				compactMetricKeys = make(map[string]bool)
+			}
+			for k := range modelBurnKeys {
+				compactMetricKeys[k] = true
+			}
+		}
 	}
 
-	metricLines := m.buildTileMetricLines(snap, innerW)
+	if len(compactMetricLines) > 0 {
+		s := []string{""}
+		s = append(s, compactMetricLines...)
+		sections = append(sections, section{s})
+	}
+
+	metricLines := m.buildTileMetricLines(snap, innerW, compactMetricKeys)
 	if len(metricLines) > 0 {
 		s := []string{""}
 		s = append(s, metricLines...)
@@ -394,11 +370,13 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		sections = append(sections, section{s})
 	}
 
-	resetLines := buildTileResetLines(snap, innerW, m.animFrame)
-	if len(resetLines) > 0 {
-		s := []string{""}
-		s = append(s, resetLines...)
-		sections = append(sections, section{s})
+	if len(headerMeta) == 0 {
+		resetLines := buildTileResetLines(snap, innerW, m.animFrame)
+		if len(resetLines) > 0 {
+			s := []string{""}
+			s = append(s, resetLines...)
+			sections = append(sections, section{s})
+		}
 	}
 
 	var body []string
@@ -454,7 +432,9 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	if snap.ProviderID == "openrouter" {
+
+	switch snap.ProviderID {
+	case "openrouter":
 		keys = prioritizeMetricKeys(keys, []string{
 			"credit_balance", "credits",
 			"usage_daily", "usage_weekly", "usage_monthly",
@@ -465,18 +445,21 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 			"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens",
 			"recent_requests", "burn_rate", "daily_projected", "limit_remaining",
 		})
-	}
-	if snap.ProviderID == "openrouter" {
+	case "cursor":
 		keys = prioritizeMetricKeys(keys, []string{
-			"usage_daily", "usage_weekly", "usage_monthly",
-			"byok_daily", "byok_weekly", "byok_monthly",
-			"today_byok_cost", "7d_byok_cost", "30d_byok_cost",
-			"today_cost", "7d_api_cost", "30d_api_cost",
-			"burn_rate", "daily_projected",
-			"today_requests", "today_input_tokens", "today_output_tokens",
-			"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens",
-			"today_media_prompts", "today_media_completions", "today_audio_inputs", "today_search_results", "today_cancelled",
-			"recent_requests", "limit_remaining",
+			"spend_limit", "plan_spend", "plan_percent_used", "chat_quota", "completions_quota",
+		})
+	case "claude_code":
+		keys = prioritizeMetricKeys(keys, []string{
+			"usage_five_hour", "usage_seven_day", "plan_percent_used",
+		})
+	case "codex":
+		keys = prioritizeMetricKeys(keys, []string{
+			"rate_limit_primary", "rate_limit_secondary", "context_window",
+		})
+	default:
+		keys = prioritizeMetricKeys(keys, []string{
+			"spend_limit", "plan_spend", "credits", "credit_balance",
 		})
 	}
 
@@ -485,6 +468,7 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 	if gaugeW < 6 {
 		gaugeW = 6
 	}
+	maxLines := maxTileGaugeLines(snap.ProviderID)
 
 	var lines []string
 	for _, key := range keys {
@@ -502,8 +486,20 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
 		lines = append(lines, labelR+" "+gauge)
+		if maxLines > 0 && len(lines) >= maxLines {
+			break
+		}
 	}
 	return lines
+}
+
+func maxTileGaugeLines(providerID string) int {
+	switch providerID {
+	case "openrouter":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func gaugeLabel(key string, window ...string) string {
@@ -515,10 +511,10 @@ func gaugeLabel(key string, window ...string) string {
 		"usage_seven_day_cowork": "7d Cowork",
 		"extra_usage":            "Extra",
 		"plan_percent_used":      "Plan Used",
-		"plan_spend":             "Spend",
-		"plan_total_spend_usd":   "Total Spend",
-		"spend_limit":            "Spend Limit",
-		"individual_spend":       "My Spend",
+		"plan_spend":             "Credits",
+		"plan_total_spend_usd":   "Total Credits",
+		"spend_limit":            "Credit Limit",
+		"individual_spend":       "My Credits",
 	}
 
 	if strings.HasPrefix(key, "rate_limit_") {
@@ -583,7 +579,295 @@ func metricHasGauge(key string, met core.Metric) bool {
 	return metricUsedPercent(key, met) >= 0
 }
 
-func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int) []string {
+type compactMetricRowSpec struct {
+	label       string
+	keys        []string
+	match       func(string, core.Metric) bool
+	maxSegments int
+}
+
+func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, innerW int) ([]string, map[string]bool) {
+	if len(snap.Metrics) == 0 || snap.ProviderID == "openrouter" {
+		return nil, nil
+	}
+
+	var specs []compactMetricRowSpec
+	switch snap.ProviderID {
+	case "cursor":
+		specs = []compactMetricRowSpec{
+			{label: "Credits", keys: []string{"plan_spend", "plan_included", "plan_bonus"}, maxSegments: 4},
+			{label: "Usage", keys: []string{"spend_limit", "individual_spend", "plan_percent_used"}, maxSegments: 4},
+		}
+	case "claude_code":
+		specs = []compactMetricRowSpec{
+			{label: "Credits", keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "burn_rate"}, maxSegments: 4},
+			{label: "Activity", keys: []string{"messages_today", "sessions_today", "tool_calls_today", "7d_messages"}, maxSegments: 4},
+			{label: "Tokens", keys: []string{"5h_block_input", "5h_block_output", "7d_input_tokens", "7d_output_tokens"}, maxSegments: 4},
+		}
+	case "codex":
+		specs = []compactMetricRowSpec{
+			{label: "Session", keys: []string{"session_input_tokens", "session_output_tokens", "session_cached_tokens", "session_reasoning_tokens"}, maxSegments: 4},
+			{label: "Limits", keys: []string{"rate_limit_primary", "rate_limit_secondary", "context_window"}, maxSegments: 3},
+		}
+	case "copilot":
+		specs = []compactMetricRowSpec{
+			{label: "Quota", keys: []string{"chat_quota", "completions_quota"}, maxSegments: 3},
+			{label: "Rate", keys: []string{"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm"}, maxSegments: 3},
+			{
+				label: "Seats",
+				match: func(key string, _ core.Metric) bool {
+					return strings.HasPrefix(key, "org_") && strings.HasSuffix(key, "_seats")
+				},
+				maxSegments: 3,
+			},
+		}
+	default:
+		specs = []compactMetricRowSpec{
+			{label: "Credits", keys: []string{"credit_balance", "credits", "plan_spend", "plan_total_spend_usd", "total_cost_usd", "today_api_cost", "7d_api_cost", "all_time_api_cost", "monthly_spend"}, maxSegments: 4},
+			{label: "Usage", keys: []string{"spend_limit", "plan_percent_used", "usage_five_hour", "usage_seven_day", "rpm", "tpm", "rpd", "tpd"}, maxSegments: 4},
+			{label: "Activity", keys: []string{"messages_today", "sessions_today", "tool_calls_today", "requests_today", "total_conversations", "recent_requests"}, maxSegments: 4},
+		}
+	}
+
+	consumed := make(map[string]bool)
+	var lines []string
+	for _, spec := range specs {
+		segments, usedKeys := collectCompactMetricSegments(spec, snap.Metrics, consumed)
+		if len(segments) == 0 {
+			continue
+		}
+
+		value := strings.Join(segments, " · ")
+		maxValueW := innerW - lipgloss.Width(spec.label) - 6
+		if maxValueW < 12 {
+			maxValueW = 12
+		}
+		value = truncateToWidth(value, maxValueW)
+
+		lines = append(lines, renderDotLeaderRow(spec.label, value, innerW))
+		for _, key := range usedKeys {
+			consumed[key] = true
+		}
+	}
+
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	return lines, consumed
+}
+
+func collectCompactMetricSegments(spec compactMetricRowSpec, metrics map[string]core.Metric, consumed map[string]bool) ([]string, []string) {
+	maxSegments := spec.maxSegments
+	if maxSegments <= 0 {
+		maxSegments = 4
+	}
+
+	var segments []string
+	var used []string
+	add := func(key string, met core.Metric) {
+		if len(segments) >= maxSegments {
+			return
+		}
+		segment := compactMetricSegment(key, met)
+		if segment == "" {
+			return
+		}
+		segments = append(segments, segment)
+		used = append(used, key)
+	}
+
+	for _, key := range spec.keys {
+		if len(segments) >= maxSegments {
+			break
+		}
+		if consumed[key] {
+			continue
+		}
+		met, ok := metrics[key]
+		if !ok {
+			continue
+		}
+		add(key, met)
+	}
+
+	if spec.match != nil && len(segments) < maxSegments {
+		keys := make([]string, 0, len(metrics))
+		for key := range metrics {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if len(segments) >= maxSegments {
+				break
+			}
+			if consumed[key] || stringInSlice(key, spec.keys) {
+				continue
+			}
+			met := metrics[key]
+			if !spec.match(key, met) {
+				continue
+			}
+			add(key, met)
+		}
+	}
+
+	return segments, used
+}
+
+func stringInSlice(s string, items []string) bool {
+	for _, item := range items {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func compactMetricSegment(key string, met core.Metric) string {
+	value := compactMetricValue(key, met)
+	if value == "" {
+		return ""
+	}
+	label := compactMetricLabel(key)
+	if label == "" {
+		return value
+	}
+	return label + " " + value
+}
+
+func compactMetricLabel(key string) string {
+	if strings.HasPrefix(key, "org_") && strings.HasSuffix(key, "_seats") {
+		org := strings.TrimSuffix(strings.TrimPrefix(key, "org_"), "_seats")
+		if org != "" {
+			return truncateToWidth(org, 8)
+		}
+		return "seats"
+	}
+
+	if strings.HasPrefix(key, "rate_limit_") {
+		return strings.TrimPrefix(key, "rate_limit_")
+	}
+
+	labels := map[string]string{
+		"plan_spend":               "plan",
+		"plan_included":            "incl",
+		"plan_bonus":               "bonus",
+		"spend_limit":              "cap",
+		"individual_spend":         "mine",
+		"plan_percent_used":        "used",
+		"plan_total_spend_usd":     "plan",
+		"plan_limit_usd":           "limit",
+		"today_api_cost":           "today",
+		"7d_api_cost":              "7d",
+		"all_time_api_cost":        "all",
+		"5h_block_cost":            "5h",
+		"burn_rate":                "burn",
+		"credit_balance":           "balance",
+		"credits":                  "credits",
+		"monthly_spend":            "month",
+		"usage_five_hour":          "5h",
+		"usage_seven_day":          "7d",
+		"session_input_tokens":     "in",
+		"session_output_tokens":    "out",
+		"session_cached_tokens":    "cached",
+		"session_reasoning_tokens": "reason",
+		"context_window":           "ctx",
+		"messages_today":           "msgs",
+		"sessions_today":           "sess",
+		"tool_calls_today":         "tools",
+		"7d_messages":              "7d msgs",
+		"5h_block_input":           "in5h",
+		"5h_block_output":          "out5h",
+		"7d_input_tokens":          "in7d",
+		"7d_output_tokens":         "out7d",
+		"chat_quota":               "chat",
+		"completions_quota":        "comp",
+		"gh_core_rpm":              "core",
+		"gh_search_rpm":            "search",
+		"gh_graphql_rpm":           "graphql",
+		"rpm":                      "rpm",
+		"tpm":                      "tpm",
+		"rpd":                      "rpd",
+		"tpd":                      "tpd",
+	}
+	return labels[key]
+}
+
+func compactMetricValue(key string, met core.Metric) string {
+	if key == "burn_rate" && met.Used != nil {
+		return fmt.Sprintf("%s/h", formatUSD(*met.Used))
+	}
+
+	used, hasUsed := metricUsedValue(met)
+	isUSD := isTileUSDMetric(key, met)
+	isPct := met.Unit == "%"
+
+	if met.Limit != nil {
+		if hasUsed {
+			if isPct {
+				return fmt.Sprintf("%.0f%%", used)
+			}
+			if isUSD {
+				return fmt.Sprintf("%s/%s", formatUSD(used), formatUSD(*met.Limit))
+			}
+			return fmt.Sprintf("%s/%s", compactMetricAmount(used, met.Unit), compactMetricAmount(*met.Limit, met.Unit))
+		}
+		if met.Remaining != nil && isPct {
+			return fmt.Sprintf("%.0f%%", 100-*met.Remaining)
+		}
+	}
+
+	if hasUsed {
+		if isPct {
+			return fmt.Sprintf("%.0f%%", used)
+		}
+		if isUSD {
+			return formatUSD(used)
+		}
+		return compactMetricAmount(used, met.Unit)
+	}
+
+	if met.Remaining != nil {
+		if isPct {
+			return fmt.Sprintf("%.0f%% left", *met.Remaining)
+		}
+		if isUSD {
+			return fmt.Sprintf("%s left", formatUSD(*met.Remaining))
+		}
+		return fmt.Sprintf("%s left", compactMetricAmount(*met.Remaining, met.Unit))
+	}
+
+	return ""
+}
+
+func metricUsedValue(met core.Metric) (float64, bool) {
+	if met.Used != nil {
+		return *met.Used, true
+	}
+	if met.Limit != nil && met.Remaining != nil {
+		return *met.Limit - *met.Remaining, true
+	}
+	return 0, false
+}
+
+func isTileUSDMetric(key string, met core.Metric) bool {
+	return met.Unit == "USD" || strings.HasSuffix(key, "_usd") ||
+		strings.Contains(key, "cost") || strings.Contains(key, "spend") ||
+		strings.Contains(key, "price")
+}
+
+func compactMetricAmount(v float64, unit string) string {
+	switch unit {
+	case "tokens", "requests", "messages", "completions", "conversations", "seats", "quota", "lines":
+		return shortCompact(v)
+	case "":
+		return shortCompact(v)
+	default:
+		return fmt.Sprintf("%s %s", shortCompact(v), unit)
+	}
+}
+
+func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int, skipKeys map[string]bool) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -601,6 +885,9 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int) []strin
 
 	var lines []string
 	for _, key := range keys {
+		if skipKeys != nil && skipKeys[key] {
+			continue
+		}
 		if snap.ProviderID == "openrouter" &&
 			(strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "provider_")) {
 			continue
@@ -697,85 +984,335 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 	return lines
 }
 
-var resetLabelMap = map[string]string{
-	"billing_block":   "5h Block",
-	"usage_five_hour": "5h Usage",
-	"usage_seven_day": "7d Usage",
-	"limit_reset":     "Limit Reset",
-	"key_expires":     "Key Expires",
+func buildTileHeaderMetaLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
+	var pills []string
+	pills = append(pills, buildTileCyclePills(snap)...)
+	pills = append(pills, buildTileResetPills(snap, animFrame)...)
+	return wrapTilePills(pills, innerW)
 }
 
-func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
+func buildTileCyclePills(snap core.QuotaSnapshot) []string {
+	var pills []string
+	if pill := buildTileCyclePill("Billing", snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"]); pill != "" {
+		pills = append(pills, pill)
+	}
+	if pill := buildTileCyclePill("5h Block", snap.Raw["block_start"], snap.Raw["block_end"]); pill != "" {
+		pills = append(pills, pill)
+	}
+	return pills
+}
+
+func buildTileCyclePill(label, startRaw, endRaw string) string {
+	start, hasStart := parseTileTimestamp(startRaw)
+	end, hasEnd := parseTileTimestamp(endRaw)
+	if !hasStart && !hasEnd {
+		return ""
+	}
+
+	var span string
+	switch {
+	case hasStart && hasEnd:
+		span = fmt.Sprintf("%s→%s", formatTileTimestamp(start), formatTileTimestamp(end))
+	case hasEnd:
+		span = "ends " + formatTileTimestamp(end)
+	default:
+		span = "since " + formatTileTimestamp(start)
+	}
+
+	return lipgloss.NewStyle().Foreground(colorLavender).Bold(true).Render("◷ "+label) +
+		" " + lipgloss.NewStyle().Foreground(colorSubtext).Render(span)
+}
+
+func parseTileTimestamp(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+
+	if unixVal, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if unixVal > 1e12 {
+			return time.Unix(unixVal/1000, (unixVal%1000)*1e6), true
+		}
+		return time.Unix(unixVal, 0), true
+	}
+
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02",
+		"Jan 02, 2006 15:04 MST",
+		"Jan 02, 2006 15:04",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func formatTileTimestamp(t time.Time) string {
+	now := time.Now()
+	isDateOnly := t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+	if isDateOnly {
+		if t.Year() == now.Year() {
+			return t.Format("Jan 02")
+		}
+		return t.Format("2006-01-02")
+	}
+	if t.Year() == now.Year() {
+		return t.Format("Jan 02 15:04")
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+func wrapTilePills(pills []string, innerW int) []string {
+	if len(pills) == 0 {
+		return nil
+	}
+
+	sep := dimStyle.Render(" · ")
+	sepW := lipgloss.Width(sep)
+
+	var lines []string
+	var line string
+	lineW := 0
+
+	for _, pill := range pills {
+		pillW := lipgloss.Width(pill)
+		if lineW == 0 {
+			line = pill
+			lineW = pillW
+			continue
+		}
+		if lineW+sepW+pillW <= innerW {
+			line += sep + pill
+			lineW += sepW + pillW
+			continue
+		}
+		lines = append(lines, line)
+		line = pill
+		lineW = pillW
+	}
+
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+type resetEntry struct {
+	key   string
+	label string
+	dur   time.Duration
+	at    time.Time
+}
+
+var resetLabelMap = map[string]string{
+	"billing_block":        "5h Block",
+	"billing_cycle_end":    "Billing",
+	"quota_reset":          "Quota",
+	"usage_five_hour":      "5h Usage",
+	"usage_seven_day":      "7d Usage",
+	"limit_reset":          "Limit",
+	"key_expires":          "Key Exp",
+	"rate_limit_primary":   "Primary",
+	"rate_limit_secondary": "Secondary",
+	"rpm":                  "RPM",
+	"tpm":                  "TPM",
+	"rpd":                  "RPD",
+	"tpd":                  "TPD",
+	"rpm_headers":          "Req",
+	"tpm_headers":          "Tok",
+	"gh_core_rpm":          "Core",
+	"gh_search_rpm":        "Search",
+	"gh_graphql_rpm":       "GraphQL",
+}
+
+func collectActiveResetEntries(snap core.QuotaSnapshot) []resetEntry {
 	if len(snap.Resets) == 0 {
 		return nil
 	}
 
-	keys := make([]string, 0, len(snap.Resets))
-	for k := range snap.Resets {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	type resetEntry struct {
-		label string
-		dur   time.Duration
-	}
 	var entries []resetEntry
-	for _, key := range keys {
-		t := snap.Resets[key]
+	for key, t := range snap.Resets {
 		dur := time.Until(t)
 		if dur < 0 {
 			continue
 		}
-		label := resetLabelMap[key]
-		if label == "" {
-			if met, ok := snap.Metrics[key]; ok && met.Window != "" {
-				label = "Usage " + met.Window
-			} else {
-				label = prettifyKey(key)
-			}
+		entries = append(entries, resetEntry{
+			key:   key,
+			label: resetLabelForKey(snap, key),
+			dur:   dur,
+			at:    t,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if !entries[i].at.Equal(entries[j].at) {
+			return entries[i].at.Before(entries[j].at)
 		}
-		entries = append(entries, resetEntry{label: label, dur: dur})
+		return entries[i].label < entries[j].label
+	})
+	return entries
+}
+
+func resetLabelForKey(snap core.QuotaSnapshot, key string) string {
+	if snap.ProviderID == "gemini_cli" {
+		if label := compactGeminiResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
+			return label
+		}
+	}
+	if label := resetLabelMap[key]; label != "" {
+		return label
+	}
+	trimmed := strings.TrimSuffix(key, "_reset")
+	if label := resetLabelMap[trimmed]; label != "" {
+		return label
+	}
+	if met, ok := snap.Metrics[trimmed]; ok && met.Window != "" {
+		return prettifyKey(trimmed)
+	}
+	if met, ok := snap.Metrics[key]; ok && met.Window != "" {
+		return prettifyKey(key)
+	}
+	return prettifyKey(trimmed)
+}
+
+func compactGeminiResetLabel(key string) string {
+	model := key
+	token := ""
+	if idx := strings.LastIndex(key, "_"); idx > 0 {
+		model = key[:idx]
+		token = key[idx+1:]
 	}
 
+	model = strings.ToLower(model)
+	model = strings.TrimPrefix(model, "gemini-")
+	model = strings.TrimSuffix(model, "-vertex")
+	model = strings.TrimSuffix(model, "-preview")
+	model = strings.ReplaceAll(model, "_", "-")
+
+	model = truncateToWidth(model, 18)
+	if token == "" {
+		return model
+	}
+
+	tokenMap := map[string]string{
+		"requests": "req",
+		"tokens":   "tok",
+		"quota":    "quota",
+	}
+	if short, ok := tokenMap[token]; ok {
+		token = short
+	}
+	return model + " " + token
+}
+
+func formatHeaderDuration(d time.Duration) string {
+	if d <= 0 {
+		return "<1m"
+	}
+	if d < time.Hour {
+		mins := int(math.Ceil(d.Minutes()))
+		if mins < 1 {
+			mins = 1
+		}
+		return fmt.Sprintf("%dm", mins)
+	}
+	if d < 24*time.Hour {
+		totalMins := int(math.Ceil(d.Minutes()))
+		h := totalMins / 60
+		m := totalMins % 60
+		return fmt.Sprintf("%dh%02dm", h, m)
+	}
+	totalHours := int(math.Ceil(d.Hours()))
+	return fmt.Sprintf("%dd%02dh", totalHours/24, totalHours%24)
+}
+
+func buildGeminiResetPills(entries []resetEntry) []string {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	dimSep := lipgloss.NewStyle().Foreground(colorSurface2).Render(" │ ")
+	type group struct {
+		at     time.Time
+		labels []string
+		minDur time.Duration
+	}
+	groups := make(map[int64]*group)
+	for _, e := range entries {
+		bucket := e.at.Unix() / 60
+		g, ok := groups[bucket]
+		if !ok {
+			g = &group{at: e.at, minDur: e.dur}
+			groups[bucket] = g
+		}
+		if e.dur < g.minDur {
+			g.minDur = e.dur
+		}
+		g.labels = append(g.labels, e.label)
+	}
+
+	ordered := make([]*group, 0, len(groups))
+	for _, g := range groups {
+		sort.Strings(g.labels)
+		ordered = append(ordered, g)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].at.Before(ordered[j].at) })
 
 	var pills []string
-	for _, e := range entries {
-		durStr := formatDuration(e.dur)
+	for _, g := range ordered {
+		durColor := colorTeal
+		if g.minDur < 10*time.Minute {
+			durColor = colorPeach
+		} else if g.minDur < 30*time.Minute {
+			durColor = colorYellow
+		}
 
+		label := "Gemini quotas"
+		if len(g.labels) <= 2 {
+			label = strings.Join(g.labels, ", ")
+		} else {
+			label = fmt.Sprintf("Gemini quotas (%d models)", len(g.labels))
+		}
+
+		pill := lipgloss.NewStyle().Foreground(colorSubtext).Render("◷ "+label+" ") +
+			lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(formatHeaderDuration(g.minDur))
+		pills = append(pills, pill)
+	}
+	return pills
+}
+
+func buildTileResetPills(snap core.QuotaSnapshot, animFrame int) []string {
+	_ = animFrame
+	entries := collectActiveResetEntries(snap)
+	if len(entries) == 0 {
+		return nil
+	}
+
+	if snap.ProviderID == "gemini_cli" && len(entries) > 4 {
+		return buildGeminiResetPills(entries)
+	}
+
+	pills := make([]string, 0, len(entries))
+	for _, e := range entries {
 		durColor := colorTeal
 		if e.dur < 10*time.Minute {
 			durColor = colorPeach
 		} else if e.dur < 30*time.Minute {
 			durColor = colorYellow
 		}
-
-		clockFrames := []string{"◴", "◷", "◶", "◵"}
-		clock := clockFrames[(animFrame/3)%len(clockFrames)]
-
-		pill := lipgloss.NewStyle().Foreground(colorSubtext).Render(clock+" "+e.label+" ") +
-			lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(durStr)
+		pill := lipgloss.NewStyle().Foreground(colorSubtext).Render("◷ "+e.label+" ") +
+			lipgloss.NewStyle().Foreground(durColor).Bold(true).Render(formatHeaderDuration(e.dur))
 		pills = append(pills, pill)
 	}
+	return pills
+}
 
-	oneLine := strings.Join(pills, dimSep)
-	if lipgloss.Width(oneLine) <= innerW {
-		return []string{oneLine}
-	}
-
-	var lines []string
-	for _, pill := range pills {
-		if lipgloss.Width(pill) > innerW {
-			pill = pill[:innerW]
-		}
-		lines = append(lines, pill)
-	}
-	return lines
+func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
+	return wrapTilePills(buildTileResetPills(snap, animFrame), innerW)
 }
 
 func renderDotLeaderRow(label, value string, totalW int) string {
@@ -845,11 +1382,7 @@ func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int) [
 		return nil
 	}
 
-	topN := 5
-	if len(models) < topN {
-		topN = len(models)
-	}
-	top := models[:topN]
+	top := models
 
 	barW := innerW - 2
 	if barW < 12 {
@@ -896,11 +1429,177 @@ func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int) [
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
 	}
 
-	if len(models) > topN {
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("  + %d more models", len(models)-topN)))
+	return lines
+}
+
+func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int) ([]string, map[string]bool) {
+	models, usedKeys := collectProviderModelMix(snap)
+	if len(models) == 0 {
+		return nil, nil
 	}
 
-	return lines
+	totalCost := float64(0)
+	totalTokens := float64(0)
+	for _, m := range models {
+		totalCost += m.cost
+		totalTokens += m.input + m.output
+	}
+
+	useCost := totalCost > 0
+	total := totalTokens
+	if useCost {
+		total = totalCost
+	}
+	if total <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	heading := "Model Burn (credits)"
+	if !useCost {
+		heading = "Model Burn (tokens)"
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		"  " + renderOpenRouterMixBar(models, total, barW, useCost, snap.AccountID),
+	}
+
+	for idx, model := range models {
+		value := model.input + model.output
+		if useCost {
+			value = model.cost
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		label := prettifyModelName(model.name)
+		colorDot := lipgloss.NewStyle().Foreground(stableModelColor(model.name, snap.AccountID)).Render("■")
+		maxLabelLen := 16
+		if innerW < 60 {
+			maxLabelLen = 14
+		}
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+		valueStr := fmt.Sprintf("%2.0f%% %s %s/%s tok",
+			pct,
+			formatUSD(model.cost),
+			shortCompact(model.input),
+			shortCompact(model.output),
+		)
+		if !useCost {
+			valueStr = fmt.Sprintf("%2.0f%% %s tok", pct, shortCompact(model.input+model.output))
+		}
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	return lines, usedKeys
+}
+
+func collectProviderModelMix(snap core.QuotaSnapshot) ([]openRouterModelMix, map[string]bool) {
+	type agg struct {
+		cost   float64
+		input  float64
+		output float64
+	}
+	byModel := make(map[string]*agg)
+	usedKeys := make(map[string]bool)
+
+	ensure := func(name string) *agg {
+		if _, ok := byModel[name]; !ok {
+			byModel[name] = &agg{}
+		}
+		return byModel[name]
+	}
+
+	recordCost := func(name string, v float64, key string) {
+		ensure(name).cost += v
+		usedKeys[key] = true
+	}
+	recordInput := func(name string, v float64, key string) {
+		ensure(name).input += v
+		usedKeys[key] = true
+	}
+	recordOutput := func(name string, v float64, key string) {
+		ensure(name).output += v
+		usedKeys[key] = true
+	}
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost_usd"):
+			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd"), *met.Used, key)
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost"):
+			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost"), *met.Used, key)
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens"):
+			recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens"), *met.Used, key)
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens"):
+			recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens"), *met.Used, key)
+		case strings.HasPrefix(key, "input_tokens_"):
+			recordInput(strings.TrimPrefix(key, "input_tokens_"), *met.Used, key)
+		case strings.HasPrefix(key, "output_tokens_"):
+			recordOutput(strings.TrimPrefix(key, "output_tokens_"), *met.Used, key)
+		}
+	}
+
+	for key, raw := range snap.Raw {
+		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens") {
+			if v, ok := parseTileNumeric(raw); ok {
+				recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens"), v, key)
+			}
+		}
+		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens") {
+			if v, ok := parseTileNumeric(raw); ok {
+				recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens"), v, key)
+			}
+		}
+	}
+
+	models := make([]openRouterModelMix, 0, len(byModel))
+	for name, v := range byModel {
+		if v.cost <= 0 && v.input <= 0 && v.output <= 0 {
+			continue
+		}
+		models = append(models, openRouterModelMix{
+			name:   name,
+			cost:   v.cost,
+			input:  v.input,
+			output: v.output,
+		})
+	}
+
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].cost != models[j].cost {
+			return models[i].cost > models[j].cost
+		}
+		return (models[i].input + models[i].output) > (models[j].input + models[j].output)
+	})
+	return models, usedKeys
+}
+
+func parseTileNumeric(raw string) (float64, bool) {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func renderOpenRouterMixBar(top []openRouterModelMix, total float64, barW int, useCost bool, providerID string) string {
@@ -1037,6 +1736,20 @@ func shortCompact(v float64) string {
 		return fmt.Sprintf("%.1fk", v/1_000)
 	}
 	return fmt.Sprintf("%.0f", v)
+}
+
+func truncateToWidth(s string, maxW int) string {
+	if maxW <= 0 || lipgloss.Width(s) <= maxW {
+		return s
+	}
+	r := []rune(s)
+	for len(r) > 0 && lipgloss.Width(string(r)+"…") > maxW {
+		r = r[:len(r)-1]
+	}
+	if len(r) == 0 {
+		return "…"
+	}
+	return string(r) + "…"
 }
 
 func formatTileMetricValue(key string, met core.Metric) string {
