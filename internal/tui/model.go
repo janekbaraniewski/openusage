@@ -997,14 +997,34 @@ func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) str
 }
 
 type providerDisplayInfo struct {
-	tagEmoji     string  // "💰", "⚡", "📊", "🔥", "💬", "💳", "⏱"
-	tagLabel     string  // "Spend", "Usage", "Activity", "Error", ...
+	tagEmoji     string  // "💰", "⚡", "🔑", "⚠", "◇"
+	tagLabel     string  // "Credits", "Usage", "Error", "Auth", "N/A"
 	summary      string  // Primary summary (e.g. "$4.23 today · $0.82/h")
 	detail       string  // Secondary detail (e.g. "Primary 3% · Secondary 15%")
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
 }
 
 func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) providerDisplayInfo {
+	return normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget))
+}
+
+func normalizeProviderDisplayInfoType(info providerDisplayInfo) providerDisplayInfo {
+	switch info.tagLabel {
+	case "Credits":
+		info.tagEmoji = "💰"
+	case "Usage":
+		info.tagEmoji = "⚡"
+	case "Error", "Auth", "N/A", "":
+		// Status and empty labels are allowed as-is.
+	default:
+		// Enforce only two billing types for provider tags.
+		info.tagLabel = "Usage"
+		info.tagEmoji = "⚡"
+	}
+	return info
+}
+
+func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget) providerDisplayInfo {
 	info := providerDisplayInfo{gaugePercent: -1}
 
 	switch snap.Status {
@@ -1295,8 +1315,8 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 	}
 
 	if m, ok := snap.Metrics["messages_today"]; ok && m.Used != nil {
-		info.tagEmoji = "💬"
-		info.tagLabel = "Activity"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		info.summary = fmt.Sprintf("%.0f msgs today", *m.Used)
 		var detailParts []string
 		if tc, ok2 := snap.Metrics["tool_calls_today"]; ok2 && tc.Used != nil {
@@ -1311,16 +1331,16 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 
 	for key, m := range snap.Metrics {
 		if m.Used != nil {
-			info.tagEmoji = "📋"
-			info.tagLabel = "Metrics"
+			info.tagEmoji = "⚡"
+			info.tagLabel = "Usage"
 			info.summary = fmt.Sprintf("%s: %s %s", metricLabel(widget, key), formatNumber(*m.Used), m.Unit)
 			return info
 		}
 	}
 
 	if snap.Message != "" {
-		info.tagEmoji = "ℹ"
-		info.tagLabel = "Info"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		msg := snap.Message
 		if len(msg) > 50 {
 			msg = msg[:47] + "..."
@@ -1329,8 +1349,8 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 		return info
 	}
 
-	info.tagEmoji = "·"
-	info.tagLabel = ""
+	info.tagEmoji = "⚡"
+	info.tagLabel = "Usage"
 	info.summary = string(snap.Status)
 	return info
 }
