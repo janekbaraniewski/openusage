@@ -9,10 +9,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+)
+
+const (
+	copilotAllTimeWindow = "all-time"
+	maxCopilotModels     = 8
 )
 
 type Provider struct{}
@@ -49,16 +55,20 @@ type copilotInternalUser struct {
 	ChatEnabled              bool              `json:"chat_enabled"`
 	MCPEnabled               bool              `json:"is_mcp_enabled"`
 	CopilotIgnoreEnabled     bool              `json:"copilotignore_enabled"`
+	CodexAgentEnabled        bool              `json:"codex_agent_enabled"`
 	RestrictedTelemetry      bool              `json:"restricted_telemetry"`
 	CanSignupForLimited      bool              `json:"can_signup_for_limited"`
 	LimitedUserSubscribedDay int               `json:"limited_user_subscribed_day"`
 	LimitedUserResetDate     string            `json:"limited_user_reset_date"`
+	QuotaResetDate           string            `json:"quota_reset_date"`
+	QuotaResetDateUTC        string            `json:"quota_reset_date_utc"`
 	AnalyticsTrackingID      string            `json:"analytics_tracking_id"`
 	Endpoints                map[string]string `json:"endpoints"`
 	OrganizationLoginList    []string          `json:"organization_login_list"`
 
-	LimitedUserQuotas *copilotQuotas `json:"limited_user_quotas"`
-	MonthlyQuotas     *copilotQuotas `json:"monthly_quotas"`
+	LimitedUserQuotas *copilotQuotas         `json:"limited_user_quotas"`
+	MonthlyQuotas     *copilotQuotas         `json:"monthly_quotas"`
+	QuotaSnapshots    *copilotQuotaSnapshots `json:"quota_snapshots"`
 
 	OrganizationList []copilotOrgEntry `json:"organization_list"`
 }
@@ -66,6 +76,24 @@ type copilotInternalUser struct {
 type copilotQuotas struct {
 	Chat        *int `json:"chat"`
 	Completions *int `json:"completions"`
+}
+
+type copilotQuotaSnapshots struct {
+	Chat                *copilotQuotaSnapshot `json:"chat"`
+	Completions         *copilotQuotaSnapshot `json:"completions"`
+	PremiumInteractions *copilotQuotaSnapshot `json:"premium_interactions"`
+}
+
+type copilotQuotaSnapshot struct {
+	Entitlement      *float64 `json:"entitlement"`
+	OverageCount     *float64 `json:"overage_count"`
+	OveragePermitted *bool    `json:"overage_permitted"`
+	PercentRemaining *float64 `json:"percent_remaining"`
+	QuotaID          string   `json:"quota_id"`
+	QuotaRemaining   *float64 `json:"quota_remaining"`
+	Remaining        *float64 `json:"remaining"`
+	Unlimited        *bool    `json:"unlimited"`
+	TimestampUTC     string   `json:"timestamp_utc"`
 }
 
 type copilotOrgEntry struct {
@@ -250,7 +278,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 
 	p.fetchOrgData(ctx, binary, &snap)
 
-	p.fetchLocalData(&snap)
+	p.fetchLocalData(acct, &snap)
 
 	p.resolveStatus(&snap, authOutput)
 
@@ -286,11 +314,27 @@ func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, 
 	if json.Unmarshal([]byte(body), &cu) != nil {
 		return
 	}
+	p.applyCopilotInternalUser(&cu, snap)
+}
+
+func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.QuotaSnapshot) {
+	if cu == nil {
+		return
+	}
 
 	snap.Raw["copilot_plan"] = cu.CopilotPlan
 	snap.Raw["access_type_sku"] = cu.AccessTypeSKU
 	if cu.AssignedDate != "" {
 		snap.Raw["assigned_date"] = cu.AssignedDate
+	}
+	if cu.CodexAgentEnabled {
+		snap.Raw["codex_agent_enabled"] = "true"
+	}
+	if cu.QuotaResetDate != "" {
+		snap.Raw["quota_reset_date"] = cu.QuotaResetDate
+	}
+	if cu.QuotaResetDateUTC != "" {
+		snap.Raw["quota_reset_date_utc"] = cu.QuotaResetDateUTC
 	}
 
 	features := []string{}
@@ -322,9 +366,22 @@ func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, 
 		}
 	}
 
+	if !p.applyQuotaSnapshotMetrics(cu.QuotaSnapshots, snap) {
+		p.applyLegacyQuotaMetrics(cu, snap)
+	}
+
+	for _, candidate := range []string{cu.QuotaResetDateUTC, cu.QuotaResetDate, cu.LimitedUserResetDate} {
+		if t := parseCopilotTime(candidate); !t.IsZero() {
+			snap.Resets["quota_reset"] = t
+			break
+		}
+	}
+}
+
+func (p *Provider) applyLegacyQuotaMetrics(cu *copilotInternalUser, snap *core.QuotaSnapshot) {
 	if cu.MonthlyQuotas != nil && cu.MonthlyQuotas.Chat != nil {
 		limit := float64(*cu.MonthlyQuotas.Chat)
-		var remaining float64
+		remaining := float64(0)
 		if cu.LimitedUserQuotas != nil && cu.LimitedUserQuotas.Chat != nil {
 			remaining = float64(*cu.LimitedUserQuotas.Chat)
 		}
@@ -340,7 +397,7 @@ func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, 
 
 	if cu.MonthlyQuotas != nil && cu.MonthlyQuotas.Completions != nil {
 		limit := float64(*cu.MonthlyQuotas.Completions)
-		var remaining float64
+		remaining := float64(0)
 		if cu.LimitedUserQuotas != nil && cu.LimitedUserQuotas.Completions != nil {
 			remaining = float64(*cu.LimitedUserQuotas.Completions)
 		}
@@ -353,11 +410,85 @@ func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, 
 			Window:    "month",
 		}
 	}
+}
 
-	if cu.LimitedUserResetDate != "" {
-		if t, err := time.Parse("2006-01-02", cu.LimitedUserResetDate); err == nil {
-			snap.Resets["quota_reset"] = t
+func (p *Provider) applyQuotaSnapshotMetrics(snapshots *copilotQuotaSnapshots, snap *core.QuotaSnapshot) bool {
+	if snapshots == nil {
+		return false
+	}
+
+	applied := false
+	if p.applySingleQuotaSnapshot("chat_quota", "messages", snapshots.Chat, snap) {
+		applied = true
+	}
+	if p.applySingleQuotaSnapshot("completions_quota", "completions", snapshots.Completions, snap) {
+		applied = true
+	}
+	if p.applySingleQuotaSnapshot("premium_interactions_quota", "requests", snapshots.PremiumInteractions, snap) {
+		applied = true
+	}
+	return applied
+}
+
+func (p *Provider) applySingleQuotaSnapshot(key, unit string, quota *copilotQuotaSnapshot, snap *core.QuotaSnapshot) bool {
+	if quota == nil {
+		return false
+	}
+
+	if quota.QuotaID != "" {
+		snap.Raw[key+"_id"] = quota.QuotaID
+	}
+	if quota.OveragePermitted != nil {
+		snap.Raw[key+"_overage_permitted"] = strconv.FormatBool(*quota.OveragePermitted)
+	}
+	if quota.Unlimited != nil && *quota.Unlimited {
+		snap.Raw[key+"_unlimited"] = "true"
+		return false
+	}
+	if quota.TimestampUTC != "" {
+		if t := parseCopilotTime(quota.TimestampUTC); !t.IsZero() {
+			snap.Resets[key+"_snapshot"] = t
 		}
+	}
+
+	remaining := firstNonNilFloat(quota.QuotaRemaining, quota.Remaining)
+	limit := quota.Entitlement
+	pct := clampPercent(firstFloat(quota.PercentRemaining))
+
+	switch {
+	case limit != nil && remaining != nil:
+		used := *limit - *remaining
+		if used < 0 {
+			used = 0
+		}
+		snap.Metrics[key] = core.Metric{
+			Limit:     float64Ptr(*limit),
+			Remaining: float64Ptr(*remaining),
+			Used:      float64Ptr(used),
+			Unit:      unit,
+			Window:    "month",
+		}
+		return true
+	case pct >= 0:
+		limitPct := 100.0
+		used := 100 - pct
+		snap.Metrics[key] = core.Metric{
+			Limit:     &limitPct,
+			Remaining: float64Ptr(pct),
+			Used:      float64Ptr(used),
+			Unit:      "%",
+			Window:    "month",
+		}
+		return true
+	case remaining != nil:
+		snap.Metrics[key] = core.Metric{
+			Used:   float64Ptr(*remaining),
+			Unit:   unit,
+			Window: "month",
+		}
+		return true
+	default:
+		return false
 	}
 }
 
@@ -371,13 +502,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 		return
 	}
 
-	rateMetrics := map[string]string{
-		"core":    "Gh API RPM",
-		"search":  "Gh Search RPM",
-		"graphql": "Gh GraphQL RPM",
-	}
-
-	for resource, label := range rateMetrics {
+	for _, resource := range []string{"core", "search", "graphql"} {
 		res, ok := rl.Resources[resource]
 		if !ok || res.Limit == 0 {
 			continue
@@ -385,6 +510,9 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 		limit := float64(res.Limit)
 		remaining := float64(res.Remaining)
 		used := float64(res.Used)
+		if used == 0 && res.Remaining >= 0 && res.Remaining <= res.Limit {
+			used = limit - remaining
+		}
 		key := "gh_" + resource + "_rpm"
 		snap.Metrics[key] = core.Metric{
 			Limit:     &limit,
@@ -396,7 +524,6 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 		if res.Reset > 0 {
 			snap.Resets[key+"_reset"] = time.Unix(res.Reset, 0)
 		}
-		_ = label
 	}
 }
 
@@ -467,6 +594,9 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 	totalSuggestions := make([]core.TimePoint, 0, len(days))
 	totalAcceptances := make([]core.TimePoint, 0, len(days))
 	totalChats := make([]core.TimePoint, 0, len(days))
+	aggSuggestions := 0.0
+	aggAcceptances := 0.0
+	aggChats := 0.0
 
 	for _, day := range days {
 		activeUsers = append(activeUsers, core.TimePoint{Date: day.Date, Value: float64(day.TotalActiveUsers)})
@@ -483,6 +613,8 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 		}
 		totalSuggestions = append(totalSuggestions, core.TimePoint{Date: day.Date, Value: daySugg})
 		totalAcceptances = append(totalAcceptances, core.TimePoint{Date: day.Date, Value: dayAccept})
+		aggSuggestions += daySugg
+		aggAcceptances += dayAccept
 
 		var dayChats float64
 		if day.IDEChat != nil {
@@ -500,6 +632,7 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 			}
 		}
 		totalChats = append(totalChats, core.TimePoint{Date: day.Date, Value: dayChats})
+		aggChats += dayChats
 	}
 
 	snap.DailySeries[prefix+"active_users"] = activeUsers
@@ -507,9 +640,36 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 	snap.DailySeries[prefix+"suggestions"] = totalSuggestions
 	snap.DailySeries[prefix+"acceptances"] = totalAcceptances
 	snap.DailySeries[prefix+"chats"] = totalChats
+
+	if len(activeUsers) > 0 {
+		lastActive := activeUsers[len(activeUsers)-1].Value
+		snap.Metrics[prefix+"active_users"] = core.Metric{Used: float64Ptr(lastActive), Unit: "users", Window: "day"}
+	}
+	if len(engagedUsers) > 0 {
+		lastEngaged := engagedUsers[len(engagedUsers)-1].Value
+		snap.Metrics[prefix+"engaged_users"] = core.Metric{Used: float64Ptr(lastEngaged), Unit: "users", Window: "day"}
+	}
+	if aggSuggestions > 0 {
+		snap.Metrics[prefix+"suggestions"] = core.Metric{Used: float64Ptr(aggSuggestions), Unit: "suggestions", Window: "series"}
+	}
+	if aggAcceptances > 0 {
+		snap.Metrics[prefix+"acceptances"] = core.Metric{Used: float64Ptr(aggAcceptances), Unit: "acceptances", Window: "series"}
+	}
+	if aggChats > 0 {
+		snap.Metrics[prefix+"chats"] = core.Metric{Used: float64Ptr(aggChats), Unit: "chats", Window: "series"}
+	}
 }
 
-func (p *Provider) fetchLocalData(snap *core.QuotaSnapshot) {
+func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.QuotaSnapshot) {
+	if acct.ExtraData != nil {
+		if dir := strings.TrimSpace(acct.ExtraData["config_dir"]); dir != "" {
+			p.readConfig(dir, snap)
+			logData := p.readLogs(dir, snap)
+			p.readSessions(dir, snap, logData)
+			return
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -546,10 +706,14 @@ func (p *Provider) readConfig(copilotDir string, snap *core.QuotaSnapshot) {
 type logSummary struct {
 	DefaultModel  string
 	SessionTokens map[string]logTokenEntry // sessionID → last CompactionProcessor entry
+	SessionBurn   map[string]float64       // sessionID → cumulative positive token deltas
 }
 
 func (p *Provider) readLogs(copilotDir string, snap *core.QuotaSnapshot) logSummary {
-	ls := logSummary{SessionTokens: make(map[string]logTokenEntry)}
+	ls := logSummary{
+		SessionTokens: make(map[string]logTokenEntry),
+		SessionBurn:   make(map[string]float64),
+	}
 	logDir := filepath.Join(copilotDir, "logs")
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -596,6 +760,14 @@ func (p *Provider) readLogs(copilotDir string, snap *core.QuotaSnapshot) logSumm
 				if te.Total > 0 {
 					allTokenEntries = append(allTokenEntries, te)
 					if currentSessionID != "" {
+						if prev, ok := ls.SessionTokens[currentSessionID]; ok && prev.Total > 0 {
+							delta := te.Used - prev.Used
+							if delta > 0 {
+								ls.SessionBurn[currentSessionID] += float64(delta)
+							}
+						} else if te.Used > 0 {
+							ls.SessionBurn[currentSessionID] += float64(te.Used)
+						}
 						ls.SessionTokens[currentSessionID] = te
 					}
 				}
@@ -612,6 +784,15 @@ func (p *Provider) readLogs(copilotDir string, snap *core.QuotaSnapshot) logSumm
 		snap.Raw["context_window_tokens"] = fmt.Sprintf("%d/%d", last.Used, last.Total)
 		pct := float64(last.Used) / float64(last.Total) * 100
 		snap.Raw["context_window_pct"] = fmt.Sprintf("%.1f%%", pct)
+		used := float64(last.Used)
+		limit := float64(last.Total)
+		snap.Metrics["context_window"] = core.Metric{
+			Limit:     &limit,
+			Used:      &used,
+			Remaining: float64Ptr(limit - used),
+			Unit:      "tokens",
+			Window:    "session",
+		}
 	}
 
 	return ls
@@ -647,12 +828,14 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		toolCalls      int
 		tokenUsed      int
 		tokenTotal     int
+		tokenBurn      float64
 	}
 
 	var sessions []sessionInfo
 	dailyMessages := make(map[string]float64)
 	dailySessions := make(map[string]float64)
 	dailyToolCalls := make(map[string]float64)
+	dailyTokens := make(map[string]float64)
 	modelMessages := make(map[string]int)
 	modelTurns := make(map[string]int)
 	modelSessions := make(map[string]int)
@@ -660,6 +843,8 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	modelReasoningChars := make(map[string]int)
 	modelToolCalls := make(map[string]int)
 	dailyModelMessages := make(map[string]map[string]float64)
+	dailyModelTokens := make(map[string]map[string]float64)
+	modelInputTokens := make(map[string]float64)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -680,6 +865,9 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		if te, ok := logs.SessionTokens[si.id]; ok {
 			si.tokenUsed = te.Used
 			si.tokenTotal = te.Total
+		}
+		if burn, ok := logs.SessionBurn[si.id]; ok {
+			si.tokenBurn = burn
 		}
 
 		if evtData, err := os.ReadFile(filepath.Join(sessPath, "events.jsonl")); err == nil {
@@ -758,20 +946,50 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 			si.model = currentModel
 		}
 
+		day := dayForSession(si.createdAt, si.updatedAt)
 		if si.model != "" {
 			modelSessions[si.model]++
 		}
-		if !si.createdAt.IsZero() {
-			dailySessions[si.createdAt.Format("2006-01-02")]++
+		if day != "" {
+			dailySessions[day]++
+		}
+
+		sessionTokens := float64(si.tokenUsed)
+		if si.tokenBurn > 0 {
+			sessionTokens = si.tokenBurn
+		}
+		if sessionTokens > 0 {
+			if day != "" {
+				dailyTokens[day] += sessionTokens
+			}
+			if si.model != "" {
+				modelInputTokens[si.model] += sessionTokens
+				if day != "" {
+					if dailyModelTokens[si.model] == nil {
+						dailyModelTokens[si.model] = make(map[string]float64)
+					}
+					dailyModelTokens[si.model][day] += sessionTokens
+				}
+			}
 		}
 		sessions = append(sessions, si)
 	}
 
+	storeSeries(snap, "messages", dailyMessages)
+	storeSeries(snap, "sessions", dailySessions)
+	storeSeries(snap, "tool_calls", dailyToolCalls)
+	storeSeries(snap, "tokens_total", dailyTokens)
 	storeSeries(snap, "cli_messages", dailyMessages)
 	storeSeries(snap, "cli_sessions", dailySessions)
 	storeSeries(snap, "cli_tool_calls", dailyToolCalls)
 	for model, dayCounts := range dailyModelMessages {
-		storeSeries(snap, "cli_messages_"+model, dayCounts)
+		safe := sanitizeMetricName(model)
+		storeSeries(snap, "cli_messages_"+safe, dayCounts)
+	}
+	for model, dayCounts := range dailyModelTokens {
+		safe := sanitizeMetricName(model)
+		storeSeries(snap, "tokens_"+safe, dayCounts)
+		storeSeries(snap, "cli_tokens_"+safe, dayCounts)
 	}
 
 	setRawStr(snap, "model_usage", formatModelMap(modelMessages, "msgs"))
@@ -782,22 +1000,81 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	setRawStr(snap, "model_tool_calls", formatModelMap(modelToolCalls, "calls"))
 
 	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].updatedAt.After(sessions[j].updatedAt)
+		ti := sessions[i].updatedAt
+		if ti.IsZero() {
+			ti = sessions[i].createdAt
+		}
+		tj := sessions[j].updatedAt
+		if tj.IsZero() {
+			tj = sessions[j].createdAt
+		}
+		return ti.After(tj)
 	})
 
 	var totalMessages, totalTurns, totalResponse, totalReasoning, totalTools int
+	totalTokens := 0.0
 	for _, s := range sessions {
 		totalMessages += s.messages
 		totalTurns += s.turns
 		totalResponse += s.responseChars
 		totalReasoning += s.reasoningChars
 		totalTools += s.toolCalls
+		tokens := float64(s.tokenUsed)
+		if s.tokenBurn > 0 {
+			tokens = s.tokenBurn
+		}
+		totalTokens += tokens
 	}
 	setRawInt(snap, "total_cli_messages", totalMessages)
 	setRawInt(snap, "total_cli_turns", totalTurns)
 	setRawInt(snap, "total_response_chars", totalResponse)
 	setRawInt(snap, "total_reasoning_chars", totalReasoning)
 	setRawInt(snap, "total_tool_calls", totalTools)
+
+	setUsedMetric(snap, "total_messages", float64(totalMessages), "messages", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_sessions", float64(len(sessions)), "sessions", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_turns", float64(totalTurns), "turns", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_tool_calls", float64(totalTools), "calls", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "total_conversations", float64(len(sessions)), "sessions", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_messages", float64(totalMessages), "messages", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_turns", float64(totalTurns), "turns", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_sessions", float64(len(sessions)), "sessions", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_tool_calls", float64(totalTools), "calls", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_input_tokens", totalTokens, "tokens", copilotAllTimeWindow)
+	setUsedMetric(snap, "client_cli_total_tokens", totalTokens, "tokens", copilotAllTimeWindow)
+
+	if _, v := latestSeriesValue(dailyMessages); v > 0 {
+		setUsedMetric(snap, "messages_today", v, "messages", "today")
+	}
+	if _, v := latestSeriesValue(dailySessions); v > 0 {
+		setUsedMetric(snap, "sessions_today", v, "sessions", "today")
+	}
+	if _, v := latestSeriesValue(dailyToolCalls); v > 0 {
+		setUsedMetric(snap, "tool_calls_today", v, "calls", "today")
+	}
+	if _, v := latestSeriesValue(dailyTokens); v > 0 {
+		setUsedMetric(snap, "tokens_today", v, "tokens", "today")
+	}
+	setUsedMetric(snap, "7d_messages", sumLastNDays(dailyMessages, 7), "messages", "7d")
+	setUsedMetric(snap, "7d_sessions", sumLastNDays(dailySessions, 7), "sessions", "7d")
+	setUsedMetric(snap, "7d_tool_calls", sumLastNDays(dailyToolCalls, 7), "calls", "7d")
+	setUsedMetric(snap, "7d_tokens", sumLastNDays(dailyTokens, 7), "tokens", "7d")
+
+	topModels := topModelNames(modelInputTokens, modelMessages, maxCopilotModels)
+	for _, model := range topModels {
+		prefix := "model_" + sanitizeMetricName(model)
+		setUsedMetric(snap, prefix+"_input_tokens", modelInputTokens[model], "tokens", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_messages", float64(modelMessages[model]), "messages", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_turns", float64(modelTurns[model]), "turns", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_sessions", float64(modelSessions[model]), "sessions", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_tool_calls", float64(modelToolCalls[model]), "calls", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_response_chars", float64(modelResponseChars[model]), "chars", copilotAllTimeWindow)
+		setUsedMetric(snap, prefix+"_reasoning_chars", float64(modelReasoningChars[model]), "chars", copilotAllTimeWindow)
+	}
 
 	if len(sessions) > 0 {
 		r := sessions[0]
@@ -812,8 +1089,24 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		if r.model != "" {
 			snap.Raw["last_session_model"] = r.model
 		}
-		if r.tokenUsed > 0 {
-			snap.Raw["last_session_tokens"] = fmt.Sprintf("%d/%d", r.tokenUsed, r.tokenTotal)
+		sessionTokens := float64(r.tokenUsed)
+		if r.tokenBurn > 0 {
+			sessionTokens = r.tokenBurn
+		}
+		if sessionTokens > 0 {
+			snap.Raw["last_session_tokens"] = fmt.Sprintf("%.0f/%d", sessionTokens, r.tokenTotal)
+			setUsedMetric(snap, "session_input_tokens", sessionTokens, "tokens", "session")
+			setUsedMetric(snap, "session_total_tokens", sessionTokens, "tokens", "session")
+			if r.tokenTotal > 0 {
+				limit := float64(r.tokenTotal)
+				snap.Metrics["context_window"] = core.Metric{
+					Limit:     &limit,
+					Used:      float64Ptr(sessionTokens),
+					Remaining: float64Ptr(maxFloat(limit-sessionTokens, 0)),
+					Unit:      "tokens",
+					Window:    "session",
+				}
+			}
 		}
 	}
 }
@@ -851,12 +1144,13 @@ func (p *Provider) resolveStatus(snap *core.QuotaSnapshot, authOutput string) {
 
 	for key, m := range snap.Metrics {
 		pct := m.Percent()
-		if pct >= 0 && pct < 5 && (key == "chat_quota" || key == "completions_quota") {
+		isQuota := key == "chat_quota" || key == "completions_quota" || key == "premium_interactions_quota"
+		if pct >= 0 && pct < 5 && isQuota {
 			snap.Status = core.StatusLimited
 			snap.Message = quotaStatusMessage(snap)
 			return
 		}
-		if pct >= 0 && pct < 20 && (key == "chat_quota" || key == "completions_quota") {
+		if pct >= 0 && pct < 20 && isQuota {
 			snap.Status = core.StatusNearLimit
 			snap.Message = quotaStatusMessage(snap)
 			return
@@ -954,6 +1248,112 @@ func storeSeries(snap *core.QuotaSnapshot, key string, m map[string]float64) {
 	}
 }
 
+func setUsedMetric(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+	if value <= 0 {
+		return
+	}
+	v := value
+	snap.Metrics[key] = core.Metric{
+		Used:   &v,
+		Unit:   unit,
+		Window: window,
+	}
+}
+
+func dayForSession(createdAt, updatedAt time.Time) string {
+	if !updatedAt.IsZero() {
+		return updatedAt.Format("2006-01-02")
+	}
+	if !createdAt.IsZero() {
+		return createdAt.Format("2006-01-02")
+	}
+	return ""
+}
+
+func latestSeriesValue(m map[string]float64) (string, float64) {
+	if len(m) == 0 {
+		return "", 0
+	}
+	dates := make([]string, 0, len(m))
+	for d := range m {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+	last := dates[len(dates)-1]
+	return last, m[last]
+}
+
+func sumLastNDays(m map[string]float64, days int) float64 {
+	if len(m) == 0 || days <= 0 {
+		return 0
+	}
+	date, _ := latestSeriesValue(m)
+	if date == "" {
+		return 0
+	}
+	end, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return 0
+	}
+	start := end.AddDate(0, 0, -(days - 1))
+	sum := 0.0
+	for d, v := range m {
+		t, err := time.Parse("2006-01-02", d)
+		if err != nil {
+			continue
+		}
+		if !t.Before(start) && !t.After(end) {
+			sum += v
+		}
+	}
+	return sum
+}
+
+func topModelNames(tokenMap map[string]float64, messageMap map[string]int, limit int) []string {
+	type row struct {
+		model    string
+		tokens   float64
+		messages int
+	}
+
+	seen := make(map[string]bool)
+	var rows []row
+	for model, tokens := range tokenMap {
+		seen[model] = true
+		rows = append(rows, row{model: model, tokens: tokens, messages: messageMap[model]})
+	}
+	for model, messages := range messageMap {
+		if seen[model] {
+			continue
+		}
+		rows = append(rows, row{model: model, messages: messages})
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].tokens == rows[j].tokens {
+			if rows[i].messages == rows[j].messages {
+				return rows[i].model < rows[j].model
+			}
+			return rows[i].messages > rows[j].messages
+		}
+		return rows[i].tokens > rows[j].tokens
+	})
+
+	if limit <= 0 || len(rows) <= limit {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.model)
+		}
+		return out
+	}
+
+	out := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		out = append(out, rows[i].model)
+	}
+	return out
+}
+
 func parseDayFromTimestamp(ts string) string {
 	t := flexParseTime(ts)
 	if t.IsZero() {
@@ -971,9 +1371,31 @@ func flexParseTime(s string) time.Time {
 		"2006-01-02T15:04:05.000Z",
 		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05.999Z",
+		"2006-01-02",
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
+		}
+	}
+	return time.Time{}
+}
+
+func parseCopilotTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+
+	if t := flexParseTime(s); !t.IsZero() {
+		return t
+	}
+
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		switch {
+		case n > 1_000_000_000_000:
+			return time.UnixMilli(n)
+		case n > 1_000_000_000:
+			return time.Unix(n, 0)
 		}
 	}
 	return time.Time{}
@@ -1025,4 +1447,69 @@ func setRawStr(snap *core.QuotaSnapshot, key, v string) {
 	if v != "" {
 		snap.Raw[key] = v
 	}
+}
+
+func float64Ptr(v float64) *float64 { return &v }
+
+func firstNonNilFloat(values ...*float64) *float64 {
+	for _, v := range values {
+		if v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func firstFloat(v *float64) float64 {
+	if v == nil {
+		return -1
+	}
+	return *v
+}
+
+func clampPercent(v float64) float64 {
+	if v < 0 {
+		return -1
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func sanitizeMetricName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return "unknown"
+	}
+
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			lastUnderscore = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastUnderscore = false
+		default:
+			if !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "unknown"
+	}
+	return out
 }

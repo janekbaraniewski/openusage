@@ -2,6 +2,8 @@ package copilot
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -227,6 +229,100 @@ func TestCopilotInternalUserParsing_NoQuotas(t *testing.T) {
 	}
 	if cu.MonthlyQuotas != nil {
 		t.Error("expected nil MonthlyQuotas for pro user")
+	}
+}
+
+func TestCopilotInternalUserParsing_QuotaSnapshots(t *testing.T) {
+	body := `{
+		"login": "testuser",
+		"access_type_sku": "free_limited_copilot",
+		"copilot_plan": "individual",
+		"quota_reset_date_utc": "2026-03-17T00:00:00Z",
+		"quota_snapshots": {
+			"chat": {
+				"entitlement": 500,
+				"quota_remaining": 470,
+				"percent_remaining": 94,
+				"quota_id": "chat",
+				"timestamp_utc": "2026-02-21T00:00:00Z"
+			},
+			"completions": {
+				"entitlement": 4000,
+				"quota_remaining": 3900,
+				"quota_id": "completions"
+			},
+			"premium_interactions": {
+				"entitlement": 50,
+				"remaining": 45,
+				"quota_id": "premium"
+			}
+		}
+	}`
+
+	var cu copilotInternalUser
+	if err := unmarshalJSON(body, &cu); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	if cu.QuotaSnapshots == nil || cu.QuotaSnapshots.Chat == nil {
+		t.Fatal("expected chat quota snapshot")
+	}
+	if cu.QuotaSnapshots.Chat.Entitlement == nil || *cu.QuotaSnapshots.Chat.Entitlement != 500 {
+		t.Fatalf("chat entitlement = %v, want 500", cu.QuotaSnapshots.Chat.Entitlement)
+	}
+	if cu.QuotaSnapshots.PremiumInteractions == nil || cu.QuotaSnapshots.PremiumInteractions.Remaining == nil || *cu.QuotaSnapshots.PremiumInteractions.Remaining != 45 {
+		t.Fatalf("premium remaining = %v, want 45", cu.QuotaSnapshots.PremiumInteractions)
+	}
+}
+
+func TestApplyCopilotInternalUser_QuotaSnapshotMetrics(t *testing.T) {
+	p := New()
+	cu := &copilotInternalUser{
+		AccessTypeSKU:     "free_limited_copilot",
+		CopilotPlan:       "individual",
+		QuotaResetDateUTC: "2026-03-17T00:00:00Z",
+		QuotaSnapshots: &copilotQuotaSnapshots{
+			Chat: &copilotQuotaSnapshot{
+				Entitlement:    float64Ptr(500),
+				QuotaRemaining: float64Ptr(470),
+				QuotaID:        "chat",
+			},
+			Completions: &copilotQuotaSnapshot{
+				Entitlement:    float64Ptr(4000),
+				QuotaRemaining: float64Ptr(3900),
+				QuotaID:        "completions",
+			},
+			PremiumInteractions: &copilotQuotaSnapshot{
+				Entitlement:      float64Ptr(50),
+				Remaining:        float64Ptr(45),
+				QuotaID:          "premium",
+				TimestampUTC:     "2026-02-21T00:00:00Z",
+				OveragePermitted: boolPtr(true),
+			},
+		},
+	}
+
+	snap := &core.QuotaSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+		Raw:     make(map[string]string),
+	}
+	p.applyCopilotInternalUser(cu, snap)
+
+	if m, ok := snap.Metrics["chat_quota"]; !ok || m.Used == nil || *m.Used != 30 {
+		t.Fatalf("chat_quota used = %v, want 30", m.Used)
+	}
+	if m, ok := snap.Metrics["completions_quota"]; !ok || m.Remaining == nil || *m.Remaining != 3900 {
+		t.Fatalf("completions_quota remaining = %v, want 3900", m.Remaining)
+	}
+	if m, ok := snap.Metrics["premium_interactions_quota"]; !ok || m.Limit == nil || *m.Limit != 50 {
+		t.Fatalf("premium_interactions_quota limit = %v, want 50", m.Limit)
+	}
+	if _, ok := snap.Resets["quota_reset"]; !ok {
+		t.Fatal("expected quota_reset")
+	}
+	if got := snap.Raw["premium_interactions_quota_overage_permitted"]; got != "true" {
+		t.Fatalf("premium overage raw = %q, want true", got)
 	}
 }
 
@@ -696,6 +792,91 @@ func TestAssistantMsgDataParsing_EmptyTools(t *testing.T) {
 	}
 }
 
+func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
+	p := New()
+	tmp := t.TempDir()
+	copilotDir := filepath.Join(tmp, ".copilot")
+	logDir := filepath.Join(copilotDir, "logs")
+	sessionDir := filepath.Join(copilotDir, "session-state")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	logContent := strings.Join([]string{
+		"2026-02-20T01:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		"2026-02-20T01:00:01.000Z [INFO] CompactionProcessor: Utilization 1.0% (1200/128000 tokens) below threshold 80%",
+		"2026-02-20T01:00:02.000Z [INFO] CompactionProcessor: Utilization 1.4% (1800/128000 tokens) below threshold 80%",
+		"2026-02-20T02:00:00.000Z [INFO] Workspace initialized: s2 (checkpoints: 0)",
+		"2026-02-20T02:00:01.000Z [INFO] CompactionProcessor: Utilization 0.7% (900/128000 tokens) below threshold 80%",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(logDir, "process-test.log"), []byte(logContent), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	mkSession := func(id, model, created, updated string) {
+		dir := filepath.Join(sessionDir, id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", id, err)
+		}
+		ws := strings.Join([]string{
+			"id: " + id,
+			"repository: owner/repo",
+			"branch: main",
+			"created_at: " + created,
+			"updated_at: " + updated,
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+			t.Fatalf("write workspace %s: %v", id, err)
+		}
+		events := strings.Join([]string{
+			`{"type":"session.model_change","timestamp":"` + created + `","data":{"newModel":"` + model + `"}}`,
+			`{"type":"user.message","timestamp":"` + created + `","data":{"content":"hello"}}`,
+			`{"type":"assistant.turn_start","timestamp":"` + created + `","data":{"turnId":"0"}}`,
+			`{"type":"assistant.message","timestamp":"` + updated + `","data":{"content":"world","reasoningText":"r","toolRequests":[{"name":"read_file"}]}}`,
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events), 0o644); err != nil {
+			t.Fatalf("write events %s: %v", id, err)
+		}
+	}
+
+	mkSession("s1", "gpt-5-mini", "2026-02-20T01:00:00Z", "2026-02-20T01:10:00Z")
+	mkSession("s2", "claude-sonnet-4.6", "2026-02-20T02:00:00Z", "2026-02-20T02:10:00Z")
+
+	snap := &core.QuotaSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+
+	logs := p.readLogs(copilotDir, snap)
+	p.readSessions(copilotDir, snap, logs)
+
+	if m := snap.Metrics["model_gpt_5_mini_input_tokens"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("model_gpt_5_mini_input_tokens missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["model_claude_sonnet_4_6_input_tokens"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("model_claude_sonnet_4_6_input_tokens missing/zero: %+v", m)
+	}
+	if _, ok := snap.DailySeries["tokens_gpt_5_mini"]; !ok {
+		t.Fatal("missing tokens_gpt_5_mini series")
+	}
+	if m := snap.Metrics["client_cli_input_tokens"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("client_cli_input_tokens missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["messages_today"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("messages_today missing/zero: %+v", m)
+	}
+	if _, ok := snap.Metrics["context_window"]; !ok {
+		t.Fatal("missing context_window metric")
+	}
+}
+
 func unmarshalJSON(s string, v interface{}) error {
 	return json.Unmarshal([]byte(s), v)
 }
+
+func boolPtr(v bool) *bool { return &v }
