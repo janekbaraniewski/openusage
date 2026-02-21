@@ -201,7 +201,7 @@ func extractProviderCost(snap core.QuotaSnapshot) float64 {
 }
 
 func extractTodayCost(snap core.QuotaSnapshot) float64 {
-	for _, key := range []string{"today_api_cost", "daily_cost_usd"} {
+	for _, key := range []string{"today_api_cost", "daily_cost_usd", "today_cost", "usage_daily"} {
 		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
 			return *m.Used
 		}
@@ -210,7 +210,7 @@ func extractTodayCost(snap core.QuotaSnapshot) float64 {
 }
 
 func extract7DayCost(snap core.QuotaSnapshot) float64 {
-	for _, key := range []string{"7d_api_cost"} {
+	for _, key := range []string{"7d_api_cost", "usage_weekly"} {
 		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
 			return *m.Used
 		}
@@ -416,6 +416,20 @@ func extractTokenActivity(snap core.QuotaSnapshot, color lipgloss.Color) []token
 		result = append(result, tokenActivityEntry{
 			provider: snap.AccountID, name: "Reasoning tokens",
 			output: *m.Used, total: *m.Used, window: "session", color: color,
+		})
+	}
+
+	// OpenRouter-specific metrics
+	if m, ok := snap.Metrics["today_reasoning_tokens"]; ok && m.Used != nil && *m.Used > 0 {
+		result = append(result, tokenActivityEntry{
+			provider: snap.AccountID, name: "Reasoning (today)",
+			output: *m.Used, total: *m.Used, window: "today", color: color,
+		})
+	}
+	if m, ok := snap.Metrics["today_cached_tokens"]; ok && m.Used != nil && *m.Used > 0 {
+		result = append(result, tokenActivityEntry{
+			provider: snap.AccountID, name: "Cached (today)",
+			cached: *m.Used, total: *m.Used, window: "today", color: color,
 		})
 	}
 

@@ -124,6 +124,8 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	actionKeys := []struct{ key, desc string }{
 		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
+		{"PgUp/PgDn", "Scroll selected tile"},
+		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
 		{"[ ]", "Switch detail tabs"},
 		{"1-3 / ←→", "Switch settings tabs"},
 		{"Space / Enter", "Apply setting in modal"},
@@ -245,7 +247,7 @@ func (m Model) renderSplash(screenW, screenH int) string {
 	spinner := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).
 		Render(SpinnerFrames[spinnerIdx])
 	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
-		Render("Discovering providers…")
+		Render("Loading providers…")
 	statusLine := "  " + spinner + " " + subtitle
 
 	// Collect all lines: banner + blank + status

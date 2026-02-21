@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -174,7 +175,7 @@ func (m Model) renderTiles(w, h int) string {
 		cursorRow = 0
 	}
 
-	scrollLine := rowOffsets[cursorRow]
+	scrollLine := rowOffsets[cursorRow] + m.tileOffset
 	if scrollLine > totalLines-h {
 		scrollLine = totalLines - h
 	}
@@ -190,16 +191,10 @@ func (m Model) renderTiles(w, h int) string {
 	visible := contentLines[scrollLine:endLine]
 
 	if scrollLine > 0 {
-		visible[0] = lipgloss.NewStyle().Foreground(colorDim).Render(
-			fmt.Sprintf("  ▲ %d more row(s) above", cursorRow))
+		visible[0] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ more above")
 	}
 	if endLine < totalLines {
-		remainingRows := totalRows - cursorRow - 1
-		if remainingRows < 1 {
-			remainingRows = 1
-		}
-		visible[len(visible)-1] = lipgloss.NewStyle().Foreground(colorDim).Render(
-			fmt.Sprintf("  ▼ %d more row(s) below", remainingRows))
+		visible[len(visible)-1] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ more below")
 	}
 
 	return padToSize(strings.Join(visible, "\n"), w, h)
@@ -365,6 +360,15 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		}})
 	}
 
+	if snap.ProviderID == "openrouter" {
+		modelMixLines := buildOpenRouterModelCompositionLines(snap, innerW)
+		if len(modelMixLines) > 0 {
+			s := []string{""}
+			s = append(s, modelMixLines...)
+			sections = append(sections, section{s})
+		}
+	}
+
 	metricLines := m.buildTileMetricLines(snap, innerW)
 	if len(metricLines) > 0 {
 		s := []string{""}
@@ -450,6 +454,31 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	if snap.ProviderID == "openrouter" {
+		keys = prioritizeMetricKeys(keys, []string{
+			"credit_balance", "credits",
+			"usage_daily", "usage_weekly", "usage_monthly",
+			"byok_daily", "byok_weekly", "byok_monthly",
+			"today_byok_cost", "7d_byok_cost", "30d_byok_cost",
+			"today_cost", "7d_api_cost", "30d_api_cost",
+			"today_requests", "today_input_tokens", "today_output_tokens",
+			"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens",
+			"recent_requests", "burn_rate", "daily_projected", "limit_remaining",
+		})
+	}
+	if snap.ProviderID == "openrouter" {
+		keys = prioritizeMetricKeys(keys, []string{
+			"usage_daily", "usage_weekly", "usage_monthly",
+			"byok_daily", "byok_weekly", "byok_monthly",
+			"today_byok_cost", "7d_byok_cost", "30d_byok_cost",
+			"today_cost", "7d_api_cost", "30d_api_cost",
+			"burn_rate", "daily_projected",
+			"today_requests", "today_input_tokens", "today_output_tokens",
+			"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens",
+			"today_media_prompts", "today_media_completions", "today_audio_inputs", "today_search_results", "today_cancelled",
+			"recent_requests", "limit_remaining",
+		})
+	}
 
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
@@ -572,7 +601,14 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int) []strin
 
 	var lines []string
 	for _, key := range keys {
+		if snap.ProviderID == "openrouter" &&
+			(strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "provider_")) {
+			continue
+		}
 		met := snap.Metrics[key]
+		if snap.ProviderID == "openrouter" && shouldHideOpenRouterMetricLine(key, met, snap.Metrics) {
+			continue
+		}
 		if metricHasGauge(key, met) {
 			continue
 		}
@@ -591,6 +627,31 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int) []strin
 	return lines
 }
 
+func shouldHideOpenRouterMetricLine(key string, met core.Metric, all map[string]core.Metric) bool {
+	// Key-level usage on /key is often zero/no-limit even when account has non-zero /credits totals.
+	// Hide noisy zero rows and prefer the higher-signal credit_balance summary.
+	if key == "credits" {
+		if _, hasBalance := all["credit_balance"]; hasBalance {
+			return true
+		}
+	}
+
+	if key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly" ||
+		key == "byok_usage" || key == "byok_daily" || key == "byok_weekly" || key == "byok_monthly" ||
+		key == "today_byok_cost" || key == "7d_byok_cost" || key == "30d_byok_cost" {
+		if met.Used == nil || *met.Used == 0 {
+			return true
+		}
+	}
+
+	// Generic suppression for zero non-quota values in OpenRouter tile detail rows.
+	if met.Used != nil && *met.Used == 0 && met.Limit == nil && met.Remaining == nil {
+		return true
+	}
+
+	return false
+}
+
 func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 	if len(snap.Raw) == 0 {
 		return nil
@@ -601,6 +662,10 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 	}
 	order := []metaEntry{
 		{"Account", "account_email"},
+		{"Key", "key_label"},
+		{"Key Name", "key_name"},
+		{"Key Type", "key_type"},
+		{"Tier", "tier"},
 		{"Plan", "plan_name"},
 		{"Type", "plan_type"},
 		{"Role", "membership_type"},
@@ -610,6 +675,8 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 		{"Version", "cli_version"},
 		{"Price", "plan_price"},
 		{"Status", "subscription_status"},
+		{"Reset", "limit_reset"},
+		{"Expires", "expires_at"},
 	}
 
 	var lines []string
@@ -634,6 +701,8 @@ var resetLabelMap = map[string]string{
 	"billing_block":   "5h Block",
 	"usage_five_hour": "5h Usage",
 	"usage_seven_day": "7d Usage",
+	"limit_reset":     "Limit Reset",
+	"key_expires":     "Key Expires",
 }
 
 func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
@@ -720,6 +789,254 @@ func renderDotLeaderRow(label, value string, totalW int) string {
 	}
 	dots := tileDotLeaderStyle.Render(strings.Repeat("·", dotsW))
 	return labelR + " " + dots + " " + valueR
+}
+
+func prioritizeMetricKeys(keys, priority []string) []string {
+	if len(priority) == 0 || len(keys) == 0 {
+		return keys
+	}
+	seen := make(map[string]bool, len(keys))
+	ordered := make([]string, 0, len(keys))
+	for _, key := range priority {
+		for _, existing := range keys {
+			if existing != key || seen[existing] {
+				continue
+			}
+			ordered = append(ordered, existing)
+			seen[existing] = true
+			break
+		}
+	}
+	for _, key := range keys {
+		if seen[key] {
+			continue
+		}
+		ordered = append(ordered, key)
+	}
+	return ordered
+}
+
+type openRouterModelMix struct {
+	name   string
+	cost   float64
+	input  float64
+	output float64
+}
+
+func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int) []string {
+	models := collectOpenRouterModelMix(snap)
+	if len(models) == 0 {
+		return nil
+	}
+
+	totalCost := float64(0)
+	totalTokens := float64(0)
+	for _, m := range models {
+		totalCost += m.cost
+		totalTokens += m.input + m.output
+	}
+
+	useCost := totalCost > 0
+	metricTotal := totalTokens
+	if useCost {
+		metricTotal = totalCost
+	}
+	if metricTotal <= 0 {
+		return nil
+	}
+
+	topN := 5
+	if len(models) < topN {
+		topN = len(models)
+	}
+	top := models[:topN]
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	heading := "Model Mix (by cost)"
+	if !useCost {
+		heading = "Model Mix (by tokens)"
+	}
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		"  " + renderOpenRouterMixBar(top, metricTotal, barW, useCost, snap.AccountID),
+	}
+
+	for idx, model := range top {
+		value := model.input + model.output
+		if useCost {
+			value = model.cost
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / metricTotal * 100
+		label := prettifyModelName(model.name)
+		colorDot := lipgloss.NewStyle().Foreground(stableModelColor(model.name, snap.AccountID)).Render("■")
+		maxLabelLen := 16
+		if innerW < 60 {
+			maxLabelLen = 14
+		}
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+		valueStr := fmt.Sprintf("%2.0f%% %s %s/%s tok",
+			pct,
+			formatUSD(model.cost),
+			shortCompact(model.input),
+			shortCompact(model.output),
+		)
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	if len(models) > topN {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("  + %d more models", len(models)-topN)))
+	}
+
+	return lines
+}
+
+func renderOpenRouterMixBar(top []openRouterModelMix, total float64, barW int, useCost bool, providerID string) string {
+	if len(top) == 0 || total <= 0 {
+		return ""
+	}
+
+	type seg struct {
+		val   float64
+		color lipgloss.Color
+	}
+	segs := make([]seg, 0, len(top)+1)
+	sumTop := float64(0)
+	for _, m := range top {
+		v := m.input + m.output
+		if useCost {
+			v = m.cost
+		}
+		if v <= 0 {
+			continue
+		}
+		sumTop += v
+		segs = append(segs, seg{
+			val:   v,
+			color: stableModelColor(m.name, providerID),
+		})
+	}
+	if sumTop < total {
+		segs = append(segs, seg{
+			val:   total - sumTop,
+			color: colorSurface1,
+		})
+	}
+	if len(segs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	remainingW := barW
+	remainingTotal := total
+	for i, s := range segs {
+		if remainingW <= 0 {
+			break
+		}
+		segW := remainingW
+		if i < len(segs)-1 {
+			segW = int(math.Round(s.val / remainingTotal * float64(remainingW)))
+			if segW < 1 && s.val > 0 {
+				segW = 1
+			}
+			if segW > remainingW {
+				segW = remainingW
+			}
+		}
+		if segW <= 0 {
+			continue
+		}
+		sb.WriteString(lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW)))
+		remainingW -= segW
+		remainingTotal -= s.val
+		if remainingTotal <= 0 {
+			remainingTotal = 1
+		}
+	}
+	if remainingW > 0 {
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
+	}
+	return sb.String()
+}
+
+func collectOpenRouterModelMix(snap core.QuotaSnapshot) []openRouterModelMix {
+	type agg struct {
+		cost   float64
+		input  float64
+		output float64
+	}
+	byModel := make(map[string]*agg)
+
+	ensure := func(name string) *agg {
+		if _, ok := byModel[name]; !ok {
+			byModel[name] = &agg{}
+		}
+		return byModel[name]
+	}
+
+	for key, met := range snap.Metrics {
+		if !strings.HasPrefix(key, "model_") || met.Used == nil {
+			continue
+		}
+		name := strings.TrimPrefix(key, "model_")
+		switch {
+		case strings.HasSuffix(name, "_cost_usd"):
+			name = strings.TrimSuffix(name, "_cost_usd")
+			ensure(name).cost += *met.Used
+		case strings.HasSuffix(name, "_cost"):
+			name = strings.TrimSuffix(name, "_cost")
+			ensure(name).cost += *met.Used
+		case strings.HasSuffix(name, "_input_tokens"):
+			name = strings.TrimSuffix(name, "_input_tokens")
+			ensure(name).input += *met.Used
+		case strings.HasSuffix(name, "_output_tokens"):
+			name = strings.TrimSuffix(name, "_output_tokens")
+			ensure(name).output += *met.Used
+		}
+	}
+
+	models := make([]openRouterModelMix, 0, len(byModel))
+	for name, v := range byModel {
+		if v.cost <= 0 && v.input <= 0 && v.output <= 0 {
+			continue
+		}
+		models = append(models, openRouterModelMix{
+			name:   name,
+			cost:   v.cost,
+			input:  v.input,
+			output: v.output,
+		})
+	}
+
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].cost != models[j].cost {
+			return models[i].cost > models[j].cost
+		}
+		return (models[i].input + models[i].output) > (models[j].input + models[j].output)
+	})
+	return models
+}
+
+func shortCompact(v float64) string {
+	if v >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", v/1_000_000)
+	}
+	if v >= 1_000 {
+		return fmt.Sprintf("%.1fk", v/1_000)
+	}
+	return fmt.Sprintf("%.0f", v)
 }
 
 func formatTileMetricValue(key string, met core.Metric) string {

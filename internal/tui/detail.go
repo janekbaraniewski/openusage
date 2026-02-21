@@ -371,6 +371,12 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case key == "context_window":
 		return "Usage", "Context Window", 1
 
+	// OpenRouter time-bucketed usage (daily, weekly, monthly)
+	case key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly":
+		return "Usage", prettifyKey(key), 1
+	case key == "limit_remaining":
+		return "Usage", "Limit Remaining", 1
+
 	case m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD":
 		return "Usage", prettifyQuotaKey(key), 1
 
@@ -393,6 +399,14 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case key == "individual_spend":
 		return "Spending", "Individual Spend", 2
 
+	// OpenRouter BYOK spending metrics
+	case strings.HasPrefix(key, "byok_") && strings.Contains(lk, "cost"):
+		return "Spending", prettifyKey(key), 2
+	case strings.HasPrefix(key, "today_byok_") || strings.HasPrefix(key, "7d_byok_") || strings.HasPrefix(key, "30d_byok_"):
+		return "Spending", prettifyKey(key), 2
+	case key == "byok_usage" || key == "byok_daily" || key == "byok_weekly" || key == "byok_monthly":
+		return "Spending", prettifyKey(key), 2
+
 	case strings.Contains(lk, "cost") || strings.Contains(lk, "burn_rate"):
 		return "Spending", prettifyKey(key), 2
 
@@ -412,13 +426,28 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 		(strings.HasSuffix(key, "_input_tokens") || strings.HasSuffix(key, "_output_tokens")):
 		return "Tokens", key, 3
 
+	// OpenRouter per-model reasoning and cached tokens
+	case strings.HasPrefix(key, "model_") &&
+		(strings.HasSuffix(key, "_reasoning_tokens") || strings.HasSuffix(key, "_cached_tokens") || strings.HasSuffix(key, "_image_tokens")):
+		return "Tokens", prettifyKey(key), 3
+
 	case strings.HasPrefix(key, "session_"):
 		return "Tokens", prettifyKey(strings.TrimPrefix(key, "session_")), 3
+
+	// OpenRouter today metrics
+	case strings.HasPrefix(key, "today_") && strings.Contains(lk, "token"):
+		return "Tokens", prettifyKey(key), 3
 
 	case strings.Contains(lk, "token"):
 		return "Tokens", prettifyKey(key), 3
 
 	case strings.HasPrefix(key, "tab_") || strings.HasPrefix(key, "composer_"):
+		return "Activity", prettifyKey(key), 4
+
+	// OpenRouter media and request metrics
+	case strings.HasPrefix(key, "today_") && (strings.Contains(lk, "media") || strings.Contains(lk, "audio") || strings.Contains(lk, "cancelled")):
+		return "Activity", prettifyKey(key), 4
+	case key == "recent_requests" || key == "daily_projected":
 		return "Activity", prettifyKey(key), 4
 
 	case strings.Contains(lk, "message") || strings.Contains(lk, "session") ||
@@ -1050,6 +1079,16 @@ func renderRawData(sb *strings.Builder, raw map[string]string, w int) {
 			"cli_version", "oauth_status", "auth_type", "install_method",
 			"binary", "project_id", "quota_api",
 		}},
+		// OpenRouter-specific groups
+		{"OpenRouter Key", []string{
+			"key_label", "key_name", "key_type", "key_disabled", "tier", "is_free_tier", "is_management_key", "is_provisioning_key",
+			"key_created_at", "key_updated_at", "key_hash_prefix", "key_lookup",
+			"expires_at", "limit_reset", "include_byok_in_limit", "rate_limit_note", "byok_in_use",
+		}},
+		{"OpenRouter Providers", []string{
+			"generations_fetched", "activity_endpoint", "activity_rows", "activity_date_range",
+			"activity_models", "activity_providers", "keys_total", "keys_active",
+		}},
 	}
 
 	rendered := make(map[string]bool)
@@ -1287,6 +1326,33 @@ var prettifyKeyOverrides = map[string]string{
 	"usage_seven_day_sonnet": "7d Sonnet Usage",
 	"usage_seven_day_opus":   "7d Opus Usage",
 	"usage_seven_day_cowork": "7d Cowork Usage",
+
+	// OpenRouter-specific metrics
+	"usage_daily":                "Today Usage",
+	"usage_weekly":               "This Week",
+	"usage_monthly":              "This Month",
+	"byok_usage":                 "BYOK Total",
+	"byok_daily":                 "BYOK Today",
+	"byok_weekly":                "BYOK This Week",
+	"byok_monthly":               "BYOK This Month",
+	"7d_byok_cost":               "7-Day BYOK Cost",
+	"30d_byok_cost":              "30-Day BYOK Cost",
+	"today_byok_cost":            "Today BYOK Cost",
+	"today_reasoning_tokens":     "Today Reasoning",
+	"today_cached_tokens":        "Today Cached",
+	"today_image_tokens":         "Today Image Tokens",
+	"today_media_prompts":        "Media Prompts",
+	"today_audio_inputs":         "Audio Inputs",
+	"today_search_results":       "Search Results",
+	"today_media_completions":    "Media Completions",
+	"today_cancelled":            "Cancelled Requests",
+	"analytics_requests":         "Analytics Requests",
+	"analytics_byok_cost":        "Analytics BYOK",
+	"analytics_reasoning_tokens": "Analytics Reasoning",
+	"30d_api_cost":               "30-Day Cost≈",
+	"daily_projected":            "Daily Projected",
+	"limit_remaining":            "Limit Remaining",
+	"recent_requests":            "Recent Requests",
 }
 
 func prettifyKey(key string) string {

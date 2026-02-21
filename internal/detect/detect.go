@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -253,6 +254,64 @@ func detectEnvKeys(result *Result) {
 			APIKeyEnv: mapping.EnvVar,
 		})
 	}
+}
+
+// ApplyCredentials fills in Token for accounts that have no API key from env vars,
+// using stored credentials from the credentials file. It also creates new accounts
+// for stored credentials that don't match any existing account.
+func ApplyCredentials(result *Result) {
+	creds, err := config.LoadCredentials()
+	if err != nil {
+		log.Printf("[detect] Failed to load credentials: %v", err)
+		return
+	}
+	if len(creds.Keys) == 0 {
+		return
+	}
+
+	// Apply to existing accounts
+	applied := make(map[string]bool, len(result.Accounts))
+	for i := range result.Accounts {
+		acct := &result.Accounts[i]
+		if acct.Token != "" || acct.ResolveAPIKey() != "" {
+			applied[acct.ID] = true
+			continue
+		}
+		if key, ok := creds.Keys[acct.ID]; ok {
+			acct.Token = key
+			applied[acct.ID] = true
+			log.Printf("[detect] Applied stored credential for %s", acct.ID)
+		}
+	}
+
+	// Create accounts for stored credentials that don't match any existing account
+	for accountID, key := range creds.Keys {
+		if applied[accountID] {
+			continue
+		}
+		provider := providerForStoredCredential(accountID)
+		if provider == "" {
+			log.Printf("[detect] Stored credential for unknown account %s, skipping", accountID)
+			continue
+		}
+		result.Accounts = append(result.Accounts, core.AccountConfig{
+			ID:       accountID,
+			Provider: provider,
+			Auth:     "api_key",
+			Token:    key,
+		})
+		log.Printf("[detect] Created account %s from stored credential", accountID)
+	}
+}
+
+// providerForStoredCredential maps a stored credential's account ID to its provider.
+func providerForStoredCredential(accountID string) string {
+	for _, mapping := range envKeyMapping {
+		if mapping.AccountID == accountID {
+			return mapping.Provider
+		}
+	}
+	return ""
 }
 
 func (r Result) Summary() string {
