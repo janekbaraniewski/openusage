@@ -18,3 +18,7 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["plan_api_percent_used"] = "api"
 	return cfg
 }
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DefaultDetailWidget()
+}

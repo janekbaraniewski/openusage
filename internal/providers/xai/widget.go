@@ -9,3 +9,7 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.DefaultAccountID = "xai"
 	return cfg
 }
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DefaultDetailWidget()
+}

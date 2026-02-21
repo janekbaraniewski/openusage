@@ -30,3 +30,7 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["rate_limit_code_review_secondary"] = "Code Review Secondary"
 	return cfg
 }
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DefaultDetailWidget()
+}

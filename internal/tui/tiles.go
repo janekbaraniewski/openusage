@@ -332,9 +332,31 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bo
 		}
 	}
 
+	providerBurnLines, providerBurnKeys := buildProviderVendorCompositionLines(snap, innerW, modelMixExpanded)
+	if len(providerBurnLines) > 0 {
+		s := []string{""}
+		s = append(s, providerBurnLines...)
+		sections = append(sections, section{s})
+	}
+	if len(providerBurnKeys) > 0 {
+		if compactMetricKeys == nil {
+			compactMetricKeys = make(map[string]bool)
+		}
+		for k := range providerBurnKeys {
+			compactMetricKeys[k] = true
+		}
+	}
+
 	if len(compactMetricLines) > 0 {
 		s := []string{""}
 		s = append(s, compactMetricLines...)
+		sections = append(sections, section{s})
+	}
+
+	trendLines := buildProviderDailyTrendLines(snap, innerW)
+	if len(trendLines) > 0 {
+		s := []string{""}
+		s = append(s, trendLines...)
 		sections = append(sections, section{s})
 	}
 
@@ -1296,6 +1318,14 @@ type modelMixEntry struct {
 	output float64
 }
 
+type providerMixEntry struct {
+	name     string
+	cost     float64
+	input    float64
+	output   float64
+	requests float64
+}
+
 type clientMixEntry struct {
 	name      string
 	total     float64
@@ -1477,6 +1507,315 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[stri
 		return (models[i].input + models[i].output) > (models[j].input + models[j].output)
 	})
 	return models, usedKeys
+}
+
+func buildProviderVendorCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allProviders, usedKeys := collectProviderVendorMix(snap)
+	if len(allProviders) == 0 {
+		return nil, nil
+	}
+	providers, hiddenCount := limitProviderMix(allProviders, expanded, 4)
+
+	totalCost := float64(0)
+	totalTokens := float64(0)
+	totalRequests := float64(0)
+	for _, p := range allProviders {
+		totalCost += p.cost
+		totalTokens += p.input + p.output
+		totalRequests += p.requests
+	}
+
+	mode := "requests"
+	total := totalRequests
+	if totalCost > 0 {
+		mode = "cost"
+		total = totalCost
+	} else if totalTokens > 0 {
+		mode = "tokens"
+		total = totalTokens
+	}
+	if total <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	heading := "Provider Activity (requests)"
+	if mode == "cost" {
+		heading = "Provider Burn (credits)"
+	} else if mode == "tokens" {
+		heading = "Provider Burn (tokens)"
+	}
+
+	providerClients := make([]clientMixEntry, 0, len(providers))
+	providerColors := make(map[string]lipgloss.Color, len(providers))
+	for _, p := range providers {
+		value := p.requests
+		if mode == "cost" {
+			value = p.cost
+		} else if mode == "tokens" {
+			value = p.input + p.output
+		}
+		if value <= 0 {
+			continue
+		}
+		providerClients = append(providerClients, clientMixEntry{name: p.name, total: value})
+		providerColors[p.name] = stableModelColor("provider:"+p.name, snap.AccountID)
+	}
+	if len(providerClients) == 0 {
+		return nil, nil
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		"  " + renderClientMixBar(providerClients, total, barW, providerColors),
+	}
+
+	for idx, provider := range providers {
+		value := provider.requests
+		if mode == "cost" {
+			value = provider.cost
+		} else if mode == "tokens" {
+			value = provider.input + provider.output
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		label := prettifyModelName(provider.name)
+		colorDot := lipgloss.NewStyle().Foreground(providerColors[provider.name]).Render("■")
+
+		maxLabelLen := 16
+		if innerW < 60 {
+			maxLabelLen = 14
+		}
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+
+		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(provider.requests))
+		if mode == "cost" {
+			valueStr = fmt.Sprintf("%2.0f%% %s %s/%s tok",
+				pct,
+				formatUSD(provider.cost),
+				shortCompact(provider.input),
+				shortCompact(provider.output),
+			)
+		} else if mode == "tokens" {
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req",
+				pct,
+				shortCompact(provider.input+provider.output),
+				shortCompact(provider.requests),
+			)
+		}
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more providers (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+func collectProviderVendorMix(snap core.QuotaSnapshot) ([]providerMixEntry, map[string]bool) {
+	type agg struct {
+		cost     float64
+		input    float64
+		output   float64
+		requests float64
+	}
+	byProvider := make(map[string]*agg)
+	usedKeys := make(map[string]bool)
+
+	ensure := func(name string) *agg {
+		if _, ok := byProvider[name]; !ok {
+			byProvider[name] = &agg{}
+		}
+		return byProvider[name]
+	}
+
+	recordCost := func(name string, v float64, key string) {
+		ensure(name).cost += v
+		usedKeys[key] = true
+	}
+	recordInput := func(name string, v float64, key string) {
+		ensure(name).input += v
+		usedKeys[key] = true
+	}
+	recordOutput := func(name string, v float64, key string) {
+		ensure(name).output += v
+		usedKeys[key] = true
+	}
+	recordRequests := func(name string, v float64, key string) {
+		ensure(name).requests += v
+		usedKeys[key] = true
+	}
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil || !strings.HasPrefix(key, "provider_") {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "_cost_usd"):
+			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost_usd"), *met.Used, key)
+		case strings.HasSuffix(key, "_cost"):
+			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost"), *met.Used, key)
+		case strings.HasSuffix(key, "_input_tokens"):
+			recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens"), *met.Used, key)
+		case strings.HasSuffix(key, "_output_tokens"):
+			recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_output_tokens"), *met.Used, key)
+		case strings.HasSuffix(key, "_requests"):
+			recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests"), *met.Used, key)
+		}
+	}
+
+	for key, raw := range snap.Raw {
+		if usedKeys[key] || !strings.HasPrefix(key, "provider_") {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "_cost"), strings.HasSuffix(key, "_byok_cost"):
+			if v, ok := parseTileNumeric(raw); ok {
+				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost")
+				baseKey = strings.TrimSuffix(baseKey, "_byok")
+				recordCost(baseKey, v, key)
+			}
+		case strings.HasSuffix(key, "_input_tokens"), strings.HasSuffix(key, "_prompt_tokens"):
+			if v, ok := parseTileNumeric(raw); ok {
+				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens")
+				baseKey = strings.TrimSuffix(baseKey, "_prompt_tokens")
+				recordInput(baseKey, v, key)
+			}
+		case strings.HasSuffix(key, "_output_tokens"), strings.HasSuffix(key, "_completion_tokens"):
+			if v, ok := parseTileNumeric(raw); ok {
+				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_output_tokens")
+				baseKey = strings.TrimSuffix(baseKey, "_completion_tokens")
+				recordOutput(baseKey, v, key)
+			}
+		case strings.HasSuffix(key, "_requests"):
+			if v, ok := parseTileNumeric(raw); ok {
+				recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests"), v, key)
+			}
+		}
+	}
+
+	providers := make([]providerMixEntry, 0, len(byProvider))
+	for name, v := range byProvider {
+		if v.cost <= 0 && v.input <= 0 && v.output <= 0 && v.requests <= 0 {
+			continue
+		}
+		providers = append(providers, providerMixEntry{
+			name:     name,
+			cost:     v.cost,
+			input:    v.input,
+			output:   v.output,
+			requests: v.requests,
+		})
+	}
+
+	sort.Slice(providers, func(i, j int) bool {
+		if providers[i].cost != providers[j].cost {
+			return providers[i].cost > providers[j].cost
+		}
+		ti := providers[i].input + providers[i].output
+		tj := providers[j].input + providers[j].output
+		if ti != tj {
+			return ti > tj
+		}
+		return providers[i].requests > providers[j].requests
+	})
+	return providers, usedKeys
+}
+
+func limitProviderMix(providers []providerMixEntry, expanded bool, maxVisible int) ([]providerMixEntry, int) {
+	if expanded || maxVisible <= 0 || len(providers) <= maxVisible {
+		return providers, 0
+	}
+	return providers[:maxVisible], len(providers) - maxVisible
+}
+
+func buildProviderDailyTrendLines(snap core.QuotaSnapshot, innerW int) []string {
+	type trendDef struct {
+		label string
+		keys  []string
+		color lipgloss.Color
+		unit  string
+	}
+	defs := []trendDef{
+		{label: "Cost", keys: []string{"analytics_cost", "cost"}, color: colorTeal, unit: "USD"},
+		{label: "Req", keys: []string{"analytics_requests", "requests"}, color: colorYellow, unit: "requests"},
+		{label: "Tokens", keys: []string{"analytics_tokens"}, color: colorSapphire, unit: "tokens"},
+	}
+
+	lines := []string{}
+	labelW := 8
+	if innerW < 55 {
+		labelW = 6
+	}
+	sparkW := innerW - labelW - 14
+	if sparkW < 10 {
+		sparkW = 10
+	}
+	if sparkW > 30 {
+		sparkW = 30
+	}
+
+	for _, def := range defs {
+		var points []core.TimePoint
+		for _, key := range def.keys {
+			if got, ok := snap.DailySeries[key]; ok && len(got) > 1 {
+				points = got
+				break
+			}
+		}
+		if len(points) < 2 {
+			continue
+		}
+		values := tailSeriesValues(points, 14)
+		if len(values) < 2 {
+			continue
+		}
+
+		last := values[len(values)-1]
+		lastLabel := shortCompact(last)
+		if def.unit == "USD" {
+			lastLabel = formatUSD(last)
+		}
+
+		if len(lines) == 0 {
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Daily Trend"))
+		}
+
+		label := lipgloss.NewStyle().Foreground(colorSubtext).Width(labelW).Render(def.label)
+		spark := RenderSparkline(values, sparkW, def.color)
+		lines = append(lines, fmt.Sprintf("  %s %s %s", label, spark, dimStyle.Render(lastLabel)))
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+	return lines
+}
+
+func tailSeriesValues(points []core.TimePoint, max int) []float64 {
+	if len(points) == 0 {
+		return nil
+	}
+	if max > 0 && len(points) > max {
+		points = points[len(points)-max:]
+	}
+	values := make([]float64, 0, len(points))
+	for _, p := range points {
+		values = append(values, p.Value)
+	}
+	return values
 }
 
 func buildProviderClientCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
@@ -1845,6 +2184,18 @@ func renderClientMixBar(top []clientMixEntry, total float64, barW int, colors ma
 
 func parseTileNumeric(raw string) (float64, bool) {
 	s := strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
+	if s == "" {
+		return 0, false
+	}
+	s = strings.TrimPrefix(s, "$")
+	s = strings.TrimSuffix(s, "%")
+	if idx := strings.IndexByte(s, ' '); idx > 0 {
+		s = s[:idx]
+	}
+	if idx := strings.IndexByte(s, '/'); idx > 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, false
 	}

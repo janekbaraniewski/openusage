@@ -77,7 +77,7 @@ var legacyAccountIDAliases = map[string]string{
 func DefaultConfig() Config {
 	return Config{
 		AutoDetect: true,
-		Theme:      "Catppuccin Mocha",
+		Theme:      "Gruvbox",
 		UI: UIConfig{
 			RefreshIntervalSeconds: 30,
 			WarnThreshold:          0.20,

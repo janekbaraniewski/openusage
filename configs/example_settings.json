@@ -4,7 +4,7 @@
     "warn_threshold": 0.20,
     "crit_threshold": 0.05
   },
-  "theme": "Catppuccin Mocha",
+  "theme": "Gruvbox",
   "experimental": {
     "analytics": false
   },
