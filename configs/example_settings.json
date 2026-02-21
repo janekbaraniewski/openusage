@@ -76,6 +76,19 @@
       "api_key_env": "XAI_API_KEY"
     },
     {
+      "id": "ollama-local",
+      "provider": "ollama",
+      "base_url": "http://127.0.0.1:11434",
+      "api_key_env": "OLLAMA_API_KEY"
+    },
+    {
+      "id": "ollama-cloud",
+      "provider": "ollama",
+      "auth": "api_key",
+      "base_url": "https://ollama.com",
+      "api_key_env": "OLLAMA_API_KEY"
+    },
+    {
       "id": "gemini-api",
       "provider": "gemini_api",
       "api_key_env": "GEMINI_API_KEY",
@@ -90,6 +103,11 @@
       "id": "copilot",
       "provider": "copilot",
       "binary": "gh"
+    },
+    {
+      "id": "alibaba_cloud",
+      "provider": "alibaba_cloud",
+      "api_key_env": "ALIBABA_CLOUD_API_KEY"
     }
   ],
   "auto_detected_accounts": []
