@@ -4,6 +4,7 @@ import "github.com/janekbaraniewski/openusage/internal/core"
 
 func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
+	cfg.ColorRole = core.DashboardColorRoleLavender
 	cfg.GaugePriority = []string{
 		"spend_limit", "plan_spend", "plan_percent_used", "chat_quota", "completions_quota",
 	}

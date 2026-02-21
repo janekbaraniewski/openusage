@@ -412,50 +412,6 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
-var apiKeyProviders = map[string]bool{
-	"openai": true, "anthropic": true, "openrouter": true,
-	"groq": true, "mistral": true, "deepseek": true,
-	"xai": true, "gemini_api": true,
-}
-
-func isAPIKeyProvider(providerID string) bool {
-	return apiKeyProviders[providerID]
-}
-
-var providerEnvVars = map[string]string{
-	"openai":     "OPENAI_API_KEY",
-	"anthropic":  "ANTHROPIC_API_KEY",
-	"openrouter": "OPENROUTER_API_KEY",
-	"groq":       "GROQ_API_KEY",
-	"mistral":    "MISTRAL_API_KEY",
-	"deepseek":   "DEEPSEEK_API_KEY",
-	"xai":        "XAI_API_KEY",
-	"gemini_api": "GEMINI_API_KEY",
-}
-
-func envVarForProvider(providerID string) string {
-	if v, ok := providerEnvVars[providerID]; ok {
-		return v
-	}
-	return ""
-}
-
-// defaultAPIKeyAccounts lists the well-known API-key providers and the default
-// account IDs that are used when no account for that provider is registered yet.
-var defaultAPIKeyAccounts = []struct {
-	ProviderID string
-	AccountID  string
-}{
-	{"openai", "openai"},
-	{"anthropic", "anthropic"},
-	{"openrouter", "openrouter"},
-	{"groq", "groq"},
-	{"mistral", "mistral"},
-	{"deepseek", "deepseek"},
-	{"xai", "xai"},
-	{"gemini_api", "gemini-api"},
-}
-
 // apiKeysTabIDs returns account IDs for the API Keys tab, including
 // unregistered API-key providers that the user can configure.
 func (m Model) apiKeysTabIDs() []string {
@@ -468,7 +424,7 @@ func (m Model) apiKeysTabIDs() []string {
 			registeredProviders[providerID] = true
 		}
 	}
-	for _, entry := range defaultAPIKeyAccounts {
+	for _, entry := range apiKeyProviderEntries() {
 		if registeredProviders[entry.ProviderID] {
 			continue
 		}
@@ -483,7 +439,7 @@ func providerForAccountID(accountID string, accountProviders map[string]string) 
 	if p, ok := accountProviders[accountID]; ok && p != "" {
 		return p
 	}
-	for _, entry := range defaultAPIKeyAccounts {
+	for _, entry := range apiKeyProviderEntries() {
 		if entry.AccountID == accountID {
 			return entry.ProviderID
 		}

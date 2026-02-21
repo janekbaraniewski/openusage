@@ -3,5 +3,9 @@ package gemini_api
 import "github.com/janekbaraniewski/openusage/internal/core"
 
 func (p *Provider) DashboardWidget() core.DashboardWidget {
-	return core.DefaultDashboardWidget()
+	cfg := core.DefaultDashboardWidget()
+	cfg.ColorRole = core.DashboardColorRoleBlue
+	cfg.APIKeyEnv = "GEMINI_API_KEY"
+	cfg.DefaultAccountID = "gemini-api"
+	return cfg
 }

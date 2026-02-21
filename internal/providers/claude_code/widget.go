@@ -4,6 +4,7 @@ import "github.com/janekbaraniewski/openusage/internal/core"
 
 func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
+	cfg.ColorRole = core.DashboardColorRoleTeal
 	cfg.GaugePriority = []string{
 		"usage_five_hour", "usage_seven_day", "plan_percent_used",
 	}
