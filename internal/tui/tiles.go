@@ -338,6 +338,23 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bo
 		sections = append(sections, section{s})
 	}
 
+	if widget.ShowClientComposition {
+		clientBurnLines, clientBurnKeys := buildProviderClientCompositionLines(snap, innerW, modelMixExpanded)
+		if len(clientBurnLines) > 0 {
+			s := []string{""}
+			s = append(s, clientBurnLines...)
+			sections = append(sections, section{s})
+		}
+		if len(clientBurnKeys) > 0 {
+			if compactMetricKeys == nil {
+				compactMetricKeys = make(map[string]bool)
+			}
+			for k := range clientBurnKeys {
+				compactMetricKeys[k] = true
+			}
+		}
+	}
+
 	metricLines := m.buildTileMetricLines(snap, widget, innerW, compactMetricKeys)
 	if len(metricLines) > 0 {
 		s := []string{""}
@@ -1279,6 +1296,17 @@ type modelMixEntry struct {
 	output float64
 }
 
+type clientMixEntry struct {
+	name      string
+	total     float64
+	input     float64
+	output    float64
+	cached    float64
+	reasoning float64
+	sessions  float64
+	series    []core.TimePoint
+}
+
 func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allModels, usedKeys := collectProviderModelMix(snap)
 	if len(allModels) == 0 {
@@ -1414,6 +1442,9 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[stri
 	}
 
 	for key, raw := range snap.Raw {
+		if usedKeys[key] {
+			continue
+		}
 		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens") {
 			if v, ok := parseTileNumeric(raw); ok {
 				recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens"), v, key)
@@ -1446,6 +1477,370 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[stri
 		return (models[i].input + models[i].output) > (models[j].input + models[j].output)
 	})
 	return models, usedKeys
+}
+
+func buildProviderClientCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allClients, usedKeys := collectProviderClientMix(snap)
+	if len(allClients) == 0 {
+		return nil, nil
+	}
+
+	clients, hiddenCount := limitClientMix(allClients, expanded, 4)
+	clientColors := buildClientColorMap(allClients, snap.AccountID)
+
+	total := float64(0)
+	for _, client := range allClients {
+		total += clientMixValue(client)
+	}
+	if total <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Client Burn (tokens)"),
+		"  " + renderClientMixBar(clients, total, barW, clientColors),
+	}
+
+	for idx, client := range clients {
+		value := clientMixValue(client)
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		label := prettifyClientName(client.name)
+		clientColor := colorForClient(clientColors, client.name)
+		colorDot := lipgloss.NewStyle().Foreground(clientColor).Render("■")
+
+		maxLabelLen := 16
+		if innerW < 60 {
+			maxLabelLen = 14
+		}
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+
+		valueStr := fmt.Sprintf("%2.0f%% %s tok", pct, shortCompact(value))
+		if client.sessions > 0 {
+			valueStr += fmt.Sprintf(" · %s sess", shortCompact(client.sessions))
+		}
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	trendEntries := limitClientTrendEntries(clients, expanded)
+	if len(trendEntries) > 0 {
+		lines = append(lines, dimStyle.Render("  Trend (daily by client)"))
+
+		labelW := 12
+		if innerW < 55 {
+			labelW = 10
+		}
+		sparkW := innerW - labelW - 5
+		if sparkW < 10 {
+			sparkW = 10
+		}
+		if sparkW > 28 {
+			sparkW = 28
+		}
+
+		for _, client := range trendEntries {
+			values := make([]float64, 0, len(client.series))
+			for _, point := range client.series {
+				values = append(values, point.Value)
+			}
+			if len(values) < 2 {
+				continue
+			}
+			label := truncateToWidth(prettifyClientName(client.name), labelW)
+			spark := RenderSparkline(values, sparkW, colorForClient(clientColors, client.name))
+			lines = append(lines, fmt.Sprintf("  %s %s",
+				lipgloss.NewStyle().Foreground(colorSubtext).Width(labelW).Render(label),
+				spark,
+			))
+		}
+	}
+
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more clients (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+func collectProviderClientMix(snap core.QuotaSnapshot) ([]clientMixEntry, map[string]bool) {
+	byClient := make(map[string]*clientMixEntry)
+	usedKeys := make(map[string]bool)
+
+	ensure := func(name string) *clientMixEntry {
+		if _, ok := byClient[name]; !ok {
+			byClient[name] = &clientMixEntry{name: name}
+		}
+		return byClient[name]
+	}
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil || !strings.HasPrefix(key, "client_") {
+			continue
+		}
+		name, field, ok := parseClientMetricKey(key)
+		if !ok {
+			continue
+		}
+		client := ensure(name)
+		switch field {
+		case "total_tokens":
+			client.total = *met.Used
+		case "input_tokens":
+			client.input = *met.Used
+		case "output_tokens":
+			client.output = *met.Used
+		case "cached_tokens":
+			client.cached = *met.Used
+		case "reasoning_tokens":
+			client.reasoning = *met.Used
+		case "sessions":
+			client.sessions = *met.Used
+		}
+		usedKeys[key] = true
+	}
+
+	for key, points := range snap.DailySeries {
+		const prefix = "tokens_client_"
+		if !strings.HasPrefix(key, prefix) || len(points) == 0 {
+			continue
+		}
+		name := strings.TrimPrefix(key, prefix)
+		if name == "" {
+			continue
+		}
+		client := ensure(name)
+		client.series = points
+		if client.total <= 0 {
+			client.total = sumSeriesValues(points)
+		}
+	}
+
+	clients := make([]clientMixEntry, 0, len(byClient))
+	for _, client := range byClient {
+		if clientMixValue(*client) <= 0 && client.sessions <= 0 && len(client.series) == 0 {
+			continue
+		}
+		clients = append(clients, *client)
+	}
+
+	sort.Slice(clients, func(i, j int) bool {
+		vi := clientMixValue(clients[i])
+		vj := clientMixValue(clients[j])
+		if vi == vj {
+			if clients[i].sessions == clients[j].sessions {
+				return clients[i].name < clients[j].name
+			}
+			return clients[i].sessions > clients[j].sessions
+		}
+		return vi > vj
+	})
+
+	return clients, usedKeys
+}
+
+func parseClientMetricKey(key string) (name, field string, ok bool) {
+	const prefix = "client_"
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	for _, suffix := range []string{
+		"_total_tokens", "_input_tokens", "_output_tokens",
+		"_cached_tokens", "_reasoning_tokens", "_sessions",
+	} {
+		if strings.HasSuffix(rest, suffix) {
+			return strings.TrimSuffix(rest, suffix), strings.TrimPrefix(suffix, "_"), true
+		}
+	}
+	return "", "", false
+}
+
+func clientMixValue(client clientMixEntry) float64 {
+	if client.total > 0 {
+		return client.total
+	}
+	if client.input > 0 || client.output > 0 || client.cached > 0 || client.reasoning > 0 {
+		return client.input + client.output + client.cached + client.reasoning
+	}
+	if len(client.series) > 0 {
+		return sumSeriesValues(client.series)
+	}
+	return 0
+}
+
+func sumSeriesValues(points []core.TimePoint) float64 {
+	total := float64(0)
+	for _, p := range points {
+		total += p.Value
+	}
+	return total
+}
+
+func limitClientMix(clients []clientMixEntry, expanded bool, maxVisible int) ([]clientMixEntry, int) {
+	if expanded || maxVisible <= 0 || len(clients) <= maxVisible {
+		return clients, 0
+	}
+	return clients[:maxVisible], len(clients) - maxVisible
+}
+
+func limitClientTrendEntries(clients []clientMixEntry, expanded bool) []clientMixEntry {
+	maxVisible := 2
+	if expanded {
+		maxVisible = 4
+	}
+
+	trend := make([]clientMixEntry, 0, maxVisible)
+	for _, client := range clients {
+		if len(client.series) < 2 {
+			continue
+		}
+		trend = append(trend, client)
+		if len(trend) >= maxVisible {
+			break
+		}
+	}
+	return trend
+}
+
+func prettifyClientName(name string) string {
+	switch name {
+	case "cli":
+		return "CLI"
+	case "ide":
+		return "IDE"
+	case "exec":
+		return "Exec"
+	case "desktop_app":
+		return "Desktop App"
+	case "other":
+		return "Other"
+	}
+
+	parts := strings.Split(name, "_")
+	for i := range parts {
+		switch parts[i] {
+		case "cli":
+			parts[i] = "CLI"
+		case "ide":
+			parts[i] = "IDE"
+		case "api":
+			parts[i] = "API"
+		default:
+			parts[i] = titleCase(parts[i])
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildClientColorMap(clients []clientMixEntry, providerID string) map[string]lipgloss.Color {
+	colors := make(map[string]lipgloss.Color, len(clients))
+	if len(clients) == 0 {
+		return colors
+	}
+
+	base := stablePaletteOffset("client", providerID)
+	for i, client := range clients {
+		colors[client.name] = ModelColor(base + i)
+	}
+	return colors
+}
+
+func colorForClient(colors map[string]lipgloss.Color, name string) lipgloss.Color {
+	if color, ok := colors[name]; ok {
+		return color
+	}
+	return stableModelColor("client:"+name, "client")
+}
+
+func stablePaletteOffset(prefix, value string) int {
+	key := prefix + ":" + value
+	hash := 0
+	for _, ch := range key {
+		hash = hash*31 + int(ch)
+	}
+	if hash < 0 {
+		hash = -hash
+	}
+	return hash
+}
+
+func renderClientMixBar(top []clientMixEntry, total float64, barW int, colors map[string]lipgloss.Color) string {
+	if len(top) == 0 || total <= 0 {
+		return ""
+	}
+
+	type seg struct {
+		val   float64
+		color lipgloss.Color
+	}
+
+	segs := make([]seg, 0, len(top)+1)
+	sumTop := float64(0)
+	for _, client := range top {
+		value := clientMixValue(client)
+		if value <= 0 {
+			continue
+		}
+		sumTop += value
+		segs = append(segs, seg{
+			val:   value,
+			color: colorForClient(colors, client.name),
+		})
+	}
+	if sumTop < total {
+		segs = append(segs, seg{
+			val:   total - sumTop,
+			color: colorSurface1,
+		})
+	}
+	if len(segs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	remainingW := barW
+	remainingTotal := total
+	for i, s := range segs {
+		if remainingW <= 0 {
+			break
+		}
+		segW := remainingW
+		if i < len(segs)-1 {
+			segW = int(math.Round(s.val / remainingTotal * float64(remainingW)))
+			if segW < 1 && s.val > 0 {
+				segW = 1
+			}
+			if segW > remainingW {
+				segW = remainingW
+			}
+		}
+		if segW <= 0 {
+			continue
+		}
+		sb.WriteString(lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW)))
+		remainingW -= segW
+		remainingTotal -= s.val
+		if remainingTotal <= 0 {
+			remainingTotal = 1
+		}
+	}
+	if remainingW > 0 {
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
+	}
+	return sb.String()
 }
 
 func parseTileNumeric(raw string) (float64, bool) {

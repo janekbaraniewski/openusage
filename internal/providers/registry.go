@@ -15,6 +15,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
+	"github.com/janekbaraniewski/openusage/internal/providers/zen"
 )
 
 func AllProviders() []core.QuotaProvider {
@@ -26,6 +27,7 @@ func AllProviders() []core.QuotaProvider {
 		mistral.New(),
 		deepseek.New(),
 		xai.New(),
+		zen.New(),
 		gemini_api.New(),
 		gemini_cli.New(),
 		copilot.New(),
