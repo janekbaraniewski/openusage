@@ -40,6 +40,28 @@ func (e *Engine) SetAccounts(accounts []AccountConfig) {
 	e.accounts = accounts
 }
 
+// AddAccount appends an account (if not already present) and triggers a refresh for it.
+func (e *Engine) AddAccount(acct AccountConfig) {
+	e.mu.Lock()
+	for _, existing := range e.accounts {
+		if existing.ID == acct.ID {
+			// Update token for existing account
+			for i := range e.accounts {
+				if e.accounts[i].ID == acct.ID {
+					e.accounts[i].Token = acct.Token
+					break
+				}
+			}
+			e.mu.Unlock()
+			go e.RefreshAll(context.Background())
+			return
+		}
+	}
+	e.accounts = append(e.accounts, acct)
+	e.mu.Unlock()
+	go e.RefreshAll(context.Background())
+}
+
 func (e *Engine) OnUpdate(fn func(map[string]QuotaSnapshot)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

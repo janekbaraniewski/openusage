@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers"
 )
 
 type tickMsg time.Time
@@ -60,6 +62,7 @@ type Model struct {
 
 	detailOffset int // vertical scroll offset for the detail panel
 	detailTab    int // active tab index in the detail panel (0=All)
+	tileOffset   int // vertical scroll offset for selected dashboard tile row
 
 	warnThreshold float64
 	critThreshold float64
@@ -84,6 +87,15 @@ type Model struct {
 	settingsCursor      int
 	settingsThemeCursor int
 	settingsStatus      string
+
+	apiKeyEditing       bool
+	apiKeyInput         string
+	apiKeyEditAccountID string
+	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
+
+	// onAddAccount is called when a new provider account is added from the API Keys tab.
+	// Set from main.go to wire into the engine.
+	onAddAccount func(core.AccountConfig)
 }
 
 func NewModel(
@@ -105,11 +117,32 @@ func NewModel(
 	return model
 }
 
+// SetOnAddAccount sets a callback invoked when a new provider account is added via the API Keys tab.
+func (m *Model) SetOnAddAccount(fn func(core.AccountConfig)) {
+	m.onAddAccount = fn
+}
+
 type themePersistedMsg struct {
 	err error
 }
 type dashboardPrefsPersistedMsg struct {
 	err error
+}
+
+type validateKeyResultMsg struct {
+	AccountID string
+	Valid     bool
+	Error     string
+}
+
+type credentialSavedMsg struct {
+	AccountID string
+	Err       error
+}
+
+type credentialDeletedMsg struct {
+	AccountID string
+	Err       error
 }
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
@@ -130,6 +163,56 @@ func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 			log.Printf("dashboard settings persist: %v", err)
 		}
 		return dashboardPrefsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) validateKeyCmd(accountID, providerID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		var provider core.QuotaProvider
+		for _, p := range providers.AllProviders() {
+			if p.ID() == providerID {
+				provider = p
+				break
+			}
+		}
+		if provider == nil {
+			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: "unknown provider"}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		acct := core.AccountConfig{
+			ID:       accountID,
+			Provider: providerID,
+			Token:    apiKey,
+		}
+		snap, err := provider.Fetch(ctx, acct)
+		if err != nil {
+			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: err.Error()}
+		}
+		if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
+			msg := snap.Message
+			if msg == "" {
+				msg = string(snap.Status)
+			}
+			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: msg}
+		}
+		return validateKeyResultMsg{AccountID: accountID, Valid: true}
+	}
+}
+
+func (m Model) saveCredentialCmd(accountID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.SaveCredential(accountID, apiKey)
+		return credentialSavedMsg{AccountID: accountID, Err: err}
+	}
+}
+
+func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.DeleteCredential(accountID)
+		return credentialDeletedMsg{AccountID: accountID, Err: err}
 	}
 }
 
@@ -170,6 +253,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case validateKeyResultMsg:
+		if msg.Valid {
+			m.apiKeyStatus = "valid ✓ — saving..."
+			return m, m.saveCredentialCmd(msg.AccountID, m.apiKeyInput)
+		}
+		m.apiKeyStatus = "invalid ✗"
+		if msg.Error != "" {
+			errMsg := msg.Error
+			if len(errMsg) > 40 {
+				errMsg = errMsg[:37] + "..."
+			}
+			m.apiKeyStatus = "invalid: " + errMsg
+		}
+		return m, nil
+
+	case credentialSavedMsg:
+		if msg.Err != nil {
+			m.apiKeyStatus = "save failed"
+		} else {
+			m.apiKeyStatus = "saved ✓"
+			apiKey := m.apiKeyInput
+			m.apiKeyEditing = false
+			m.apiKeyInput = ""
+
+			// Register account with engine if callback is set
+			if m.onAddAccount != nil {
+				providerID := m.accountProviders[msg.AccountID]
+				acct := core.AccountConfig{
+					ID:       msg.AccountID,
+					Provider: providerID,
+					Auth:     "api_key",
+					Token:    apiKey,
+				}
+				m.onAddAccount(acct)
+			}
+
+			// Ensure the provider shows in the UI
+			if m.providerOrderIndex(msg.AccountID) < 0 {
+				m.providerOrder = append(m.providerOrder, msg.AccountID)
+				m.providerEnabled[msg.AccountID] = true
+			}
+			m.refreshing = true
+		}
+		return m, nil
+
+	case credentialDeletedMsg:
+		if msg.Err != nil {
+			m.settingsStatus = "delete failed"
+		} else {
+			m.settingsStatus = "key deleted"
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -199,11 +335,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = m.nextScreen(1)
 			m.mode = modeList
 			m.detailOffset = 0
+			m.tileOffset = 0
 			return m, nil
 		case "shift+tab":
 			m.screen = m.nextScreen(-1)
 			m.mode = modeList
 			m.detailOffset = 0
+			m.tileOffset = 0
 			return m, nil
 		case "t":
 			name := CycleTheme()
@@ -309,12 +447,14 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor--
 			m.detailOffset = 0
 			m.detailTab = 0
+			m.tileOffset = 0
 		}
 	case "down", "j":
 		if m.cursor < len(ids)-1 {
 			m.cursor++
 			m.detailOffset = 0
 			m.detailTab = 0
+			m.tileOffset = 0
 		}
 	case "enter", "right", "l":
 		m.mode = modeDetail
@@ -365,10 +505,12 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.filtering = false
 		m.cursor = 0
+		m.tileOffset = 0
 	case "esc":
 		m.filter = ""
 		m.filtering = false
 		m.cursor = 0
+		m.tileOffset = 0
 	case "backspace":
 		if len(m.filter) > 0 {
 			m.filter = m.filter[:len(m.filter)-1]
@@ -390,19 +532,34 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.cursor >= cols {
 			m.cursor -= cols
+			m.tileOffset = 0
 		}
 	case "down", "j":
 		if m.cursor+cols < len(ids) {
 			m.cursor += cols
+			m.tileOffset = 0
 		}
 	case "left", "h":
 		if m.cursor > 0 {
 			m.cursor--
+			m.tileOffset = 0
 		}
 	case "right", "l":
 		if m.cursor < len(ids)-1 {
 			m.cursor++
+			m.tileOffset = 0
 		}
+	case "pgdown", "ctrl+d":
+		m.tileOffset += m.tileScrollStep()
+	case "pgup", "ctrl+u":
+		m.tileOffset -= m.tileScrollStep()
+		if m.tileOffset < 0 {
+			m.tileOffset = 0
+		}
+	case "home":
+		m.tileOffset = 0
+	case "end":
+		m.tileOffset = 9999 // capped during render
 	case "enter":
 		m.mode = modeDetail
 		m.detailOffset = 0
@@ -413,11 +570,20 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.filter != "" {
 			m.filter = ""
 			m.cursor = 0
+			m.tileOffset = 0
 		}
 	case "r":
 		m.refreshing = true
 	}
 	return m, nil
+}
+
+func (m Model) tileScrollStep() int {
+	step := m.height / 4
+	if step < 3 {
+		step = 3
+	}
+	return step
 }
 
 func (m Model) View() string {
@@ -629,6 +795,9 @@ func (m Model) renderFooterStatusLine() string {
 		if m.filter != "" {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter)
 		}
+		if m.mode == modeList && m.tileOffset > 0 {
+			return " " + dimStyle.Render("panel scroll active · PgUp/PgDn · Home/End")
+		}
 	}
 
 	return " " + helpStyle.Render("? help")
@@ -838,6 +1007,11 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 			info.summary = fmt.Sprintf("$%.2f spent", *m.Used)
 		}
 		return info
+	}
+
+	// OpenRouter-specific display should run before generic credits handling.
+	if snap.ProviderID == "openrouter" {
+		return computeOpenRouterDisplayInfo(snap, info)
 	}
 
 	if m, ok := snap.Metrics["credits"]; ok {
@@ -1051,6 +1225,65 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	info.tagEmoji = "·"
 	info.tagLabel = ""
 	info.summary = string(snap.Status)
+	return info
+}
+
+// computeOpenRouterDisplayInfo creates display info specifically for OpenRouter with all its rich metrics
+func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayInfo) providerDisplayInfo {
+	// Prefer account-level purchased credits from /credits.
+	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
+		info.tagEmoji = "💰"
+		info.tagLabel = "Credits"
+		spent := *m.Limit - *m.Remaining
+		if m.Used != nil {
+			spent = *m.Used
+		}
+		info.summary = fmt.Sprintf("$%.2f / $%.2f spent", spent, *m.Limit)
+		if pct := m.Percent(); pct >= 0 {
+			info.gaugePercent = 100 - pct
+		}
+
+		detailParts := []string{fmt.Sprintf("$%.2f remaining", *m.Remaining)}
+		if daily, ok := snap.Metrics["usage_daily"]; ok && daily.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *daily.Used))
+		}
+		if weekly, ok := snap.Metrics["usage_weekly"]; ok && weekly.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *weekly.Used))
+		}
+		if models, ok := snap.Raw["activity_models"]; ok && models != "" {
+			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
+		}
+		info.detail = strings.Join(detailParts, " · ")
+		return info
+	}
+
+	// Fallback: key-level credits/usage from /key.
+	if m, ok := snap.Metrics["credits"]; ok && m.Used != nil {
+		info.tagEmoji = "💰"
+		info.tagLabel = "Usage"
+		info.summary = fmt.Sprintf("$%.4f used", *m.Used)
+
+		var detailParts []string
+		if daily, ok := snap.Metrics["usage_daily"]; ok && daily.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *daily.Used))
+		}
+		if byok, ok := snap.Metrics["byok_daily"]; ok && byok.Used != nil && *byok.Used > 0 {
+			detailParts = append(detailParts, fmt.Sprintf("BYOK $%.2f", *byok.Used))
+		}
+		if burn, ok := snap.Metrics["burn_rate"]; ok && burn.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *burn.Used))
+		}
+		if models, ok := snap.Raw["activity_models"]; ok && models != "" {
+			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
+		}
+		info.detail = strings.Join(detailParts, " · ")
+		return info
+	}
+
+	// Fallback to generic
+	info.tagEmoji = "💰"
+	info.tagLabel = "OpenRouter"
+	info.summary = "Connected"
 	return info
 }
 

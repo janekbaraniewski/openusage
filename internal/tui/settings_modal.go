@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type settingsModalTab int
@@ -14,6 +16,7 @@ const (
 	settingsTabProviders settingsModalTab = iota
 	settingsTabOrder
 	settingsTabTheme
+	settingsTabAPIKeys
 	settingsTabCount
 )
 
@@ -21,12 +24,16 @@ var settingsTabNames = []string{
 	"Providers",
 	"Order",
 	"Theme",
+	"API Keys",
 }
 
 func (m *Model) openSettingsModal() {
 	m.showSettingsModal = true
 	m.settingsStatus = ""
 	m.settingsModalTab = settingsTabProviders
+	m.apiKeyEditing = false
+	m.apiKeyInput = ""
+	m.apiKeyStatus = ""
 	if len(m.providerOrder) > 0 {
 		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
 	}
@@ -40,6 +47,9 @@ func (m *Model) openSettingsModal() {
 func (m *Model) closeSettingsModal() {
 	m.showSettingsModal = false
 	m.settingsStatus = ""
+	m.apiKeyEditing = false
+	m.apiKeyInput = ""
+	m.apiKeyStatus = ""
 }
 
 func (m Model) settingsModalInfo() string {
@@ -64,7 +74,14 @@ func (m Model) settingsModalInfo() string {
 }
 
 func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.apiKeyEditing {
+		return m.handleAPIKeyEditKey(msg)
+	}
+
 	ids := m.settingsIDs()
+	if m.settingsModalTab == settingsTabAPIKeys {
+		ids = m.apiKeysTabIDs()
+	}
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -78,7 +95,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab", "left", "h", "[":
 		m.settingsModalTab = (m.settingsModalTab + settingsTabCount - 1) % settingsTabCount
 		return m, nil
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		idx := int(msg.String()[0] - '1')
 		if idx >= 0 && idx < int(settingsTabCount) {
 			m.settingsModalTab = settingsModalTab(idx)
@@ -172,6 +189,41 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.persistThemeCmd(name)
 			}
 		}
+	case settingsTabAPIKeys:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsCursor > 0 {
+				m.settingsCursor--
+			}
+		case "down", "j":
+			if m.settingsCursor < len(ids)-1 {
+				m.settingsCursor++
+			}
+		case " ", "enter":
+			if len(ids) == 0 {
+				return m, nil
+			}
+			id := ids[clamp(m.settingsCursor, 0, len(ids)-1)]
+			providerID := providerForAccountID(id, m.accountProviders)
+			if isAPIKeyProvider(providerID) {
+				m.apiKeyEditing = true
+				m.apiKeyInput = ""
+				m.apiKeyEditAccountID = id
+				m.apiKeyStatus = ""
+				// Ensure the provider mapping exists (for unregistered providers)
+				m.accountProviders[id] = providerID
+			}
+		case "d":
+			if len(ids) == 0 {
+				return m, nil
+			}
+			id := ids[clamp(m.settingsCursor, 0, len(ids)-1)]
+			providerID := providerForAccountID(id, m.accountProviders)
+			if isAPIKeyProvider(providerID) {
+				m.settingsStatus = "deleting key..."
+				return m, m.deleteCredentialCmd(id)
+			}
+		}
 	}
 
 	return m, nil
@@ -250,6 +302,11 @@ func (m Model) settingsModalHint() string {
 		return "Up/Down: select  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabOrder:
 		return "Up/Down: select  ·  Shift+K/J: move item  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabAPIKeys:
+		if m.apiKeyEditing {
+			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
+		}
+		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
 	default:
 		return "Up/Down: select theme  ·  Space/Enter: apply theme  ·  Left/Right: switch tab  ·  Esc: close"
 	}
@@ -261,6 +318,8 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 		return m.renderSettingsProvidersBody(w, h)
 	case settingsTabOrder:
 		return m.renderSettingsOrderBody(w, h)
+	case settingsTabAPIKeys:
+		return m.renderSettingsAPIKeysBody(w, h)
 	default:
 		return m.renderSettingsThemeBody(w, h)
 	}
@@ -351,6 +410,191 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 	}
 
 	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+var apiKeyProviders = map[string]bool{
+	"openai": true, "anthropic": true, "openrouter": true,
+	"groq": true, "mistral": true, "deepseek": true,
+	"xai": true, "gemini_api": true,
+}
+
+func isAPIKeyProvider(providerID string) bool {
+	return apiKeyProviders[providerID]
+}
+
+var providerEnvVars = map[string]string{
+	"openai":     "OPENAI_API_KEY",
+	"anthropic":  "ANTHROPIC_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
+	"groq":       "GROQ_API_KEY",
+	"mistral":    "MISTRAL_API_KEY",
+	"deepseek":   "DEEPSEEK_API_KEY",
+	"xai":        "XAI_API_KEY",
+	"gemini_api": "GEMINI_API_KEY",
+}
+
+func envVarForProvider(providerID string) string {
+	if v, ok := providerEnvVars[providerID]; ok {
+		return v
+	}
+	return ""
+}
+
+// defaultAPIKeyAccounts lists the well-known API-key providers and the default
+// account IDs that are used when no account for that provider is registered yet.
+var defaultAPIKeyAccounts = []struct {
+	ProviderID string
+	AccountID  string
+}{
+	{"openai", "openai-auto"},
+	{"anthropic", "anthropic-auto"},
+	{"openrouter", "openrouter-auto"},
+	{"groq", "groq-auto"},
+	{"mistral", "mistral-auto"},
+	{"deepseek", "deepseek-auto"},
+	{"xai", "xai-auto"},
+	{"gemini_api", "gemini-api-auto"},
+}
+
+// apiKeysTabIDs returns account IDs for the API Keys tab, including
+// unregistered API-key providers that the user can configure.
+func (m Model) apiKeysTabIDs() []string {
+	registeredProviders := make(map[string]bool)
+	var ids []string
+	for _, id := range m.providerOrder {
+		providerID := m.accountProviders[id]
+		if isAPIKeyProvider(providerID) {
+			ids = append(ids, id)
+			registeredProviders[providerID] = true
+		}
+	}
+	for _, entry := range defaultAPIKeyAccounts {
+		if registeredProviders[entry.ProviderID] {
+			continue
+		}
+		ids = append(ids, entry.AccountID)
+	}
+	return ids
+}
+
+// providerForAccountID looks up the provider ID for an account, falling back
+// to the default API-key account mapping for unregistered providers.
+func providerForAccountID(accountID string, accountProviders map[string]string) string {
+	if p, ok := accountProviders[accountID]; ok && p != "" {
+		return p
+	}
+	for _, entry := range defaultAPIKeyAccounts {
+		if entry.AccountID == accountID {
+			return entry.ProviderID
+		}
+	}
+	return ""
+}
+
+func maskAPIKey(key string) string {
+	if len(key) <= 12 {
+		return key
+	}
+	return key[:8] + "..." + key[len(key)-4:]
+}
+
+func (m Model) renderSettingsAPIKeysBody(w, h int) string {
+	ids := m.apiKeysTabIDs()
+	if len(ids) == 0 {
+		return padToSize(dimStyle.Render("No API-key providers available."), w, h)
+	}
+
+	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	start, end := listWindow(len(ids), cursor, h)
+	lines := make([]string, 0, h)
+
+	for i := start; i < end; i++ {
+		id := ids[i]
+		providerID := providerForAccountID(id, m.accountProviders)
+		if snap, ok := m.snapshots[id]; ok && snap.ProviderID != "" {
+			providerID = snap.ProviderID
+		}
+		if providerID == "" {
+			providerID = "unknown"
+		}
+
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+
+		if !isAPIKeyProvider(providerID) {
+			indicator := lipgloss.NewStyle().Foreground(colorDim).Render("○")
+			label := dimStyle.Render("N/A")
+			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, dimStyle.Render(id), label)
+			lines = append(lines, line)
+			continue
+		}
+
+		envVar := envVarForProvider(providerID)
+
+		var indicator string
+		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
+			indicator = lipgloss.NewStyle().Foreground(colorGreen).Render("✓")
+		} else if envVar != "" && os.Getenv(envVar) != "" {
+			indicator = lipgloss.NewStyle().Foreground(colorYellow).Render("env")
+		} else {
+			indicator = lipgloss.NewStyle().Foreground(colorRed).Render("✗")
+		}
+
+		envLabel := ""
+		if envVar != "" {
+			envLabel = "  " + dimStyle.Render(envVar)
+		}
+
+		if m.apiKeyEditing && i == cursor {
+			masked := maskAPIKey(m.apiKeyInput)
+			inputStyle := lipgloss.NewStyle().Foreground(colorSapphire)
+			cursorChar := PulseChar("█", "▌", m.animFrame)
+			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, id, inputStyle.Render(masked+cursorChar))
+			if m.apiKeyStatus != "" {
+				line += "  " + dimStyle.Render(m.apiKeyStatus)
+			}
+			lines = append(lines, line)
+		} else {
+			line := fmt.Sprintf("%s%s %s%s", prefix, indicator, id, envLabel)
+			lines = append(lines, line)
+		}
+	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.apiKeyEditing = false
+		m.apiKeyInput = ""
+		m.apiKeyStatus = ""
+		return m, nil
+	case "enter":
+		if m.apiKeyInput == "" || m.apiKeyStatus == "validating..." {
+			return m, nil
+		}
+		id := m.apiKeyEditAccountID
+		providerID := m.accountProviders[id]
+		m.apiKeyStatus = "validating..."
+		return m, m.validateKeyCmd(id, providerID, m.apiKeyInput)
+	case "backspace":
+		if len(m.apiKeyInput) > 0 {
+			m.apiKeyInput = m.apiKeyInput[:len(m.apiKeyInput)-1]
+		}
+		m.apiKeyStatus = ""
+		return m, nil
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.apiKeyInput += string(msg.Runes)
+			m.apiKeyStatus = ""
+		}
+		return m, nil
+	}
 }
 
 func listWindow(total, cursor, visible int) (int, int) {

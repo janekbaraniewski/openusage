@@ -67,6 +67,13 @@ func main() {
 		}
 	}
 
+	// Apply stored credentials for accounts missing API keys
+	{
+		credResult := detect.Result{Accounts: allAccounts}
+		detect.ApplyCredentials(&credResult)
+		allAccounts = credResult.Accounts
+	}
+
 	if len(allAccounts) == 0 {
 		fmt.Println("⚡ OpenUsage — No accounts configured or detected.")
 		fmt.Println()
@@ -122,6 +129,7 @@ func main() {
 		cfg.Dashboard,
 		allAccounts,
 	)
+	model.SetOnAddAccount(engine.AddAccount)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	engine.OnUpdate(func(snaps map[string]core.QuotaSnapshot) {

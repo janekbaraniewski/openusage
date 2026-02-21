@@ -3,7 +3,7 @@
 </p>
 
 
-<p align="center">The coding agents usage dashboard you've been looking for.</p>
+<p align="center">The coding agent usage dashboard you’ve been looking for.</p>
 
 
 OpenUsage auto-detects local tools/API keys and shows live quota and cost snapshots in your terminal.
