@@ -399,8 +399,6 @@ func (p *Provider) fetchQuotaFromAPI(ctx context.Context, snap *core.QuotaSnapsh
 		window := "daily"
 		if bucket.ResetTime != "" {
 			if resetT, err := time.Parse(time.RFC3339, bucket.ResetTime); err == nil {
-				snap.Resets[metricKey] = resetT
-
 				dur := time.Until(resetT)
 				if dur > 0 {
 					window = formatWindow(dur)
@@ -424,7 +422,6 @@ func (p *Provider) fetchQuotaFromAPI(ctx context.Context, snap *core.QuotaSnapsh
 			worstFraction = fraction
 		}
 	}
-
 	if worstFraction <= 0 {
 		snap.Status = core.StatusLimited
 	} else if worstFraction < 0.15 {

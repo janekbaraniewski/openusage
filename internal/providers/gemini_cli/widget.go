@@ -6,8 +6,6 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleBlue
 	cfg.ShowClientComposition = true
-	cfg.ResetStyle = core.DashboardResetStyleCompactModelResets
-	cfg.ResetCompactThreshold = 4
 	cfg.GaugePriority = []string{
 		"tokens_today", "7d_tokens", "messages_today", "sessions_today", "tool_calls_today",
 		"client_cli_total_tokens", "client_cli_input_tokens",
@@ -28,4 +26,8 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["tokens_today"] = "Today Tokens"
 	cfg.MetricLabelOverrides["7d_tokens"] = "7-Day Tokens"
 	return cfg
+}
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DefaultDetailWidget()
 }
