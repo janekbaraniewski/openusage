@@ -523,3 +523,140 @@ func TestApplyUsageResponse_KeepsFutureBucketValue(t *testing.T) {
 		t.Fatalf("expected usage_five_hour to remain 73, got %.1f", *fh.Used)
 	}
 }
+
+func TestBuildStatsCandidates_IncludesBackupPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	got := buildStatsCandidates("", claudeDir, tmpDir)
+
+	want := []string{
+		filepath.Join(claudeDir, "stats-cache.json"),
+		filepath.Join(claudeDir, ".claude-backup", "stats-cache.json"),
+		filepath.Join(tmpDir, ".claude-backup", "stats-cache.json"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d candidates, got %d: %v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestProviderFetch_UsesBackupStatsPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	backupDir := filepath.Join(claudeDir, ".claude-backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatalf("mkdir backup dir: %v", err)
+	}
+
+	statsPath := filepath.Join(backupDir, "stats-cache.json")
+	stats := statsCache{
+		Version:          2,
+		LastComputedDate: "2026-02-21",
+		TotalSessions:    3,
+		TotalMessages:    7,
+	}
+	statsData, _ := json.Marshal(stats)
+	if err := os.WriteFile(statsPath, statsData, 0644); err != nil {
+		t.Fatalf("write stats: %v", err)
+	}
+
+	accountPath := filepath.Join(tmpDir, ".claude.json")
+	if err := os.WriteFile(accountPath, []byte(`{"hasAvailableSubscription":true}`), 0644); err != nil {
+		t.Fatalf("write account: %v", err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID: "claude-backup-path",
+		ExtraData: map[string]string{
+			"claude_dir": claudeDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("expected StatusOK, got %v (%s)", snap.Status, snap.Message)
+	}
+	if got := snap.Raw["stats_path"]; got != statsPath {
+		t.Fatalf("expected stats_path %q, got %q", statsPath, got)
+	}
+}
+
+func TestReadConversationJSONL_DedupesRequestUsageAndToolCalls(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "projects", "repo-a")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	now := time.Now().UTC()
+	line := func(ts time.Time, reqID, msgID, toolID, toolName string, in, out int) string {
+		return fmt.Sprintf(
+			`{"type":"assistant","sessionId":"sess1","requestId":"%s","timestamp":"%s","message":{"id":"%s","model":"claude-opus-4-6","role":"assistant","content":[{"type":"tool_use","id":"%s","name":"%s"}],"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+			reqID,
+			ts.Format(time.RFC3339),
+			msgID,
+			toolID,
+			toolName,
+			in,
+			out,
+		)
+	}
+
+	lines := []string{
+		line(now.Add(-3*time.Minute), "req-1", "msg-1a", "tool-1", "Read", 100, 10),
+		line(now.Add(-2*time.Minute), "req-1", "msg-1b", "tool-1", "Read", 100, 10), // duplicate request
+		line(now.Add(-1*time.Minute), "req-2", "msg-2", "tool-2", "Bash", 50, 5),
+	}
+
+	fpath := filepath.Join(projectDir, "session.jsonl")
+	if err := os.WriteFile(fpath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	p := New()
+	snap := core.QuotaSnapshot{
+		ProviderID:  p.ID(),
+		AccountID:   "dedupe-test",
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	if err := p.readConversationJSONL(filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
+		t.Fatalf("readConversationJSONL failed: %v", err)
+	}
+
+	if got := snap.Raw["jsonl_total_entries"]; got != "2" {
+		t.Fatalf("expected 2 deduped entries, got %q", got)
+	}
+	if got := snap.Raw["jsonl_unique_requests"]; got != "2" {
+		t.Fatalf("expected 2 unique requests, got %q", got)
+	}
+	if got := snap.Raw["tool_count"]; got != "2" {
+		t.Fatalf("expected 2 unique tools, got %q", got)
+	}
+
+	m, ok := snap.Metrics["model_claude_opus_4_6_input_tokens"]
+	if !ok || m.Used == nil {
+		t.Fatalf("missing model input metric")
+	}
+	if *m.Used != 150 {
+		t.Fatalf("expected deduped model input=150, got %.0f", *m.Used)
+	}
+
+	tm, ok := snap.Metrics["all_time_tool_calls"]
+	if !ok || tm.Used == nil {
+		t.Fatalf("missing all_time_tool_calls metric")
+	}
+	if *tm.Used != 2 {
+		t.Fatalf("expected all_time_tool_calls=2, got %.0f", *tm.Used)
+	}
+}
