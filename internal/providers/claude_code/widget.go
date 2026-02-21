@@ -15,7 +15,7 @@ func dashboardWidget() core.DashboardWidget {
 		{Label: "Credits", Keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "all_time_api_cost"}, MaxSegments: 4},
 		{Label: "Activity", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "7d_tool_calls"}, MaxSegments: 4},
 		{Label: "Tokens", Keys: []string{"7d_input_tokens", "7d_output_tokens", "7d_cache_read_tokens", "7d_cache_create_tokens"}, MaxSegments: 4},
-		{Label: "Context", Keys: []string{"today_cache_create_1h_tokens", "today_cache_create_5m_tokens", "7d_reasoning_tokens", "burn_rate"}, MaxSegments: 4},
+		{Label: "Usage", Keys: []string{"today_cache_create_1h_tokens", "today_cache_create_5m_tokens", "7d_reasoning_tokens", "burn_rate"}, MaxSegments: 4},
 		{Label: "Tools", Keys: []string{"today_web_search_requests", "today_web_fetch_requests", "7d_web_search_requests", "7d_web_fetch_requests"}, MaxSegments: 4},
 	}
 	cfg.HideMetricPrefixes = []string{"tokens_today_", "input_tokens_", "output_tokens_", "model_", "client_"}
@@ -25,7 +25,7 @@ func dashboardWidget() core.DashboardWidget {
 			Keys:  []string{"model_usage", "model_usage_window", "model_count"},
 		},
 		core.DashboardRawGroup{
-			Label: "Context",
+			Label: "Usage Detail",
 			Keys:  []string{"cache_usage", "service_tier_usage", "inference_geo_usage"},
 		},
 		core.DashboardRawGroup{

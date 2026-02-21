@@ -58,15 +58,14 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	}
 	lines = append(lines, "")
 
-	lines = append(lines, headingStyle.Render("  Category Tags"))
+	lines = append(lines, headingStyle.Render("  Billing Types"))
 	lines = append(lines, "")
 
 	tags := []struct {
 		emoji, label, desc string
 	}{
-		{"💰", "Spend", "Hard spending limit — $ used vs $ budget"},
-		{"⚡", "Usage", "Percent-used usage windows — rate/limit/quota normalized"},
-		{"💬", "Activity", "Activity counter — messages, sessions, tools"},
+		{"💰", "Credits", "Token/API spend model — billed per usage amount"},
+		{"⚡", "Usage", "Quota/window model — available usage over a reset period"},
 	}
 
 	for _, t := range tags {

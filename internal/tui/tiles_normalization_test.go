@@ -450,8 +450,8 @@ func TestBuildGeminiOtherQuotaLines_ExcludesPrimaryAndUsesRemaining(t *testing.T
 	if len(lines) != 3 {
 		t.Fatalf("lines len = %d, want 3 (heading + 2 rows)", len(lines))
 	}
-	if !strings.Contains(lines[0], "Other Quotas") {
-		t.Fatalf("heading line missing 'Other Quotas': %q", lines[0])
+	if !strings.Contains(lines[0], "Other Usage") {
+		t.Fatalf("heading line missing 'Other Usage': %q", lines[0])
 	}
 
 	if usedKeys["quota_model_gemini_3_pro_preview_requests"] {

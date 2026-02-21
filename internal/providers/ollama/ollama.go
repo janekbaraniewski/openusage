@@ -137,6 +137,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	finalizeUsageWindows(&snap)
+
 	switch {
 	case hasData:
 		snap.Status = core.StatusOK
@@ -153,8 +155,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func buildStatusMessage(snap core.UsageSnapshot) string {
-	parts := make([]string, 0, 3)
-	for _, key := range []string{"messages_today", "requests_today", "models_total"} {
+	parts := make([]string, 0, 5)
+	for _, key := range []string{"messages_today", "requests_today", "requests_5h", "requests_1d", "models_total"} {
 		metric, ok := snap.Metrics[key]
 		if !ok || metric.Remaining == nil {
 			continue
@@ -164,6 +166,10 @@ func buildStatusMessage(snap core.UsageSnapshot) string {
 			parts = append(parts, fmt.Sprintf("%.0f msgs today", *metric.Remaining))
 		case "requests_today":
 			parts = append(parts, fmt.Sprintf("%.0f req today", *metric.Remaining))
+		case "requests_5h":
+			parts = append(parts, fmt.Sprintf("%.0f req 5h", *metric.Remaining))
+		case "requests_1d":
+			parts = append(parts, fmt.Sprintf("%.0f req 1d", *metric.Remaining))
 		case "models_total":
 			parts = append(parts, fmt.Sprintf("%.0f models", *metric.Remaining))
 		}
@@ -177,11 +183,23 @@ func buildStatusMessage(snap core.UsageSnapshot) string {
 func (p *Provider) fetchLocalAPI(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
 	var hasData bool
 
+	statusOK, err := p.fetchLocalStatus(ctx, baseURL, snap)
+	if err != nil {
+		return false, err
+	}
+	hasData = hasData || statusOK
+
 	versionOK, err := p.fetchLocalVersion(ctx, baseURL, snap)
 	if err != nil {
 		return false, err
 	}
 	hasData = hasData || versionOK
+
+	meOK, err := p.fetchLocalMe(ctx, baseURL, snap)
+	if err != nil {
+		return hasData, err
+	}
+	hasData = hasData || meOK
 
 	tagsOK, err := p.fetchLocalTags(ctx, baseURL, snap)
 	if err != nil {
@@ -217,6 +235,60 @@ func (p *Provider) fetchLocalVersion(ctx context.Context, baseURL string, snap *
 		return true, nil
 	}
 	return false, nil
+}
+
+func (p *Provider) fetchLocalStatus(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
+	var resp map[string]any
+	code, _, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/status", "", &resp)
+	if err != nil {
+		return false, nil
+	}
+	if code == http.StatusNotFound || code == http.StatusMethodNotAllowed {
+		return false, nil
+	}
+	if code != http.StatusOK {
+		return false, nil
+	}
+
+	cloud := anyMapCaseInsensitive(resp, "cloud")
+	if len(cloud) == 0 {
+		return false, nil
+	}
+
+	var hasData bool
+	if disabled, ok := anyBoolCaseInsensitive(cloud, "disabled"); ok {
+		snap.SetAttribute("cloud_disabled", strconv.FormatBool(disabled))
+		hasData = true
+	}
+	if source := anyStringCaseInsensitive(cloud, "source"); source != "" {
+		snap.SetAttribute("cloud_source", source)
+		hasData = true
+	}
+	return hasData, nil
+}
+
+func (p *Provider) fetchLocalMe(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
+	var resp map[string]any
+	code, _, err := doJSONRequest(ctx, http.MethodPost, baseURL+"/api/me", "", &resp)
+	if err != nil {
+		return false, nil
+	}
+
+	switch code {
+	case http.StatusOK:
+		return applyCloudUserPayload(resp, snap), nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		if signinURL := anyStringCaseInsensitive(resp, "signin_url", "sign_in_url"); signinURL != "" {
+			snap.SetAttribute("signin_url", signinURL)
+			return true, nil
+		}
+		return false, nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return false, nil
+	default:
+		snap.SetDiagnostic("local_me_status", fmt.Sprintf("HTTP %d", code))
+		return false, nil
+	}
 }
 
 func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
@@ -378,12 +450,58 @@ func (p *Provider) fetchDesktopDB(ctx context.Context, acct core.AccountConfig, 
 		setCountMetric("requests_today", userMessagesToday, "requests", "today")
 	}
 
+	sessions5h, err := queryCount(ctx, db, `SELECT COUNT(*) FROM chats WHERE datetime(created_at) >= datetime('now', '-5 hours')`)
+	if err == nil {
+		setCountMetric("sessions_5h", sessions5h, "sessions", "5h")
+	}
+
+	sessions1d, err := queryCount(ctx, db, `SELECT COUNT(*) FROM chats WHERE datetime(created_at) >= datetime('now', '-24 hours')`)
+	if err == nil {
+		setCountMetric("sessions_1d", sessions1d, "sessions", "1d")
+	}
+
+	messages5h, err := queryCount(ctx, db, `SELECT COUNT(*) FROM messages WHERE datetime(created_at) >= datetime('now', '-5 hours')`)
+	if err == nil {
+		setCountMetric("messages_5h", messages5h, "messages", "5h")
+	}
+
+	messages1d, err := queryCount(ctx, db, `SELECT COUNT(*) FROM messages WHERE datetime(created_at) >= datetime('now', '-24 hours')`)
+	if err == nil {
+		setCountMetric("messages_1d", messages1d, "messages", "1d")
+	}
+
+	requests5h, err := queryCount(ctx, db, `SELECT COUNT(*) FROM messages WHERE role = 'user' AND datetime(created_at) >= datetime('now', '-5 hours')`)
+	if err == nil {
+		setCountMetric("requests_5h", requests5h, "requests", "5h")
+	}
+
+	requests1d, err := queryCount(ctx, db, `SELECT COUNT(*) FROM messages WHERE role = 'user' AND datetime(created_at) >= datetime('now', '-24 hours')`)
+	if err == nil {
+		setCountMetric("requests_1d", requests1d, "requests", "1d")
+	}
+
 	toolCallsToday, err := queryCount(ctx, db, `SELECT COUNT(*)
 		FROM tool_calls tc
 		JOIN messages m ON tc.message_id = m.id
 		WHERE date(m.created_at, 'localtime') = date('now', 'localtime')`)
 	if err == nil {
 		setCountMetric("tool_calls_today", toolCallsToday, "calls", "today")
+	}
+
+	toolCalls5h, err := queryCount(ctx, db, `SELECT COUNT(*)
+		FROM tool_calls tc
+		JOIN messages m ON tc.message_id = m.id
+		WHERE datetime(m.created_at) >= datetime('now', '-5 hours')`)
+	if err == nil {
+		setCountMetric("tool_calls_5h", toolCalls5h, "calls", "5h")
+	}
+
+	toolCalls1d, err := queryCount(ctx, db, `SELECT COUNT(*)
+		FROM tool_calls tc
+		JOIN messages m ON tc.message_id = m.id
+		WHERE datetime(m.created_at) >= datetime('now', '-24 hours')`)
+	if err == nil {
+		setCountMetric("tool_calls_1d", toolCalls1d, "calls", "1d")
 	}
 
 	attachmentsToday, err := queryCount(ctx, db, `SELECT COUNT(*)
@@ -396,6 +514,18 @@ func (p *Provider) fetchDesktopDB(ctx context.Context, acct core.AccountConfig, 
 
 	if err := populateModelUsageFromDB(ctx, db, snap); err != nil {
 		snap.SetDiagnostic("desktop_model_usage_error", err.Error())
+	}
+
+	if err := populateEstimatedTokenUsageFromDB(ctx, db, snap); err != nil {
+		snap.SetDiagnostic("desktop_token_estimate_error", err.Error())
+	}
+
+	if err := populateSourceUsageFromDB(ctx, db, snap); err != nil {
+		snap.SetDiagnostic("desktop_source_usage_error", err.Error())
+	}
+
+	if err := populateToolUsageFromDB(ctx, db, snap); err != nil {
+		snap.SetDiagnostic("desktop_tool_usage_error", err.Error())
 	}
 
 	if err := populateDailySeriesFromDB(ctx, db, snap); err != nil {
@@ -420,6 +550,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 	}
 
 	now := time.Now()
+	start5h := now.Add(-5 * time.Hour)
 	start24h := now.Add(-24 * time.Hour)
 	start7d := now.Add(-7 * 24 * time.Hour)
 	today := now.Format("2006-01-02")
@@ -440,8 +571,40 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 			if event.Timestamp.After(start7d) {
 				metrics.requests7d++
 			}
+			if event.Timestamp.After(start5h) {
+				metrics.requests5h++
+				metrics.latencyTotal5h += event.Duration
+				metrics.latencyCount5h++
+				switch {
+				case event.Status >= 500:
+					metrics.errors5xx5h++
+				case event.Status >= 400:
+					metrics.errors4xx5h++
+				}
+				switch event.Path {
+				case "/api/chat", "/v1/chat/completions", "/v1/responses":
+					metrics.chatRequests5h++
+				case "/api/generate", "/v1/completions":
+					metrics.generateRequests5h++
+				}
+			}
 			if event.Timestamp.After(start24h) {
 				metrics.recentRequests++
+				metrics.requests1d++
+				metrics.latencyTotal1d += event.Duration
+				metrics.latencyCount1d++
+				switch {
+				case event.Status >= 500:
+					metrics.errors5xx1d++
+				case event.Status >= 400:
+					metrics.errors4xx1d++
+				}
+				switch event.Path {
+				case "/api/chat", "/v1/chat/completions", "/v1/responses":
+					metrics.chatRequests1d++
+				case "/api/generate", "/v1/completions":
+					metrics.generateRequests1d++
+				}
 			}
 			if dateKey == today {
 				metrics.requestsToday++
@@ -470,12 +633,30 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 	}
 
 	setValueMetric(snap, "requests_today", float64(metrics.requestsToday), "requests", "today")
+	setValueMetric(snap, "requests_5h", float64(metrics.requests5h), "requests", "5h")
+	setValueMetric(snap, "requests_1d", float64(metrics.requests1d), "requests", "1d")
 	setValueMetric(snap, "recent_requests", float64(metrics.recentRequests), "requests", "24h")
 	setValueMetric(snap, "requests_7d", float64(metrics.requests7d), "requests", "7d")
+	setValueMetric(snap, "chat_requests_5h", float64(metrics.chatRequests5h), "requests", "5h")
+	setValueMetric(snap, "generate_requests_5h", float64(metrics.generateRequests5h), "requests", "5h")
+	setValueMetric(snap, "chat_requests_1d", float64(metrics.chatRequests1d), "requests", "1d")
+	setValueMetric(snap, "generate_requests_1d", float64(metrics.generateRequests1d), "requests", "1d")
 	setValueMetric(snap, "chat_requests_today", float64(metrics.chatRequestsToday), "requests", "today")
 	setValueMetric(snap, "generate_requests_today", float64(metrics.generateRequestsToday), "requests", "today")
+	setValueMetric(snap, "http_4xx_5h", float64(metrics.errors4xx5h), "responses", "5h")
+	setValueMetric(snap, "http_5xx_5h", float64(metrics.errors5xx5h), "responses", "5h")
+	setValueMetric(snap, "http_4xx_1d", float64(metrics.errors4xx1d), "responses", "1d")
+	setValueMetric(snap, "http_5xx_1d", float64(metrics.errors5xx1d), "responses", "1d")
 	setValueMetric(snap, "http_4xx_today", float64(metrics.errors4xxToday), "responses", "today")
 	setValueMetric(snap, "http_5xx_today", float64(metrics.errors5xxToday), "responses", "today")
+	if metrics.latencyCount5h > 0 {
+		avgMs := float64(metrics.latencyTotal5h.Microseconds()) / 1000 / float64(metrics.latencyCount5h)
+		setValueMetric(snap, "avg_latency_ms_5h", avgMs, "ms", "5h")
+	}
+	if metrics.latencyCount1d > 0 {
+		avgMs := float64(metrics.latencyTotal1d.Microseconds()) / 1000 / float64(metrics.latencyCount1d)
+		setValueMetric(snap, "avg_latency_ms_1d", avgMs, "ms", "1d")
+	}
 	if metrics.latencyCount > 0 {
 		avgMs := float64(metrics.latencyTotal.Microseconds()) / 1000 / float64(metrics.latencyCount)
 		setValueMetric(snap, "avg_latency_ms_today", avgMs, "ms", "today")
@@ -511,7 +692,7 @@ func (p *Provider) fetchServerConfig(acct core.AccountConfig, snap *core.UsageSn
 func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, apiKey string, snap *core.UsageSnapshot) (hasData, authFailed, limited bool, err error) {
 	cloudBaseURL := resolveCloudBaseURL(acct)
 
-	var me cloudUserResponse
+	var me map[string]any
 	status, headers, reqErr := doJSONRequest(ctx, http.MethodPost, cloudBaseURL+"/api/me", apiKey, &me)
 	if reqErr != nil {
 		return false, false, false, fmt.Errorf("ollama: cloud account request failed: %w", reqErr)
@@ -526,25 +707,9 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	switch status {
 	case http.StatusOK:
 		snap.SetAttribute("auth_type", "api_key")
-		if me.ID != "" {
-			snap.SetAttribute("account_id", me.ID)
+		if applyCloudUserPayload(me, snap) {
+			hasData = true
 		}
-		if me.Email != "" {
-			snap.SetAttribute("account_email", me.Email)
-		}
-		if me.Name != "" {
-			snap.SetAttribute("account_name", me.Name)
-		}
-		if me.Plan != "" {
-			snap.SetAttribute("plan_name", me.Plan)
-		}
-		if me.SubscriptionPeriodStart.Time != "" && me.SubscriptionPeriodStart.Valid {
-			snap.SetAttribute("billing_cycle_start", me.SubscriptionPeriodStart.Time)
-		}
-		if me.SubscriptionPeriodEnd.Time != "" && me.SubscriptionPeriodEnd.Valid {
-			snap.SetAttribute("billing_cycle_end", me.SubscriptionPeriodEnd.Time)
-		}
-		hasData = true
 	case http.StatusUnauthorized, http.StatusForbidden:
 		authFailed = true
 	case http.StatusTooManyRequests:
@@ -576,6 +741,206 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	}
 
 	return hasData, authFailed, limited, nil
+}
+
+func applyCloudUserPayload(payload map[string]any, snap *core.UsageSnapshot) bool {
+	if len(payload) == 0 {
+		return false
+	}
+
+	var hasData bool
+
+	if id := anyStringCaseInsensitive(payload, "id", "ID"); id != "" {
+		snap.SetAttribute("account_id", id)
+		hasData = true
+	}
+	if email := anyStringCaseInsensitive(payload, "email", "Email"); email != "" {
+		snap.SetAttribute("account_email", email)
+		hasData = true
+	}
+	if name := anyStringCaseInsensitive(payload, "name", "Name"); name != "" {
+		snap.SetAttribute("account_name", name)
+		hasData = true
+	}
+	if plan := anyStringCaseInsensitive(payload, "plan", "Plan"); plan != "" {
+		snap.SetAttribute("plan_name", plan)
+		hasData = true
+	}
+
+	if customerID := anyNullStringCaseInsensitive(payload, "customerid", "customer_id", "CustomerID"); customerID != "" {
+		snap.SetAttribute("customer_id", customerID)
+	}
+	if subscriptionID := anyNullStringCaseInsensitive(payload, "subscriptionid", "subscription_id", "SubscriptionID"); subscriptionID != "" {
+		snap.SetAttribute("subscription_id", subscriptionID)
+	}
+	if workOSUserID := anyNullStringCaseInsensitive(payload, "workosuserid", "workos_user_id", "WorkOSUserID"); workOSUserID != "" {
+		snap.SetAttribute("workos_user_id", workOSUserID)
+	}
+
+	if billingStart, ok := anyNullTimeCaseInsensitive(payload, "subscriptionperiodstart", "subscription_period_start", "SubscriptionPeriodStart"); ok {
+		snap.SetAttribute("billing_cycle_start", billingStart.Format(time.RFC3339))
+	}
+	if billingEnd, ok := anyNullTimeCaseInsensitive(payload, "subscriptionperiodend", "subscription_period_end", "SubscriptionPeriodEnd"); ok {
+		snap.SetAttribute("billing_cycle_end", billingEnd.Format(time.RFC3339))
+	}
+
+	if extractCloudUsageWindows(payload, snap) {
+		hasData = true
+	}
+
+	return hasData
+}
+
+func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot) bool {
+	var found bool
+
+	sessionKeys := []string{
+		"session_usage", "sessionusage", "usage_5h", "usagefivehour", "five_hour_usage", "fivehourusage",
+	}
+	if metric, resetAt, ok := findUsageWindow(payload, sessionKeys, "5h"); ok {
+		snap.Metrics["usage_five_hour"] = metric
+		if !resetAt.IsZero() {
+			snap.Resets["usage_five_hour"] = resetAt
+			snap.SetAttribute("block_end", resetAt.Format(time.RFC3339))
+			if metric.Window == "5h" {
+				start := resetAt.Add(-5 * time.Hour)
+				snap.SetAttribute("block_start", start.Format(time.RFC3339))
+			}
+		}
+		found = true
+	}
+
+	dayKeys := []string{
+		"weekly_usage", "weeklyusage", "usage_1d", "usageoneday", "one_day_usage", "daily_usage", "dailyusage",
+	}
+	if metric, resetAt, ok := findUsageWindow(payload, dayKeys, "1d"); ok {
+		snap.Metrics["usage_one_day"] = metric
+		if !resetAt.IsZero() {
+			snap.Resets["usage_one_day"] = resetAt
+		}
+		found = true
+	}
+
+	return found
+}
+
+func findUsageWindow(payload map[string]any, keys []string, fallbackWindow string) (core.Metric, time.Time, bool) {
+	sources := []map[string]any{
+		payload,
+		anyMapCaseInsensitive(payload, "usage"),
+		anyMapCaseInsensitive(payload, "cloud_usage"),
+		anyMapCaseInsensitive(payload, "quota"),
+	}
+
+	for _, src := range sources {
+		if len(src) == 0 {
+			continue
+		}
+		for _, key := range keys {
+			v, ok := anyValueCaseInsensitive(src, key)
+			if !ok {
+				continue
+			}
+			if metric, resetAt, ok := parseUsageWindowValue(v, fallbackWindow); ok {
+				return metric, resetAt, true
+			}
+		}
+	}
+
+	return core.Metric{}, time.Time{}, false
+}
+
+func parseUsageWindowValue(v any, fallbackWindow string) (core.Metric, time.Time, bool) {
+	if pct, ok := anyFloat(v); ok {
+		return core.Metric{
+			Used:   core.Float64Ptr(pct),
+			Unit:   "%",
+			Window: fallbackWindow,
+		}, time.Time{}, true
+	}
+
+	switch raw := v.(type) {
+	case string:
+		s := strings.TrimSpace(strings.TrimSuffix(raw, "%"))
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return core.Metric{
+				Used:   core.Float64Ptr(f),
+				Unit:   "%",
+				Window: fallbackWindow,
+			}, time.Time{}, true
+		}
+	case map[string]any:
+		var metric core.Metric
+		metric.Window = fallbackWindow
+		metric.Unit = anyStringCaseInsensitive(raw, "unit")
+		if metric.Unit == "" {
+			metric.Unit = "%"
+		}
+
+		if window := anyStringCaseInsensitive(raw, "window"); window != "" {
+			metric.Window = strings.TrimSpace(window)
+		}
+
+		if used, ok := anyFloatCaseInsensitive(raw, "used", "usage", "value"); ok {
+			metric.Used = core.Float64Ptr(used)
+		}
+		if limit, ok := anyFloatCaseInsensitive(raw, "limit", "max"); ok {
+			metric.Limit = core.Float64Ptr(limit)
+		}
+		if remaining, ok := anyFloatCaseInsensitive(raw, "remaining", "left"); ok {
+			metric.Remaining = core.Float64Ptr(remaining)
+		}
+		if pct, ok := anyFloatCaseInsensitive(raw, "percent", "pct", "used_percent", "usage_percent"); ok {
+			metric.Unit = "%"
+			metric.Used = core.Float64Ptr(pct)
+			metric.Limit = nil
+			metric.Remaining = nil
+		}
+
+		var resetAt time.Time
+		if resetRaw := anyStringCaseInsensitive(raw, "reset_at", "resets_at", "reset_time", "reset"); resetRaw != "" {
+			if t, ok := parseAnyTime(resetRaw); ok {
+				resetAt = t
+			}
+		}
+		if resetAt.IsZero() {
+			if seconds, ok := anyFloatCaseInsensitive(raw, "reset_in", "reset_in_seconds", "resets_in", "seconds_to_reset"); ok && seconds > 0 {
+				resetAt = time.Now().Add(time.Duration(seconds * float64(time.Second)))
+			}
+		}
+
+		if metric.Used != nil || metric.Limit != nil || metric.Remaining != nil {
+			return metric, resetAt, true
+		}
+	}
+
+	return core.Metric{}, time.Time{}, false
+}
+
+func finalizeUsageWindows(snap *core.UsageSnapshot) {
+	now := time.Now().In(time.Local)
+	blockStart, blockEnd := currentFiveHourBlock(now)
+
+	// Keep usage windows strictly real-data-driven.
+	// If usage_five_hour exists but reset is missing, infer the current 5h block boundary.
+	if _, ok := snap.Metrics["usage_five_hour"]; ok {
+		if _, ok := snap.Resets["usage_five_hour"]; !ok {
+			snap.Resets["usage_five_hour"] = blockEnd
+		}
+		if _, ok := snap.Attributes["block_start"]; !ok {
+			snap.SetAttribute("block_start", blockStart.Format(time.RFC3339))
+		}
+		if _, ok := snap.Attributes["block_end"]; !ok {
+			snap.SetAttribute("block_end", blockEnd.Format(time.RFC3339))
+		}
+	}
+}
+
+func currentFiveHourBlock(now time.Time) (time.Time, time.Time) {
+	startHour := (now.Hour() / 5) * 5
+	start := time.Date(now.Year(), now.Month(), now.Day(), startHour, 0, 0, 0, now.Location())
+	end := start.Add(5 * time.Hour)
+	return start, end
 }
 
 func resolveCloudBaseURL(acct core.AccountConfig) string {
@@ -681,6 +1046,21 @@ func queryCount(ctx context.Context, db *sql.DB, query string) (int64, error) {
 	return count, nil
 }
 
+func tableHasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	table = strings.TrimSpace(table)
+	column = strings.TrimSpace(column)
+	if table == "" || column == "" {
+		return false, nil
+	}
+	safeTable := strings.ReplaceAll(table, "'", "''")
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?`, safeTable)
+	var count int
+	if err := db.QueryRowContext(ctx, query, column).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func populateSettingsFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
 	var selectedModel sql.NullString
 	var contextLength sql.NullInt64
@@ -773,6 +1153,41 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 		snap.Raw["models_usage_top"] = strings.Join(top, ", ")
 	}
 
+	todayRows, err := db.QueryContext(ctx, `SELECT model_name, COUNT(*)
+		FROM messages
+		WHERE model_name IS NOT NULL AND trim(model_name) != ''
+			AND date(created_at, 'localtime') = date('now', 'localtime')
+		GROUP BY model_name`)
+	if err == nil {
+		defer todayRows.Close()
+		for todayRows.Next() {
+			var model string
+			var count float64
+			if err := todayRows.Scan(&model, &count); err != nil {
+				return err
+			}
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+
+			metricKey := "model_" + sanitizeMetricPart(model) + "_requests_today"
+			setValueMetric(snap, metricKey, count, "requests", "today")
+
+			rec := core.ModelUsageRecord{
+				RawModelID: model,
+				RawSource:  "sqlite",
+				Window:     "today",
+				Requests:   core.Float64Ptr(count),
+			}
+			rec.SetDimension("provider", "ollama")
+			core.AppendModelUsageRecord(snap, rec)
+		}
+		if err := todayRows.Err(); err != nil {
+			return err
+		}
+	}
+
 	perDayRows, err := db.QueryContext(ctx, `SELECT date(created_at), model_name, COUNT(*)
 		FROM messages
 		WHERE model_name IS NOT NULL AND trim(model_name) != ''
@@ -807,9 +1222,487 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 	for model, byDate := range perModelDaily {
 		seriesKey := "requests_model_" + sanitizeMetricPart(model)
 		snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDate)
+		usageSeriesKey := "usage_model_" + sanitizeMetricPart(model)
+		snap.DailySeries[usageSeriesKey] = mapToSortedTimePoints(byDate)
 	}
 
 	return nil
+}
+
+func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
+	hasThinking, err := tableHasColumn(ctx, db, "messages", "thinking")
+	if err != nil {
+		return err
+	}
+
+	thinkingExpr := `''`
+	if hasThinking {
+		thinkingExpr = `COALESCE(thinking, '')`
+	}
+
+	query := fmt.Sprintf(`SELECT chat_id, id, role, model_name, COALESCE(content, ''), %s, COALESCE(created_at, '')
+		FROM messages
+		ORDER BY chat_id, datetime(created_at), id`, thinkingExpr)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type tokenAgg struct {
+		input    float64
+		output   float64
+		requests float64
+	}
+	ensureAgg := func(m map[string]*tokenAgg, key string) *tokenAgg {
+		if m[key] == nil {
+			m[key] = &tokenAgg{}
+		}
+		return m[key]
+	}
+	ensureDaily := func(m map[string]map[string]float64, key string) map[string]float64 {
+		if m[key] == nil {
+			m[key] = make(map[string]float64)
+		}
+		return m[key]
+	}
+
+	modelAgg := make(map[string]*tokenAgg)
+	sourceAgg := make(map[string]*tokenAgg)
+	dailyTokens := make(map[string]float64)
+	dailyRequests := make(map[string]float64)
+	modelDailyTokens := make(map[string]map[string]float64)
+	sourceDailyTokens := make(map[string]map[string]float64)
+	sourceDailyRequests := make(map[string]map[string]float64)
+	sessionsBySource := make(map[string]float64)
+
+	now := time.Now().In(time.Local)
+	start5h := now.Add(-5 * time.Hour)
+	start1d := now.Add(-24 * time.Hour)
+	start7d := now.Add(-7 * 24 * time.Hour)
+
+	var tokens5h float64
+	var tokens1d float64
+	var tokens7d float64
+	var tokensToday float64
+
+	currentChat := ""
+	pendingInputChars := 0
+	chatSources := make(map[string]bool)
+	flushChat := func() {
+		for source := range chatSources {
+			sessionsBySource[source]++
+		}
+		clear(chatSources)
+		pendingInputChars = 0
+	}
+
+	for rows.Next() {
+		var chatID string
+		var id int64
+		var role sql.NullString
+		var modelName sql.NullString
+		var content sql.NullString
+		var thinking sql.NullString
+		var createdAt sql.NullString
+
+		if err := rows.Scan(&chatID, &id, &role, &modelName, &content, &thinking, &createdAt); err != nil {
+			return err
+		}
+
+		if currentChat == "" {
+			currentChat = chatID
+		}
+		if chatID != currentChat {
+			flushChat()
+			currentChat = chatID
+		}
+
+		roleVal := strings.ToLower(strings.TrimSpace(role.String))
+		contentLen := len(content.String)
+		thinkingLen := len(thinking.String)
+
+		ts := time.Time{}
+		if createdAt.Valid && strings.TrimSpace(createdAt.String) != "" {
+			if parsed, ok := parseAnyTime(createdAt.String); ok {
+				ts = parsed.In(time.Local)
+			}
+		}
+		day := ""
+		if !ts.IsZero() {
+			day = ts.Format("2006-01-02")
+		} else if createdAt.Valid && len(createdAt.String) >= 10 {
+			day = createdAt.String[:10]
+		}
+
+		if roleVal == "user" {
+			pendingInputChars += contentLen + thinkingLen
+			continue
+		}
+		if roleVal != "assistant" {
+			continue
+		}
+
+		model := strings.TrimSpace(modelName.String)
+		if model == "" {
+			continue
+		}
+		modelKey := sanitizeMetricPart(model)
+		source := sourceFromModelName(model)
+		sourceKey := sanitizeMetricPart(source)
+
+		inputTokens := estimateTokensFromChars(pendingInputChars)
+		outputTokens := estimateTokensFromChars(contentLen + thinkingLen)
+		totalTokens := inputTokens + outputTokens
+		pendingInputChars = 0
+
+		modelTotals := ensureAgg(modelAgg, model)
+		modelTotals.input += inputTokens
+		modelTotals.output += outputTokens
+		modelTotals.requests++
+
+		sourceTotals := ensureAgg(sourceAgg, sourceKey)
+		sourceTotals.input += inputTokens
+		sourceTotals.output += outputTokens
+		sourceTotals.requests++
+		chatSources[sourceKey] = true
+
+		if day != "" {
+			dailyTokens[day] += totalTokens
+			dailyRequests[day]++
+			ensureDaily(modelDailyTokens, modelKey)[day] += totalTokens
+			ensureDaily(sourceDailyTokens, sourceKey)[day] += totalTokens
+			ensureDaily(sourceDailyRequests, sourceKey)[day]++
+			if day == now.Format("2006-01-02") {
+				tokensToday += totalTokens
+			}
+		}
+
+		if !ts.IsZero() {
+			if ts.After(start5h) {
+				tokens5h += totalTokens
+			}
+			if ts.After(start1d) {
+				tokens1d += totalTokens
+			}
+			if ts.After(start7d) {
+				tokens7d += totalTokens
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if currentChat != "" {
+		flushChat()
+	}
+
+	type modelTotal struct {
+		name string
+		tok  float64
+	}
+	var topModels []modelTotal
+	for model, totals := range modelAgg {
+		modelKey := sanitizeMetricPart(model)
+		setValueMetric(snap, "model_"+modelKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setValueMetric(snap, "model_"+modelKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setValueMetric(snap, "model_"+modelKey+"_total_tokens", totals.input+totals.output, "tokens", "all-time")
+
+		rec := core.ModelUsageRecord{
+			RawModelID:   model,
+			RawSource:    "sqlite_estimate",
+			Window:       "all-time",
+			InputTokens:  core.Float64Ptr(totals.input),
+			OutputTokens: core.Float64Ptr(totals.output),
+			TotalTokens:  core.Float64Ptr(totals.input + totals.output),
+			Requests:     core.Float64Ptr(totals.requests),
+		}
+		rec.SetDimension("provider", "ollama")
+		rec.SetDimension("estimation", "chars_div_4")
+		core.AppendModelUsageRecord(snap, rec)
+
+		topModels = append(topModels, modelTotal{name: model, tok: totals.input + totals.output})
+	}
+	sort.Slice(topModels, func(i, j int) bool {
+		if topModels[i].tok == topModels[j].tok {
+			return topModels[i].name < topModels[j].name
+		}
+		return topModels[i].tok > topModels[j].tok
+	})
+	if len(topModels) > 0 {
+		top := make([]string, 0, minInt(len(topModels), 6))
+		for i := 0; i < len(topModels) && i < 6; i++ {
+			top = append(top, fmt.Sprintf("%s=%.0f", topModels[i].name, topModels[i].tok))
+		}
+		snap.Raw["model_tokens_estimated_top"] = strings.Join(top, ", ")
+	}
+
+	for sourceKey, totals := range sourceAgg {
+		totalTokens := totals.input + totals.output
+		setValueMetric(snap, "client_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setValueMetric(snap, "client_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setValueMetric(snap, "client_"+sourceKey+"_total_tokens", totalTokens, "tokens", "all-time")
+		setValueMetric(snap, "client_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
+		if sessions := sessionsBySource[sourceKey]; sessions > 0 {
+			setValueMetric(snap, "client_"+sourceKey+"_sessions", sessions, "sessions", "all-time")
+		}
+
+		setValueMetric(snap, "provider_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setValueMetric(snap, "provider_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setValueMetric(snap, "provider_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
+	}
+
+	for sourceKey, byDay := range sourceDailyTokens {
+		if len(byDay) == 0 {
+			continue
+		}
+		snap.DailySeries["tokens_client_"+sourceKey] = mapToSortedTimePoints(byDay)
+	}
+	for sourceKey, byDay := range sourceDailyRequests {
+		if len(byDay) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_client_"+sourceKey] = mapToSortedTimePoints(byDay)
+	}
+	for modelKey, byDay := range modelDailyTokens {
+		if len(byDay) == 0 {
+			continue
+		}
+		snap.DailySeries["tokens_model_"+modelKey] = mapToSortedTimePoints(byDay)
+	}
+	if len(dailyTokens) > 0 {
+		snap.DailySeries["analytics_tokens"] = mapToSortedTimePoints(dailyTokens)
+	}
+	if len(dailyRequests) > 0 {
+		snap.DailySeries["analytics_requests"] = mapToSortedTimePoints(dailyRequests)
+	}
+
+	if tokensToday > 0 {
+		setValueMetric(snap, "tokens_today", tokensToday, "tokens", "today")
+	}
+	if tokens5h > 0 {
+		setValueMetric(snap, "tokens_5h", tokens5h, "tokens", "5h")
+	}
+	if tokens1d > 0 {
+		setValueMetric(snap, "tokens_1d", tokens1d, "tokens", "1d")
+	}
+	if tokens7d > 0 {
+		setValueMetric(snap, "7d_tokens", tokens7d, "tokens", "7d")
+	}
+
+	snap.SetAttribute("token_estimation", "chars_div_4")
+	return nil
+}
+
+func estimateTokensFromChars(chars int) float64 {
+	if chars <= 0 {
+		return 0
+	}
+	return float64((chars + 3) / 4)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
+	allTimeRows, err := db.QueryContext(ctx, `SELECT model_name, COUNT(*)
+		FROM messages
+		WHERE model_name IS NOT NULL AND trim(model_name) != ''
+		GROUP BY model_name`)
+	if err != nil {
+		return err
+	}
+	defer allTimeRows.Close()
+
+	allTimeBySource := make(map[string]float64)
+	for allTimeRows.Next() {
+		var model string
+		var count float64
+		if err := allTimeRows.Scan(&model, &count); err != nil {
+			return err
+		}
+		source := sourceFromModelName(model)
+		allTimeBySource[source] += count
+	}
+	if err := allTimeRows.Err(); err != nil {
+		return err
+	}
+
+	for source, count := range allTimeBySource {
+		if count <= 0 {
+			continue
+		}
+		sourceKey := sanitizeMetricPart(source)
+		setValueMetric(snap, "source_"+sourceKey+"_requests", count, "requests", "all-time")
+	}
+
+	todayRows, err := db.QueryContext(ctx, `SELECT model_name, COUNT(*)
+		FROM messages
+		WHERE model_name IS NOT NULL AND trim(model_name) != ''
+			AND date(created_at, 'localtime') = date('now', 'localtime')
+		GROUP BY model_name`)
+	if err == nil {
+		defer todayRows.Close()
+		todayBySource := make(map[string]float64)
+		for todayRows.Next() {
+			var model string
+			var count float64
+			if err := todayRows.Scan(&model, &count); err != nil {
+				return err
+			}
+			source := sourceFromModelName(model)
+			todayBySource[source] += count
+		}
+		if err := todayRows.Err(); err != nil {
+			return err
+		}
+
+		for source, count := range todayBySource {
+			if count <= 0 {
+				continue
+			}
+			sourceKey := sanitizeMetricPart(source)
+			setValueMetric(snap, "source_"+sourceKey+"_requests_today", count, "requests", "today")
+		}
+	}
+
+	perDayRows, err := db.QueryContext(ctx, `SELECT date(created_at), model_name, COUNT(*)
+		FROM messages
+		WHERE model_name IS NOT NULL AND trim(model_name) != ''
+		GROUP BY date(created_at), model_name`)
+	if err != nil {
+		return nil
+	}
+	defer perDayRows.Close()
+
+	perSourceDaily := make(map[string]map[string]float64)
+	for perDayRows.Next() {
+		var day string
+		var model string
+		var count float64
+		if err := perDayRows.Scan(&day, &model, &count); err != nil {
+			return err
+		}
+		day = strings.TrimSpace(day)
+		if day == "" {
+			continue
+		}
+		source := sourceFromModelName(model)
+		sourceKey := sanitizeMetricPart(source)
+		if perSourceDaily[sourceKey] == nil {
+			perSourceDaily[sourceKey] = make(map[string]float64)
+		}
+		perSourceDaily[sourceKey][day] += count
+	}
+	if err := perDayRows.Err(); err != nil {
+		return err
+	}
+
+	for sourceKey, byDay := range perSourceDaily {
+		if len(byDay) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_source_"+sourceKey] = mapToSortedTimePoints(byDay)
+	}
+
+	return nil
+}
+
+func populateToolUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
+	hasFunctionName, err := tableHasColumn(ctx, db, "tool_calls", "function_name")
+	if err != nil || !hasFunctionName {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT function_name, COUNT(*)
+		FROM tool_calls
+		WHERE trim(function_name) != ''
+		GROUP BY function_name
+		ORDER BY COUNT(*) DESC`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var top []string
+	for rows.Next() {
+		var toolName string
+		var count float64
+		if err := rows.Scan(&toolName, &count); err != nil {
+			return err
+		}
+		toolName = strings.TrimSpace(toolName)
+		if toolName == "" {
+			continue
+		}
+
+		setValueMetric(snap, "tool_"+sanitizeMetricPart(toolName), count, "calls", "all-time")
+		if len(top) < 6 {
+			top = append(top, fmt.Sprintf("%s=%.0f", toolName, count))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(top) > 0 {
+		snap.Raw["tool_usage"] = strings.Join(top, ", ")
+	}
+
+	perDayRows, err := db.QueryContext(ctx, `SELECT date(m.created_at), tc.function_name, COUNT(*)
+		FROM tool_calls tc
+		JOIN messages m ON tc.message_id = m.id
+		WHERE trim(tc.function_name) != ''
+		GROUP BY date(m.created_at), tc.function_name`)
+	if err != nil {
+		return nil
+	}
+	defer perDayRows.Close()
+
+	perToolDaily := make(map[string]map[string]float64)
+	for perDayRows.Next() {
+		var day string
+		var toolName string
+		var count float64
+		if err := perDayRows.Scan(&day, &toolName, &count); err != nil {
+			return err
+		}
+		day = strings.TrimSpace(day)
+		toolKey := sanitizeMetricPart(toolName)
+		if day == "" || toolKey == "" {
+			continue
+		}
+		if perToolDaily[toolKey] == nil {
+			perToolDaily[toolKey] = make(map[string]float64)
+		}
+		perToolDaily[toolKey][day] += count
+	}
+	if err := perDayRows.Err(); err != nil {
+		return err
+	}
+
+	for toolKey, byDay := range perToolDaily {
+		if len(byDay) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_tool_"+toolKey] = mapToSortedTimePoints(byDay)
+	}
+
+	return nil
+}
+
+func sourceFromModelName(model string) string {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return "unknown"
+	}
+	if strings.HasSuffix(normalized, ":cloud") || strings.Contains(normalized, "-cloud") {
+		return "cloud"
+	}
+	return "local"
 }
 
 func populateDailySeriesFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
@@ -847,7 +1740,13 @@ func populateDailySeriesFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 		}
 		rows.Close()
 		if len(byDate) > 0 {
-			snap.DailySeries[dq.key] = mapToSortedTimePoints(byDate)
+			points := mapToSortedTimePoints(byDate)
+			snap.DailySeries[dq.key] = points
+			if dq.key == "requests_user" {
+				if _, exists := snap.DailySeries["requests"]; !exists {
+					snap.DailySeries["requests"] = points
+				}
+			}
 		}
 	}
 
@@ -1007,6 +1906,7 @@ func sanitizeMetricPart(input string) string {
 
 func setValueMetric(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	snap.Metrics[key] = core.Metric{
+		Used:      core.Float64Ptr(value),
 		Remaining: core.Float64Ptr(value),
 		Unit:      unit,
 		Window:    window,
@@ -1052,6 +1952,163 @@ func isCloudModel(model tagModel) bool {
 	return false
 }
 
+func anyValueCaseInsensitive(m map[string]any, keys ...string) (any, bool) {
+	if len(m) == 0 {
+		return nil, false
+	}
+	want := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		norm := normalizeLookupKey(key)
+		if norm == "" {
+			continue
+		}
+		want[norm] = struct{}{}
+	}
+	for k, v := range m {
+		if _, ok := want[normalizeLookupKey(k)]; ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func anyStringCaseInsensitive(m map[string]any, keys ...string) string {
+	v, ok := anyValueCaseInsensitive(m, keys...)
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return strings.TrimSpace(val)
+	case fmt.Stringer:
+		return strings.TrimSpace(val.String())
+	default:
+		return ""
+	}
+}
+
+func anyMapCaseInsensitive(m map[string]any, keys ...string) map[string]any {
+	v, ok := anyValueCaseInsensitive(m, keys...)
+	if !ok {
+		return nil
+	}
+	out, _ := v.(map[string]any)
+	return out
+}
+
+func anyBoolCaseInsensitive(m map[string]any, keys ...string) (bool, bool) {
+	v, ok := anyValueCaseInsensitive(m, keys...)
+	if !ok {
+		return false, false
+	}
+	switch val := v.(type) {
+	case bool:
+		return val, true
+	case string:
+		b, err := strconv.ParseBool(strings.TrimSpace(val))
+		if err == nil {
+			return b, true
+		}
+	}
+	return false, false
+}
+
+func anyFloatCaseInsensitive(m map[string]any, keys ...string) (float64, bool) {
+	v, ok := anyValueCaseInsensitive(m, keys...)
+	if !ok {
+		return 0, false
+	}
+	return anyFloat(v)
+}
+
+func anyFloat(v any) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case float32:
+		return float64(val), true
+	case int:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case int32:
+		return float64(val), true
+	case uint:
+		return float64(val), true
+	case uint64:
+		return float64(val), true
+	case uint32:
+		return float64(val), true
+	case json.Number:
+		f, err := val.Float64()
+		if err == nil {
+			return f, true
+		}
+	case string:
+		s := strings.TrimSpace(strings.TrimSuffix(val, "%"))
+		f, err := strconv.ParseFloat(s, 64)
+		if err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func anyNullStringCaseInsensitive(m map[string]any, keys ...string) string {
+	raw := anyMapCaseInsensitive(m, keys...)
+	if len(raw) == 0 {
+		return ""
+	}
+	valid, ok := anyBoolCaseInsensitive(raw, "valid")
+	if ok && !valid {
+		return ""
+	}
+	return anyStringCaseInsensitive(raw, "string", "value")
+}
+
+func anyNullTimeCaseInsensitive(m map[string]any, keys ...string) (time.Time, bool) {
+	raw := anyMapCaseInsensitive(m, keys...)
+	if len(raw) == 0 {
+		return time.Time{}, false
+	}
+	valid, ok := anyBoolCaseInsensitive(raw, "valid")
+	if ok && !valid {
+		return time.Time{}, false
+	}
+	timeRaw := anyStringCaseInsensitive(raw, "time", "value")
+	if timeRaw == "" {
+		return time.Time{}, false
+	}
+	return parseAnyTime(timeRaw)
+}
+
+func normalizeLookupKey(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
+}
+
+func parseAnyTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 type versionResponse struct {
 	Version string `json:"version"`
 }
@@ -1092,22 +2149,6 @@ type processResponse struct {
 	Models []processModel `json:"models"`
 }
 
-type cloudUserResponse struct {
-	ID                      string          `json:"id"`
-	Email                   string          `json:"email"`
-	Name                    string          `json:"name"`
-	Plan                    string          `json:"plan"`
-	SubscriptionPeriodStart cloudNullTime   `json:"subscriptionperiodstart"`
-	SubscriptionPeriodEnd   cloudNullTime   `json:"subscriptionperiodend"`
-	RawPeriodStart          json.RawMessage `json:"SubscriptionPeriodStart"`
-	RawPeriodEnd            json.RawMessage `json:"SubscriptionPeriodEnd"`
-}
-
-type cloudNullTime struct {
-	Time  string `json:"Time"`
-	Valid bool   `json:"Valid"`
-}
-
 type ginLogEvent struct {
 	Timestamp time.Time
 	Status    int
@@ -1119,10 +2160,24 @@ type ginLogEvent struct {
 type logMetrics struct {
 	dailyRequests map[string]float64
 
+	requests5h     int
+	requests1d     int
 	requestsToday  int
 	recentRequests int
 	requests7d     int
 
+	chatRequests5h        int
+	generateRequests5h    int
+	errors4xx5h           int
+	errors5xx5h           int
+	latencyTotal5h        time.Duration
+	latencyCount5h        int
+	chatRequests1d        int
+	generateRequests1d    int
+	errors4xx1d           int
+	errors5xx1d           int
+	latencyTotal1d        time.Duration
+	latencyCount1d        int
 	chatRequestsToday     int
 	generateRequestsToday int
 	errors4xxToday        int

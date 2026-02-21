@@ -12,7 +12,7 @@ func dashboardWidget() core.DashboardWidget {
 		"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm",
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
-		{Label: "Quota", Keys: []string{"chat_quota", "completions_quota", "premium_interactions_quota"}, MaxSegments: 4},
+		{Label: "Usage", Keys: []string{"chat_quota", "completions_quota", "premium_interactions_quota"}, MaxSegments: 4},
 		{Label: "Rate", Keys: []string{"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm"}, MaxSegments: 3},
 		{Label: "Activity", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "total_messages"}, MaxSegments: 4},
 		{Label: "Tokens", Keys: []string{"context_window", "cli_input_tokens", "7d_tokens"}, MaxSegments: 3},

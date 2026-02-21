@@ -13,7 +13,7 @@ func dashboardWidget() core.DashboardWidget {
 		"client_cli_total_tokens", "client_cli_input_tokens",
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
-		{Label: "Quota", Keys: []string{"quota", "quota_models_exhausted", "quota_models_low", "quota_models_tracked"}, MaxSegments: 4},
+		{Label: "Usage", Keys: []string{"quota", "quota_models_exhausted", "quota_models_low", "quota_models_tracked"}, MaxSegments: 4},
 		{Label: "Usage", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "total_conversations"}, MaxSegments: 4},
 		{Label: "Tokens", Keys: []string{"tokens_today", "7d_tokens", "today_input_tokens", "today_output_tokens"}, MaxSegments: 4},
 		{Label: "Activity", Keys: []string{"total_messages", "total_sessions", "total_turns", "total_tool_calls"}, MaxSegments: 4},
@@ -34,12 +34,12 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["total_tool_calls"] = "All-Time Tool Calls"
 	cfg.MetricLabelOverrides["tokens_today"] = "Today Tokens"
 	cfg.MetricLabelOverrides["7d_tokens"] = "7-Day Tokens"
-	cfg.MetricLabelOverrides["quota"] = "Quota (Worst Model)"
-	cfg.MetricLabelOverrides["quota_pro"] = "Pro Quota"
-	cfg.MetricLabelOverrides["quota_flash"] = "Flash Quota"
-	cfg.MetricLabelOverrides["quota_models_tracked"] = "Tracked Quota Models"
-	cfg.MetricLabelOverrides["quota_models_low"] = "Low Quota Models"
-	cfg.MetricLabelOverrides["quota_models_exhausted"] = "Exhausted Quota Models"
+	cfg.MetricLabelOverrides["quota"] = "Usage (Worst Model)"
+	cfg.MetricLabelOverrides["quota_pro"] = "Pro Usage"
+	cfg.MetricLabelOverrides["quota_flash"] = "Flash Usage"
+	cfg.MetricLabelOverrides["quota_models_tracked"] = "Tracked Usage Models"
+	cfg.MetricLabelOverrides["quota_models_low"] = "Low Usage Models"
+	cfg.MetricLabelOverrides["quota_models_exhausted"] = "Exhausted Usage Models"
 	cfg.MetricLabelOverrides["today_input_tokens"] = "Today Input Tokens"
 	cfg.MetricLabelOverrides["today_output_tokens"] = "Today Output Tokens"
 	cfg.MetricLabelOverrides["today_cached_tokens"] = "Today Cached Tokens"

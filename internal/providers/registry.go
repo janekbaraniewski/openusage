@@ -2,6 +2,7 @@ package providers
 
 import (
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/alibaba_cloud"
 	"github.com/janekbaraniewski/openusage/internal/providers/anthropic"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/codex"
@@ -22,6 +23,7 @@ func AllProviders() []core.UsageProvider {
 	return []core.UsageProvider{
 		openai.New(),
 		anthropic.New(),
+		alibaba_cloud.New(),
 		openrouter.New(),
 		groq.New(),
 		mistral.New(),
