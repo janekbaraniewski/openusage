@@ -60,9 +60,10 @@ type Model struct {
 	width     int
 	height    int
 
-	detailOffset int // vertical scroll offset for the detail panel
-	detailTab    int // active tab index in the detail panel (0=All)
-	tileOffset   int // vertical scroll offset for selected dashboard tile row
+	detailOffset          int // vertical scroll offset for the detail panel
+	detailTab             int // active tab index in the detail panel (0=All)
+	tileOffset            int // vertical scroll offset for selected dashboard tile row
+	expandedModelMixTiles map[string]bool
 
 	warnThreshold float64
 	critThreshold float64
@@ -111,6 +112,7 @@ func NewModel(
 		experimentalAnalytics: experimentalAnalytics,
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
+		expandedModelMixTiles: make(map[string]bool),
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
@@ -556,6 +558,10 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.tileOffset < 0 {
 			m.tileOffset = 0
 		}
+	case "ctrl+o":
+		if id := m.selectedTileID(ids); id != "" {
+			m.expandedModelMixTiles[id] = !m.expandedModelMixTiles[id]
+		}
 	case "home":
 		m.tileOffset = 0
 	case "end":
@@ -576,6 +582,16 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshing = true
 	}
 	return m, nil
+}
+
+func (m Model) selectedTileID(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	if m.cursor < 0 || m.cursor >= len(ids) {
+		return ""
+	}
+	return ids[m.cursor]
 }
 
 func (m Model) tileScrollStep() int {
@@ -857,7 +873,7 @@ func (m Model) renderList(w, h int) string {
 }
 
 func (m Model) renderListItem(snap core.QuotaSnapshot, selected bool, w int) string {
-	di := computeDisplayInfo(snap)
+	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
 
 	icon := StatusIcon(snap.Status)
 	iconColor := StatusColor(snap.Status)
@@ -942,7 +958,7 @@ type providerDisplayInfo struct {
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
 }
 
-func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
+func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) providerDisplayInfo {
 	info := providerDisplayInfo{gaugePercent: -1}
 
 	switch snap.Status {
@@ -1009,8 +1025,8 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 		return info
 	}
 
-	// OpenRouter-specific display should run before generic credits handling.
-	if snap.ProviderID == "openrouter" {
+	// Provider-specific display style hooks run before generic credits handling.
+	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter {
 		return computeOpenRouterDisplayInfo(snap, info)
 	}
 
@@ -1288,7 +1304,7 @@ func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayI
 }
 
 func providerSummary(snap core.QuotaSnapshot) string {
-	return computeDisplayInfo(snap).summary
+	return computeDisplayInfo(snap, dashboardWidget(snap.ProviderID)).summary
 }
 
 func bestMetricPercent(snap core.QuotaSnapshot) float64 {

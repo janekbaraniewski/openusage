@@ -124,7 +124,7 @@ func renderTabBar(sb *strings.Builder, tabs []string, active int, w int) {
 }
 
 func renderDetailHeader(sb *strings.Builder, snap core.QuotaSnapshot, w int) {
-	di := computeDisplayInfo(snap)
+	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
 
 	innerW := w - 6 // card border + padding eats ~6 chars
 	if innerW < 20 {
