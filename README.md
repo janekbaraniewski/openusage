@@ -12,7 +12,7 @@ OpenUsage auto-detects local tools/API keys and shows live quota and cost snapsh
 
 Or side by side with your agent
 
-![OpenUsage side by side](./assets/sidebyside.png)
+![OpenUsage side by side](./assets/nexttoagent.png)
 
 ## Install
 
