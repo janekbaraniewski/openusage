@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"math/rand"
 	"os"
 	"time"
 
@@ -43,6 +45,7 @@ func main() {
 
 func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	now := time.Now()
+	rng := rand.New(rand.NewSource(now.UnixNano()))
 	snaps := make(map[string]core.QuotaSnapshot)
 
 	// ── claude-code ─────────────────────────────────────────────
@@ -227,6 +230,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	addMissingDemoSnapshots(snaps, now)
+	randomizeDemoSnapshots(snaps, now, rng)
 
 	return snaps
 }
@@ -303,7 +307,22 @@ func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.Quota
 		snap.Metrics["usage_daily"] = core.Metric{Used: ptr(8.92), Unit: "USD", Window: "1d"}
 		snap.Metrics["usage_weekly"] = core.Metric{Used: ptr(41.67), Unit: "USD", Window: "7d"}
 		snap.Metrics["burn_rate"] = core.Metric{Used: ptr(1.87), Unit: "USD/h", Window: "current"}
-		snap.Raw["activity_models"] = "9"
+		snap.Metrics["model_openai_gpt-4o-mini_cost_usd"] = core.Metric{Used: ptr(19.42), Unit: "USD", Window: "activity"}
+		snap.Metrics["model_openai_gpt-4o-mini_input_tokens"] = core.Metric{Used: ptr(1854000), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_openai_gpt-4o-mini_output_tokens"] = core.Metric{Used: ptr(229300), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_anthropic_claude-3.5-sonnet_cost_usd"] = core.Metric{Used: ptr(14.36), Unit: "USD", Window: "activity"}
+		snap.Metrics["model_anthropic_claude-3.5-sonnet_input_tokens"] = core.Metric{Used: ptr(1118000), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_anthropic_claude-3.5-sonnet_output_tokens"] = core.Metric{Used: ptr(143900), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_moonshotai_kimi-k2_cost_usd"] = core.Metric{Used: ptr(9.41), Unit: "USD", Window: "activity"}
+		snap.Metrics["model_moonshotai_kimi-k2_input_tokens"] = core.Metric{Used: ptr(920600), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_moonshotai_kimi-k2_output_tokens"] = core.Metric{Used: ptr(120700), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_google_gemini-2.5-pro_cost_usd"] = core.Metric{Used: ptr(6.84), Unit: "USD", Window: "activity"}
+		snap.Metrics["model_google_gemini-2.5-pro_input_tokens"] = core.Metric{Used: ptr(684200), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_google_gemini-2.5-pro_output_tokens"] = core.Metric{Used: ptr(78200), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_meta-llama_llama-3.1-70b_cost_usd"] = core.Metric{Used: ptr(3.51), Unit: "USD", Window: "activity"}
+		snap.Metrics["model_meta-llama_llama-3.1-70b_input_tokens"] = core.Metric{Used: ptr(351000), Unit: "tokens", Window: "activity"}
+		snap.Metrics["model_meta-llama_llama-3.1-70b_output_tokens"] = core.Metric{Used: ptr(41500), Unit: "tokens", Window: "activity"}
+		snap.Raw["activity_models"] = "5"
 		snap.Raw["is_management_key"] = "false"
 		snap.Message = "$193.74 credits remaining"
 	case "groq":
@@ -358,4 +377,182 @@ func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.Quota
 	}
 
 	return snap
+}
+
+func randomizeDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time, rng *rand.Rand) {
+	for accountID, snap := range snaps {
+		for key, metric := range snap.Metrics {
+			snap.Metrics[key] = randomizeDemoMetric(metric, rng)
+		}
+
+		for key, resetAt := range snap.Resets {
+			resetIn := resetAt.Sub(now)
+			if resetIn <= 0 {
+				continue
+			}
+			snap.Resets[key] = now.Add(jitterDuration(resetIn, 0.25, rng))
+		}
+
+		snap.Message = demoMessageForSnapshot(snap)
+		snaps[accountID] = snap
+	}
+}
+
+func randomizeDemoMetric(metric core.Metric, rng *rand.Rand) core.Metric {
+	hasLimit := metric.Limit != nil && *metric.Limit > 0
+	hasRemaining := metric.Remaining != nil
+	hasUsed := metric.Used != nil
+
+	if hasLimit && (hasRemaining || hasUsed) {
+		limit := *metric.Limit
+		used := limit * 0.5
+		switch {
+		case hasUsed:
+			used = *metric.Used
+		case hasRemaining:
+			used = limit - *metric.Remaining
+		}
+		used = randomizeValue(used, 0.18, rng)
+		if used < 0 {
+			used = 0
+		}
+		if used > limit {
+			used = limit
+		}
+
+		if hasUsed {
+			updatedUsed := roundLike(*metric.Used, used)
+			metric.Used = ptr(updatedUsed)
+		}
+		if hasRemaining {
+			remaining := limit - used
+			if remaining < 0 {
+				remaining = 0
+			}
+			updatedRemaining := roundLike(*metric.Remaining, remaining)
+			metric.Remaining = ptr(updatedRemaining)
+		}
+		return metric
+	}
+
+	if hasUsed {
+		used := randomizeValue(*metric.Used, 0.2, rng)
+		if used < 0 {
+			used = 0
+		}
+		metric.Used = ptr(roundLike(*metric.Used, used))
+	}
+	if hasRemaining {
+		remaining := randomizeValue(*metric.Remaining, 0.2, rng)
+		if remaining < 0 {
+			remaining = 0
+		}
+		metric.Remaining = ptr(roundLike(*metric.Remaining, remaining))
+	}
+
+	return metric
+}
+
+func randomizeValue(value, maxDelta float64, rng *rand.Rand) float64 {
+	if value == 0 {
+		return 0
+	}
+	factor := 1 + ((rng.Float64()*2 - 1) * maxDelta)
+	return value * factor
+}
+
+func jitterDuration(base time.Duration, maxDelta float64, rng *rand.Rand) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	factor := 1 + ((rng.Float64()*2 - 1) * maxDelta)
+	jittered := time.Duration(float64(base) * factor)
+	if jittered < 5*time.Second {
+		return 5 * time.Second
+	}
+	return jittered
+}
+
+func roundLike(original, value float64) float64 {
+	if math.Abs(original-math.Round(original)) < 1e-9 {
+		return math.Round(value)
+	}
+	return math.Round(value*100) / 100
+}
+
+func demoMessageForSnapshot(snap core.QuotaSnapshot) string {
+	switch snap.ProviderID {
+	case "openai":
+		if remaining, limit, ok := metricRemainingAndLimit(snap.Metrics, "rpm"); ok {
+			return fmt.Sprintf("OpenAI healthy: %.0f/%.0f RPM remaining", remaining, limit)
+		}
+	case "anthropic":
+		if remaining, limit, ok := metricRemainingAndLimit(snap.Metrics, "rpm"); ok {
+			return fmt.Sprintf("Anthropic: %.0f/%.0f RPM remaining", remaining, limit)
+		}
+	case "openrouter":
+		if remaining, ok := metricRemaining(snap.Metrics, "credit_balance"); ok {
+			return fmt.Sprintf("$%.2f credits remaining", remaining)
+		}
+	case "groq":
+		rpmRemaining, rpmLimit, rpmOK := metricRemainingAndLimit(snap.Metrics, "rpm")
+		rpdRemaining, rpdLimit, rpdOK := metricRemainingAndLimit(snap.Metrics, "rpd")
+		if rpmOK && rpdOK {
+			return fmt.Sprintf("Remaining: %.0f/%.0f RPM, %.0f/%.0f RPD", rpmRemaining, rpmLimit, rpdRemaining, rpdLimit)
+		}
+	case "mistral":
+		if spend, ok := metricUsed(snap.Metrics, "monthly_spend"); ok {
+			return fmt.Sprintf("Mistral monthly spend: %.2f EUR", spend)
+		}
+	case "deepseek":
+		if remaining, ok := metricRemaining(snap.Metrics, "total_balance"); ok {
+			return fmt.Sprintf("Balance: %.2f CNY", remaining)
+		}
+	case "xai":
+		if remaining, ok := metricRemaining(snap.Metrics, "credits"); ok {
+			return fmt.Sprintf("$%.2f remaining", remaining)
+		}
+	case "cursor":
+		spend, spendOK := metricUsed(snap.Metrics, "plan_spend")
+		remaining, remainingOK := metricRemaining(snap.Metrics, "spend_limit")
+		limit, limitOK := metricLimit(snap.Metrics, "spend_limit")
+		if spendOK && remainingOK && limitOK {
+			return fmt.Sprintf("Team — $%.2f / $%.0f team spend ($%.2f remaining)", spend, limit, remaining)
+		}
+	}
+
+	return snap.Message
+}
+
+func metricUsed(metrics map[string]core.Metric, key string) (float64, bool) {
+	metric, ok := metrics[key]
+	if !ok || metric.Used == nil {
+		return 0, false
+	}
+	return *metric.Used, true
+}
+
+func metricLimit(metrics map[string]core.Metric, key string) (float64, bool) {
+	metric, ok := metrics[key]
+	if !ok || metric.Limit == nil {
+		return 0, false
+	}
+	return *metric.Limit, true
+}
+
+func metricRemaining(metrics map[string]core.Metric, key string) (float64, bool) {
+	metric, ok := metrics[key]
+	if !ok || metric.Remaining == nil {
+		return 0, false
+	}
+	return *metric.Remaining, true
+}
+
+func metricRemainingAndLimit(metrics map[string]core.Metric, key string) (float64, float64, bool) {
+	remaining, remainingOK := metricRemaining(metrics, key)
+	limit, limitOK := metricLimit(metrics, key)
+	if !remainingOK || !limitOK {
+		return 0, 0, false
+	}
+	return remaining, limit, true
 }
