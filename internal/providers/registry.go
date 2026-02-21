@@ -12,6 +12,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/groq"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
+	"github.com/janekbaraniewski/openusage/internal/providers/ollama"
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
@@ -28,6 +29,7 @@ func AllProviders() []core.UsageProvider {
 		xai.New(),
 		gemini_api.New(),
 		gemini_cli.New(),
+		ollama.New(),
 		copilot.New(),
 		cursor.New(),
 		claude_code.New(),

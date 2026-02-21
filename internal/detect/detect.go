@@ -32,6 +32,7 @@ func AutoDetect() Result {
 	detectCursor(&result)
 	detectClaudeCode(&result)
 	detectCodex(&result)
+	detectOllama(&result)
 	detectAider(&result)
 	detectGHCopilot(&result)
 	detectGeminiCLI(&result)
@@ -234,6 +235,8 @@ var envKeyMapping = []struct {
 	{"OPENCODE_API_KEY", "zen", "zen"},
 	{"GEMINI_API_KEY", "gemini_api", "gemini-api"},
 	{"GOOGLE_API_KEY", "gemini_api", "gemini-google"},
+	{"OLLAMA_API_KEY", "ollama", "ollama-cloud"},
+	{"ALIBABA_CLOUD_API_KEY", "alibaba_cloud", "alibaba_cloud"},
 }
 
 func detectEnvKeys(result *Result) {

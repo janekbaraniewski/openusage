@@ -102,7 +102,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r":
-		m.refreshing = true
+		m = m.requestRefresh()
 		return m, nil
 	}
 

@@ -150,8 +150,8 @@ func TestFetch_UsageAPI(t *testing.T) {
 		case "/v1internal:loadCodeAssist":
 			loadCalled = true
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"cloudaicompanionProject":"test-project-123","currentTier":{"id":"FREE"}}`)
-		case "/v1internal:retrieveUserUsage":
+			fmt.Fprint(w, `{"cloudaicompanionProject":"test-project-123","currentTier":{"id":"free-tier","name":"Free Tier"}}`)
+		case "/v1internal:retrieveUserQuota":
 			quotaCalled = true
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"buckets":[
@@ -200,15 +200,18 @@ func TestFetch_UsageAPI(t *testing.T) {
 		t.Error("loadCodeAssist endpoint was not called")
 	}
 
-	quota, err := retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, server.URL)
+	quota, method, err := retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, server.URL)
 	if err != nil {
-		t.Fatalf("retrieveUserUsage() error: %v", err)
+		t.Fatalf("retrieveUserQuota() error: %v", err)
+	}
+	if method != "retrieveUserQuota" {
+		t.Fatalf("method = %q, want retrieveUserQuota", method)
 	}
 	if len(quota.Buckets) != 2 {
 		t.Fatalf("got %d buckets, want 2", len(quota.Buckets))
 	}
 	if !quotaCalled {
-		t.Error("retrieveUserUsage endpoint was not called")
+		t.Error("retrieveUserQuota endpoint was not called")
 	}
 
 	flash := quota.Buckets[0]
@@ -225,6 +228,32 @@ func TestFetch_UsageAPI(t *testing.T) {
 	}
 	if pro.RemainingFraction == nil || *pro.RemainingFraction != 0.10 {
 		t.Errorf("bucket[1].RemainingFraction = %v, want 0.10", pro.RemainingFraction)
+	}
+}
+
+func TestFetch_UsageAPI_FallbackLegacyMethod(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1internal:retrieveUserQuota":
+			http.NotFound(w, r)
+		case "/v1internal:retrieveUserUsage":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"buckets":[{"modelId":"gemini-3-pro-preview","remainingFraction":0.02,"resetTime":"2099-01-01T00:00:00Z","tokenType":"REQUESTS"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	quota, method, err := retrieveUserQuotaWithEndpoint(context.Background(), "test-token", "test-project", server.URL)
+	if err != nil {
+		t.Fatalf("retrieveUserQuotaWithEndpoint() error: %v", err)
+	}
+	if method != "retrieveUserUsage" {
+		t.Fatalf("method = %q, want retrieveUserUsage", method)
+	}
+	if len(quota.Buckets) != 1 {
+		t.Fatalf("buckets = %d, want 1", len(quota.Buckets))
 	}
 }
 
@@ -344,13 +373,25 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["7d_tokens"]; !ok || m.Used == nil || *m.Used != 220 {
 		t.Fatalf("7d_tokens = %v, want 220", m.Used)
 	}
+	if m, ok := snap.Metrics["today_input_tokens"]; !ok || m.Used == nil || *m.Used != 190 {
+		t.Fatalf("today_input_tokens = %v, want 190", m.Used)
+	}
+	if m, ok := snap.Metrics["today_output_tokens"]; !ok || m.Used == nil || *m.Used != 25 {
+		t.Fatalf("today_output_tokens = %v, want 25", m.Used)
+	}
+	if m, ok := snap.Metrics["total_cached_tokens"]; !ok || m.Used == nil || *m.Used != 20 {
+		t.Fatalf("total_cached_tokens = %v, want 20", m.Used)
+	}
+	if m, ok := snap.Metrics["model_gemini_3_flash_preview_requests"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("model_gemini_3_flash_preview_requests = %v, want 2", m.Used)
+	}
 	if m, ok := snap.Metrics["total_conversations"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("total_conversations = %v, want 1", m.Used)
 	}
 	if !strings.Contains(snap.Raw["model_usage"], "gemini-3-flash-preview") {
 		t.Fatalf("model_usage = %q, expected model name", snap.Raw["model_usage"])
 	}
-	
+
 	if m, ok := snap.Metrics["context_window"]; !ok || m.Used == nil || *m.Used != 220 {
 		t.Fatalf("context_window used = %v, want 220", m.Used)
 	}
@@ -362,6 +403,86 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	clientSeries := snap.DailySeries["tokens_client_cli"]
 	if len(clientSeries) != 1 || clientSeries[0].Value != 220 {
 		t.Fatalf("tokens_client_cli series = %+v, want one point at 220", clientSeries)
+	}
+}
+
+func TestFetch_QuotaLimitMessageFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	writeJSON(t, filepath.Join(tmpDir, "oauth_creds.json"), oauthCreds{
+		AccessToken: "ya29.test",
+		ExpiryDate:  4102444800000,
+		// No refresh token to force local-only mode.
+	})
+	writeJSON(t, filepath.Join(tmpDir, "google_accounts.json"), googleAccounts{Active: "test@example.com"})
+
+	chatDir := filepath.Join(tmpDir, "tmp", "proj-hash", "chats")
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+	writeJSON(t, filepath.Join(chatDir, "session-2026-02-01T10-00-quota.json"), map[string]any{
+		"sessionId":   "session-1",
+		"startTime":   "2026-02-01T10:00:00Z",
+		"lastUpdated": "2026-02-01T10:05:00Z",
+		"messages": []map[string]any{
+			{"type": "gemini", "timestamp": "2026-02-01T10:01:00Z", "content": "Usage limit reached for all Pro models.\n/stats for usage details"},
+		},
+	})
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:        "test-gemini-cli",
+		Provider:  "gemini_cli",
+		ExtraData: map[string]string{"config_dir": tmpDir},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusLimited {
+		t.Fatalf("status = %v, want limited", snap.Status)
+	}
+	q, ok := snap.Metrics["quota"]
+	if !ok || q.Used == nil || *q.Used != 100 {
+		t.Fatalf("quota metric = %+v, want used=100", q)
+	}
+}
+
+func TestApplyQuotaBuckets(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+		Raw:     make(map[string]string),
+	}
+
+	result := applyQuotaBuckets(&snap, []bucketInfo{
+		{ModelID: "gemini-3-pro-preview", TokenType: "REQUESTS", RemainingFraction: float64Ptr(0.02), ResetTime: "2099-01-01T00:00:00Z"},
+		{ModelID: "gemini-3-pro-preview_vertex", TokenType: "REQUESTS", RemainingFraction: float64Ptr(0.04), ResetTime: "2099-01-01T00:00:00Z"},
+		{ModelID: "gemini-3-flash-preview", TokenType: "REQUESTS", RemainingFraction: float64Ptr(0.95), ResetTime: "2099-01-01T00:00:00Z"},
+	})
+
+	if result.modelCount != 2 {
+		t.Fatalf("modelCount = %d, want 2", result.modelCount)
+	}
+	if result.worstFraction != 0.02 {
+		t.Fatalf("worstFraction = %.2f, want 0.02", result.worstFraction)
+	}
+
+	quota, ok := snap.Metrics["quota"]
+	if !ok || quota.Used == nil {
+		t.Fatalf("missing quota metric: %+v", quota)
+	}
+	if *quota.Used != 98 {
+		t.Fatalf("quota used = %.1f, want 98", *quota.Used)
+	}
+
+	if _, ok := snap.Metrics["quota_pro"]; !ok {
+		t.Fatal("missing quota_pro metric")
+	}
+	if _, ok := snap.Metrics["quota_flash"]; !ok {
+		t.Fatal("missing quota_flash metric")
+	}
+	if _, ok := snap.Metrics["quota_model_gemini_3_pro_preview_requests"]; !ok {
+		t.Fatal("missing per-model quota metric")
 	}
 }
 
@@ -401,4 +522,8 @@ func writeJSON(t *testing.T, path string, v interface{}) {
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
 }

@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -348,5 +350,117 @@ func TestBuildModelColorMap_AssignsDistinctColorsForVisibleModels(t *testing.T) 
 				t.Fatalf("adjacent palette picks too close: idx[%d]=%d idx[%d]=%d", i-1, prevIdx, i, currIdx)
 			}
 		}
+	}
+}
+
+func quotaMetricForTest(usedPercent float64) core.Metric {
+	limit := 100.0
+	used := usedPercent
+	remaining := 100.0 - usedPercent
+	return core.Metric{
+		Limit:     &limit,
+		Used:      &used,
+		Remaining: &remaining,
+		Unit:      "%",
+		Window:    "daily",
+	}
+}
+
+func TestGeminiPrimaryQuotaMetricKey_UsesHighestModelUsage(t *testing.T) {
+	snap := core.UsageSnapshot{
+		ProviderID: "gemini_cli",
+		Metrics: map[string]core.Metric{
+			"quota_model_gemini_3_pro_preview_requests":  quotaMetricForTest(98),
+			"quota_model_gemini_2_5_flash_requests":      quotaMetricForTest(20),
+			"quota_model_gemini_2_5_flash_lite_requests": quotaMetricForTest(75),
+			"quota":       quotaMetricForTest(98),
+			"quota_flash": quotaMetricForTest(20),
+			"quota_pro":   quotaMetricForTest(98),
+			"quota_model_gemini_3_pro_preview_vertex_tok":  {Used: float64Ptr(0), Unit: "tokens"},
+			"quota_model_gemini_3_pro_preview_vertex_none": {},
+		},
+	}
+
+	got := geminiPrimaryQuotaMetricKey(snap)
+	want := "quota_model_gemini_3_pro_preview_requests"
+	if got != want {
+		t.Fatalf("geminiPrimaryQuotaMetricKey = %q, want %q", got, want)
+	}
+}
+
+func TestFilterGeminiPrimaryQuotaReset_OnlyKeepsPrimaryQuota(t *testing.T) {
+	now := time.Now()
+	entries := []resetEntry{
+		{key: "quota_model_gemini_2_5_flash_requests_reset", label: "flash", at: now.Add(2 * time.Hour), dur: 2 * time.Hour},
+		{key: "quota_model_gemini_3_pro_preview_requests_reset", label: "pro", at: now.Add(8 * time.Hour), dur: 8 * time.Hour},
+		{key: "quota_flash_reset", label: "flash agg", at: now.Add(2 * time.Hour), dur: 2 * time.Hour},
+		{key: "usage_seven_day", label: "Usage 7d", at: now.Add(24 * time.Hour), dur: 24 * time.Hour},
+	}
+	snap := core.UsageSnapshot{
+		ProviderID: "gemini_cli",
+		Metrics: map[string]core.Metric{
+			"quota_model_gemini_3_pro_preview_requests": quotaMetricForTest(98),
+			"quota_model_gemini_2_5_flash_requests":     quotaMetricForTest(20),
+		},
+	}
+
+	filtered := filterGeminiPrimaryQuotaReset(entries, snap)
+	if len(filtered) != 2 {
+		t.Fatalf("filtered len = %d, want 2", len(filtered))
+	}
+
+	hasPrimary := false
+	hasNonQuota := false
+	for _, entry := range filtered {
+		if entry.key == "quota_model_gemini_3_pro_preview_requests_reset" {
+			hasPrimary = true
+		}
+		if entry.key == "usage_seven_day" {
+			hasNonQuota = true
+		}
+		if isGeminiQuotaResetKey(entry.key) && entry.key != "quota_model_gemini_3_pro_preview_requests_reset" {
+			t.Fatalf("unexpected secondary quota reset kept: %q", entry.key)
+		}
+	}
+	if !hasPrimary {
+		t.Fatal("expected primary quota reset to be kept")
+	}
+	if !hasNonQuota {
+		t.Fatal("expected non-quota reset to be preserved")
+	}
+}
+
+func TestBuildGeminiOtherQuotaLines_ExcludesPrimaryAndUsesRemaining(t *testing.T) {
+	now := time.Now()
+	snap := core.UsageSnapshot{
+		ProviderID: "gemini_cli",
+		Metrics: map[string]core.Metric{
+			"quota_model_gemini_3_pro_preview_requests":  quotaMetricForTest(98),
+			"quota_model_gemini_2_5_flash_lite_requests": quotaMetricForTest(75),
+			"quota_model_gemini_2_0_flash_requests":      quotaMetricForTest(40),
+		},
+		Resets: map[string]time.Time{
+			"quota_model_gemini_3_pro_preview_requests_reset":  now.Add(8 * time.Hour),
+			"quota_model_gemini_2_5_flash_lite_requests_reset": now.Add(2 * time.Hour),
+			"quota_model_gemini_2_0_flash_requests_reset":      now.Add(6 * time.Hour),
+		},
+	}
+
+	lines, usedKeys := buildGeminiOtherQuotaLines(snap, 120)
+	if len(lines) != 3 {
+		t.Fatalf("lines len = %d, want 3 (heading + 2 rows)", len(lines))
+	}
+	if !strings.Contains(lines[0], "Other Quotas") {
+		t.Fatalf("heading line missing 'Other Quotas': %q", lines[0])
+	}
+
+	if usedKeys["quota_model_gemini_3_pro_preview_requests"] {
+		t.Fatal("primary quota metric should not be included in other quotas")
+	}
+	if !usedKeys["quota_model_gemini_2_5_flash_lite_requests"] {
+		t.Fatal("expected flash lite quota metric in other quotas")
+	}
+	if !usedKeys["quota_model_gemini_2_0_flash_requests"] {
+		t.Fatal("expected flash quota metric in other quotas")
 	}
 }

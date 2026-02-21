@@ -373,6 +373,10 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var otherLines []string
 	otherLines = appendOtherGroup(otherLines, compactMetricLines)
 
+	geminiQuotaLines, geminiQuotaKeys := buildGeminiOtherQuotaLines(snap, innerW)
+	otherLines = appendOtherGroup(otherLines, geminiQuotaLines)
+	compactMetricKeys = addUsedKeys(compactMetricKeys, geminiQuotaKeys)
+
 	metricLines := m.buildTileMetricLines(snap, widget, innerW, compactMetricKeys)
 	otherLines = appendOtherGroup(otherLines, metricLines)
 
@@ -1226,6 +1230,9 @@ func buildTileResetPills(snap core.UsageSnapshot, widget core.DashboardWidget, a
 	if len(entries) == 0 {
 		return nil
 	}
+	if snap.ProviderID == "gemini_cli" {
+		entries = filterGeminiPrimaryQuotaReset(entries, snap)
+	}
 
 	if widget.ResetStyle == core.DashboardResetStyleCompactModelResets {
 		threshold := widget.ResetCompactThreshold
@@ -1254,6 +1261,208 @@ func buildTileResetPills(snap core.UsageSnapshot, widget core.DashboardWidget, a
 
 func buildTileResetLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
 	return wrapTilePills(buildTileResetPills(snap, widget, animFrame), innerW)
+}
+
+type geminiQuotaEntry struct {
+	key         string
+	label       string
+	usedPercent float64
+	resetKey    string
+	resetAt     time.Time
+	hasReset    bool
+}
+
+func collectGeminiQuotaEntries(snap core.UsageSnapshot) []geminiQuotaEntry {
+	if snap.ProviderID != "gemini_cli" {
+		return nil
+	}
+
+	entries := make([]geminiQuotaEntry, 0)
+	for key, metric := range snap.Metrics {
+		if !strings.HasPrefix(key, "quota_model_") {
+			continue
+		}
+		usedPct := metricUsedPercent(key, metric)
+		if usedPct < 0 {
+			continue
+		}
+
+		entry := geminiQuotaEntry{
+			key:         key,
+			label:       geminiQuotaLabelFromMetricKey(key),
+			usedPercent: usedPct,
+			resetKey:    key + "_reset",
+		}
+		if resetAt, ok := snap.Resets[entry.resetKey]; ok && !resetAt.IsZero() {
+			entry.hasReset = true
+			entry.resetAt = resetAt
+		}
+		entries = append(entries, entry)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].usedPercent != entries[j].usedPercent {
+			return entries[i].usedPercent > entries[j].usedPercent
+		}
+		return entries[i].label < entries[j].label
+	})
+	return entries
+}
+
+func geminiQuotaLabelFromMetricKey(metricKey string) string {
+	base := strings.TrimPrefix(metricKey, "quota_model_")
+	if base == "" {
+		return metricKey
+	}
+
+	modelPart := base
+	tokenType := ""
+	if idx := strings.LastIndex(base, "_"); idx > 0 {
+		modelPart = base[:idx]
+		tokenType = base[idx+1:]
+	}
+
+	modelLabel := prettifyModelName(strings.ReplaceAll(modelPart, "_", "-"))
+	tokenLabel := tokenType
+	switch tokenType {
+	case "requests":
+		tokenLabel = "req"
+	case "tokens":
+		tokenLabel = "tok"
+	}
+	if tokenLabel == "" {
+		return truncateToWidth(modelLabel, 28)
+	}
+	return truncateToWidth(modelLabel+" "+tokenLabel, 28)
+}
+
+func geminiPrimaryQuotaMetricKey(snap core.UsageSnapshot) string {
+	entries := collectGeminiQuotaEntries(snap)
+	if len(entries) > 0 {
+		return entries[0].key
+	}
+
+	bestKey := ""
+	bestUsed := -1.0
+	for _, key := range []string{"quota", "quota_pro", "quota_flash"} {
+		metric, ok := snap.Metrics[key]
+		if !ok {
+			continue
+		}
+		usedPct := metricUsedPercent(key, metric)
+		if usedPct > bestUsed {
+			bestUsed = usedPct
+			bestKey = key
+		}
+	}
+	return bestKey
+}
+
+func isGeminiQuotaResetKey(key string) bool {
+	switch key {
+	case "quota_reset", "quota_pro_reset", "quota_flash_reset":
+		return true
+	}
+	return strings.HasPrefix(key, "quota_model_")
+}
+
+func filterGeminiPrimaryQuotaReset(entries []resetEntry, snap core.UsageSnapshot) []resetEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	primaryMetricKey := geminiPrimaryQuotaMetricKey(snap)
+	primaryResetKey := ""
+	if primaryMetricKey != "" {
+		primaryResetKey = primaryMetricKey + "_reset"
+	}
+
+	var quotaEntries []resetEntry
+	filtered := make([]resetEntry, 0, len(entries))
+	for _, entry := range entries {
+		if isGeminiQuotaResetKey(entry.key) {
+			quotaEntries = append(quotaEntries, entry)
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	if len(quotaEntries) == 0 {
+		return entries
+	}
+
+	chosen := quotaEntries[0]
+	found := false
+	if primaryResetKey != "" {
+		for _, entry := range quotaEntries {
+			if entry.key == primaryResetKey {
+				chosen = entry
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		for _, fallbackKey := range []string{"quota_reset", "quota_pro_reset", "quota_flash_reset"} {
+			for _, entry := range quotaEntries {
+				if entry.key == fallbackKey {
+					chosen = entry
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+
+	filtered = append(filtered, chosen)
+	sort.Slice(filtered, func(i, j int) bool {
+		if !filtered[i].at.Equal(filtered[j].at) {
+			return filtered[i].at.Before(filtered[j].at)
+		}
+		return filtered[i].label < filtered[j].label
+	})
+	return filtered
+}
+
+func buildGeminiOtherQuotaLines(snap core.UsageSnapshot, innerW int) ([]string, map[string]bool) {
+	entries := collectGeminiQuotaEntries(snap)
+	if len(entries) <= 1 {
+		return nil, nil
+	}
+
+	primaryKey := geminiPrimaryQuotaMetricKey(snap)
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Other Quotas"),
+	}
+	usedKeys := make(map[string]bool, len(entries))
+
+	maxLabel := innerW / 2
+	if maxLabel < 14 {
+		maxLabel = 14
+	}
+	for _, entry := range entries {
+		if entry.key == primaryKey {
+			continue
+		}
+
+		value := fmt.Sprintf("%.1f%% used", entry.usedPercent)
+		if entry.hasReset {
+			remaining := time.Until(entry.resetAt)
+			if remaining > 0 {
+				value += " · " + formatHeaderDuration(remaining)
+			}
+		}
+
+		lines = append(lines, renderDotLeaderRow(truncateToWidth(entry.label, maxLabel), value, innerW))
+		usedKeys[entry.key] = true
+	}
+
+	if len(lines) <= 1 {
+		return nil, nil
+	}
+	return lines, usedKeys
 }
 
 func renderDotLeaderRow(label, value string, totalW int) string {

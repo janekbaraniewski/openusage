@@ -131,6 +131,9 @@ func main() {
 		allAccounts,
 	)
 	model.SetOnAddAccount(engine.AddAccount)
+	model.SetOnRefresh(func() {
+		go engine.RefreshAll(context.Background())
+	})
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {

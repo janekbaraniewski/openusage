@@ -97,6 +97,7 @@ type Model struct {
 	// onAddAccount is called when a new provider account is added from the API Keys tab.
 	// Set from main.go to wire into the engine.
 	onAddAccount func(core.AccountConfig)
+	onRefresh    func()
 }
 
 func NewModel(
@@ -122,6 +123,11 @@ func NewModel(
 // SetOnAddAccount sets a callback invoked when a new provider account is added via the API Keys tab.
 func (m *Model) SetOnAddAccount(fn func(core.AccountConfig)) {
 	m.onAddAccount = fn
+}
+
+// SetOnRefresh sets a callback invoked when the user requests a manual refresh.
+func (m *Model) SetOnRefresh(fn func()) {
+	m.onRefresh = fn
 }
 
 type themePersistedMsg struct {
@@ -432,7 +438,7 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.analyticsFilter = ""
 		}
 	case "r":
-		m.refreshing = true
+		m = m.requestRefresh()
 	}
 	return m, nil
 }
@@ -510,7 +516,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		m.filter = ""
 	case "r":
-		m.refreshing = true
+		m = m.requestRefresh()
 	}
 	return m, nil
 }
@@ -624,9 +630,17 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "r":
-		m.refreshing = true
+		m = m.requestRefresh()
 	}
 	return m, nil
+}
+
+func (m Model) requestRefresh() Model {
+	m.refreshing = true
+	if m.onRefresh != nil {
+		m.onRefresh()
+	}
+	return m
 }
 
 func (m Model) selectedTileID(ids []string) string {
@@ -1097,6 +1111,27 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 		return info
 	}
 
+	quotaKey := ""
+	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
+		if _, ok := snap.Metrics[key]; ok {
+			quotaKey = key
+			break
+		}
+	}
+	if quotaKey != "" {
+		m := snap.Metrics[quotaKey]
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Quota"
+		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
+			info.gaugePercent = pct
+			info.summary = fmt.Sprintf("%.0f%% quota used", pct)
+		}
+		if m.Remaining != nil {
+			info.detail = fmt.Sprintf("%.0f%% quota left", *m.Remaining)
+		}
+		return info
+	}
+
 	if m, ok := snap.Metrics["context_window"]; ok && m.Used != nil && m.Limit != nil {
 		info.tagEmoji = "🧠"
 		info.tagLabel = "Context"
@@ -1105,16 +1140,6 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 			info.summary = fmt.Sprintf("%.0f%% context used", pct)
 		}
 		info.detail = fmt.Sprintf("%s / %s tokens", shortCompact(*m.Used), shortCompact(*m.Limit))
-		return info
-	}
-
-	if m, ok := snap.Metrics["quota"]; ok && m.Used != nil && m.Limit != nil {
-		info.tagEmoji = "⚡"
-		info.tagLabel = "Quota"
-		if pct := m.Percent(); pct >= 0 {
-			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.0f%% quota used", pct)
-		}
 		return info
 	}
 

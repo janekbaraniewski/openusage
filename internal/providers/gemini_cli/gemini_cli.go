@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ const (
 
 	maxBreakdownMetrics = 8
 	maxBreakdownRaw     = 6
+
+	quotaNearLimitFraction = 0.15
 )
 
 type Provider struct {
@@ -110,15 +113,38 @@ type clientMetadata struct {
 }
 
 type loadCodeAssistResponse struct {
-	CurrentTier             *json.RawMessage `json:"currentTier,omitempty"`
-	CloudAICompanionProject string           `json:"cloudaicompanionProject,omitempty"`
+	CurrentTier             *geminiTierInfo            `json:"currentTier,omitempty"`
+	AllowedTiers            []geminiTierInfo           `json:"allowedTiers,omitempty"`
+	IneligibleTiers         []geminiIneligibleTier     `json:"ineligibleTiers,omitempty"`
+	CloudAICompanionProject string                     `json:"cloudaicompanionProject,omitempty"`
+	GCPManaged              bool                       `json:"gcpManaged,omitempty"`
+	UpgradeSubscriptionURI  string                     `json:"upgradeSubscriptionUri,omitempty"`
+	UpgradeSubscriptionText string                     `json:"upgradeSubscriptionText,omitempty"`
+	UpgradeSubscriptionType string                     `json:"upgradeSubscriptionType,omitempty"`
+	Diagnostics             map[string]json.RawMessage `json:"-"`
 }
 
-type retrieveUserUsageRequest struct {
+type geminiTierInfo struct {
+	ID                                 string `json:"id,omitempty"`
+	Name                               string `json:"name,omitempty"`
+	Description                        string `json:"description,omitempty"`
+	UserDefinedCloudAICompanionProject bool   `json:"userDefinedCloudaicompanionProject,omitempty"`
+	IsDefault                          bool   `json:"isDefault,omitempty"`
+	UsesGCPTOS                         bool   `json:"usesGcpTos,omitempty"`
+}
+
+type geminiIneligibleTier struct {
+	ReasonCode    string `json:"reasonCode,omitempty"`
+	ReasonMessage string `json:"reasonMessage,omitempty"`
+	TierID        string `json:"tierId,omitempty"`
+	TierName      string `json:"tierName,omitempty"`
+}
+
+type retrieveUserQuotaRequest struct {
 	Project string `json:"project"`
 }
 
-type retrieveUserUsageResponse struct {
+type retrieveUserQuotaResponse struct {
 	Buckets []bucketInfo `json:"buckets,omitempty"`
 }
 
@@ -142,12 +168,14 @@ type geminiChatMessage struct {
 	Type      string              `json:"type"`
 	Timestamp string              `json:"timestamp"`
 	Model     string              `json:"model"`
+	Content   json.RawMessage     `json:"content,omitempty"`
 	Tokens    *geminiMessageToken `json:"tokens,omitempty"`
 	ToolCalls []geminiToolCall    `json:"toolCalls,omitempty"`
 }
 
 type geminiToolCall struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Status string `json:"status,omitempty"`
 }
 
 type geminiMessageToken struct {
@@ -370,10 +398,14 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 		projectID = acct.ExtraData["project_id"]
 	}
 
-	if projectID == "" {
-		projectID, err = loadCodeAssist(ctx, accessToken, "")
-		if err != nil {
-			return fmt.Errorf("loadCodeAssist: %w", err)
+	loadResp, err := loadCodeAssistDetails(ctx, accessToken, projectID)
+	if err != nil {
+		return fmt.Errorf("loadCodeAssist: %w", err)
+	}
+	if loadResp != nil {
+		applyLoadCodeAssistMetadata(snap, loadResp)
+		if projectID == "" {
+			projectID = loadResp.CloudAICompanionProject
 		}
 	}
 
@@ -382,82 +414,23 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	}
 	snap.Raw["project_id"] = projectID
 
-	quota, err := retrieveUserUsage(ctx, accessToken, projectID)
+	quota, method, err := retrieveUserQuota(ctx, accessToken, projectID)
 	if err != nil {
-		return fmt.Errorf("retrieveUserUsage: %w", err)
+		return fmt.Errorf("retrieveUserQuota: %w", err)
 	}
 
 	if len(quota.Buckets) == 0 {
-		snap.Raw["quota_api"] = "ok (no buckets returned)"
+		snap.Raw["quota_api"] = fmt.Sprintf("ok (0 buckets, %s)", method)
+		snap.Raw["quota_api_method"] = method
 		return nil
 	}
 
-	snap.Raw["quota_api"] = fmt.Sprintf("ok (%d buckets)", len(quota.Buckets))
+	snap.Raw["quota_api"] = fmt.Sprintf("ok (%d buckets, %s)", len(quota.Buckets), method)
+	snap.Raw["quota_api_method"] = method
+	snap.Raw["quota_bucket_count"] = fmt.Sprintf("%d", len(quota.Buckets))
 
-	worstFraction := 1.0
-	var worstMetric *core.Metric
-
-	for _, bucket := range quota.Buckets {
-		if bucket.ModelID == "" || bucket.RemainingFraction == nil {
-			continue
-		}
-
-		fraction := *bucket.RemainingFraction
-		remaining := fraction * 100 // percentage
-		limit := float64(100)
-
-		modelKey := sanitizeMetricName(bucket.ModelID)
-		if modelKey == "" {
-			modelKey = "unknown_model"
-		}
-		tokenKey := sanitizeMetricName(bucket.TokenType)
-		if tokenKey == "" {
-			tokenKey = "quota"
-		}
-		metricKey := modelKey + "_" + tokenKey
-
-		window := "daily"
-		if bucket.ResetTime != "" {
-			if resetT, err := time.Parse(time.RFC3339, bucket.ResetTime); err == nil {
-				dur := time.Until(resetT)
-				if dur > 0 {
-					window = formatWindow(dur)
-				}
-			}
-		}
-
-		unit := "quota"
-		if bucket.TokenType != "" {
-			unit = strings.ToLower(strings.TrimSpace(bucket.TokenType))
-		}
-
-		metric := core.Metric{
-			Limit:     &limit,
-			Remaining: &remaining,
-			Unit:      unit,
-			Window:    window,
-		}
-		snap.Metrics[metricKey] = metric
-
-		if fraction < worstFraction {
-			worstFraction = fraction
-			worstMetric = &metric
-		}
-	}
-
-	if worstMetric != nil {
-		// Expose the most constrained quota as the primary "quota" metric
-		// so it can be reliably prioritized in the dashboard gauge.
-		snap.Metrics["quota"] = *worstMetric
-	}
-
-	if worstFraction <= 0 {
-		snap.Status = core.StatusLimited
-	} else if worstFraction < 0.15 {
-		snap.Status = core.StatusNearLimit
-	} else {
-		snap.Status = core.StatusOK
-	}
+	result := applyQuotaBuckets(snap, quota.Buckets)
+	applyQuotaStatus(snap, result.worstFraction)
 
 	return nil
 }
@@ -503,10 +476,26 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 }
 
 func loadCodeAssist(ctx context.Context, accessToken, existingProjectID string) (string, error) {
-	return loadCodeAssistWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
+	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
+	if err != nil {
+		return "", err
+	}
+	return resp.CloudAICompanionProject, nil
 }
 
 func loadCodeAssistWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string) (string, error) {
+	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, baseURL)
+	if err != nil {
+		return "", err
+	}
+	return resp.CloudAICompanionProject, nil
+}
+
+func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string) (*loadCodeAssistResponse, error) {
+	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
+}
+
+func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string) (*loadCodeAssistResponse, error) {
 	reqBody := loadCodeAssistRequest{
 		CloudAICompanionProject: existingProjectID,
 		Metadata: clientMetadata{
@@ -519,23 +508,53 @@ func loadCodeAssistWithEndpoint(ctx context.Context, accessToken, existingProjec
 
 	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "loadCodeAssist", reqBody, baseURL)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var resp loadCodeAssistResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return "", fmt.Errorf("parse loadCodeAssist response: %w", err)
+		return nil, fmt.Errorf("parse loadCodeAssist response: %w", err)
 	}
 
-	return resp.CloudAICompanionProject, nil
+	return &resp, nil
 }
 
-func retrieveUserUsage(ctx context.Context, accessToken, projectID string) (*retrieveUserUsageResponse, error) {
+func retrieveUserQuota(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, string, error) {
+	return retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
+}
+
+func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, string, error) {
+	reqBody := retrieveUserQuotaRequest{
+		Project: projectID,
+	}
+
+	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL)
+	if err != nil && shouldTryLegacyQuotaMethod(err) {
+		legacyResp, legacyErr := retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, baseURL)
+		if legacyErr != nil {
+			return nil, "", fmt.Errorf("retrieveUserQuota: %w; retrieveUserUsage: %w", err, legacyErr)
+		}
+		return legacyResp, "retrieveUserUsage", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
+	var resp retrieveUserQuotaResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, "", fmt.Errorf("parse retrieveUserQuota response: %w", err)
+	}
+
+	return &resp, "retrieveUserQuota", nil
+}
+
+// retrieveUserUsage remains as a compatibility fallback for older endpoints.
+func retrieveUserUsage(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, error) {
 	return retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
 }
 
-func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserUsageResponse, error) {
-	reqBody := retrieveUserUsageRequest{
+func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, error) {
+	reqBody := retrieveUserQuotaRequest{
 		Project: projectID,
 	}
 
@@ -544,7 +563,7 @@ func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, 
 		return nil, err
 	}
 
-	var resp retrieveUserUsageResponse
+	var resp retrieveUserQuotaResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return nil, fmt.Errorf("parse retrieveUserUsage response: %w", err)
 	}
@@ -615,6 +634,366 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+type quotaAggregationResult struct {
+	bucketCount   int
+	modelCount    int
+	worstFraction float64
+}
+
+type quotaAggregate struct {
+	modelID           string
+	tokenType         string
+	remainingFraction float64
+	resetAt           time.Time
+	hasReset          bool
+}
+
+func applyLoadCodeAssistMetadata(snap *core.UsageSnapshot, resp *loadCodeAssistResponse) {
+	if resp == nil {
+		return
+	}
+
+	snap.Raw["gcp_managed"] = fmt.Sprintf("%t", resp.GCPManaged)
+	if resp.UpgradeSubscriptionURI != "" {
+		snap.Raw["upgrade_uri"] = resp.UpgradeSubscriptionURI
+	}
+	if resp.UpgradeSubscriptionType != "" {
+		snap.Raw["upgrade_type"] = resp.UpgradeSubscriptionType
+	}
+
+	if resp.CurrentTier != nil {
+		if resp.CurrentTier.ID != "" {
+			snap.Raw["tier_id"] = resp.CurrentTier.ID
+		}
+		if resp.CurrentTier.Name != "" {
+			snap.Raw["tier_name"] = resp.CurrentTier.Name
+		}
+		if resp.CurrentTier.Description != "" {
+			snap.Raw["tier_description"] = truncate(strings.TrimSpace(resp.CurrentTier.Description), 200)
+		}
+		snap.Raw["tier_uses_gcp_tos"] = fmt.Sprintf("%t", resp.CurrentTier.UsesGCPTOS)
+		snap.Raw["tier_user_project"] = fmt.Sprintf("%t", resp.CurrentTier.UserDefinedCloudAICompanionProject)
+	}
+
+	allowedTiers := float64(len(resp.AllowedTiers))
+	ineligibleTiers := float64(len(resp.IneligibleTiers))
+	snap.Metrics["allowed_tiers"] = core.Metric{Used: &allowedTiers, Unit: "tiers", Window: "current"}
+	snap.Metrics["ineligible_tiers"] = core.Metric{Used: &ineligibleTiers, Unit: "tiers", Window: "current"}
+
+	if len(resp.AllowedTiers) > 0 {
+		names := make([]string, 0, len(resp.AllowedTiers))
+		for _, tier := range resp.AllowedTiers {
+			if tier.Name != "" {
+				names = append(names, tier.Name)
+			} else if tier.ID != "" {
+				names = append(names, tier.ID)
+			}
+		}
+		if len(names) > 0 {
+			snap.Raw["allowed_tier_names"] = strings.Join(names, ", ")
+		}
+	}
+
+	if len(resp.IneligibleTiers) > 0 {
+		reasons := make([]string, 0, len(resp.IneligibleTiers))
+		for _, tier := range resp.IneligibleTiers {
+			if tier.ReasonMessage != "" {
+				reasons = append(reasons, tier.ReasonMessage)
+			} else if tier.ReasonCode != "" {
+				reasons = append(reasons, tier.ReasonCode)
+			}
+		}
+		if len(reasons) > 0 {
+			snap.Raw["ineligible_reasons"] = strings.Join(reasons, " | ")
+		}
+	}
+}
+
+func shouldTryLegacyQuotaMethod(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "http 404") || strings.Contains(msg, "not found")
+}
+
+func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggregationResult {
+	result := quotaAggregationResult{bucketCount: len(buckets), worstFraction: 1.0}
+	if len(buckets) == 0 {
+		return result
+	}
+
+	aggregates := make(map[string]quotaAggregate)
+	for _, bucket := range buckets {
+		fraction, ok := bucketRemainingFraction(bucket)
+		if !ok {
+			continue
+		}
+		if fraction < 0 {
+			fraction = 0
+		}
+		if fraction > 1 {
+			fraction = 1
+		}
+
+		modelID := normalizeQuotaModelID(bucket.ModelID)
+		tokenType := strings.ToLower(strings.TrimSpace(bucket.TokenType))
+		if tokenType == "" {
+			tokenType = "requests"
+		}
+
+		var resetAt time.Time
+		hasReset := false
+		if bucket.ResetTime != "" {
+			if parsed, err := time.Parse(time.RFC3339, bucket.ResetTime); err == nil {
+				resetAt = parsed
+				hasReset = true
+			}
+		}
+
+		key := modelID + "|" + tokenType
+		current, exists := aggregates[key]
+		if !exists || fraction < current.remainingFraction {
+			aggregates[key] = quotaAggregate{
+				modelID:           modelID,
+				tokenType:         tokenType,
+				remainingFraction: fraction,
+				resetAt:           resetAt,
+				hasReset:          hasReset,
+			}
+			continue
+		}
+		if exists && fraction == current.remainingFraction && hasReset && (!current.hasReset || resetAt.Before(current.resetAt)) {
+			current.resetAt = resetAt
+			current.hasReset = true
+			aggregates[key] = current
+		}
+	}
+
+	if len(aggregates) == 0 {
+		return result
+	}
+
+	keys := make([]string, 0, len(aggregates))
+	for key := range aggregates {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	modelWorst := make(map[string]float64)
+	var summary []string
+
+	worstFraction := 1.0
+	var worstMetric core.Metric
+	worstFound := false
+	var worstReset time.Time
+	worstHasReset := false
+
+	proFraction := 1.0
+	var proMetric core.Metric
+	proFound := false
+	var proReset time.Time
+	proHasReset := false
+
+	flashFraction := 1.0
+	var flashMetric core.Metric
+	flashFound := false
+	var flashReset time.Time
+	flashHasReset := false
+
+	for _, key := range keys {
+		agg := aggregates[key]
+		window := "daily"
+		if agg.hasReset {
+			window = formatWindow(time.Until(agg.resetAt))
+		}
+		metric := quotaMetricFromFraction(agg.remainingFraction, window)
+
+		metricKey := "quota_model_" + sanitizeMetricName(agg.modelID) + "_" + sanitizeMetricName(agg.tokenType)
+		snap.Metrics[metricKey] = metric
+		if agg.hasReset {
+			snap.Resets[metricKey+"_reset"] = agg.resetAt
+		}
+
+		usedPct := 100 - agg.remainingFraction*100
+		summary = append(summary, fmt.Sprintf("%s %.1f%% used", agg.modelID, usedPct))
+
+		if prev, ok := modelWorst[agg.modelID]; !ok || agg.remainingFraction < prev {
+			modelWorst[agg.modelID] = agg.remainingFraction
+		}
+
+		if !worstFound || agg.remainingFraction < worstFraction {
+			worstFraction = agg.remainingFraction
+			worstMetric = metric
+			worstFound = true
+			worstReset = agg.resetAt
+			worstHasReset = agg.hasReset
+		}
+
+		modelLower := strings.ToLower(agg.modelID)
+		if strings.Contains(modelLower, "pro") && (!proFound || agg.remainingFraction < proFraction) {
+			proFraction = agg.remainingFraction
+			proMetric = metric
+			proFound = true
+			proReset = agg.resetAt
+			proHasReset = agg.hasReset
+		}
+		if strings.Contains(modelLower, "flash") && (!flashFound || agg.remainingFraction < flashFraction) {
+			flashFraction = agg.remainingFraction
+			flashMetric = metric
+			flashFound = true
+			flashReset = agg.resetAt
+			flashHasReset = agg.hasReset
+		}
+	}
+
+	if len(summary) > maxBreakdownRaw {
+		summary = summary[:maxBreakdownRaw]
+	}
+	if len(summary) > 0 {
+		snap.Raw["quota_models"] = strings.Join(summary, ", ")
+	}
+
+	if worstFound {
+		snap.Metrics["quota"] = worstMetric
+		if worstHasReset {
+			snap.Resets["quota_reset"] = worstReset
+		}
+		result.worstFraction = worstFraction
+	}
+	if proFound {
+		snap.Metrics["quota_pro"] = proMetric
+		if proHasReset {
+			snap.Resets["quota_pro_reset"] = proReset
+		}
+	}
+	if flashFound {
+		snap.Metrics["quota_flash"] = flashMetric
+		if flashHasReset {
+			snap.Resets["quota_flash_reset"] = flashReset
+		}
+	}
+
+	lowCount := 0
+	exhaustedCount := 0
+	for _, fraction := range modelWorst {
+		if fraction <= 0 {
+			exhaustedCount++
+		}
+		if fraction < quotaNearLimitFraction {
+			lowCount++
+		}
+	}
+	modelCount := len(modelWorst)
+	result.modelCount = modelCount
+	snap.Raw["quota_models_tracked"] = fmt.Sprintf("%d", modelCount)
+
+	modelCountF := float64(modelCount)
+	lowCountF := float64(lowCount)
+	exhaustedCountF := float64(exhaustedCount)
+	snap.Metrics["quota_models_tracked"] = core.Metric{Used: &modelCountF, Unit: "models", Window: "daily"}
+	snap.Metrics["quota_models_low"] = core.Metric{Used: &lowCountF, Unit: "models", Window: "daily"}
+	snap.Metrics["quota_models_exhausted"] = core.Metric{Used: &exhaustedCountF, Unit: "models", Window: "daily"}
+
+	return result
+}
+
+func quotaMetricFromFraction(remainingFraction float64, window string) core.Metric {
+	limit := 100.0
+	remaining := remainingFraction * 100
+	used := 100 - remaining
+	return core.Metric{
+		Limit:     &limit,
+		Remaining: &remaining,
+		Used:      &used,
+		Unit:      "%",
+		Window:    window,
+	}
+}
+
+func normalizeQuotaModelID(modelID string) string {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return "all_models"
+	}
+	modelID = strings.TrimPrefix(modelID, "models/")
+	modelID = strings.TrimSuffix(modelID, "_vertex")
+	return modelID
+}
+
+func bucketRemainingFraction(bucket bucketInfo) (float64, bool) {
+	if bucket.RemainingFraction != nil {
+		return *bucket.RemainingFraction, true
+	}
+	if bucket.RemainingAmount == "" {
+		return 0, false
+	}
+	return parseRemainingAmountFraction(bucket.RemainingAmount)
+}
+
+func parseRemainingAmountFraction(raw string) (float64, bool) {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	if s == "" {
+		return 0, false
+	}
+
+	if strings.HasSuffix(s, "%") {
+		value, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+		if err != nil {
+			return 0, false
+		}
+		return value / 100, true
+	}
+
+	if strings.Contains(s, "/") {
+		parts := strings.SplitN(s, "/", 2)
+		if len(parts) != 2 {
+			return 0, false
+		}
+		numerator, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		denominator, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err1 != nil || err2 != nil || denominator <= 0 {
+			return 0, false
+		}
+		return numerator / denominator, true
+	}
+
+	value, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	if value > 1 {
+		return value / 100, true
+	}
+	return value, true
+}
+
+func applyQuotaStatus(snap *core.UsageSnapshot, worstFraction float64) {
+	if worstFraction < 0 {
+		return
+	}
+
+	desired := core.StatusOK
+	if worstFraction <= 0 {
+		desired = core.StatusLimited
+	} else if worstFraction < quotaNearLimitFraction {
+		desired = core.StatusNearLimit
+	}
+
+	if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
+		return
+	}
+
+	severity := map[core.Status]int{
+		core.StatusOK:        0,
+		core.StatusNearLimit: 1,
+		core.StatusLimited:   2,
+	}
+	if severity[desired] > severity[snap.Status] {
+		snap.Status = desired
+	}
+}
+
 func (t geminiMessageToken) toUsage() tokenUsage {
 	total := t.Total
 	if total <= 0 {
@@ -645,17 +1024,30 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	modelDaily := make(map[string]map[string]float64)
 	clientDaily := make(map[string]map[string]float64)
 	clientSessions := make(map[string]int)
+	modelRequests := make(map[string]int)
+	modelSessions := make(map[string]int)
 
 	dailyMessages := make(map[string]float64)
 	dailySessions := make(map[string]float64)
 	dailyToolCalls := make(map[string]float64)
 	dailyTokens := make(map[string]float64)
+	dailyInputTokens := make(map[string]float64)
+	dailyOutputTokens := make(map[string]float64)
+	dailyCachedTokens := make(map[string]float64)
+	dailyReasoningTokens := make(map[string]float64)
+	dailyToolTokens := make(map[string]float64)
 
 	sessionIDs := make(map[string]bool)
 	sessionCount := 0
 	totalMessages := 0
 	totalTurns := 0
 	totalToolCalls := 0
+	totalInfoMessages := 0
+	totalErrorMessages := 0
+	totalAssistantMessages := 0
+	totalToolSuccess := 0
+	totalToolFailed := 0
+	quotaLimitEvents := 0
 
 	var lastModelName string
 	var lastModelTokens int
@@ -688,11 +1080,25 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 		var previous tokenUsage
 		var hasPrevious bool
 		fileHasUsage := false
+		sessionModels := make(map[string]bool)
 
 		for _, msg := range chat.Messages {
 			day := dayFromTimestamp(msg.Timestamp)
 			if day == "" {
 				day = sessionDay
+			}
+
+			switch strings.ToLower(strings.TrimSpace(msg.Type)) {
+			case "info":
+				totalInfoMessages++
+			case "error":
+				totalErrorMessages++
+			case "gemini", "assistant", "model":
+				totalAssistantMessages++
+			}
+
+			if isQuotaLimitMessage(msg.Content) {
+				quotaLimitEvents++
 			}
 
 			if strings.EqualFold(msg.Type, "user") {
@@ -711,6 +1117,11 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 					if tc.Name != "" {
 						toolTotals[tc.Name]++
 					}
+					if strings.EqualFold(tc.Status, "success") {
+						totalToolSuccess++
+					} else if strings.TrimSpace(tc.Status) != "" {
+						totalToolFailed++
+					}
 				}
 			}
 
@@ -720,13 +1131,15 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 
 			modelName := normalizeModelName(msg.Model)
 			total := msg.Tokens.toUsage()
-			
+
 			// Track latest model usage from the most recent session file
 			if !foundLatest {
 				lastModelName = modelName
 				lastModelTokens = total.TotalTokens
 				fileHasUsage = true
 			}
+			modelRequests[modelName]++
+			sessionModels[modelName] = true
 
 			delta := total
 			if hasPrevious {
@@ -749,11 +1162,20 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 				addDailyUsage(modelDaily, modelName, day, float64(delta.TotalTokens))
 				addDailyUsage(clientDaily, clientName, day, float64(delta.TotalTokens))
 				dailyTokens[day] += float64(delta.TotalTokens)
+				dailyInputTokens[day] += float64(delta.InputTokens)
+				dailyOutputTokens[day] += float64(delta.OutputTokens)
+				dailyCachedTokens[day] += float64(delta.CachedInputTokens)
+				dailyReasoningTokens[day] += float64(delta.ReasoningTokens)
+				dailyToolTokens[day] += float64(delta.ToolTokens)
 			}
 
 			totalTurns++
 		}
-		
+
+		for modelName := range sessionModels {
+			modelSessions[modelName]++
+		}
+
 		if fileHasUsage {
 			foundLatest = true
 		}
@@ -781,17 +1203,29 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	emitBreakdownMetrics("model", modelTotals, modelDaily, snap)
 	emitBreakdownMetrics("client", clientTotals, clientDaily, snap)
 	emitClientSessionMetrics(clientSessions, snap)
+	emitModelRequestMetrics(modelRequests, modelSessions, snap)
 	emitToolMetrics(toolTotals, snap)
 
 	storeSeries(snap, "messages", dailyMessages)
 	storeSeries(snap, "sessions", dailySessions)
 	storeSeries(snap, "tool_calls", dailyToolCalls)
 	storeSeries(snap, "tokens_total", dailyTokens)
+	storeSeries(snap, "tokens_input", dailyInputTokens)
+	storeSeries(snap, "tokens_output", dailyOutputTokens)
+	storeSeries(snap, "tokens_cached", dailyCachedTokens)
+	storeSeries(snap, "tokens_reasoning", dailyReasoningTokens)
+	storeSeries(snap, "tokens_tool", dailyToolTokens)
 
 	setUsedMetric(snap, "total_messages", float64(totalMessages), "messages", defaultUsageWindowLabel)
 	setUsedMetric(snap, "total_sessions", float64(sessionCount), "sessions", defaultUsageWindowLabel)
 	setUsedMetric(snap, "total_turns", float64(totalTurns), "turns", defaultUsageWindowLabel)
 	setUsedMetric(snap, "total_tool_calls", float64(totalToolCalls), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_info_messages", float64(totalInfoMessages), "messages", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_error_messages", float64(totalErrorMessages), "messages", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_assistant_messages", float64(totalAssistantMessages), "messages", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_calls_success", float64(totalToolSuccess), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_calls_failed", float64(totalToolFailed), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "quota_limit_events", float64(quotaLimitEvents), "events", defaultUsageWindowLabel)
 
 	if cliUsage, ok := clientTotals["CLI"]; ok {
 		setUsedMetric(snap, "client_cli_messages", float64(totalMessages), "messages", defaultUsageWindowLabel)
@@ -802,6 +1236,33 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 		setUsedMetric(snap, "client_cli_cached_tokens", float64(cliUsage.CachedInputTokens), "tokens", defaultUsageWindowLabel)
 		setUsedMetric(snap, "client_cli_reasoning_tokens", float64(cliUsage.ReasoningTokens), "tokens", defaultUsageWindowLabel)
 		setUsedMetric(snap, "client_cli_total_tokens", float64(cliUsage.TotalTokens), "tokens", defaultUsageWindowLabel)
+	}
+
+	total := aggregateTokenTotals(modelTotals)
+	setUsedMetric(snap, "total_input_tokens", float64(total.InputTokens), "tokens", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_output_tokens", float64(total.OutputTokens), "tokens", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_cached_tokens", float64(total.CachedInputTokens), "tokens", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_reasoning_tokens", float64(total.ReasoningTokens), "tokens", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_tool_tokens", float64(total.ToolTokens), "tokens", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_tokens", float64(total.TotalTokens), "tokens", defaultUsageWindowLabel)
+
+	if total.InputTokens > 0 {
+		cacheEfficiency := float64(total.CachedInputTokens) / float64(total.InputTokens) * 100
+		setPercentMetric(snap, "cache_efficiency", cacheEfficiency, defaultUsageWindowLabel)
+	}
+	if total.TotalTokens > 0 {
+		reasoningShare := float64(total.ReasoningTokens) / float64(total.TotalTokens) * 100
+		toolShare := float64(total.ToolTokens) / float64(total.TotalTokens) * 100
+		setPercentMetric(snap, "reasoning_share", reasoningShare, defaultUsageWindowLabel)
+		setPercentMetric(snap, "tool_token_share", toolShare, defaultUsageWindowLabel)
+	}
+	if totalTurns > 0 {
+		avgTokensPerTurn := float64(total.TotalTokens) / float64(totalTurns)
+		setUsedMetric(snap, "avg_tokens_per_turn", avgTokensPerTurn, "tokens", defaultUsageWindowLabel)
+	}
+	if sessionCount > 0 {
+		avgToolsPerSession := float64(totalToolCalls) / float64(sessionCount)
+		setUsedMetric(snap, "avg_tools_per_session", avgToolsPerSession, "calls", defaultUsageWindowLabel)
 	}
 
 	if _, v := latestSeriesValue(dailyMessages); v > 0 {
@@ -816,11 +1277,48 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	if _, v := latestSeriesValue(dailyTokens); v > 0 {
 		setUsedMetric(snap, "tokens_today", v, "tokens", "today")
 	}
+	if _, v := latestSeriesValue(dailyInputTokens); v > 0 {
+		setUsedMetric(snap, "today_input_tokens", v, "tokens", "today")
+	}
+	if _, v := latestSeriesValue(dailyOutputTokens); v > 0 {
+		setUsedMetric(snap, "today_output_tokens", v, "tokens", "today")
+	}
+	if _, v := latestSeriesValue(dailyCachedTokens); v > 0 {
+		setUsedMetric(snap, "today_cached_tokens", v, "tokens", "today")
+	}
+	if _, v := latestSeriesValue(dailyReasoningTokens); v > 0 {
+		setUsedMetric(snap, "today_reasoning_tokens", v, "tokens", "today")
+	}
+	if _, v := latestSeriesValue(dailyToolTokens); v > 0 {
+		setUsedMetric(snap, "today_tool_tokens", v, "tokens", "today")
+	}
 
 	setUsedMetric(snap, "7d_messages", sumLastNDays(dailyMessages, 7), "messages", "7d")
 	setUsedMetric(snap, "7d_sessions", sumLastNDays(dailySessions, 7), "sessions", "7d")
 	setUsedMetric(snap, "7d_tool_calls", sumLastNDays(dailyToolCalls, 7), "calls", "7d")
 	setUsedMetric(snap, "7d_tokens", sumLastNDays(dailyTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "7d_input_tokens", sumLastNDays(dailyInputTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "7d_output_tokens", sumLastNDays(dailyOutputTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "7d_cached_tokens", sumLastNDays(dailyCachedTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "7d_reasoning_tokens", sumLastNDays(dailyReasoningTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "7d_tool_tokens", sumLastNDays(dailyToolTokens, 7), "tokens", "7d")
+
+	if quotaLimitEvents > 0 {
+		snap.Raw["quota_limit_detected"] = "true"
+		if _, hasQuota := snap.Metrics["quota"]; !hasQuota {
+			limit := 100.0
+			remaining := 0.0
+			used := 100.0
+			snap.Metrics["quota"] = core.Metric{
+				Limit:     &limit,
+				Remaining: &remaining,
+				Used:      &used,
+				Unit:      "%",
+				Window:    "daily",
+			}
+			applyQuotaStatus(snap, 0)
+		}
+	}
 
 	return sessionCount, nil
 }
@@ -968,6 +1466,50 @@ func emitClientSessionMetrics(clientSessions map[string]int, snap *core.UsageSna
 	}
 }
 
+func emitModelRequestMetrics(modelRequests, modelSessions map[string]int, snap *core.UsageSnapshot) {
+	type entry struct {
+		name     string
+		requests int
+		sessions int
+	}
+
+	all := make([]entry, 0, len(modelRequests))
+	for name, requests := range modelRequests {
+		if requests <= 0 {
+			continue
+		}
+		all = append(all, entry{name: name, requests: requests, sessions: modelSessions[name]})
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].requests == all[j].requests {
+			return all[i].name < all[j].name
+		}
+		return all[i].requests > all[j].requests
+	})
+
+	for i, item := range all {
+		if i >= maxBreakdownMetrics {
+			break
+		}
+		keyPrefix := "model_" + sanitizeMetricName(item.name)
+		req := float64(item.requests)
+		sess := float64(item.sessions)
+		snap.Metrics[keyPrefix+"_requests"] = core.Metric{
+			Used:   &req,
+			Unit:   "requests",
+			Window: defaultUsageWindowLabel,
+		}
+		if item.sessions > 0 {
+			snap.Metrics[keyPrefix+"_sessions"] = core.Metric{
+				Used:   &sess,
+				Unit:   "sessions",
+				Window: defaultUsageWindowLabel,
+			}
+		}
+	}
+}
+
 func emitToolMetrics(toolTotals map[string]int, snap *core.UsageSnapshot) {
 	type entry struct {
 		name  string
@@ -992,7 +1534,7 @@ func emitToolMetrics(toolTotals map[string]int, snap *core.UsageSnapshot) {
 		if i < limit {
 			parts = append(parts, fmt.Sprintf("%s (%d)", item.name, item.count))
 		}
-		
+
 		val := float64(item.count)
 		snap.Metrics["tool_"+sanitizeMetricName(item.name)] = core.Metric{
 			Used:   &val,
@@ -1000,14 +1542,27 @@ func emitToolMetrics(toolTotals map[string]int, snap *core.UsageSnapshot) {
 			Window: defaultUsageWindowLabel,
 		}
 	}
-	
+
 	if len(all) > limit {
 		parts = append(parts, fmt.Sprintf("+%d more", len(all)-limit))
 	}
-	
+
 	if len(parts) > 0 {
 		snap.Raw["tool_usage"] = strings.Join(parts, ", ")
 	}
+}
+
+func aggregateTokenTotals(modelTotals map[string]tokenUsage) tokenUsage {
+	var total tokenUsage
+	for _, usage := range modelTotals {
+		total.InputTokens += usage.InputTokens
+		total.CachedInputTokens += usage.CachedInputTokens
+		total.OutputTokens += usage.OutputTokens
+		total.ReasoningTokens += usage.ReasoningTokens
+		total.ToolTokens += usage.ToolTokens
+		total.TotalTokens += usage.TotalTokens
+	}
+	return total
 }
 
 func setUsageMetric(snap *core.UsageSnapshot, key string, value float64) {
@@ -1182,7 +1737,7 @@ func getModelContextLimit(model string) int {
 	case strings.Contains(model, "gemini-3"), strings.Contains(model, "gemini-exp"):
 		// Assuming recent experimental/v3 models follow the 2M trend of 1.5 Pro/Exp.
 		// Subject to change as these are preview models.
-		return 2_000_000 
+		return 2_000_000
 	case strings.Contains(model, "pro"):
 		return 32_000 // Legacy Gemini 1.0 Pro
 	case strings.Contains(model, "flash"):
@@ -1290,4 +1845,60 @@ func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, wi
 		Unit:   unit,
 		Window: window,
 	}
+}
+
+func setPercentMetric(snap *core.UsageSnapshot, key string, value float64, window string) {
+	if value < 0 {
+		return
+	}
+	if value > 100 {
+		value = 100
+	}
+	v := value
+	limit := 100.0
+	remaining := 100 - value
+	snap.Metrics[key] = core.Metric{
+		Used:      &v,
+		Limit:     &limit,
+		Remaining: &remaining,
+		Unit:      "%",
+		Window:    window,
+	}
+}
+
+func isQuotaLimitMessage(content json.RawMessage) bool {
+	text := strings.ToLower(parseMessageContentText(content))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "usage limit reached") ||
+		strings.Contains(text, "all pro models") ||
+		strings.Contains(text, "/stats for usage details")
+}
+
+func parseMessageContentText(content json.RawMessage) string {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 {
+		return ""
+	}
+
+	var asString string
+	if content[0] == '"' && json.Unmarshal(content, &asString) == nil {
+		return asString
+	}
+
+	var asArray []map[string]any
+	if content[0] == '[' && json.Unmarshal(content, &asArray) == nil {
+		var parts []string
+		for _, item := range asArray {
+			if text, ok := item["text"].(string); ok && strings.TrimSpace(text) != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " ")
+		}
+	}
+
+	return string(content)
 }
