@@ -17,10 +17,10 @@ const (
 )
 
 type quotasResponse struct {
-	Code      string    `json:"code"`
-	Message   string    `json:"message"`
+	Code      string     `json:"code"`
+	Message   string     `json:"message"`
 	Data      quotasData `json:"data"`
-	RequestID string    `json:"request_id"`
+	RequestID string     `json:"request_id"`
 }
 
 type quotasData struct {
@@ -38,17 +38,17 @@ type quotasData struct {
 }
 
 type rateLimitInfo struct {
-	RPM           *int   `json:"rpm"`
-	TPM           *int   `json:"tpm"`
-	Remaining     *int   `json:"remaining"`
-	ResetTime     *int64 `json:"reset_time"`
+	RPM       *int   `json:"rpm"`
+	TPM       *int   `json:"tpm"`
+	Remaining *int   `json:"remaining"`
+	ResetTime *int64 `json:"reset_time"`
 }
 
 type modelQuota struct {
-	RPM    *int     `json:"rpm"`
-	TPM    *int     `json:"tpm"`
-	Used   *float64 `json:"used"`
-	Limit  *float64 `json:"limit"`
+	RPM   *int     `json:"rpm"`
+	TPM   *int     `json:"tpm"`
+	Used  *float64 `json:"used"`
+	Limit *float64 `json:"limit"`
 }
 
 type billingPeriod struct {
@@ -153,15 +153,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if quotasResp.RateLimit != nil {
 		if quotasResp.RateLimit.RPM != nil {
 			snap.Metrics["rpm"] = core.Metric{
-				Limit: func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.RPM),
-				Unit:  "requests",
+				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.RPM),
+				Unit:   "requests",
 				Window: "1m",
 			}
 		}
 		if quotasResp.RateLimit.TPM != nil {
 			snap.Metrics["tpm"] = core.Metric{
-				Limit: func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.TPM),
-				Unit:  "tokens",
+				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.TPM),
+				Unit:   "tokens",
 				Window: "1m",
 			}
 		}
