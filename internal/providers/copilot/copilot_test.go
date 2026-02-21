@@ -911,6 +911,118 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	}
 }
 
+func TestReadLogs_UsesNewestTokenEntryByTimestamp(t *testing.T) {
+	p := New()
+	tmp := t.TempDir()
+	copilotDir := filepath.Join(tmp, ".copilot")
+	logDir := filepath.Join(copilotDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+
+	newer := strings.Join([]string{
+		"2026-02-21T10:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		"2026-02-21T10:00:01.000Z [INFO] CompactionProcessor: Utilization 3.9% (5000/128000 tokens) below threshold 80%",
+	}, "\n")
+	older := strings.Join([]string{
+		"2026-02-20T10:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		"2026-02-20T10:00:01.000Z [INFO] CompactionProcessor: Utilization 0.8% (1000/128000 tokens) below threshold 80%",
+	}, "\n")
+	// Lexicographic order is intentionally opposite to timestamp order.
+	if err := os.WriteFile(filepath.Join(logDir, "a-new.log"), []byte(newer), 0o644); err != nil {
+		t.Fatalf("write newer log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "z-old.log"), []byte(older), 0o644); err != nil {
+		t.Fatalf("write older log: %v", err)
+	}
+
+	snap := &core.UsageSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+		Raw:     make(map[string]string),
+	}
+	logs := p.readLogs(copilotDir, snap)
+
+	if got := snap.Raw["context_window_tokens"]; got != "5000/128000" {
+		t.Fatalf("context_window_tokens = %q, want %q", got, "5000/128000")
+	}
+	if got := logs.SessionTokens["s1"].Used; got != 5000 {
+		t.Fatalf("session s1 used = %d, want 5000", got)
+	}
+}
+
+func TestReadSessions_UsesLatestEventTimestampForRecency(t *testing.T) {
+	p := New()
+	tmp := t.TempDir()
+	copilotDir := filepath.Join(tmp, ".copilot")
+	logDir := filepath.Join(copilotDir, "logs")
+	sessionDir := filepath.Join(copilotDir, "session-state")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	logContent := strings.Join([]string{
+		"2026-02-21T13:05:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		"2026-02-21T13:05:01.000Z [INFO] CompactionProcessor: Utilization 1.0% (1200/128000 tokens) below threshold 80%",
+		"2026-02-21T15:00:00.000Z [INFO] Workspace initialized: s2 (checkpoints: 0)",
+		"2026-02-21T15:00:01.000Z [INFO] CompactionProcessor: Utilization 1.7% (2200/128000 tokens) below threshold 80%",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(logDir, "process.log"), []byte(logContent), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	mkSession := func(id, model, wsCreated, wsUpdated, evtTs string) {
+		dir := filepath.Join(sessionDir, id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", id, err)
+		}
+		ws := strings.Join([]string{
+			"id: " + id,
+			"repository: owner/repo",
+			"branch: main",
+			"created_at: " + wsCreated,
+			"updated_at: " + wsUpdated,
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+			t.Fatalf("write workspace %s: %v", id, err)
+		}
+		events := strings.Join([]string{
+			`{"type":"session.model_change","timestamp":"` + evtTs + `","data":{"newModel":"` + model + `"}}`,
+			`{"type":"user.message","timestamp":"` + evtTs + `","data":{"content":"hello"}}`,
+			`{"type":"assistant.turn_start","timestamp":"` + evtTs + `","data":{"turnId":"0"}}`,
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events), 0o644); err != nil {
+			t.Fatalf("write events %s: %v", id, err)
+		}
+	}
+
+	// Workspace metadata claims s1 is newer, but session events show s2 is latest.
+	mkSession("s1", "model-s1", "2026-02-21T10:00:00Z", "2026-02-21T13:00:00Z", "2026-02-21T13:05:00Z")
+	mkSession("s2", "model-s2", "2026-02-21T10:00:00Z", "2026-02-21T12:00:00Z", "2026-02-21T15:00:00Z")
+
+	snap := &core.UsageSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	logs := p.readLogs(copilotDir, snap)
+	p.readSessions(copilotDir, snap, logs)
+
+	if got := snap.Raw["last_session_model"]; got != "model-s2" {
+		t.Fatalf("last_session_model = %q, want model-s2", got)
+	}
+	if got := snap.Raw["last_session_tokens"]; got != "2200/128000" {
+		t.Fatalf("last_session_tokens = %q, want 2200/128000", got)
+	}
+	if got := snap.Raw["last_session_time"]; got != "2026-02-21T15:00:01Z" {
+		t.Fatalf("last_session_time = %q, want 2026-02-21T15:00:01Z", got)
+	}
+}
+
 func unmarshalJSON(s string, v interface{}) error {
 	return json.Unmarshal([]byte(s), v)
 }

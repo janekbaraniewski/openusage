@@ -301,7 +301,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	userJSON, err := runGH(ctx, binary, "api", "/user")
+	userJSON, err := runGHAPI(ctx, binary, "/user")
 	if err != nil {
 		return
 	}
@@ -321,7 +321,7 @@ func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.
 }
 
 func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGH(ctx, binary, "api", "/copilot_internal/user")
+	body, err := runGHAPI(ctx, binary, "/copilot_internal/user")
 	if err != nil {
 		return
 	}
@@ -508,7 +508,7 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 }
 
 func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGH(ctx, binary, "api", "/rate_limit")
+	body, err := runGHAPI(ctx, binary, "/rate_limit")
 	if err != nil {
 		return
 	}
@@ -559,7 +559,7 @@ func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.U
 }
 
 func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGH(ctx, binary, "api", fmt.Sprintf("/orgs/%s/copilot/billing", org))
+	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/billing", org))
 	if err != nil {
 		return
 	}
@@ -591,7 +591,7 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap
 }
 
 func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGH(ctx, binary, "api", fmt.Sprintf("/orgs/%s/copilot/metrics", org))
+	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
 	if err != nil {
 		return
 	}
@@ -729,6 +729,7 @@ func (p *Provider) readLogs(copilotDir string, snap *core.UsageSnapshot) logSumm
 		SessionTokens: make(map[string]logTokenEntry),
 		SessionBurn:   make(map[string]float64),
 	}
+	sessionEntries := make(map[string][]logTokenEntry)
 	logDir := filepath.Join(copilotDir, "logs")
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -775,15 +776,7 @@ func (p *Provider) readLogs(copilotDir string, snap *core.UsageSnapshot) logSumm
 				if te.Total > 0 {
 					allTokenEntries = append(allTokenEntries, te)
 					if currentSessionID != "" {
-						if prev, ok := ls.SessionTokens[currentSessionID]; ok && prev.Total > 0 {
-							delta := te.Used - prev.Used
-							if delta > 0 {
-								ls.SessionBurn[currentSessionID] += float64(delta)
-							}
-						} else if te.Used > 0 {
-							ls.SessionBurn[currentSessionID] += float64(te.Used)
-						}
-						ls.SessionTokens[currentSessionID] = te
+						sessionEntries[currentSessionID] = append(sessionEntries[currentSessionID], te)
 					}
 				}
 			}
@@ -794,8 +787,30 @@ func (p *Provider) readLogs(copilotDir string, snap *core.UsageSnapshot) logSumm
 		snap.Raw["default_model"] = ls.DefaultModel
 	}
 
-	if len(allTokenEntries) > 0 {
-		last := allTokenEntries[len(allTokenEntries)-1]
+	for sessionID, entries := range sessionEntries {
+		sortCompactionEntries(entries)
+		last := entries[len(entries)-1]
+		ls.SessionTokens[sessionID] = last
+
+		burn := 0.0
+		for idx, te := range entries {
+			if idx == 0 {
+				if te.Used > 0 {
+					burn += float64(te.Used)
+				}
+				continue
+			}
+			delta := te.Used - entries[idx-1].Used
+			if delta > 0 {
+				burn += float64(delta)
+			}
+		}
+		if burn > 0 {
+			ls.SessionBurn[sessionID] = burn
+		}
+	}
+
+	if last, ok := newestCompactionEntry(allTokenEntries); ok {
 		snap.Raw["context_window_tokens"] = fmt.Sprintf("%d/%d", last.Used, last.Total)
 		pct := float64(last.Used) / float64(last.Total) * 100
 		snap.Raw["context_window_pct"] = fmt.Sprintf("%.1f%%", pct)
@@ -889,6 +904,14 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		if te, ok := logs.SessionTokens[si.id]; ok {
 			si.tokenUsed = te.Used
 			si.tokenTotal = te.Total
+			if !te.Timestamp.IsZero() {
+				if si.createdAt.IsZero() {
+					si.createdAt = te.Timestamp
+				}
+				if si.updatedAt.IsZero() || te.Timestamp.After(si.updatedAt) {
+					si.updatedAt = te.Timestamp
+				}
+			}
 		}
 		if burn, ok := logs.SessionBurn[si.id]; ok {
 			si.tokenBurn = burn
@@ -896,6 +919,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 
 		if evtData, err := os.ReadFile(filepath.Join(sessPath, "events.jsonl")); err == nil {
 			currentModel := logs.DefaultModel
+			var firstEventAt, lastEventAt time.Time
 			lines := strings.Split(string(evtData), "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
@@ -905,6 +929,15 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 				var evt sessionEvent
 				if json.Unmarshal([]byte(line), &evt) != nil {
 					continue
+				}
+				evtTime := flexParseTime(evt.Timestamp)
+				if !evtTime.IsZero() {
+					if firstEventAt.IsZero() || evtTime.Before(firstEventAt) {
+						firstEventAt = evtTime
+					}
+					if lastEventAt.IsZero() || evtTime.After(lastEventAt) {
+						lastEventAt = evtTime
+					}
 				}
 
 				switch evt.Type {
@@ -990,6 +1023,12 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 						}
 					}
 				}
+			}
+			if !firstEventAt.IsZero() && si.createdAt.IsZero() {
+				si.createdAt = firstEventAt
+			}
+			if !lastEventAt.IsZero() && (si.updatedAt.IsZero() || lastEventAt.After(si.updatedAt)) {
+				si.updatedAt = lastEventAt
 			}
 			si.model = currentModel
 		}
@@ -1231,6 +1270,47 @@ func parseCompactionLine(line string) logTokenEntry {
 	return entry
 }
 
+func sortCompactionEntries(entries []logTokenEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		ti := entries[i].Timestamp
+		tj := entries[j].Timestamp
+		switch {
+		case ti.IsZero() && tj.IsZero():
+			return entries[i].Used < entries[j].Used
+		case ti.IsZero():
+			return false
+		case tj.IsZero():
+			return true
+		default:
+			return ti.Before(tj)
+		}
+	})
+}
+
+func newestCompactionEntry(entries []logTokenEntry) (logTokenEntry, bool) {
+	if len(entries) == 0 {
+		return logTokenEntry{}, false
+	}
+	best := entries[0]
+	for _, te := range entries[1:] {
+		if best.Timestamp.IsZero() && !te.Timestamp.IsZero() {
+			best = te
+			continue
+		}
+		if !best.Timestamp.IsZero() && te.Timestamp.IsZero() {
+			continue
+		}
+		if !te.Timestamp.IsZero() && te.Timestamp.After(best.Timestamp) {
+			best = te
+			continue
+		}
+		if best.Timestamp.Equal(te.Timestamp) && te.Used > best.Used {
+			best = te
+		}
+	}
+	return best, true
+}
+
 func (p *Provider) resolveStatus(snap *core.UsageSnapshot, authOutput string) {
 	lower := strings.ToLower(authOutput)
 	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") {
@@ -1308,6 +1388,18 @@ func runGH(ctx context.Context, binary string, args ...string) (string, error) {
 		return stdout.String() + stderr.String(), err
 	}
 	return stdout.String(), nil
+}
+
+func runGHAPI(ctx context.Context, binary, endpoint string) (string, error) {
+	// Ask GitHub to revalidate so we don't pin stale Copilot quota/rate data.
+	return runGH(
+		ctx,
+		binary,
+		"api",
+		"-H", "Cache-Control: no-cache",
+		"-H", "Pragma: no-cache",
+		endpoint,
+	)
 }
 
 func parseSimpleYAML(content string) map[string]string {

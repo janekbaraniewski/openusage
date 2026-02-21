@@ -1121,23 +1121,23 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) pr
 	if quotaKey != "" {
 		m := snap.Metrics[quotaKey]
 		info.tagEmoji = "⚡"
-		info.tagLabel = "Quota"
+		info.tagLabel = "Usage"
 		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
 			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.0f%% quota used", pct)
+			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
 		}
 		if m.Remaining != nil {
-			info.detail = fmt.Sprintf("%.0f%% quota left", *m.Remaining)
+			info.detail = fmt.Sprintf("%.0f%% usage left", *m.Remaining)
 		}
 		return info
 	}
 
 	if m, ok := snap.Metrics["context_window"]; ok && m.Used != nil && m.Limit != nil {
-		info.tagEmoji = "🧠"
-		info.tagLabel = "Context"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.0f%% context used", pct)
+			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
 		}
 		info.detail = fmt.Sprintf("%s / %s tokens", shortCompact(*m.Used), shortCompact(*m.Limit))
 		return info

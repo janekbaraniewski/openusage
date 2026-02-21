@@ -151,11 +151,113 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 	type providerExpect struct {
 		metrics []string
 		raw     []string
+		meta    []string
 		resets  []string
 		series  []string
 	}
 
 	expectations := map[string]providerExpect{
+		"openai": {
+			metrics: []string{
+				"rpm",
+				"tpm",
+			},
+			raw: []string{
+				"x-ratelimit-limit-requests",
+				"x-ratelimit-limit-tokens",
+			},
+			resets: []string{
+				"rpm",
+				"tpm",
+			},
+		},
+		"anthropic": {
+			metrics: []string{
+				"rpm",
+				"tpm",
+			},
+			raw: []string{
+				"anthropic-ratelimit-requests-limit",
+				"anthropic-ratelimit-tokens-limit",
+			},
+			resets: []string{
+				"rpm",
+				"tpm",
+			},
+		},
+		"alibaba_cloud": {
+			metrics: []string{
+				"available_balance",
+				"tokens_used",
+				"model_qwen_max_used",
+			},
+			meta: []string{
+				"billing_cycle_start",
+				"billing_cycle_end",
+			},
+		},
+		"groq": {
+			metrics: []string{
+				"rpm",
+				"tpm",
+				"rpd",
+				"tpd",
+			},
+			resets: []string{
+				"rpm",
+				"rpd",
+			},
+		},
+		"mistral": {
+			metrics: []string{
+				"monthly_budget",
+				"monthly_spend",
+				"monthly_input_tokens",
+			},
+			raw: []string{
+				"plan",
+				"monthly_cost",
+			},
+		},
+		"deepseek": {
+			metrics: []string{
+				"total_balance",
+				"granted_balance",
+				"topped_up_balance",
+				"rpm",
+				"tpm",
+			},
+			raw: []string{
+				"currency",
+				"account_available",
+			},
+		},
+		"xai": {
+			metrics: []string{
+				"credits",
+				"rpm",
+				"tpm",
+			},
+			raw: []string{
+				"api_key_name",
+				"team_id",
+			},
+		},
+		"gemini_api": {
+			metrics: []string{
+				"available_models",
+				"input_token_limit",
+				"output_token_limit",
+				"rpm",
+			},
+			raw: []string{
+				"models_sample",
+				"total_models",
+			},
+			resets: []string{
+				"rpm",
+			},
+		},
 		"gemini_cli": {
 			metrics: []string{
 				"quota",
@@ -219,6 +321,30 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"analytics_tokens",
 			},
 		},
+		"ollama": {
+			metrics: []string{
+				"usage_five_hour",
+				"models_total",
+				"requests_today",
+				"tool_read_file",
+				"model_llama3_1_8b_requests",
+			},
+			meta: []string{
+				"account_email",
+				"billing_cycle_start",
+				"billing_cycle_end",
+				"block_start",
+				"block_end",
+			},
+			resets: []string{
+				"usage_five_hour",
+				"usage_one_day",
+			},
+			series: []string{
+				"usage_model_llama3_1_8b",
+				"usage_source_local",
+			},
+		},
 	}
 
 	for providerID, exp := range expectations {
@@ -235,6 +361,11 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		for _, key := range exp.raw {
 			if _, ok := snap.Raw[key]; !ok {
 				t.Fatalf("provider %q missing raw %q", providerID, key)
+			}
+		}
+		for _, key := range exp.meta {
+			if _, ok := snap.MetaValue(key); !ok {
+				t.Fatalf("provider %q missing metadata %q", providerID, key)
 			}
 		}
 		for _, key := range exp.resets {

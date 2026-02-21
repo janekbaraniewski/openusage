@@ -1055,8 +1055,9 @@ type resetEntry struct {
 var resetLabelMap = map[string]string{
 	"billing_block":        "Usage 5h",
 	"billing_cycle_end":    "Billing",
-	"quota_reset":          "Quota",
+	"quota_reset":          "Usage",
 	"usage_five_hour":      "Usage 5h",
+	"usage_one_day":        "Usage 1d",
 	"usage_seven_day":      "Usage 7d",
 	"limit_reset":          "Limit",
 	"key_expires":          "Key Exp",
@@ -1434,7 +1435,7 @@ func buildGeminiOtherQuotaLines(snap core.UsageSnapshot, innerW int) ([]string, 
 
 	primaryKey := geminiPrimaryQuotaMetricKey(snap)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Other Quotas"),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Other Usage"),
 	}
 	usedKeys := make(map[string]bool, len(entries))
 

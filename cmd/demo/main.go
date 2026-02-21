@@ -142,6 +142,369 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 	rng := rand.New(rand.NewSource(now.UnixNano()))
 	snaps := make(map[string]core.UsageSnapshot)
 
+	// openai
+	snaps["openai"] = core.UsageSnapshot{
+		ProviderID: "openai",
+		AccountID:  "openai",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rpm": {
+				Limit: ptr(10000), Remaining: ptr(7820), Used: ptr(2180),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(2000000), Remaining: ptr(1664000), Used: ptr(336000),
+				Unit: "tokens", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(34 * time.Second),
+			"tpm": now.Add(34 * time.Second),
+		},
+		Raw: map[string]string{
+			"x-ratelimit-limit-requests":     "10000",
+			"x-ratelimit-remaining-requests": "7820",
+			"x-ratelimit-reset-requests":     "34s",
+			"x-ratelimit-limit-tokens":       "2000000",
+			"x-ratelimit-remaining-tokens":   "1664000",
+			"x-ratelimit-reset-tokens":       "34s",
+		},
+		Message: "OpenAI rate limits healthy",
+	}
+
+	// anthropic
+	snaps["anthropic"] = core.UsageSnapshot{
+		ProviderID: "anthropic",
+		AccountID:  "anthropic",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rpm": {
+				Limit: ptr(4000), Remaining: ptr(3510), Used: ptr(490),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(400000), Remaining: ptr(308000), Used: ptr(92000),
+				Unit: "tokens", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(21 * time.Second),
+			"tpm": now.Add(21 * time.Second),
+		},
+		Raw: map[string]string{
+			"anthropic-ratelimit-requests-limit":     "4000",
+			"anthropic-ratelimit-requests-remaining": "3510",
+			"anthropic-ratelimit-requests-reset":     "21s",
+			"anthropic-ratelimit-tokens-limit":       "400000",
+			"anthropic-ratelimit-tokens-remaining":   "308000",
+			"anthropic-ratelimit-tokens-reset":       "21s",
+		},
+		Message: "Anthropic limits and token budget available",
+	}
+
+	// alibaba-cloud
+	snaps["alibaba_cloud"] = core.UsageSnapshot{
+		ProviderID: "alibaba_cloud",
+		AccountID:  "alibaba_cloud",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"available_balance": {Limit: ptr(1200), Remaining: ptr(780), Used: ptr(420), Unit: "USD", Window: "current"},
+			"credit_balance":    {Limit: ptr(1500), Remaining: ptr(1090), Used: ptr(410), Unit: "USD", Window: "current"},
+			"spend_limit":       {Limit: ptr(2000), Remaining: ptr(1258), Used: ptr(742), Unit: "USD", Window: "current"},
+			"daily_spend":       {Used: ptr(19.8), Unit: "USD", Window: "1d"},
+			"monthly_spend":     {Used: ptr(742), Unit: "USD", Window: "30d"},
+			"rpm":               {Limit: ptr(3000), Remaining: ptr(2430), Used: ptr(570), Unit: "requests", Window: "1m"},
+			"tpm":               {Limit: ptr(900000), Remaining: ptr(631000), Used: ptr(269000), Unit: "tokens", Window: "1m"},
+			"tokens_used":       {Used: ptr(1.62e7), Unit: "tokens", Window: "current"},
+			"requests_used":     {Used: ptr(55200), Unit: "requests", Window: "current"},
+			"model_qwen_max_usage_pct": {
+				Used: ptr(67), Unit: "%", Window: "current",
+			},
+			"model_qwen_max_used": {
+				Used: ptr(1340), Limit: ptr(2000), Unit: "units", Window: "current",
+			},
+			"model_deepseek_r1_usage_pct": {
+				Used: ptr(38), Unit: "%", Window: "current",
+			},
+			"model_deepseek_r1_used": {
+				Used: ptr(760), Limit: ptr(2000), Unit: "units", Window: "current",
+			},
+		},
+		Attributes: map[string]string{
+			"billing_cycle_start": now.Add(-10 * 24 * time.Hour).UTC().Format(time.RFC3339),
+			"billing_cycle_end":   now.Add(20 * 24 * time.Hour).UTC().Format(time.RFC3339),
+		},
+		Raw: map[string]string{
+			"request_id": "demo-ali-usage-4289",
+		},
+		Message: "Alibaba quotas and billing data available",
+	}
+
+	// groq
+	snaps["groq"] = core.UsageSnapshot{
+		ProviderID: "groq",
+		AccountID:  "groq",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rpm": {
+				Limit: ptr(30000), Remaining: ptr(28760), Used: ptr(1240),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(900000), Remaining: ptr(794000), Used: ptr(106000),
+				Unit: "tokens", Window: "1m",
+			},
+			"rpd": {
+				Limit: ptr(500000), Remaining: ptr(482600), Used: ptr(17400),
+				Unit: "requests", Window: "1d",
+			},
+			"tpd": {
+				Limit: ptr(9000000), Remaining: ptr(8220000), Used: ptr(780000),
+				Unit: "tokens", Window: "1d",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(41 * time.Second),
+			"tpm": now.Add(41 * time.Second),
+			"rpd": now.Add(13*time.Hour + 18*time.Minute),
+			"tpd": now.Add(13*time.Hour + 18*time.Minute),
+		},
+		Raw: map[string]string{
+			"x-ratelimit-limit-requests-day":     "500000",
+			"x-ratelimit-remaining-requests-day": "482600",
+			"x-ratelimit-limit-tokens-day":       "9000000",
+			"x-ratelimit-remaining-tokens-day":   "8220000",
+		},
+		Message: "Remaining: 28760/30000 RPM, 482600/500000 RPD",
+	}
+
+	// mistral
+	snaps["mistral"] = core.UsageSnapshot{
+		ProviderID: "mistral",
+		AccountID:  "mistral",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"monthly_budget":       {Limit: ptr(300.0), Unit: "EUR", Window: "1mo"},
+			"monthly_spend":        {Limit: ptr(300.0), Remaining: ptr(188.4), Used: ptr(111.6), Unit: "EUR", Window: "1mo"},
+			"credit_balance":       {Remaining: ptr(188.4), Unit: "EUR", Window: "current"},
+			"monthly_input_tokens": {Used: ptr(5920000), Unit: "tokens", Window: "1mo"},
+			"monthly_output_tokens": {
+				Used: ptr(831000), Unit: "tokens", Window: "1mo",
+			},
+			"rpm": {
+				Limit: ptr(8000), Remaining: ptr(7340), Used: ptr(660),
+				Unit: "requests", Window: "1m",
+			},
+			"rpm_alt": {
+				Limit: ptr(8000), Remaining: ptr(7340), Used: ptr(660),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(1000000), Remaining: ptr(888000), Used: ptr(112000),
+				Unit: "tokens", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm":     now.Add(39 * time.Second),
+			"rpm_alt": now.Add(39 * time.Second),
+			"tpm":     now.Add(39 * time.Second),
+		},
+		Raw: map[string]string{
+			"plan":         "La Plateforme Team",
+			"monthly_cost": "111.6000 EUR",
+		},
+		Message: "Mistral monthly spend: 111.60 EUR",
+	}
+
+	// deepseek
+	snaps["deepseek"] = core.UsageSnapshot{
+		ProviderID: "deepseek",
+		AccountID:  "deepseek",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"total_balance":     {Remaining: ptr(428.90), Unit: "CNY", Window: "current"},
+			"granted_balance":   {Remaining: ptr(100.00), Unit: "CNY", Window: "current"},
+			"topped_up_balance": {Remaining: ptr(328.90), Unit: "CNY", Window: "current"},
+			"rpm": {
+				Limit: ptr(6000), Remaining: ptr(5820), Used: ptr(180),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(600000), Remaining: ptr(546000), Used: ptr(54000),
+				Unit: "tokens", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(28 * time.Second),
+			"tpm": now.Add(28 * time.Second),
+		},
+		Raw: map[string]string{
+			"currency":          "CNY",
+			"account_available": "true",
+		},
+		Message: "Balance: 428.90 CNY",
+	}
+
+	// xai
+	snaps["xai"] = core.UsageSnapshot{
+		ProviderID: "xai",
+		AccountID:  "xai",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"credits": {
+				Limit: ptr(500.00), Remaining: ptr(372.19), Used: ptr(127.81), Unit: "USD", Window: "current",
+			},
+			"rpm": {
+				Limit: ptr(6000), Remaining: ptr(5570), Used: ptr(430),
+				Unit: "requests", Window: "1m",
+			},
+			"tpm": {
+				Limit: ptr(900000), Remaining: ptr(756000), Used: ptr(144000),
+				Unit: "tokens", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(36 * time.Second),
+			"tpm": now.Add(36 * time.Second),
+		},
+		Raw: map[string]string{
+			"api_key_name": "prod-key",
+			"team_id":      "team_7f4a2",
+		},
+		Message: "$372.19 remaining",
+	}
+
+	// gemini-api
+	snaps["gemini-api"] = core.UsageSnapshot{
+		ProviderID: "gemini_api",
+		AccountID:  "gemini-api",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"available_models":   {Used: ptr(37), Unit: "models", Window: "current"},
+			"input_token_limit":  {Limit: ptr(1048576), Unit: "tokens", Window: "per-request"},
+			"output_token_limit": {Limit: ptr(8192), Unit: "tokens", Window: "per-request"},
+			"rpm": {
+				Limit: ptr(60), Remaining: ptr(44), Used: ptr(16),
+				Unit: "requests", Window: "1m",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rpm": now.Add(43 * time.Second),
+		},
+		Raw: map[string]string{
+			"models_sample": "gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash",
+			"total_models":  "37",
+			"model_name":    "Gemini 2.5 Flash",
+		},
+		Message: "auth OK; 37 models available",
+	}
+
+	// ollama
+	snaps["ollama"] = core.UsageSnapshot{
+		ProviderID: "ollama",
+		AccountID:  "ollama",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"usage_five_hour":                {Used: ptr(34), Unit: "%", Window: "5h"},
+			"usage_one_day":                  {Used: ptr(62), Unit: "%", Window: "1d"},
+			"models_total":                   {Used: ptr(24), Remaining: ptr(24), Unit: "models", Window: "current"},
+			"models_local":                   {Used: ptr(18), Remaining: ptr(18), Unit: "models", Window: "current"},
+			"models_cloud":                   {Used: ptr(6), Remaining: ptr(6), Unit: "models", Window: "current"},
+			"loaded_models":                  {Used: ptr(3), Remaining: ptr(3), Unit: "models", Window: "current"},
+			"loaded_vram_bytes":              {Used: ptr(17.2e9), Remaining: ptr(17.2e9), Unit: "bytes", Window: "current"},
+			"model_storage_bytes":            {Used: ptr(83.4e9), Remaining: ptr(83.4e9), Unit: "bytes", Window: "current"},
+			"context_window":                 {Used: ptr(131072), Remaining: ptr(131072), Unit: "tokens", Window: "current"},
+			"configured_context_length":      {Used: ptr(65536), Remaining: ptr(65536), Unit: "tokens", Window: "current"},
+			"requests_today":                 {Used: ptr(412), Remaining: ptr(412), Unit: "requests", Window: "today"},
+			"messages_today":                 {Used: ptr(388), Remaining: ptr(388), Unit: "messages", Window: "today"},
+			"sessions_today":                 {Used: ptr(63), Remaining: ptr(63), Unit: "sessions", Window: "today"},
+			"tool_calls_today":               {Used: ptr(157), Remaining: ptr(157), Unit: "calls", Window: "today"},
+			"requests_5h":                    {Used: ptr(138), Remaining: ptr(138), Unit: "requests", Window: "5h"},
+			"messages_5h":                    {Used: ptr(129), Remaining: ptr(129), Unit: "messages", Window: "5h"},
+			"sessions_5h":                    {Used: ptr(21), Remaining: ptr(21), Unit: "sessions", Window: "5h"},
+			"tool_calls_5h":                  {Used: ptr(48), Remaining: ptr(48), Unit: "calls", Window: "5h"},
+			"requests_1d":                    {Used: ptr(412), Remaining: ptr(412), Unit: "requests", Window: "1d"},
+			"messages_1d":                    {Used: ptr(388), Remaining: ptr(388), Unit: "messages", Window: "1d"},
+			"sessions_1d":                    {Used: ptr(63), Remaining: ptr(63), Unit: "sessions", Window: "1d"},
+			"tool_calls_1d":                  {Used: ptr(157), Remaining: ptr(157), Unit: "calls", Window: "1d"},
+			"recent_requests":                {Used: ptr(512), Remaining: ptr(512), Unit: "requests", Window: "24h"},
+			"requests_7d":                    {Used: ptr(2310), Remaining: ptr(2310), Unit: "requests", Window: "7d"},
+			"chat_requests_today":            {Used: ptr(271), Remaining: ptr(271), Unit: "requests", Window: "today"},
+			"generate_requests_today":        {Used: ptr(141), Remaining: ptr(141), Unit: "requests", Window: "today"},
+			"chat_requests_5h":               {Used: ptr(90), Remaining: ptr(90), Unit: "requests", Window: "5h"},
+			"generate_requests_5h":           {Used: ptr(48), Remaining: ptr(48), Unit: "requests", Window: "5h"},
+			"chat_requests_1d":               {Used: ptr(271), Remaining: ptr(271), Unit: "requests", Window: "1d"},
+			"generate_requests_1d":           {Used: ptr(141), Remaining: ptr(141), Unit: "requests", Window: "1d"},
+			"avg_latency_ms_today":           {Used: ptr(318), Remaining: ptr(318), Unit: "ms", Window: "today"},
+			"avg_latency_ms_5h":              {Used: ptr(294), Remaining: ptr(294), Unit: "ms", Window: "5h"},
+			"avg_latency_ms_1d":              {Used: ptr(321), Remaining: ptr(321), Unit: "ms", Window: "1d"},
+			"http_4xx_today":                 {Used: ptr(3), Remaining: ptr(3), Unit: "responses", Window: "today"},
+			"http_5xx_today":                 {Used: ptr(1), Remaining: ptr(1), Unit: "responses", Window: "today"},
+			"model_llama3_1_8b_requests":     {Used: ptr(1290), Remaining: ptr(1290), Unit: "requests", Window: "all-time"},
+			"model_qwen2_5_coder_requests":   {Used: ptr(740), Remaining: ptr(740), Unit: "requests", Window: "all-time"},
+			"model_deepseek_r1_14b_requests": {Used: ptr(280), Remaining: ptr(280), Unit: "requests", Window: "all-time"},
+			"model_llama3_1_8b_requests_today": {
+				Used: ptr(236), Remaining: ptr(236), Unit: "requests", Window: "today",
+			},
+			"model_qwen2_5_coder_requests_today": {
+				Used: ptr(131), Remaining: ptr(131), Unit: "requests", Window: "today",
+			},
+			"source_local_requests":       {Used: ptr(1980), Remaining: ptr(1980), Unit: "requests", Window: "all-time"},
+			"source_cloud_requests":       {Used: ptr(330), Remaining: ptr(330), Unit: "requests", Window: "all-time"},
+			"source_local_requests_today": {Used: ptr(362), Remaining: ptr(362), Unit: "requests", Window: "today"},
+			"source_cloud_requests_today": {Used: ptr(50), Remaining: ptr(50), Unit: "requests", Window: "today"},
+			"tool_read_file":              {Used: ptr(420), Remaining: ptr(420), Unit: "calls", Window: "all-time"},
+			"tool_edit_file":              {Used: ptr(318), Remaining: ptr(318), Unit: "calls", Window: "all-time"},
+			"tool_run_shell_command":      {Used: ptr(196), Remaining: ptr(196), Unit: "calls", Window: "all-time"},
+			"tool_web_search":             {Used: ptr(82), Remaining: ptr(82), Unit: "calls", Window: "all-time"},
+		},
+		Resets: map[string]time.Time{
+			"usage_five_hour": now.Add(2*time.Hour + 39*time.Minute),
+			"usage_one_day":   now.Add(7*time.Hour + 18*time.Minute),
+		},
+		Attributes: map[string]string{
+			"account_email":       "dev@acme-corp.io",
+			"account_name":        "Acme Dev",
+			"plan_name":           "pro",
+			"selected_model":      "qwen2.5-coder:32b",
+			"cloud_disabled":      "false",
+			"cloud_source":        "desktop",
+			"cli_version":         "0.11.4",
+			"auth_type":           "api_key",
+			"billing_cycle_start": now.Add(-9 * 24 * time.Hour).UTC().Format(time.RFC3339),
+			"billing_cycle_end":   now.Add(21 * 24 * time.Hour).UTC().Format(time.RFC3339),
+			"block_start":         now.Add(-2*time.Hour - 21*time.Minute).UTC().Format(time.RFC3339),
+			"block_end":           now.Add(2*time.Hour + 39*time.Minute).UTC().Format(time.RFC3339),
+		},
+		Raw: map[string]string{
+			"models_top":         "qwen2.5-coder:32b, llama3.1:8b, deepseek-r1:14b, qwen2.5:14b",
+			"loaded_models":      "qwen2.5-coder:32b, llama3.1:8b, deepseek-r1:14b",
+			"tool_usage":         "read_file=420, edit_file=318, run_shell_command=196, web_search=82",
+			"desktop_db_path":    "~/.ollama/db.sqlite",
+			"server_config_path": "~/.ollama/server.json",
+		},
+		DailySeries: map[string][]core.TimePoint{
+			"requests":                  demoSeries(now, 284, 301, 317, 342, 368, 391, 412),
+			"messages":                  demoSeries(now, 262, 280, 296, 321, 347, 365, 388),
+			"sessions":                  demoSeries(now, 42, 44, 47, 51, 54, 58, 63),
+			"tool_calls":                demoSeries(now, 91, 104, 113, 124, 136, 148, 157),
+			"usage_model_llama3_1_8b":   demoSeries(now, 128, 143, 157, 176, 189, 207, 236),
+			"usage_model_qwen2_5_coder": demoSeries(now, 72, 81, 95, 101, 113, 122, 131),
+			"usage_source_local":        demoSeries(now, 251, 269, 286, 309, 331, 346, 362),
+			"usage_source_cloud":        demoSeries(now, 33, 32, 31, 33, 37, 45, 50),
+		},
+		Message: "388 msgs today, 412 req today, 138 req 5h, 24 models",
+	}
+
 	// claude-code
 	snaps["claude-code"] = core.UsageSnapshot{
 		ProviderID: "claude_code",
