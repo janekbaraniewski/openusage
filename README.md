@@ -20,13 +20,15 @@ Or side by side with your agent
 brew install janekbaraniewski/tap/openusage
 ```
 
+Pre-built binaries for macOS, Linux, and Windows are available on the [GitHub Releases](https://github.com/janekbaraniewski/openusage/releases) page.
+
 Or from source (Go 1.25+):
 
 ```bash
 go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
 ```
 
-CGO is required (`CGO_ENABLED=1`) because the Cursor provider uses SQLite via `mattn/go-sqlite3`.
+Building from source requires CGO (`CGO_ENABLED=1`) because the Cursor provider uses SQLite via `mattn/go-sqlite3`.
 
 ## Run
 
