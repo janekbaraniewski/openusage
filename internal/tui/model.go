@@ -1080,7 +1080,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 			worstRatePct = pct
 		}
 		if m.Unit == "%" && m.Remaining != nil {
-			label := prettifyKey(strings.TrimPrefix(key, "rate_limit_"))
+			label := metricLabel(widget, strings.TrimPrefix(key, "rate_limit_"))
 			rateParts = append(rateParts, fmt.Sprintf("%s %.0f%%", label, 100-*m.Remaining))
 		} else if pct >= 0 {
 			label := strings.ToUpper(key)
@@ -1181,7 +1181,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 		info.summary = fmt.Sprintf("%.0f%% used", 100-worstQuotaPct)
 		if quotaKey != "" {
 			qm := snap.Metrics[quotaKey]
-			parts := []string{prettifyKey(quotaKey)}
+			parts := []string{metricLabel(widget, quotaKey)}
 			if qm.Window != "" && qm.Window != "all_time" && qm.Window != "current_period" {
 				parts = append(parts, qm.Window)
 			}
@@ -1222,7 +1222,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 		if m.Used != nil {
 			info.tagEmoji = "📋"
 			info.tagLabel = "Metrics"
-			info.summary = fmt.Sprintf("%s: %s %s", prettifyKey(key), formatNumber(*m.Used), m.Unit)
+			info.summary = fmt.Sprintf("%s: %s %s", metricLabel(widget, key), formatNumber(*m.Used), m.Unit)
 			return info
 		}
 	}

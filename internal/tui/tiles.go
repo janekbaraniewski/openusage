@@ -445,7 +445,7 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, widget core.Dashboar
 			continue
 		}
 
-		label := gaugeLabel(key, met.Window)
+		label := gaugeLabel(widget, key, met.Window)
 		if len(label) > maxLabelW {
 			label = label[:maxLabelW-1] + "…"
 		}
@@ -460,19 +460,13 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, widget core.Dashboar
 	return lines
 }
 
-func gaugeLabel(key string, window ...string) string {
+func gaugeLabel(widget core.DashboardWidget, key string, window ...string) string {
 	overrides := map[string]string{
-		"usage_five_hour":        "5 Hour",
-		"usage_seven_day":        "7 Day",
-		"usage_seven_day_sonnet": "7d Sonnet",
-		"usage_seven_day_opus":   "7d Opus",
-		"usage_seven_day_cowork": "7d Cowork",
-		"extra_usage":            "Extra",
-		"plan_percent_used":      "Plan Used",
-		"plan_spend":             "Credits",
-		"plan_total_spend_usd":   "Total Credits",
-		"spend_limit":            "Credit Limit",
-		"individual_spend":       "My Credits",
+		"plan_percent_used":    "Plan Used",
+		"plan_spend":           "Credits",
+		"plan_total_spend_usd": "Total Credits",
+		"spend_limit":          "Credit Limit",
+		"individual_spend":     "My Credits",
 	}
 
 	if strings.HasPrefix(key, "rate_limit_") {
@@ -483,34 +477,12 @@ func gaugeLabel(key string, window ...string) string {
 		if w != "" {
 			return "Usage " + w
 		}
-		return "Usage " + prettifyKey(strings.TrimPrefix(key, "rate_limit_"))
+		return "Usage " + metricLabel(widget, strings.TrimPrefix(key, "rate_limit_"))
 	}
 	if label, ok := overrides[key]; ok {
 		return label
 	}
-	if label, ok := prettifyKeyOverrides[key]; ok {
-		return label
-	}
-
-	clean := key
-	for _, prefix := range []string{"usage_", "rate_limit_"} {
-		if strings.HasPrefix(clean, prefix) {
-			clean = clean[len(prefix):]
-			break
-		}
-	}
-
-	if strings.Contains(clean, "-") {
-		parts := strings.Split(clean, "-")
-		for i, p := range parts {
-			if len(p) > 0 {
-				parts[i] = strings.ToUpper(p[:1]) + p[1:]
-			}
-		}
-		return strings.Join(parts, " ")
-	}
-
-	return prettifyKey(clean)
+	return metricLabel(widget, key)
 }
 
 var metricsNoGauge = map[string]bool{
@@ -575,7 +547,7 @@ func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, widget core.Das
 	consumed := make(map[string]bool)
 	var lines []string
 	for _, spec := range specs {
-		segments, usedKeys := collectCompactMetricSegments(spec, snap.Metrics, consumed)
+		segments, usedKeys := collectCompactMetricSegments(spec, widget, snap.Metrics, consumed)
 		if len(segments) == 0 {
 			continue
 		}
@@ -599,7 +571,7 @@ func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, widget core.Das
 	return lines, consumed
 }
 
-func collectCompactMetricSegments(spec compactMetricRowSpec, metrics map[string]core.Metric, consumed map[string]bool) ([]string, []string) {
+func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.DashboardWidget, metrics map[string]core.Metric, consumed map[string]bool) ([]string, []string) {
 	maxSegments := spec.maxSegments
 	if maxSegments <= 0 {
 		maxSegments = 4
@@ -611,7 +583,7 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, metrics map[string]
 		if len(segments) >= maxSegments {
 			return
 		}
-		segment := compactMetricSegment(key, met)
+		segment := compactMetricSegment(widget, key, met)
 		if segment == "" {
 			return
 		}
@@ -666,19 +638,25 @@ func stringInSlice(s string, items []string) bool {
 	return false
 }
 
-func compactMetricSegment(key string, met core.Metric) string {
+func compactMetricSegment(widget core.DashboardWidget, key string, met core.Metric) string {
 	value := compactMetricValue(key, met)
 	if value == "" {
 		return ""
 	}
-	label := compactMetricLabel(key)
+	label := compactMetricLabel(widget, key)
 	if label == "" {
 		return value
 	}
 	return label + " " + value
 }
 
-func compactMetricLabel(key string) string {
+func compactMetricLabel(widget core.DashboardWidget, key string) string {
+	if widget.CompactMetricLabelOverrides != nil {
+		if label, ok := widget.CompactMetricLabelOverrides[key]; ok && label != "" {
+			return label
+		}
+	}
+
 	if strings.HasPrefix(key, "org_") && strings.HasSuffix(key, "_seats") {
 		org := strings.TrimSuffix(strings.TrimPrefix(key, "org_"), "_seats")
 		if org != "" {
@@ -692,46 +670,27 @@ func compactMetricLabel(key string) string {
 	}
 
 	labels := map[string]string{
-		"plan_spend":               "plan",
-		"plan_included":            "incl",
-		"plan_bonus":               "bonus",
-		"spend_limit":              "cap",
-		"individual_spend":         "mine",
-		"plan_percent_used":        "used",
-		"plan_total_spend_usd":     "plan",
-		"plan_limit_usd":           "limit",
-		"today_api_cost":           "today",
-		"7d_api_cost":              "7d",
-		"all_time_api_cost":        "all",
-		"5h_block_cost":            "5h",
-		"burn_rate":                "burn",
-		"credit_balance":           "balance",
-		"credits":                  "credits",
-		"monthly_spend":            "month",
-		"usage_five_hour":          "5h",
-		"usage_seven_day":          "7d",
-		"session_input_tokens":     "in",
-		"session_output_tokens":    "out",
-		"session_cached_tokens":    "cached",
-		"session_reasoning_tokens": "reason",
-		"context_window":           "ctx",
-		"messages_today":           "msgs",
-		"sessions_today":           "sess",
-		"tool_calls_today":         "tools",
-		"7d_messages":              "7d msgs",
-		"5h_block_input":           "in5h",
-		"5h_block_output":          "out5h",
-		"7d_input_tokens":          "in7d",
-		"7d_output_tokens":         "out7d",
-		"chat_quota":               "chat",
-		"completions_quota":        "comp",
-		"gh_core_rpm":              "core",
-		"gh_search_rpm":            "search",
-		"gh_graphql_rpm":           "graphql",
-		"rpm":                      "rpm",
-		"tpm":                      "tpm",
-		"rpd":                      "rpd",
-		"tpd":                      "tpd",
+		"plan_spend":           "plan",
+		"plan_included":        "incl",
+		"plan_bonus":           "bonus",
+		"spend_limit":          "cap",
+		"individual_spend":     "mine",
+		"plan_percent_used":    "used",
+		"plan_total_spend_usd": "plan",
+		"plan_limit_usd":       "limit",
+		"credit_balance":       "balance",
+		"credits":              "credits",
+		"monthly_spend":        "month",
+		"context_window":       "ctx",
+		"messages_today":       "msgs",
+		"sessions_today":       "sess",
+		"tool_calls_today":     "tools",
+		"chat_quota":           "chat",
+		"completions_quota":    "comp",
+		"rpm":                  "rpm",
+		"tpm":                  "tpm",
+		"rpd":                  "rpd",
+		"tpd":                  "tpd",
 	}
 	return labels[key]
 }
@@ -846,7 +805,7 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, widget core.Dashboa
 			continue
 		}
 
-		label := prettifyKey(key)
+		label := metricLabel(widget, key)
 		if len(label) > maxLabel {
 			label = label[:maxLabel-1] + "…"
 		}
@@ -1129,12 +1088,12 @@ func resetLabelForKey(snap core.QuotaSnapshot, widget core.DashboardWidget, key 
 		return label
 	}
 	if met, ok := snap.Metrics[trimmed]; ok && met.Window != "" {
-		return prettifyKey(trimmed)
+		return metricLabel(widget, trimmed)
 	}
 	if met, ok := snap.Metrics[key]; ok && met.Window != "" {
-		return prettifyKey(key)
+		return metricLabel(widget, key)
 	}
-	return prettifyKey(trimmed)
+	return metricLabel(widget, trimmed)
 }
 
 func compactModelResetLabel(key string) string {

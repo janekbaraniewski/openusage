@@ -379,7 +379,7 @@ func extractUsageGauges(snap core.QuotaSnapshot, color lipgloss.Color) []usageGa
 
 		result = append(result, usageGaugeEntry{
 			provider: snap.AccountID,
-			name:     gaugeLabel(key, m.Window),
+			name:     gaugeLabel(dashboardWidget(snap.ProviderID), key, m.Window),
 			pctUsed:  pctUsed,
 			window:   window,
 			color:    color,
