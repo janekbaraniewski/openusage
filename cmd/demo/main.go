@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
@@ -101,10 +102,10 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		Message: "Codex CLI session data",
 	}
 
-	// ── copilot-auto ────────────────────────────────────────────
-	snaps["copilot-auto"] = core.QuotaSnapshot{
+	// ── copilot ─────────────────────────────────────────────────
+	snaps["copilot"] = core.QuotaSnapshot{
 		ProviderID: "copilot",
-		AccountID:  "copilot-auto",
+		AccountID:  "copilot",
 		Timestamp:  now,
 		Status:     core.StatusOK,
 		Metrics: map[string]core.Metric{
@@ -173,7 +174,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		Message: "Team — $338 / $3600 team spend ($3262 remaining)",
 	}
 
-	// ── gemini-cli-auto ─────────────────────────────────────────
+	// ── gemini-cli ──────────────────────────────────────────────
 	// Gemini CLI emits metric keys as "<modelID>_<tokenType>" (no rate_limit_ prefix)
 	// with Unit = tokenType (e.g. "RPM") and Limit/Remaining in percentages.
 	geminiModels := []string{
@@ -210,9 +211,9 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		Window: "all-time",
 	}
 
-	snaps["gemini-cli-auto"] = core.QuotaSnapshot{
+	snaps["gemini-cli"] = core.QuotaSnapshot{
 		ProviderID: "gemini_cli",
-		AccountID:  "gemini-cli-auto",
+		AccountID:  "gemini-cli",
 		Timestamp:  now,
 		Status:     core.StatusOK,
 		Metrics:    geminiMetrics,
@@ -225,5 +226,136 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		Message: "Gemini CLI (dev@acme-corp.io)",
 	}
 
+	addMissingDemoSnapshots(snaps, now)
+
 	return snaps
+}
+
+func addMissingDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time) {
+	present := make(map[string]bool, len(snaps))
+	for _, snap := range snaps {
+		present[snap.ProviderID] = true
+	}
+
+	for _, provider := range providers.AllProviders() {
+		providerID := provider.ID()
+		if present[providerID] {
+			continue
+		}
+		accountID := demoAccountID(providerID)
+		snaps[accountID] = demoDefaultSnapshot(providerID, accountID, now)
+		present[providerID] = true
+	}
+}
+
+func demoAccountID(providerID string) string {
+	switch providerID {
+	case "openai":
+		return "openai"
+	case "anthropic":
+		return "anthropic"
+	case "openrouter":
+		return "openrouter"
+	case "groq":
+		return "groq"
+	case "mistral":
+		return "mistral"
+	case "deepseek":
+		return "deepseek"
+	case "xai":
+		return "xai"
+	case "gemini_api":
+		return "gemini-api"
+	default:
+		return providerID
+	}
+}
+
+func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.QuotaSnapshot {
+	snap := core.QuotaSnapshot{
+		ProviderID: providerID,
+		AccountID:  accountID,
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics:    make(map[string]core.Metric),
+		Resets:     make(map[string]time.Time),
+		Raw:        make(map[string]string),
+		Message:    "Demo data",
+	}
+
+	switch providerID {
+	case "openai":
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(10000), Remaining: ptr(7900), Unit: "requests", Window: "1m"}
+		snap.Metrics["tpm"] = core.Metric{Limit: ptr(2000000), Remaining: ptr(1720000), Unit: "tokens", Window: "1m"}
+		snap.Resets["rpm"] = now.Add(34 * time.Second)
+		snap.Resets["tpm"] = now.Add(34 * time.Second)
+		snap.Message = "OpenAI rate limits healthy"
+	case "anthropic":
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(4000), Remaining: ptr(3550), Unit: "requests", Window: "1m"}
+		snap.Metrics["tpm"] = core.Metric{Limit: ptr(400000), Remaining: ptr(312000), Unit: "tokens", Window: "1m"}
+		snap.Resets["rpm"] = now.Add(22 * time.Second)
+		snap.Resets["tpm"] = now.Add(22 * time.Second)
+		snap.Message = "Anthropic limits and token budget available"
+	case "openrouter":
+		snap.Metrics["credit_balance"] = core.Metric{
+			Limit: ptr(250.00), Remaining: ptr(193.74), Used: ptr(56.26), Unit: "USD", Window: "current",
+		}
+		snap.Metrics["usage_daily"] = core.Metric{Used: ptr(8.92), Unit: "USD", Window: "1d"}
+		snap.Metrics["usage_weekly"] = core.Metric{Used: ptr(41.67), Unit: "USD", Window: "7d"}
+		snap.Metrics["burn_rate"] = core.Metric{Used: ptr(1.87), Unit: "USD/h", Window: "current"}
+		snap.Raw["activity_models"] = "9"
+		snap.Raw["is_management_key"] = "false"
+		snap.Message = "$193.74 credits remaining"
+	case "groq":
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(30000), Remaining: ptr(29240), Unit: "requests", Window: "1m"}
+		snap.Metrics["tpm"] = core.Metric{Limit: ptr(900000), Remaining: ptr(812000), Unit: "tokens", Window: "1m"}
+		snap.Metrics["rpd"] = core.Metric{Limit: ptr(500000), Remaining: ptr(486500), Unit: "requests", Window: "1d"}
+		snap.Metrics["tpd"] = core.Metric{Limit: ptr(9000000), Remaining: ptr(8400000), Unit: "tokens", Window: "1d"}
+		snap.Resets["rpm"] = now.Add(41 * time.Second)
+		snap.Resets["rpd"] = now.Add(13*time.Hour + 18*time.Minute)
+		snap.Message = "Remaining: 29240/30000 RPM, 486500/500000 RPD"
+	case "mistral":
+		snap.Metrics["monthly_budget"] = core.Metric{Limit: ptr(100.0), Unit: "EUR", Window: "1mo"}
+		snap.Metrics["monthly_spend"] = core.Metric{
+			Limit: ptr(100.0), Remaining: ptr(75.2), Used: ptr(24.8), Unit: "EUR", Window: "1mo",
+		}
+		snap.Metrics["credit_balance"] = core.Metric{Remaining: ptr(75.2), Unit: "EUR", Window: "current"}
+		snap.Metrics["monthly_input_tokens"] = core.Metric{Used: ptr(1840000), Unit: "tokens", Window: "1mo"}
+		snap.Metrics["monthly_output_tokens"] = core.Metric{Used: ptr(293000), Unit: "tokens", Window: "1mo"}
+		snap.Raw["plan"] = "La Plateforme"
+		snap.Message = "Mistral monthly spend: 24.8 EUR"
+	case "deepseek":
+		snap.Metrics["total_balance"] = core.Metric{Remaining: ptr(428.90), Unit: "CNY", Window: "current"}
+		snap.Metrics["granted_balance"] = core.Metric{Remaining: ptr(100.00), Unit: "CNY", Window: "current"}
+		snap.Metrics["topped_up_balance"] = core.Metric{Remaining: ptr(328.90), Unit: "CNY", Window: "current"}
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(6000), Remaining: ptr(5840), Unit: "requests", Window: "1m"}
+		snap.Metrics["tpm"] = core.Metric{Limit: ptr(600000), Remaining: ptr(552000), Unit: "tokens", Window: "1m"}
+		snap.Resets["rpm"] = now.Add(27 * time.Second)
+		snap.Resets["tpm"] = now.Add(27 * time.Second)
+		snap.Raw["currency"] = "CNY"
+		snap.Message = "Balance: 428.90 CNY"
+	case "xai":
+		snap.Metrics["credits"] = core.Metric{
+			Limit: ptr(500.00), Remaining: ptr(376.23), Used: ptr(123.77), Unit: "USD", Window: "current",
+		}
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(6000), Remaining: ptr(5640), Unit: "requests", Window: "1m"}
+		snap.Metrics["tpm"] = core.Metric{Limit: ptr(900000), Remaining: ptr(771000), Unit: "tokens", Window: "1m"}
+		snap.Resets["rpm"] = now.Add(39 * time.Second)
+		snap.Resets["tpm"] = now.Add(39 * time.Second)
+		snap.Raw["api_key_name"] = "prod-key"
+		snap.Message = "$376.23 remaining"
+	case "gemini_api":
+		snap.Metrics["available_models"] = core.Metric{Used: ptr(22), Unit: "models", Window: "current"}
+		snap.Metrics["input_token_limit"] = core.Metric{Limit: ptr(1048576), Unit: "tokens", Window: "per-request"}
+		snap.Metrics["output_token_limit"] = core.Metric{Limit: ptr(8192), Unit: "tokens", Window: "per-request"}
+		snap.Metrics["rpm"] = core.Metric{Limit: ptr(60), Remaining: ptr(54), Unit: "requests", Window: "1m"}
+		snap.Resets["rpm"] = now.Add(43 * time.Second)
+		snap.Raw["models_sample"] = "gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash"
+		snap.Raw["total_models"] = "22"
+		snap.Message = "auth OK; 22 models available"
+	default:
+		snap.Message = "Demo data available"
+	}
+
+	return snap
 }
