@@ -19,7 +19,7 @@ const (
 	TabDyn1 DetailTab = 1 // first dynamic group
 )
 
-func DetailTabs(snap core.QuotaSnapshot) []string {
+func DetailTabs(snap core.UsageSnapshot) []string {
 	tabs := []string{"All"}
 	if len(snap.Metrics) > 0 {
 		groups := groupMetrics(snap.Metrics, dashboardWidget(snap.ProviderID), detailWidget(snap.ProviderID))
@@ -36,7 +36,7 @@ func DetailTabs(snap core.QuotaSnapshot) []string {
 	return tabs
 }
 
-func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh float64, activeTab int) string {
+func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh float64, activeTab int) string {
 	var sb strings.Builder
 	widget := dashboardWidget(snap.ProviderID)
 	details := detailWidget(snap.ProviderID)
@@ -64,6 +64,7 @@ func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh 
 	showAll := tabName == "All"
 	showTimers := tabName == "Timers" || showAll
 	showInfo := tabName == "Info" || showAll
+	meta := snapshotMetaEntries(snap)
 
 	if len(snap.Metrics) > 0 {
 		groups := groupMetrics(snap.Metrics, widget, details)
@@ -79,11 +80,11 @@ func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh 
 		renderTimersSection(&sb, snap.Resets, widget, w)
 	}
 
-	if showInfo && len(snap.Raw) > 0 {
+	if showInfo && len(meta) > 0 {
 		sb.WriteString("\n")
-		count := len(snap.Raw)
+		count := len(meta)
 		renderDetailSectionHeader(&sb, fmt.Sprintf("› Details (%d entries)", count), w)
-		renderRawData(&sb, snap.Raw, widget, w)
+		renderRawData(&sb, meta, widget, w)
 	}
 
 	age := time.Since(snap.Timestamp)
@@ -125,7 +126,7 @@ func renderTabBar(sb *strings.Builder, tabs []string, active int, w int) {
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface2).Render(strings.Repeat("─", sepLen)) + "\n")
 }
 
-func renderDetailHeader(sb *strings.Builder, snap core.QuotaSnapshot, w int) {
+func renderDetailHeader(sb *strings.Builder, snap core.UsageSnapshot, w int) {
 	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
 
 	innerW := w - 6 // card border + padding eats ~6 chars
@@ -166,44 +167,44 @@ func renderDetailHeader(sb *strings.Builder, snap core.QuotaSnapshot, w int) {
 
 	var metaTags []string
 
-	if email, ok := snap.Raw["account_email"]; ok && email != "" {
+	if email := snapshotMeta(snap, "account_email"); email != "" {
 		metaTags = append(metaTags, MetaTagHighlight("✉", email))
 	}
 
-	if planName, ok := snap.Raw["plan_name"]; ok && planName != "" {
+	if planName := snapshotMeta(snap, "plan_name"); planName != "" {
 		metaTags = append(metaTags, MetaTag("◆", planName))
 	}
-	if planType, ok := snap.Raw["plan_type"]; ok && planType != "" {
+	if planType := snapshotMeta(snap, "plan_type"); planType != "" {
 		metaTags = append(metaTags, MetaTag("◇", planType))
 	}
-	if membership, ok := snap.Raw["membership_type"]; ok && membership != "" {
+	if membership := snapshotMeta(snap, "membership_type"); membership != "" {
 		metaTags = append(metaTags, MetaTag("👤", membership))
 	}
-	if team, ok := snap.Raw["team_membership"]; ok && team != "" {
+	if team := snapshotMeta(snap, "team_membership"); team != "" {
 		metaTags = append(metaTags, MetaTag("🏢", team))
 	}
-	if org, ok := snap.Raw["organization_name"]; ok && org != "" {
+	if org := snapshotMeta(snap, "organization_name"); org != "" {
 		metaTags = append(metaTags, MetaTag("🏢", org))
 	}
 
-	if model, ok := snap.Raw["active_model"]; ok && model != "" {
+	if model := snapshotMeta(snap, "active_model"); model != "" {
 		metaTags = append(metaTags, MetaTag("⬡", model))
 	}
-	if cliVer, ok := snap.Raw["cli_version"]; ok && cliVer != "" {
+	if cliVer := snapshotMeta(snap, "cli_version"); cliVer != "" {
 		metaTags = append(metaTags, MetaTag("⌘", "v"+cliVer))
 	}
 
-	if planPrice, ok := snap.Raw["plan_price"]; ok && planPrice != "" {
+	if planPrice := snapshotMeta(snap, "plan_price"); planPrice != "" {
 		metaTags = append(metaTags, MetaTag("$", planPrice))
 	}
-	if credits, ok := snap.Raw["credits"]; ok && credits != "" {
+	if credits := snapshotMeta(snap, "credits"); credits != "" {
 		metaTags = append(metaTags, MetaTag("💳", credits))
 	}
 
-	if oauth, ok := snap.Raw["oauth_status"]; ok && oauth != "" {
+	if oauth := snapshotMeta(snap, "oauth_status"); oauth != "" {
 		metaTags = append(metaTags, MetaTag("🔒", oauth))
 	}
-	if sub, ok := snap.Raw["subscription_status"]; ok && sub != "" {
+	if sub := snapshotMeta(snap, "subscription_status"); sub != "" {
 		metaTags = append(metaTags, MetaTag("✓", sub))
 	}
 
@@ -345,6 +346,7 @@ func classifyMetric(key string, m core.Metric, widget core.DashboardWidget, deta
 		if label == "" {
 			label = metricLabel(widget, key)
 		}
+		label = normalizeWidgetLabel(label)
 		order = override.Order
 		if order <= 0 {
 			order = groupOrder(details, override.Group, 4)
@@ -352,112 +354,33 @@ func classifyMetric(key string, m core.Metric, widget core.DashboardWidget, deta
 		return override.Group, label, order
 	}
 
-	lk := strings.ToLower(key)
-
-	switch {
-
-	case key == "rpm" || key == "tpm" || key == "rpd" || key == "tpd":
-		return "Usage", strings.ToUpper(key), groupOrder(details, "Usage", 1)
-	case strings.HasPrefix(key, "rate_limit_"):
-		return "Usage", metricLabel(widget, strings.TrimPrefix(key, "rate_limit_")), groupOrder(details, "Usage", 1)
-	case key == "rpm_headers" || key == "tpm_headers":
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-	case key == "gh_api_rpm" || key == "copilot_chat":
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-
-	case key == "plan_percent_used":
-		return "Usage", "Plan Used", groupOrder(details, "Usage", 1)
-
-	case key == "spend_limit":
-		return "Usage", "Spend Limit", groupOrder(details, "Usage", 1)
-
-	case key == "plan_spend":
-		return "Usage", "Plan Spend", groupOrder(details, "Usage", 1)
-
-	case key == "monthly_spend" && m.Limit != nil:
-		return "Usage", "Monthly Spend", groupOrder(details, "Usage", 1)
-	case key == "monthly_budget" && m.Limit != nil:
-		return "Usage", "Monthly Budget", groupOrder(details, "Usage", 1)
-
-	case (key == "credits" || key == "credit_balance") && m.Limit != nil:
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-
-	case key == "context_window":
-		return "Usage", "Context Window", groupOrder(details, "Usage", 1)
-
-	// Time-bucketed usage (daily, weekly, monthly)
-	case key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly":
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-	case key == "limit_remaining":
-		return "Usage", "Limit Remaining", groupOrder(details, "Usage", 1)
-
-	case m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", prettifyQuotaKey(key, widget), groupOrder(details, "Usage", 1)
-
-	case m.Unit == "%" && (m.Used != nil || m.Remaining != nil):
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-
-	case m.Used != nil && m.Limit != nil &&
-		!strings.Contains(lk, "token") && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", metricLabel(widget, key), groupOrder(details, "Usage", 1)
-
-	case strings.HasPrefix(key, "model_") &&
-		!strings.HasSuffix(key, "_input_tokens") &&
-		!strings.HasSuffix(key, "_output_tokens"):
-		return "Spending", strings.TrimPrefix(key, "model_"), groupOrder(details, "Spending", 2)
-
-	case key == "plan_included" || key == "plan_bonus" ||
-		key == "plan_total_spend_usd" || key == "plan_limit_usd":
-		return "Spending", metricLabel(widget, strings.TrimPrefix(key, "plan_")), groupOrder(details, "Spending", 2)
-
-	case key == "individual_spend":
-		return "Spending", "Individual Spend", groupOrder(details, "Spending", 2)
-
-	case strings.Contains(lk, "cost") || strings.Contains(lk, "burn_rate"):
-		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
-
-	case key == "credits" || key == "credit_balance":
-		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
-
-	case key == "monthly_spend" || key == "monthly_budget":
-		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
-
-	case strings.HasSuffix(key, "_balance"):
-		return "Spending", metricLabel(widget, key), groupOrder(details, "Spending", 2)
-
-	case strings.HasPrefix(key, "input_tokens_") || strings.HasPrefix(key, "output_tokens_"):
-		return "Tokens", key, groupOrder(details, "Tokens", 3)
-
-	case strings.HasPrefix(key, "model_") &&
-		(strings.HasSuffix(key, "_input_tokens") || strings.HasSuffix(key, "_output_tokens")):
-		return "Tokens", key, groupOrder(details, "Tokens", 3)
-
-	// Per-model reasoning and cached tokens
-	case strings.HasPrefix(key, "model_") &&
-		(strings.HasSuffix(key, "_reasoning_tokens") || strings.HasSuffix(key, "_cached_tokens") || strings.HasSuffix(key, "_image_tokens")):
-		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
-
-	case strings.HasPrefix(key, "session_"):
-		return "Tokens", metricLabel(widget, strings.TrimPrefix(key, "session_")), groupOrder(details, "Tokens", 3)
-
-	// Additional today metrics
-	case strings.HasPrefix(key, "today_") && strings.Contains(lk, "token"):
-		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
-
-	case strings.Contains(lk, "token"):
-		return "Tokens", metricLabel(widget, key), groupOrder(details, "Tokens", 3)
-
-	case strings.HasPrefix(key, "tab_") || strings.HasPrefix(key, "composer_"):
-		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
-
-	case strings.Contains(lk, "message") || strings.Contains(lk, "session") ||
-		strings.Contains(lk, "conversation") || strings.Contains(lk, "tool_call") ||
-		strings.Contains(lk, "request"):
-		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
-
+	group = string(core.InferMetricGroup(key, m))
+	label = metricLabel(widget, key)
+	switch group {
+	case string(core.MetricGroupUsage):
+		if strings.HasPrefix(key, "rate_limit_") {
+			label = metricLabel(widget, strings.TrimPrefix(key, "rate_limit_"))
+		} else if m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD" {
+			label = prettifyUsageKey(key, widget)
+		}
+		order = groupOrder(details, group, 1)
+	case string(core.MetricGroupSpending):
+		if strings.HasPrefix(key, "model_") &&
+			!strings.HasSuffix(key, "_input_tokens") &&
+			!strings.HasSuffix(key, "_output_tokens") {
+			label = strings.TrimPrefix(key, "model_")
+		}
+		order = groupOrder(details, group, 2)
+	case string(core.MetricGroupTokens):
+		if strings.HasPrefix(key, "session_") {
+			label = metricLabel(widget, strings.TrimPrefix(key, "session_"))
+		}
+		order = groupOrder(details, group, 3)
 	default:
-		return "Activity", metricLabel(widget, key), groupOrder(details, "Activity", 4)
+		order = groupOrder(details, string(core.MetricGroupActivity), 4)
+		group = string(core.MetricGroupActivity)
 	}
+	return group, label, order
 }
 
 func groupOrder(details core.DetailWidget, group string, fallback int) int {
@@ -470,13 +393,35 @@ func groupOrder(details core.DetailWidget, group string, fallback int) int {
 func metricLabel(widget core.DashboardWidget, key string) string {
 	if widget.MetricLabelOverrides != nil {
 		if label, ok := widget.MetricLabelOverrides[key]; ok && label != "" {
-			return label
+			return normalizeWidgetLabel(label)
 		}
 	}
-	return prettifyKey(key)
+	return normalizeWidgetLabel(prettifyKey(key))
 }
 
-func prettifyQuotaKey(key string, widget core.DashboardWidget) string {
+func normalizeWidgetLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return label
+	}
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"5h Block", "Usage 5h"},
+		{"5-Hour Usage", "Usage 5h"},
+		{"5h Usage", "Usage 5h"},
+		{"7-Day Usage", "Usage 7d"},
+		{"7d Usage", "Usage 7d"},
+	}
+	for _, repl := range replacements {
+		label = strings.ReplaceAll(label, repl.old, repl.new)
+	}
+	return label
+}
+
+func prettifyUsageKey(key string, widget core.DashboardWidget) string {
 	lastUnderscore := strings.LastIndex(key, "_")
 	if lastUnderscore > 0 && lastUnderscore < len(key)-1 {
 		suffix := key[lastUnderscore+1:]
@@ -539,13 +484,13 @@ func renderListSection(sb *strings.Builder, entries []metricEntry, w int) {
 func renderUsageSection(sb *strings.Builder, entries []metricEntry, w int, warnThresh, critThresh float64) {
 	labelW := sectionLabelWidth(w)
 
-	var quotaEntries []metricEntry
+	var usageEntries []metricEntry
 	var gaugeEntries []metricEntry
 
 	for _, e := range entries {
 		m := e.metric
 		if m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD" {
-			quotaEntries = append(quotaEntries, e)
+			usageEntries = append(usageEntries, e)
 		} else {
 			gaugeEntries = append(gaugeEntries, e)
 		}
@@ -555,11 +500,11 @@ func renderUsageSection(sb *strings.Builder, entries []metricEntry, w int, warnT
 		renderGaugeEntry(sb, entry, labelW, w, warnThresh, critThresh)
 	}
 
-	if len(quotaEntries) > 0 {
+	if len(usageEntries) > 0 {
 		if len(gaugeEntries) > 0 {
 			sb.WriteString("\n")
 		}
-		renderQuotaTable(sb, quotaEntries, w, warnThresh, critThresh)
+		renderUsageTable(sb, usageEntries, w, warnThresh, critThresh)
 	}
 }
 
@@ -812,19 +757,11 @@ func renderGaugeEntry(sb *strings.Builder, entry metricEntry, labelW, w int, war
 }
 
 func isModelCostKey(key string) bool {
-	return strings.HasPrefix(key, "model_") &&
-		(strings.HasSuffix(key, "_cost") || strings.HasSuffix(key, "_cost_usd"))
+	return core.IsModelCostMetricKey(key)
 }
 
 func isPerModelTokenKey(key string) bool {
-	if strings.HasPrefix(key, "input_tokens_") || strings.HasPrefix(key, "output_tokens_") {
-		return true
-	}
-	if strings.HasPrefix(key, "model_") &&
-		(strings.HasSuffix(key, "_input_tokens") || strings.HasSuffix(key, "_output_tokens")) {
-		return true
-	}
-	return false
+	return core.IsPerModelTokenMetricKey(key)
 }
 
 func formatMetricValue(m core.Metric) string {
@@ -1012,7 +949,7 @@ func renderTokenUsageTable(sb *strings.Builder, entries []metricEntry, w int) {
 	}
 }
 
-func renderQuotaTable(sb *strings.Builder, entries []metricEntry, w int, warnThresh, critThresh float64) {
+func renderUsageTable(sb *strings.Builder, entries []metricEntry, w int, warnThresh, critThresh float64) {
 	if len(entries) == 0 {
 		return
 	}

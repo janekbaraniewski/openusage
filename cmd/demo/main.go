@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -21,21 +22,31 @@ func ptr(v float64) *float64 { return &v }
 func main() {
 	log.SetOutput(io.Discard)
 
+	interval := 5 * time.Second
+	accounts := buildDemoAccounts()
+	engine := core.NewEngine(interval)
+	engine.SetAccounts(accounts)
+	for _, provider := range buildDemoProviders(providers.AllProviders()) {
+		engine.RegisterProvider(provider)
+	}
+
 	model := tui.NewModel(
 		0.20,
 		0.05,
 		false,
 		config.DashboardConfig{},
-		nil,
+		accounts,
 	)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	model.SetOnAddAccount(engine.AddAccount)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
-	go func() {
-		for {
-			p.Send(tui.SnapshotsMsg(buildDemoSnapshots()))
-			time.Sleep(5 * time.Second)
-		}
-	}()
+	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
+		p.Send(tui.SnapshotsMsg(snaps))
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go engine.Run(ctx)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
@@ -43,13 +54,96 @@ func main() {
 	}
 }
 
-func buildDemoSnapshots() map[string]core.QuotaSnapshot {
+type demoProvider struct {
+	base core.UsageProvider
+}
+
+func buildDemoProviders(realProviders []core.UsageProvider) []core.UsageProvider {
+	out := make([]core.UsageProvider, 0, len(realProviders))
+	for _, provider := range realProviders {
+		out = append(out, &demoProvider{base: provider})
+	}
+	return out
+}
+
+func buildDemoAccounts() []core.AccountConfig {
+	providerList := providers.AllProviders()
+	accounts := make([]core.AccountConfig, 0, len(providerList))
+	seenAccountIDs := make(map[string]bool, len(providerList))
+	for _, provider := range providerList {
+		spec := provider.Spec()
+		accountID := demoAccountID(provider.ID())
+		if accountID == "" {
+			accountID = spec.Auth.DefaultAccountID
+		}
+		if accountID == "" {
+			accountID = provider.ID()
+		}
+		if seenAccountIDs[accountID] {
+			accountID = provider.ID()
+		}
+
+		accounts = append(accounts, core.AccountConfig{
+			ID:        accountID,
+			Provider:  provider.ID(),
+			Auth:      string(spec.Auth.Type),
+			APIKeyEnv: spec.Auth.APIKeyEnv,
+		})
+		seenAccountIDs[accountID] = true
+	}
+	return accounts
+}
+
+func (p *demoProvider) ID() string {
+	return p.base.ID()
+}
+
+func (p *demoProvider) Describe() core.ProviderInfo {
+	return p.base.Describe()
+}
+
+func (p *demoProvider) Spec() core.ProviderSpec {
+	return p.base.Spec()
+}
+
+func (p *demoProvider) DashboardWidget() core.DashboardWidget {
+	return p.base.DashboardWidget()
+}
+
+func (p *demoProvider) DetailWidget() core.DetailWidget {
+	return p.base.DetailWidget()
+}
+
+func (p *demoProvider) Fetch(_ context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	snaps := buildDemoSnapshots()
+	if snap, ok := snaps[acct.ID]; ok && snap.ProviderID == p.base.ID() {
+		return forceAccountAndProvider(snap, acct.ID, p.base.ID()), nil
+	}
+
+	for _, snap := range snaps {
+		if snap.ProviderID == p.base.ID() {
+			return forceAccountAndProvider(snap, acct.ID, p.base.ID()), nil
+		}
+	}
+
+	now := time.Now()
+	snap := demoDefaultSnapshot(p.base.ID(), acct.ID, now)
+	return forceAccountAndProvider(snap, acct.ID, p.base.ID()), nil
+}
+
+func forceAccountAndProvider(snap core.UsageSnapshot, accountID, providerID string) core.UsageSnapshot {
+	snap.AccountID = accountID
+	snap.ProviderID = providerID
+	return snap
+}
+
+func buildDemoSnapshots() map[string]core.UsageSnapshot {
 	now := time.Now()
 	rng := rand.New(rand.NewSource(now.UnixNano()))
-	snaps := make(map[string]core.QuotaSnapshot)
+	snaps := make(map[string]core.UsageSnapshot)
 
 	// claude-code
-	snaps["claude-code"] = core.QuotaSnapshot{
+	snaps["claude-code"] = core.UsageSnapshot{
 		ProviderID: "claude_code",
 		AccountID:  "claude-code",
 		Timestamp:  now,
@@ -138,6 +232,27 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			},
 			"client_desktop_app_total_tokens": {Used: ptr(78130), Unit: "tokens", Window: "7d"},
 			"client_desktop_app_sessions":     {Used: ptr(11), Unit: "sessions", Window: "7d"},
+			"client_janekbaraniewski_total_tokens": {
+				Used: ptr(97200), Unit: "tokens", Window: "7d",
+			},
+			"client_janekbaraniewski_sessions": {Used: ptr(8), Unit: "sessions", Window: "7d"},
+			"client_perf_trading_s_total_tokens": {
+				Used: ptr(73100), Unit: "tokens", Window: "7d",
+			},
+			"client_perf_trading_s_sessions": {Used: ptr(5), Unit: "sessions", Window: "7d"},
+			"client_agentusage_total_tokens": {
+				Used: ptr(55700), Unit: "tokens", Window: "7d",
+			},
+			"client_agentusage_sessions": {Used: ptr(10), Unit: "sessions", Window: "7d"},
+			"client_kubesreai_total_tokens": {
+				Used: ptr(35300), Unit: "tokens", Window: "7d",
+			},
+			"client_kubesreai_sessions": {Used: ptr(3), Unit: "sessions", Window: "7d"},
+			"tool_read_calls":           {Used: ptr(1420), Unit: "calls", Window: "7d"},
+			"tool_bash_calls":           {Used: ptr(870), Unit: "calls", Window: "7d"},
+			"tool_edit_calls":           {Used: ptr(560), Unit: "calls", Window: "7d"},
+			"tool_webfetch_calls":       {Used: ptr(330), Unit: "calls", Window: "7d"},
+			"tool_websearch_calls":      {Used: ptr(96), Unit: "calls", Window: "7d"},
 		},
 		Resets: map[string]time.Time{
 			"billing_block":   now.Add(3*time.Hour + 12*time.Minute),
@@ -149,23 +264,31 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"model_usage":        "claude-sonnet-4-5: 62%, claude-opus-4-6: 30%, claude-haiku-4-1: 8%",
 			"model_usage_window": "7d",
 			"model_count":        "3",
+			"block_start":        now.Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+			"block_end":          now.Add(3 * time.Hour).UTC().Format(time.RFC3339),
 			"cache_usage":        "read 62k, write 13k",
 			"tool_usage":         "web_fetch: 119, web_search: 39",
-			"tool_count":         "2",
-			"client_usage":       "CLI 78%, Desktop App 22%",
+			"tool_count":         "31",
+			"client_usage":       "CLI 27%, Perf Trading S 21%, Agentusage 15%, Kubesreai 14%, Janekbaraniewski 23%",
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"cost":                         demoSeries(now, 44, 61, 53, 72, 84, 89, 109),
-			"requests":                     demoSeries(now, 288, 301, 336, 354, 382, 415, 441),
-			"tokens_client_cli":            demoSeries(now, 21300, 24700, 25900, 28100, 29400, 31800, 34600),
-			"tokens_client_desktop_app":    demoSeries(now, 6100, 7200, 8000, 8700, 8900, 9800, 11100),
-			"tokens_model_claude_sonnet_4": demoSeries(now, 12700, 13800, 15100, 16400, 17300, 18200, 19500),
+			"cost":                           demoSeries(now, 44, 61, 53, 72, 84, 89, 109),
+			"requests":                       demoSeries(now, 288, 301, 336, 354, 382, 415, 441),
+			"tokens_client_cli":              demoSeries(now, 21300, 24700, 25900, 28100, 29400, 31800, 34600),
+			"tokens_client_desktop_app":      demoSeries(now, 6100, 7200, 8000, 8700, 8900, 9800, 11100),
+			"tokens_client_janekbaraniewski": demoSeries(now, 10200, 11400, 12600, 13200, 14100, 15200, 16500),
+			"tokens_client_perf_trading_s":   demoSeries(now, 7600, 8100, 8700, 9300, 10100, 10800, 11700),
+			"tokens_client_agentusage":       demoSeries(now, 5200, 6100, 6800, 7200, 7900, 8600, 9400),
+			"tokens_client_kubesreai":        demoSeries(now, 3600, 4000, 4300, 4700, 5100, 5600, 6000),
+			"usage_model_claude-opus-4-6":    demoSeries(now, 15, 17, 19, 20, 22, 24, 26),
+			"usage_model_claude-sonnet-4-5":  demoSeries(now, 23, 26, 29, 31, 33, 35, 37),
+			"tokens_model_claude_sonnet_4":   demoSeries(now, 12700, 13800, 15100, 16400, 17300, 18200, 19500),
 		},
 		Message: "~$246.47 today · $4.80/h",
 	}
 
 	// codex-cli
-	snaps["codex-cli"] = core.QuotaSnapshot{
+	snaps["codex-cli"] = core.UsageSnapshot{
 		ProviderID: "codex",
 		AccountID:  "codex-cli",
 		Timestamp:  now,
@@ -188,7 +311,55 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"model_gpt_5_3_codex_output_tokens": {
 				Used: ptr(4500), Unit: "tokens", Window: "session",
 			},
-			"model_gpt_5_3_codex_cost_usd":     {Used: ptr(3.40), Unit: "USD", Window: "session"},
+			"model_gpt_5_3_codex_cost_usd": {Used: ptr(3.40), Unit: "USD", Window: "session"},
+			"model_gpt_5_1_codex_max_input_tokens": {
+				Used: ptr(371100), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_max_output_tokens": {
+				Used: ptr(111500), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_max_cached_tokens": {
+				Used: ptr(117700), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_max_reasoning_tokens": {
+				Used: ptr(37100), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_max_total_tokens": {
+				Used: ptr(637400), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_mini_input_tokens": {
+				Used: ptr(119500), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_mini_output_tokens": {
+				Used: ptr(18500), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_mini_cached_tokens": {
+				Used: ptr(119100), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_mini_reasoning_tokens": {
+				Used: ptr(59200), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_1_codex_mini_total_tokens": {
+				Used: ptr(317300), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_input_tokens": {
+				Used: ptr(127000), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_output_tokens": {
+				Used: ptr(17400), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_cached_tokens": {
+				Used: ptr(17400), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_reasoning_tokens": {
+				Used: ptr(180200), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_mini_input_tokens": {
+				Used: ptr(59200), Unit: "tokens", Window: "session",
+			},
+			"model_gpt_5_2_codex_mini_output_tokens": {
+				Used: ptr(12700), Unit: "tokens", Window: "session",
+			},
 			"client_cli_input_tokens":          {Used: ptr(59800), Unit: "tokens", Window: "session"},
 			"client_cli_output_tokens":         {Used: ptr(16900), Unit: "tokens", Window: "session"},
 			"client_cli_cached_tokens":         {Used: ptr(24400), Unit: "tokens", Window: "session"},
@@ -200,6 +371,12 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"client_desktop_app_output_tokens": {Used: ptr(5200), Unit: "tokens", Window: "session"},
 			"client_desktop_app_cached_tokens": {Used: ptr(2900), Unit: "tokens", Window: "session"},
 			"client_desktop_app_sessions":      {Used: ptr(2), Unit: "sessions", Window: "today"},
+			"client_ide_total_tokens":          {Used: ptr(119500), Unit: "tokens", Window: "session"},
+			"client_ide_input_tokens":          {Used: ptr(79900), Unit: "tokens", Window: "session"},
+			"client_ide_output_tokens":         {Used: ptr(26700), Unit: "tokens", Window: "session"},
+			"client_ide_cached_tokens":         {Used: ptr(10400), Unit: "tokens", Window: "session"},
+			"client_ide_reasoning_tokens":      {Used: ptr(25600), Unit: "tokens", Window: "session"},
+			"client_ide_sessions":              {Used: ptr(39), Unit: "sessions", Window: "today"},
 		},
 		Resets: map[string]time.Time{
 			"rate_limit_primary":             now.Add(41 * time.Minute),
@@ -208,20 +385,19 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		},
 		Raw: map[string]string{
 			"account_email": "dev@acme-corp.io",
-			"plan_type":     "team",
-			"cli_version":   "0.104.0",
-			"model_usage":   "gpt-5-codex: 81%, gpt-5.3-codex: 19%",
-			"client_usage":  "CLI 83%, Desktop App 17%",
+			"model_usage":   "gpt-5.1-codex-max: 55%, gpt-5.1-codex-mini: 31%, gpt-5.2-codex: 11%, gpt-5.2-codex-mini: 3%",
+			"client_usage":  "Desktop App 70%, CLI 25%, IDE 5%",
 		},
 		DailySeries: map[string][]core.TimePoint{
 			"tokens_client_cli":         demoSeries(now, 6200, 8100, 9400, 10800, 12500, 14800, 17300),
 			"tokens_client_desktop_app": demoSeries(now, 1200, 1900, 2200, 2600, 2900, 3300, 3600),
+			"tokens_client_ide":         demoSeries(now, 5400, 6700, 7900, 9200, 10100, 11300, 12500),
 		},
 		Message: "Primary limit nearly exhausted; code review still available",
 	}
 
 	// copilot
-	snaps["copilot"] = core.QuotaSnapshot{
+	snaps["copilot"] = core.UsageSnapshot{
 		ProviderID: "copilot",
 		AccountID:  "copilot",
 		Timestamp:  now,
@@ -243,13 +419,21 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 				Limit: ptr(128000), Used: ptr(22600), Remaining: ptr(105400),
 				Unit: "tokens", Window: "session",
 			},
-			"messages_today":   {Used: ptr(46), Unit: "messages", Window: "today"},
-			"sessions_today":   {Used: ptr(9), Unit: "sessions", Window: "today"},
-			"tool_calls_today": {Used: ptr(15), Unit: "calls", Window: "today"},
-			"total_messages":   {Used: ptr(1820), Unit: "messages", Window: "all-time"},
-			"tokens_today":     {Used: ptr(28400), Unit: "tokens", Window: "today"},
-			"7d_tokens":        {Used: ptr(166500), Unit: "tokens", Window: "7d"},
-			"cli_input_tokens": {Used: ptr(11200), Unit: "tokens", Window: "today"},
+			"messages_today":      {Used: ptr(46), Unit: "messages", Window: "today"},
+			"7d_messages":         {Used: ptr(223), Unit: "messages", Window: "7d"},
+			"sessions_today":      {Used: ptr(9), Unit: "sessions", Window: "today"},
+			"tool_calls_today":    {Used: ptr(15), Unit: "calls", Window: "today"},
+			"total_messages":      {Used: ptr(1820), Unit: "messages", Window: "all-time"},
+			"tokens_today":        {Used: ptr(28400), Unit: "tokens", Window: "today"},
+			"7d_tokens":           {Used: ptr(166500), Unit: "tokens", Window: "7d"},
+			"cli_messages":        {Used: ptr(2021), Unit: "messages", Window: "all-time"},
+			"cli_turns":           {Used: ptr(3040), Unit: "turns", Window: "all-time"},
+			"cli_total_calls":     {Used: ptr(200), Unit: "calls", Window: "all-time"},
+			"cli_sessions":        {Used: ptr(54), Unit: "sessions", Window: "all-time"},
+			"cli_reasoning_chars": {Used: ptr(1110), Unit: "chars", Window: "7d"},
+			"cli_response_chars":  {Used: ptr(204), Unit: "chars", Window: "7d"},
+			"cli_tokens":          {Used: ptr(51300), Unit: "tokens", Window: "7d"},
+			"cli_input_tokens":    {Used: ptr(11200), Unit: "tokens", Window: "today"},
 			"org_acme_total_seats": {
 				Used: ptr(56), Unit: "seats", Window: "current",
 			},
@@ -271,6 +455,21 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			},
 			"model_claude_sonnet_4_6_cost_usd": {
 				Used: ptr(9.86), Unit: "USD", Window: "7d",
+			},
+			"model_claude_haiku_4_5_input_tokens": {
+				Used: ptr(33000), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_haiku_4_5_output_tokens": {
+				Used: ptr(9200), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_haiku_4_5_messages": {
+				Used: ptr(255), Unit: "messages", Window: "7d",
+			},
+			"model_claude_haiku_4_5_reasoning_chars": {
+				Used: ptr(45), Unit: "chars", Window: "7d",
+			},
+			"model_claude_haiku_4_5_response_chars": {
+				Used: ptr(42), Unit: "chars", Window: "7d",
 			},
 			"client_owner_repo_total_tokens": {Used: ptr(90400), Unit: "tokens", Window: "7d"},
 			"client_owner_repo_input_tokens": {Used: ptr(74200), Unit: "tokens", Window: "7d"},
@@ -311,9 +510,6 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 		},
 		Raw: map[string]string{
 			"github_login":    "acme-dev",
-			"account_email":   "dev@acme-corp.io",
-			"plan_name":       "Copilot Business",
-			"membership_type": "Business",
 			"access_type_sku": "business",
 			"copilot_plan":    "business",
 			"premium_interactions_quota_overage_permitted": "true",
@@ -330,11 +526,11 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"tokens_client_vscode":     demoSeries(now, 2100, 2400, 2900, 3300, 3800, 4100, 4600),
 			"tokens_client_cli":        demoSeries(now, 900, 1200, 1400, 1700, 1800, 2200, 2500),
 		},
-		Message: "Copilot Business: 118 chats, 72 completions, 23 premium",
+		Message: "",
 	}
 
 	// cursor-ide
-	snaps["cursor-ide"] = core.QuotaSnapshot{
+	snaps["cursor-ide"] = core.UsageSnapshot{
 		ProviderID: "cursor",
 		AccountID:  "cursor-ide",
 		Timestamp:  now,
@@ -367,26 +563,62 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"model_gemini-3-flash_output_tokens": {Used: ptr(4700), Unit: "tokens", Window: "month"},
 			"plan_bonus":                         {Used: ptr(20.93), Unit: "USD"},
 			"plan_included":                      {Used: ptr(20.00), Unit: "USD"},
+			"requests_today":                     {Used: ptr(1400), Unit: "requests", Window: "today"},
+			"total_ai_requests":                  {Used: ptr(59800), Unit: "requests", Window: "month"},
+			"client_ide_sessions":                {Used: ptr(58500), Unit: "sessions", Window: "month"},
+			"client_cli_agents_sessions":         {Used: ptr(1300), Unit: "sessions", Window: "month"},
+			"source_ide_requests":                {Used: ptr(58500), Unit: "requests", Window: "month"},
+			"source_cli_agents_requests":         {Used: ptr(1300), Unit: "requests", Window: "month"},
+			"source_composer_requests":           {Used: ptr(6400), Unit: "requests", Window: "month"},
+			"source_human_requests":              {Used: ptr(1100), Unit: "requests", Window: "month"},
+			"composer_accepted_lines":            {Used: ptr(81), Unit: "lines", Window: "today"},
+			"composer_suggested_lines":           {Used: ptr(81), Unit: "lines", Window: "today"},
+		},
+		Resets: map[string]time.Time{
+			"billing_cycle_end": now.Add(16*24*time.Hour + 20*time.Hour),
 		},
 		Raw: map[string]string{
-			"account_email":   "dev@acme-corp.io",
-			"plan_name":       "pro",
-			"team_membership": "team",
+			"account_email":       "dev@acme-corp.io",
+			"plan_name":           "pro",
+			"team_membership":     "team",
+			"billing_cycle_start": now.Add(-13 * 24 * time.Hour).UTC().Format(time.RFC3339),
+			"billing_cycle_end":   now.Add(16*24*time.Hour + 20*time.Hour).UTC().Format(time.RFC3339),
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"cost":     demoSeries(now, 31, 39, 42, 46, 54, 58, 68),
-			"requests": demoSeries(now, 640, 701, 750, 811, 870, 919, 1006),
+			"cost":                    demoSeries(now, 31, 39, 42, 46, 54, 58, 68),
+			"requests":                demoSeries(now, 640, 701, 750, 811, 870, 919, 1006),
+			"usage_source_ide":        demoSeries(now, 640, 710, 760, 820, 910, 980, 1040),
+			"usage_source_cli_agents": demoSeries(now, 20, 30, 45, 60, 70, 80, 95),
+			"usage_source_composer":   demoSeries(now, 50, 65, 74, 81, 93, 106, 112),
+			"usage_model_claude-4.6-opus-high-thinking": demoSeries(now, 4200, 6100, 7200, 8100, 9300, 10100, 11600),
+			"usage_model_gemini-3-flash":                demoSeries(now, 700, 930, 1180, 1340, 1620, 1840, 2050),
+			"usage_model_claude-4.5-opus-high-thinking": demoSeries(now, 210, 260, 320, 410, 490, 560, 630),
 		},
 		Message: "Team — $338 / $3600 team spend ($3262 remaining)",
 	}
 
 	// gemini-cli
-	snaps["gemini-cli"] = core.QuotaSnapshot{
+	snaps["gemini-cli"] = core.UsageSnapshot{
 		ProviderID: "gemini_cli",
 		AccountID:  "gemini-cli",
 		Timestamp:  now,
 		Status:     core.StatusOK,
 		Metrics: map[string]core.Metric{
+			"quota":                  {Used: ptr(98), Limit: ptr(100), Unit: "%", Window: "month"},
+			"quota_pro":              {Used: ptr(98), Limit: ptr(100), Unit: "%", Window: "month"},
+			"quota_flash":            {Used: ptr(1), Limit: ptr(100), Unit: "%", Window: "month"},
+			"quota_models_tracked":   {Used: ptr(6), Unit: "models", Window: "month"},
+			"quota_models_low":       {Used: ptr(2), Unit: "models", Window: "month"},
+			"quota_models_exhausted": {Used: ptr(0), Unit: "models", Window: "month"},
+			"quota_model_gemini_2_5_pro_requests": {
+				Used: ptr(98), Limit: ptr(100), Unit: "%", Window: "month",
+			},
+			"quota_model_gemini_2_0_flash_requests": {
+				Used: ptr(1), Limit: ptr(100), Unit: "%", Window: "month",
+			},
+			"quota_model_gemini_2_5_flash_lite_requests": {
+				Used: ptr(0.8), Limit: ptr(100), Unit: "%", Window: "month",
+			},
 			"total_conversations": {Used: ptr(184), Unit: "conversations", Window: "all-time"},
 			"total_messages":      {Used: ptr(2480), Unit: "messages", Window: "all-time"},
 			"total_sessions":      {Used: ptr(194), Unit: "sessions", Window: "all-time"},
@@ -396,10 +628,22 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"sessions_today":      {Used: ptr(8), Unit: "sessions", Window: "today"},
 			"tool_calls_today":    {Used: ptr(11), Unit: "calls", Window: "today"},
 			"tokens_today":        {Used: ptr(31600), Unit: "tokens", Window: "today"},
+			"today_input_tokens":  {Used: ptr(21400), Unit: "tokens", Window: "today"},
+			"today_output_tokens": {Used: ptr(5100), Unit: "tokens", Window: "today"},
+			"today_cached_tokens": {Used: ptr(5700), Unit: "tokens", Window: "today"},
+			"today_reasoning_tokens": {
+				Used: ptr(6800), Unit: "tokens", Window: "today",
+			},
+			"today_tool_tokens":   {Used: ptr(28100), Unit: "tokens", Window: "today"},
 			"7d_messages":         {Used: ptr(226), Unit: "messages", Window: "7d"},
 			"7d_sessions":         {Used: ptr(44), Unit: "sessions", Window: "7d"},
 			"7d_tool_calls":       {Used: ptr(73), Unit: "calls", Window: "7d"},
 			"7d_tokens":           {Used: ptr(170400), Unit: "tokens", Window: "7d"},
+			"7d_input_tokens":     {Used: ptr(146700), Unit: "tokens", Window: "7d"},
+			"7d_output_tokens":    {Used: ptr(23800), Unit: "tokens", Window: "7d"},
+			"7d_cached_tokens":    {Used: ptr(33600), Unit: "tokens", Window: "7d"},
+			"7d_reasoning_tokens": {Used: ptr(20600), Unit: "tokens", Window: "7d"},
+			"7d_tool_tokens":      {Used: ptr(54100), Unit: "tokens", Window: "7d"},
 			"client_cli_messages": {Used: ptr(1730), Unit: "messages", Window: "all-time"},
 			"client_cli_turns":    {Used: ptr(2210), Unit: "turns", Window: "all-time"},
 			"client_cli_tool_calls": {
@@ -411,11 +655,6 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"client_cli_reasoning_tokens": {Used: ptr(7800), Unit: "tokens", Window: "7d"},
 			"client_cli_total_tokens":     {Used: ptr(147600), Unit: "tokens", Window: "7d"},
 			"client_cli_sessions":         {Used: ptr(29), Unit: "sessions", Window: "7d"},
-			"client_vscode_input_tokens":  {Used: ptr(14200), Unit: "tokens", Window: "7d"},
-			"client_vscode_output_tokens": {Used: ptr(4100), Unit: "tokens", Window: "7d"},
-			"client_vscode_cached_tokens": {Used: ptr(2300), Unit: "tokens", Window: "7d"},
-			"client_vscode_total_tokens":  {Used: ptr(20600), Unit: "tokens", Window: "7d"},
-			"client_vscode_sessions":      {Used: ptr(5), Unit: "sessions", Window: "7d"},
 			"model_gemini_3_pro_input_tokens": {
 				Used: ptr(66900), Unit: "tokens", Window: "7d",
 			},
@@ -428,26 +667,38 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"model_gemini_3_flash_preview_output_tokens": {
 				Used: ptr(9300), Unit: "tokens", Window: "7d",
 			},
+			"tool_calls_success": {Used: ptr(185), Unit: "calls", Window: "7d"},
+			"tool_google_web_search": {
+				Used: ptr(48), Unit: "calls", Window: "7d",
+			},
+			"tool_run_shell_command": {
+				Used: ptr(41), Unit: "calls", Window: "7d",
+			},
+			"tool_read_file": {Used: ptr(34), Unit: "calls", Window: "7d"},
 		},
-		Resets: map[string]time.Time{},
+		Resets: map[string]time.Time{
+			"quota_model_gemini_2_5_pro_requests_reset":        now.Add(22*time.Hour + 9*time.Minute),
+			"quota_model_gemini_2_0_flash_requests_reset":      now.Add(7*time.Hour + 3*time.Minute),
+			"quota_model_gemini_2_5_flash_lite_requests_reset": now.Add(7*time.Hour + 3*time.Minute),
+			"quota_reset": now.Add(22*time.Hour + 9*time.Minute),
+		},
 		Raw: map[string]string{
-			"account_email": "dev@acme-corp.io",
-			"oauth_status":  "valid (refreshed)",
-			"quota_api":     "ok (22 buckets)",
-			"auth_type":     "oauth",
-			"model_usage":   "gemini-3-pro: 65%, gemini-3-flash-preview: 35%",
-			"client_usage":  "CLI 88%, VS Code 12%",
+			"oauth_status": "valid (refreshed)",
+			"quota_api":    "ok (22 buckets)",
+			"auth_type":    "oauth",
+			"model_usage":  "gemini-3-pro-preview: 75%, gemini-3-flash-preview: 25%",
+			"client_usage": "CLI 100%",
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"tokens_client_cli":    demoSeries(now, 17100, 18300, 19800, 21200, 22600, 24300, 25100),
-			"tokens_client_vscode": demoSeries(now, 2100, 2400, 2800, 2900, 3200, 3600, 4100),
-			"requests":             demoSeries(now, 29, 31, 36, 34, 40, 42, 45),
+			"tokens_client_cli": demoSeries(now, 17100, 18300, 19800, 21200, 22600, 24300, 25100),
+			"requests":          demoSeries(now, 29, 31, 36, 34, 40, 42, 45),
+			"analytics_tokens":  demoSeries(now, 4.8e6, 5.0e6, 5.1e6, 5.3e6, 5.4e6, 5.5e6, 5.7e6),
 		},
-		Message: "Gemini CLI (dev@acme-corp.io)",
+		Message: "",
 	}
 
 	// openrouter
-	snaps["openrouter"] = core.QuotaSnapshot{
+	snaps["openrouter"] = core.UsageSnapshot{
 		ProviderID: "openrouter",
 		AccountID:  "openrouter",
 		Timestamp:  now,
@@ -529,26 +780,151 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 			"provider_openai_cost_usd":    {Used: ptr(22.13), Unit: "USD", Window: "activity"},
 			"provider_anthropic_requests": {Used: ptr(410), Unit: "requests", Window: "activity"},
 			"provider_anthropic_cost_usd": {Used: ptr(13.02), Unit: "USD", Window: "activity"},
+			"provider_openai_input_tokens": {
+				Used: ptr(2100000), Unit: "tokens", Window: "activity",
+			},
+			"provider_openai_output_tokens": {
+				Used: ptr(302000), Unit: "tokens", Window: "activity",
+			},
+			"provider_anthropic_input_tokens": {
+				Used: ptr(1100000), Unit: "tokens", Window: "activity",
+			},
+			"provider_anthropic_output_tokens": {
+				Used: ptr(141000), Unit: "tokens", Window: "activity",
+			},
+			"provider_moonshotai_requests": {
+				Used: ptr(320), Unit: "requests", Window: "activity",
+			},
+			"provider_moonshotai_cost_usd": {
+				Used: ptr(9.41), Unit: "USD", Window: "activity",
+			},
+			"provider_moonshotai_input_tokens": {
+				Used: ptr(920600), Unit: "tokens", Window: "activity",
+			},
+			"provider_moonshotai_output_tokens": {
+				Used: ptr(120700), Unit: "tokens", Window: "activity",
+			},
+			"provider_google_requests": {
+				Used: ptr(210), Unit: "requests", Window: "activity",
+			},
+			"provider_google_cost_usd": {
+				Used: ptr(6.84), Unit: "USD", Window: "activity",
+			},
+			"provider_google_input_tokens": {
+				Used: ptr(684200), Unit: "tokens", Window: "activity",
+			},
+			"provider_google_output_tokens": {
+				Used: ptr(78200), Unit: "tokens", Window: "activity",
+			},
+			"provider_novita_requests": {
+				Used: ptr(21), Unit: "requests", Window: "activity",
+			},
+			"provider_novita_cost_usd": {
+				Used: ptr(2.99), Unit: "USD", Window: "activity",
+			},
+			"provider_novita_input_tokens": {
+				Used: ptr(520000), Unit: "tokens", Window: "activity",
+			},
+			"provider_novita_output_tokens": {
+				Used: ptr(79000), Unit: "tokens", Window: "activity",
+			},
+			"provider_siliconflow_requests": {
+				Used: ptr(7), Unit: "requests", Window: "activity",
+			},
+			"provider_siliconflow_cost_usd": {
+				Used: ptr(0.38), Unit: "USD", Window: "activity",
+			},
+			"provider_siliconflow_input_tokens": {
+				Used: ptr(118000), Unit: "tokens", Window: "activity",
+			},
+			"provider_siliconflow_output_tokens": {
+				Used: ptr(15000), Unit: "tokens", Window: "activity",
+			},
+			"provider_deepinfra_requests": {
+				Used: ptr(4), Unit: "requests", Window: "activity",
+			},
+			"provider_deepinfra_cost_usd": {
+				Used: ptr(0.18), Unit: "USD", Window: "activity",
+			},
+			"provider_deepinfra_input_tokens": {
+				Used: ptr(330000), Unit: "tokens", Window: "activity",
+			},
+			"provider_deepinfra_output_tokens": {
+				Used: ptr(54000), Unit: "tokens", Window: "activity",
+			},
+			"analytics_7d_requests": {
+				Used: ptr(40), Unit: "requests", Window: "7d",
+			},
+			"analytics_30d_requests": {
+				Used: ptr(81), Unit: "requests", Window: "30d",
+			},
+			"analytics_7d_tokens": {
+				Used: ptr(4.4e6), Unit: "tokens", Window: "7d",
+			},
+			"analytics_30d_tokens": {
+				Used: ptr(8.7e6), Unit: "tokens", Window: "30d",
+			},
+			"analytics_7d_cost": {
+				Used: ptr(8.35), Unit: "USD", Window: "7d",
+			},
+			"analytics_30d_cost": {
+				Used: ptr(44.84), Unit: "USD", Window: "30d",
+			},
+			"analytics_active_days": {Used: ptr(26), Unit: "days", Window: "30d"},
+			"analytics_models":      {Used: ptr(32), Unit: "models", Window: "30d"},
+			"analytics_providers":   {Used: ptr(28), Unit: "providers", Window: "30d"},
+			"analytics_endpoints":   {Used: ptr(6), Unit: "endpoints", Window: "30d"},
+			"keys_total":            {Used: ptr(4), Unit: "keys", Window: "current"},
+			"keys_active":           {Used: ptr(4), Unit: "keys", Window: "current"},
+			"keys_disabled":         {Used: ptr(0), Unit: "keys", Window: "current"},
+			"model_novita_moonshotai_kimi-k2_cost_usd": {
+				Used: ptr(2.10), Unit: "USD", Window: "activity",
+			},
+			"model_novita_moonshotai_kimi-k2_input_tokens": {
+				Used: ptr(4400000), Unit: "tokens", Window: "activity",
+			},
+			"model_novita_moonshotai_kimi-k2_output_tokens": {
+				Used: ptr(510000), Unit: "tokens", Window: "activity",
+			},
+			"model_siliconflow_int4_cost_usd": {
+				Used: ptr(0.38), Unit: "USD", Window: "activity",
+			},
+			"model_siliconflow_int4_input_tokens": {
+				Used: ptr(1300000), Unit: "tokens", Window: "activity",
+			},
+			"model_siliconflow_int4_output_tokens": {
+				Used: ptr(160000), Unit: "tokens", Window: "activity",
+			},
+			"model_unknown_cost_usd": {
+				Used: ptr(0.09), Unit: "USD", Window: "activity",
+			},
+			"model_unknown_input_tokens": {
+				Used: ptr(384200), Unit: "tokens", Window: "activity",
+			},
+			"model_unknown_output_tokens": {
+				Used: ptr(47000), Unit: "tokens", Window: "activity",
+			},
 		},
 		Raw: map[string]string{
-			"activity_models":       "4",
+			"activity_models":       "32",
 			"is_management_key":     "false",
 			"key_label":             "team-prod",
 			"tier":                  "premium",
 			"is_free_tier":          "false",
 			"include_byok_in_limit": "true",
 			"byok_in_use":           "true",
-			"activity_providers":    "openai, anthropic, moonshotai, google",
+			"activity_providers":    "openai, anthropic, moonshotai, google, novita, siliconflow, deepinfra",
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"cost":     demoSeries(now, 5.4, 6.1, 6.8, 7.2, 7.6, 8.2, 8.9),
-			"requests": demoSeries(now, 290, 312, 345, 358, 381, 402, 428),
+			"cost":             demoSeries(now, 5.4, 6.1, 6.8, 7.2, 7.6, 8.2, 8.9),
+			"requests":         demoSeries(now, 290, 312, 345, 358, 381, 402, 428),
+			"analytics_tokens": demoSeries(now, 3.9e6, 4.0e6, 4.1e6, 4.2e6, 4.3e6, 4.35e6, 4.4e6),
 		},
 		Message: "$193.74 credits remaining",
 	}
 
 	// zen
-	snaps["zen"] = core.QuotaSnapshot{
+	snaps["zen"] = core.UsageSnapshot{
 		ProviderID: "zen",
 		AccountID:  "zen",
 		Timestamp:  now,
@@ -676,7 +1052,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	return snaps
 }
 
-func addMissingDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time) {
+func addMissingDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time) {
 	present := make(map[string]bool, len(snaps))
 	for _, snap := range snaps {
 		present[snap.ProviderID] = true
@@ -695,6 +1071,14 @@ func addMissingDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time)
 
 func demoAccountID(providerID string) string {
 	switch providerID {
+	case "claude_code":
+		return "claude-code"
+	case "codex":
+		return "codex-cli"
+	case "cursor":
+		return "cursor-ide"
+	case "gemini_cli":
+		return "gemini-cli"
 	case "openai":
 		return "openai"
 	case "anthropic":
@@ -716,8 +1100,8 @@ func demoAccountID(providerID string) string {
 	}
 }
 
-func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.QuotaSnapshot {
-	snap := core.QuotaSnapshot{
+func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.UsageSnapshot {
+	snap := core.UsageSnapshot{
 		ProviderID: providerID,
 		AccountID:  accountID,
 		Timestamp:  now,
@@ -820,7 +1204,7 @@ func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.Quota
 	return snap
 }
 
-func randomizeDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time, rng *rand.Rand) {
+func randomizeDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time, rng *rand.Rand) {
 	for accountID, snap := range snaps {
 		for key, metric := range snap.Metrics {
 			snap.Metrics[key] = randomizeDemoMetric(metric, rng)
@@ -937,7 +1321,7 @@ func demoSeries(now time.Time, values ...float64) []core.TimePoint {
 	return series
 }
 
-func demoMessageForSnapshot(snap core.QuotaSnapshot) string {
+func demoMessageForSnapshot(snap core.UsageSnapshot) string {
 	switch snap.ProviderID {
 	case "openai":
 		if remaining, limit, ok := metricRemainingAndLimit(snap.Metrics, "rpm"); ok {

@@ -2,11 +2,14 @@ package cursor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -146,7 +149,7 @@ func TestProvider_Fetch_WithMockAPI(t *testing.T) {
 
 	p := &Provider{}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  "test-cursor-api",
 		Metrics:    make(map[string]core.Metric),
@@ -461,6 +464,153 @@ func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointReturns
 	}
 }
 
+func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
+	now := time.Now()
+	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
+		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.Add(-2 * time.Hour).UnixMilli()},
+		{Hash: "h2", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.AddDate(0, 0, -1).UnixMilli()},
+		{Hash: "h3", Source: "tab", Model: "claude-4.5-opus", CreatedAt: now.Add(-1 * time.Hour).UnixMilli()},
+		{Hash: "h4", Source: "cli", Model: "gpt-4o", CreatedAt: now.Add(-90 * time.Minute).UnixMilli()},
+	})
+
+	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
+	}))
+	defer server.Close()
+
+	prevBase := cursorAPIBase
+	cursorAPIBase = server.URL
+	defer func() { cursorAPIBase = prevBase }()
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "cursor-api-local-merge",
+		Provider: "cursor",
+		Token:    "test-token",
+		ExtraData: map[string]string{
+			"tracking_db": trackingDBPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	if _, ok := snap.Metrics["plan_spend"]; !ok {
+		t.Fatalf("expected API plan_spend metric to be present")
+	}
+	if m, ok := snap.Metrics["source_composer_requests"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("source_composer_requests missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["source_tab_requests"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("source_tab_requests missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["source_cli_requests"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("source_cli_requests missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["client_ide_sessions"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("client_ide_sessions missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["client_cli_agents_sessions"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("client_cli_agents_sessions missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["model_claude_4_5_opus_requests"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("model_claude_4_5_opus_requests missing or invalid: %+v", m)
+	}
+	if m, ok := snap.Metrics["model_gpt_4o_requests"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("model_gpt_4o_requests missing or invalid: %+v", m)
+	}
+	if len(snap.DailySeries["usage_source_composer"]) < 2 {
+		t.Fatalf("expected usage_source_composer daily series with at least 2 points")
+	}
+	if len(snap.DailySeries["usage_model_claude_4_5_opus"]) < 2 {
+		t.Fatalf("expected usage_model_claude_4_5_opus daily series with at least 2 points")
+	}
+	if snap.Message == "Local Cursor IDE usage tracking (API unavailable)" {
+		t.Fatalf("expected API message to be preserved when API succeeds")
+	}
+}
+
+func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *testing.T) {
+	now := time.Now()
+	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
+		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.Add(-1 * time.Hour).UnixMilli()},
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(currentPeriodUsageResp{
+			BillingCycleStart: "1768055295000",
+			BillingCycleEnd:   "1770733695000",
+			PlanUsage: planUsage{
+				TotalSpend:       4500,
+				IncludedSpend:    2000,
+				BonusSpend:       2500,
+				Limit:            2000,
+				TotalPercentUsed: 65,
+			},
+			SpendLimitUsage: spendLimitUsage{
+				PooledLimit:     50000,
+				PooledUsed:      10000,
+				PooledRemaining: 40000,
+				IndividualUsed:  8000,
+				LimitType:       "team",
+			},
+			DisplayMessage: "You've used 65% of your plan",
+		})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		json.NewEncoder(w).Encode(planInfoResp{})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetHardLimit", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(hardLimitResp{})
+	})
+	mux.HandleFunc("/auth/full_stripe_profile", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(stripeProfileResp{})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetUsageLimitPolicyStatus", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(usageLimitPolicyResp{})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	prevBase := cursorAPIBase
+	cursorAPIBase = server.URL
+	defer func() { cursorAPIBase = prevBase }()
+
+	p := New()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	snap, err := p.Fetch(ctx, core.AccountConfig{
+		ID:       "cursor-optional-timeout",
+		Provider: "cursor",
+		Token:    "test-token",
+		ExtraData: map[string]string{
+			"tracking_db": trackingDBPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	if _, ok := snap.Metrics["plan_spend"]; !ok {
+		t.Fatalf("expected API plan_spend metric to be present")
+	}
+
+	if m, ok := snap.Metrics["total_ai_requests"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected local total_ai_requests to be preserved, got %+v", m)
+	}
+
+	if _, ok := snap.Raw["tracking_db_error"]; ok {
+		t.Fatalf("did not expect tracking_db_error when local data is available")
+	}
+}
+
 func newCursorAPITestMux(aggregateHandler http.HandlerFunc) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
@@ -501,4 +651,81 @@ func newCursorAPITestMux(aggregateHandler http.HandlerFunc) *http.ServeMux {
 	})
 	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", aggregateHandler)
 	return mux
+}
+
+func TestCursorClientBucket(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "composer", want: "ide"},
+		{source: "tab", want: "ide"},
+		{source: "human", want: "ide"},
+		{source: "cli", want: "cli_agents"},
+		{source: "background-agent", want: "cli_agents"},
+		{source: "terminal", want: "cli_agents"},
+		{source: "unknown-source", want: "other"},
+		{source: "", want: "other"},
+	}
+
+	for _, tt := range tests {
+		if got := cursorClientBucket(tt.source); got != tt.want {
+			t.Errorf("cursorClientBucket(%q) = %q, want %q", tt.source, got, tt.want)
+		}
+	}
+}
+
+type cursorTrackingRow struct {
+	Hash      string
+	Source    string
+	Model     string
+	CreatedAt int64
+}
+
+func createCursorTrackingDBForTest(t *testing.T, rows []cursorTrackingRow) string {
+	t.Helper()
+
+	dbPath := filepath.Join(t.TempDir(), "ai-code-tracking.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE ai_code_hashes (
+			hash TEXT PRIMARY KEY,
+			source TEXT NOT NULL,
+			fileExtension TEXT,
+			fileName TEXT,
+			requestId TEXT,
+			conversationId TEXT,
+			timestamp INTEGER,
+			createdAt INTEGER NOT NULL,
+			model TEXT
+		)`)
+	if err != nil {
+		t.Fatalf("create ai_code_hashes table: %v", err)
+	}
+
+	stmt, err := db.Prepare(`
+		INSERT INTO ai_code_hashes (
+			hash, source, fileExtension, fileName, requestId, conversationId, timestamp, createdAt, model
+		) VALUES (?, ?, '', '', '', '', ?, ?, ?)`)
+	if err != nil {
+		t.Fatalf("prepare insert: %v", err)
+	}
+	defer stmt.Close()
+
+	for _, row := range rows {
+		ts := row.CreatedAt
+		if ts == 0 {
+			ts = time.Now().UnixMilli()
+		}
+		if _, err := stmt.Exec(row.Hash, row.Source, ts, ts, row.Model); err != nil {
+			t.Fatalf("insert row %q: %v", row.Hash, err)
+		}
+	}
+
+	return dbPath
 }

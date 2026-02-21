@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const (
@@ -22,21 +23,34 @@ const (
 	maxCopilotClients    = 6
 )
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "copilot" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name: "GitHub Copilot",
-		Capabilities: []string{
-			"quota_tracking", "plan_detection", "chat_quota",
-			"completions_quota", "org_billing", "org_metrics",
-			"session_tracking", "local_config", "rate_limits",
-		},
-		DocURL: "https://docs.github.com/en/copilot",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "copilot",
+			Info: core.ProviderInfo{
+				Name: "GitHub Copilot",
+				Capabilities: []string{
+					"quota_tracking", "plan_detection", "chat_quota",
+					"completions_quota", "org_billing", "org_metrics",
+					"session_tracking", "local_config", "rate_limits",
+				},
+				DocURL: "https://docs.github.com/en/copilot",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type: core.ProviderAuthTypeCLI,
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{
+					"Install GitHub CLI and run `gh auth login`.",
+					"Ensure Copilot entitlement is enabled for the authenticated account.",
+				},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 	}
 }
 
@@ -61,37 +75,37 @@ type copilotInternalUser struct {
 	CanSignupForLimited      bool              `json:"can_signup_for_limited"`
 	LimitedUserSubscribedDay int               `json:"limited_user_subscribed_day"`
 	LimitedUserResetDate     string            `json:"limited_user_reset_date"`
-	QuotaResetDate           string            `json:"quota_reset_date"`
-	QuotaResetDateUTC        string            `json:"quota_reset_date_utc"`
+	UsageResetDate           string            `json:"quota_reset_date"`
+	UsageResetDateUTC        string            `json:"quota_reset_date_utc"`
 	AnalyticsTrackingID      string            `json:"analytics_tracking_id"`
 	Endpoints                map[string]string `json:"endpoints"`
 	OrganizationLoginList    []string          `json:"organization_login_list"`
 
-	LimitedUserQuotas *copilotQuotas         `json:"limited_user_quotas"`
-	MonthlyQuotas     *copilotQuotas         `json:"monthly_quotas"`
-	QuotaSnapshots    *copilotQuotaSnapshots `json:"quota_snapshots"`
+	LimitedUserUsage *copilotUsageLimits    `json:"limited_user_quotas"`
+	MonthlyUsage     *copilotUsageLimits    `json:"monthly_quotas"`
+	UsageSnapshots   *copilotUsageSnapshots `json:"quota_snapshots"`
 
 	OrganizationList []copilotOrgEntry `json:"organization_list"`
 }
 
-type copilotQuotas struct {
+type copilotUsageLimits struct {
 	Chat        *int `json:"chat"`
 	Completions *int `json:"completions"`
 }
 
-type copilotQuotaSnapshots struct {
-	Chat                *copilotQuotaSnapshot `json:"chat"`
-	Completions         *copilotQuotaSnapshot `json:"completions"`
-	PremiumInteractions *copilotQuotaSnapshot `json:"premium_interactions"`
+type copilotUsageSnapshots struct {
+	Chat                *copilotUsageSnapshot `json:"chat"`
+	Completions         *copilotUsageSnapshot `json:"completions"`
+	PremiumInteractions *copilotUsageSnapshot `json:"premium_interactions"`
 }
 
-type copilotQuotaSnapshot struct {
+type copilotUsageSnapshot struct {
 	Entitlement      *float64 `json:"entitlement"`
 	OverageCount     *float64 `json:"overage_count"`
 	OveragePermitted *bool    `json:"overage_permitted"`
 	PercentRemaining *float64 `json:"percent_remaining"`
-	QuotaID          string   `json:"quota_id"`
-	QuotaRemaining   *float64 `json:"quota_remaining"`
+	UsageID          string   `json:"quota_id"`
+	UsageRemaining   *float64 `json:"quota_remaining"`
 	Remaining        *float64 `json:"remaining"`
 	Unlimited        *bool    `json:"unlimited"`
 	TimestampUTC     string   `json:"timestamp_utc"`
@@ -224,14 +238,14 @@ type logTokenEntry struct {
 	Total     int
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	binary := acct.Binary
 	if binary == "" {
 		binary = "gh"
 	}
 
 	if _, err := exec.LookPath(binary); err != nil {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -240,7 +254,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		}, nil
 	}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
 		Timestamp:   time.Now(),
@@ -286,7 +300,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.UsageSnapshot) {
 	userJSON, err := runGH(ctx, binary, "api", "/user")
 	if err != nil {
 		return
@@ -306,7 +320,7 @@ func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.
 	}
 }
 
-func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, snap *core.UsageSnapshot) {
 	body, err := runGH(ctx, binary, "api", "/copilot_internal/user")
 	if err != nil {
 		return
@@ -318,7 +332,7 @@ func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, 
 	p.applyCopilotInternalUser(&cu, snap)
 }
 
-func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.QuotaSnapshot) {
+func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.UsageSnapshot) {
 	if cu == nil {
 		return
 	}
@@ -331,11 +345,11 @@ func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.
 	if cu.CodexAgentEnabled {
 		snap.Raw["codex_agent_enabled"] = "true"
 	}
-	if cu.QuotaResetDate != "" {
-		snap.Raw["quota_reset_date"] = cu.QuotaResetDate
+	if cu.UsageResetDate != "" {
+		snap.Raw["quota_reset_date"] = cu.UsageResetDate
 	}
-	if cu.QuotaResetDateUTC != "" {
-		snap.Raw["quota_reset_date_utc"] = cu.QuotaResetDateUTC
+	if cu.UsageResetDateUTC != "" {
+		snap.Raw["quota_reset_date_utc"] = cu.UsageResetDateUTC
 	}
 
 	features := []string{}
@@ -367,11 +381,11 @@ func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.
 		}
 	}
 
-	if !p.applyQuotaSnapshotMetrics(cu.QuotaSnapshots, snap) {
-		p.applyLegacyQuotaMetrics(cu, snap)
+	if !p.applyUsageSnapshotMetrics(cu.UsageSnapshots, snap) {
+		p.applyLegacyUsageMetrics(cu, snap)
 	}
 
-	for _, candidate := range []string{cu.QuotaResetDateUTC, cu.QuotaResetDate, cu.LimitedUserResetDate} {
+	for _, candidate := range []string{cu.UsageResetDateUTC, cu.UsageResetDate, cu.LimitedUserResetDate} {
 		if t := parseCopilotTime(candidate); !t.IsZero() {
 			snap.Resets["quota_reset"] = t
 			break
@@ -379,12 +393,12 @@ func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.
 	}
 }
 
-func (p *Provider) applyLegacyQuotaMetrics(cu *copilotInternalUser, snap *core.QuotaSnapshot) {
-	if cu.MonthlyQuotas != nil && cu.MonthlyQuotas.Chat != nil {
-		limit := float64(*cu.MonthlyQuotas.Chat)
+func (p *Provider) applyLegacyUsageMetrics(cu *copilotInternalUser, snap *core.UsageSnapshot) {
+	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Chat != nil {
+		limit := float64(*cu.MonthlyUsage.Chat)
 		remaining := float64(0)
-		if cu.LimitedUserQuotas != nil && cu.LimitedUserQuotas.Chat != nil {
-			remaining = float64(*cu.LimitedUserQuotas.Chat)
+		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Chat != nil {
+			remaining = float64(*cu.LimitedUserUsage.Chat)
 		}
 		used := limit - remaining
 		snap.Metrics["chat_quota"] = core.Metric{
@@ -396,11 +410,11 @@ func (p *Provider) applyLegacyQuotaMetrics(cu *copilotInternalUser, snap *core.Q
 		}
 	}
 
-	if cu.MonthlyQuotas != nil && cu.MonthlyQuotas.Completions != nil {
-		limit := float64(*cu.MonthlyQuotas.Completions)
+	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Completions != nil {
+		limit := float64(*cu.MonthlyUsage.Completions)
 		remaining := float64(0)
-		if cu.LimitedUserQuotas != nil && cu.LimitedUserQuotas.Completions != nil {
-			remaining = float64(*cu.LimitedUserQuotas.Completions)
+		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Completions != nil {
+			remaining = float64(*cu.LimitedUserUsage.Completions)
 		}
 		used := limit - remaining
 		snap.Metrics["completions_quota"] = core.Metric{
@@ -413,31 +427,31 @@ func (p *Provider) applyLegacyQuotaMetrics(cu *copilotInternalUser, snap *core.Q
 	}
 }
 
-func (p *Provider) applyQuotaSnapshotMetrics(snapshots *copilotQuotaSnapshots, snap *core.QuotaSnapshot) bool {
+func (p *Provider) applyUsageSnapshotMetrics(snapshots *copilotUsageSnapshots, snap *core.UsageSnapshot) bool {
 	if snapshots == nil {
 		return false
 	}
 
 	applied := false
-	if p.applySingleQuotaSnapshot("chat_quota", "messages", snapshots.Chat, snap) {
+	if p.applySingleUsageSnapshot("chat_quota", "messages", snapshots.Chat, snap) {
 		applied = true
 	}
-	if p.applySingleQuotaSnapshot("completions_quota", "completions", snapshots.Completions, snap) {
+	if p.applySingleUsageSnapshot("completions_quota", "completions", snapshots.Completions, snap) {
 		applied = true
 	}
-	if p.applySingleQuotaSnapshot("premium_interactions_quota", "requests", snapshots.PremiumInteractions, snap) {
+	if p.applySingleUsageSnapshot("premium_interactions_quota", "requests", snapshots.PremiumInteractions, snap) {
 		applied = true
 	}
 	return applied
 }
 
-func (p *Provider) applySingleQuotaSnapshot(key, unit string, quota *copilotQuotaSnapshot, snap *core.QuotaSnapshot) bool {
+func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsageSnapshot, snap *core.UsageSnapshot) bool {
 	if quota == nil {
 		return false
 	}
 
-	if quota.QuotaID != "" {
-		snap.Raw[key+"_id"] = quota.QuotaID
+	if quota.UsageID != "" {
+		snap.Raw[key+"_id"] = quota.UsageID
 	}
 	if quota.OveragePermitted != nil {
 		snap.Raw[key+"_overage_permitted"] = strconv.FormatBool(*quota.OveragePermitted)
@@ -452,7 +466,7 @@ func (p *Provider) applySingleQuotaSnapshot(key, unit string, quota *copilotQuot
 		}
 	}
 
-	remaining := firstNonNilFloat(quota.QuotaRemaining, quota.Remaining)
+	remaining := firstNonNilFloat(quota.UsageRemaining, quota.Remaining)
 	limit := quota.Entitlement
 	pct := clampPercent(firstFloat(quota.PercentRemaining))
 
@@ -493,7 +507,7 @@ func (p *Provider) applySingleQuotaSnapshot(key, unit string, quota *copilotQuot
 	}
 }
 
-func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *core.UsageSnapshot) {
 	body, err := runGH(ctx, binary, "api", "/rate_limit")
 	if err != nil {
 		return
@@ -528,7 +542,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 	}
 }
 
-func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.UsageSnapshot) {
 	orgs := snap.Raw["copilot_orgs"]
 	if orgs == "" {
 		return
@@ -544,7 +558,7 @@ func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.Q
 	}
 }
 
-func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
 	body, err := runGH(ctx, binary, "api", fmt.Sprintf("/orgs/%s/copilot/billing", org))
 	if err != nil {
 		return
@@ -576,7 +590,7 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap
 	}
 }
 
-func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
 	body, err := runGH(ctx, binary, "api", fmt.Sprintf("/orgs/%s/copilot/metrics", org))
 	if err != nil {
 		return
@@ -661,7 +675,7 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 	}
 }
 
-func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.QuotaSnapshot) {
+func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.UsageSnapshot) {
 	if acct.ExtraData != nil {
 		if dir := strings.TrimSpace(acct.ExtraData["config_dir"]); dir != "" {
 			p.readConfig(dir, snap)
@@ -684,7 +698,7 @@ func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.QuotaSnaps
 	p.readSessions(copilotDir, snap, logData)
 }
 
-func (p *Provider) readConfig(copilotDir string, snap *core.QuotaSnapshot) {
+func (p *Provider) readConfig(copilotDir string, snap *core.UsageSnapshot) {
 	data, err := os.ReadFile(filepath.Join(copilotDir, "config.json"))
 	if err != nil {
 		return
@@ -710,7 +724,7 @@ type logSummary struct {
 	SessionBurn   map[string]float64       // sessionID → cumulative positive token deltas
 }
 
-func (p *Provider) readLogs(copilotDir string, snap *core.QuotaSnapshot) logSummary {
+func (p *Provider) readLogs(copilotDir string, snap *core.UsageSnapshot) logSummary {
 	ls := logSummary{
 		SessionTokens: make(map[string]logTokenEntry),
 		SessionBurn:   make(map[string]float64),
@@ -805,7 +819,7 @@ type assistantMsgData struct {
 	ToolRequests json.RawMessage `json:"toolRequests"`
 }
 
-func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, logs logSummary) {
+func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, logs logSummary) {
 	sessionDir := filepath.Join(copilotDir, "session-state")
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
@@ -848,6 +862,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	dailyModelMessages := make(map[string]map[string]float64)
 	dailyModelTokens := make(map[string]map[string]float64)
 	modelInputTokens := make(map[string]float64)
+	toolUsageCounts := make(map[string]int)
 	clientLabels := make(map[string]string)
 	clientTokens := make(map[string]float64)
 	clientSessions := make(map[string]int)
@@ -960,6 +975,13 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 							si.toolCalls += len(tools)
 							if currentModel != "" {
 								modelToolCalls[currentModel] += len(tools)
+							}
+							for _, toolReq := range tools {
+								toolName := extractCopilotToolName(toolReq)
+								if toolName == "" {
+									toolName = "unknown"
+								}
+								toolUsageCounts[toolName]++
 							}
 							day := parseDayFromTimestamp(evt.Timestamp)
 							if day != "" {
@@ -1110,13 +1132,23 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 	topModels := topModelNames(modelInputTokens, modelMessages, maxCopilotModels)
 	for _, model := range topModels {
 		prefix := "model_" + sanitizeMetricName(model)
+		rec := core.ModelUsageRecord{
+			RawModelID: model,
+			RawSource:  "json",
+			Window:     copilotAllTimeWindow,
+		}
 		setUsedMetric(snap, prefix+"_input_tokens", modelInputTokens[model], "tokens", copilotAllTimeWindow)
+		if modelInputTokens[model] > 0 {
+			rec.InputTokens = core.Float64Ptr(modelInputTokens[model])
+			rec.TotalTokens = core.Float64Ptr(modelInputTokens[model])
+		}
 		setUsedMetric(snap, prefix+"_messages", float64(modelMessages[model]), "messages", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_turns", float64(modelTurns[model]), "turns", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_sessions", float64(modelSessions[model]), "sessions", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_tool_calls", float64(modelToolCalls[model]), "calls", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_response_chars", float64(modelResponseChars[model]), "chars", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_reasoning_chars", float64(modelReasoningChars[model]), "chars", copilotAllTimeWindow)
+		core.AppendModelUsageRecord(snap, rec)
 	}
 
 	topClients := topCopilotClientNames(clientTokens, clientSessions, clientMessages, maxCopilotClients)
@@ -1130,6 +1162,13 @@ func (p *Provider) readSessions(copilotDir string, snap *core.QuotaSnapshot, log
 		}
 	}
 	setRawStr(snap, "client_usage", formatCopilotClientUsage(topClients, clientLabels, clientTokens, clientSessions))
+	setRawStr(snap, "tool_usage", formatModelMap(toolUsageCounts, "calls"))
+	for toolName, count := range toolUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setUsedMetric(snap, "tool_"+sanitizeMetricName(toolName), float64(count), "calls", copilotAllTimeWindow)
+	}
 
 	if len(sessions) > 0 {
 		r := sessions[0]
@@ -1192,7 +1231,7 @@ func parseCompactionLine(line string) logTokenEntry {
 	return entry
 }
 
-func (p *Provider) resolveStatus(snap *core.QuotaSnapshot, authOutput string) {
+func (p *Provider) resolveStatus(snap *core.UsageSnapshot, authOutput string) {
 	lower := strings.ToLower(authOutput)
 	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") {
 		snap.Status = core.StatusLimited
@@ -1202,26 +1241,26 @@ func (p *Provider) resolveStatus(snap *core.QuotaSnapshot, authOutput string) {
 
 	for key, m := range snap.Metrics {
 		pct := m.Percent()
-		isQuota := key == "chat_quota" || key == "completions_quota" || key == "premium_interactions_quota"
-		if pct >= 0 && pct < 5 && isQuota {
+		isUsageMetric := key == "chat_quota" || key == "completions_quota" || key == "premium_interactions_quota"
+		if pct >= 0 && pct < 5 && isUsageMetric {
 			snap.Status = core.StatusLimited
-			snap.Message = quotaStatusMessage(snap)
+			snap.Message = usageStatusMessage(snap)
 			return
 		}
-		if pct >= 0 && pct < 20 && isQuota {
+		if pct >= 0 && pct < 20 && isUsageMetric {
 			snap.Status = core.StatusNearLimit
-			snap.Message = quotaStatusMessage(snap)
+			snap.Message = usageStatusMessage(snap)
 			return
 		}
 	}
 
 	if snap.Status == "" {
 		snap.Status = core.StatusOK
-		snap.Message = quotaStatusMessage(snap)
+		snap.Message = usageStatusMessage(snap)
 	}
 }
 
-func quotaStatusMessage(snap *core.QuotaSnapshot) string {
+func usageStatusMessage(snap *core.UsageSnapshot) string {
 	parts := []string{}
 
 	login := snap.Raw["github_login"]
@@ -1300,13 +1339,13 @@ func mapToSeries(m map[string]float64) []core.TimePoint {
 	return pts
 }
 
-func storeSeries(snap *core.QuotaSnapshot, key string, m map[string]float64) {
+func storeSeries(snap *core.UsageSnapshot, key string, m map[string]float64) {
 	if len(m) > 0 {
 		snap.DailySeries[key] = mapToSeries(m)
 	}
 }
 
-func setUsedMetric(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	if value <= 0 {
 		return
 	}
@@ -1593,6 +1632,30 @@ func extractModelFromInfoMsg(msg string) string {
 	return m
 }
 
+func extractCopilotToolName(raw json.RawMessage) string {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return ""
+	}
+
+	var tool struct {
+		Name     string `json:"name"`
+		ToolName string `json:"toolName"`
+		Tool     string `json:"tool"`
+	}
+	if err := json.Unmarshal(raw, &tool); err != nil {
+		return ""
+	}
+
+	candidates := []string{tool.Name, tool.ToolName, tool.Tool}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func formatModelMap(m map[string]int, unit string) string {
 	if len(m) == 0 {
 		return ""
@@ -1617,13 +1680,13 @@ func formatModelMapPlain(m map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-func setRawInt(snap *core.QuotaSnapshot, key string, v int) {
+func setRawInt(snap *core.UsageSnapshot, key string, v int) {
 	if v > 0 {
 		snap.Raw[key] = fmt.Sprintf("%d", v)
 	}
 }
 
-func setRawStr(snap *core.QuotaSnapshot, key, v string) {
+func setRawStr(snap *core.UsageSnapshot, key, v string) {
 	if v != "" {
 		snap.Raw[key] = v
 	}

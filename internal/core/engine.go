@@ -10,25 +10,27 @@ import (
 
 type Engine struct {
 	mu        sync.RWMutex
-	providers map[string]QuotaProvider // keyed by provider ID
+	providers map[string]UsageProvider // keyed by provider ID
 	accounts  []AccountConfig
-	snapshots map[string]QuotaSnapshot // keyed by account ID
+	snapshots map[string]UsageSnapshot // keyed by account ID
 	interval  time.Duration
 	timeout   time.Duration
+	modelNorm ModelNormalizationConfig
 
-	onUpdate func(map[string]QuotaSnapshot)
+	onUpdate func(map[string]UsageSnapshot)
 }
 
 func NewEngine(interval time.Duration) *Engine {
 	return &Engine{
-		providers: make(map[string]QuotaProvider),
-		snapshots: make(map[string]QuotaSnapshot),
+		providers: make(map[string]UsageProvider),
+		snapshots: make(map[string]UsageSnapshot),
 		interval:  interval,
 		timeout:   5 * time.Second,
+		modelNorm: DefaultModelNormalizationConfig(),
 	}
 }
 
-func (e *Engine) RegisterProvider(p QuotaProvider) {
+func (e *Engine) RegisterProvider(p UsageProvider) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.providers[p.ID()] = p
@@ -38,6 +40,12 @@ func (e *Engine) SetAccounts(accounts []AccountConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.accounts = accounts
+}
+
+func (e *Engine) SetModelNormalizationConfig(cfg ModelNormalizationConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.modelNorm = NormalizeModelNormalizationConfig(cfg)
 }
 
 // AddAccount appends an account (if not already present) and triggers a refresh for it.
@@ -62,16 +70,16 @@ func (e *Engine) AddAccount(acct AccountConfig) {
 	go e.RefreshAll(context.Background())
 }
 
-func (e *Engine) OnUpdate(fn func(map[string]QuotaSnapshot)) {
+func (e *Engine) OnUpdate(fn func(map[string]UsageSnapshot)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.onUpdate = fn
 }
 
-func (e *Engine) Snapshots() map[string]QuotaSnapshot {
+func (e *Engine) Snapshots() map[string]UsageSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	out := make(map[string]QuotaSnapshot, len(e.snapshots))
+	out := make(map[string]UsageSnapshot, len(e.snapshots))
 	for k, v := range e.snapshots {
 		out[k] = v
 	}
@@ -87,7 +95,7 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	results := make(chan struct {
 		id       string
-		snapshot QuotaSnapshot
+		snapshot UsageSnapshot
 	}, len(accounts))
 
 	for _, acct := range accounts {
@@ -97,11 +105,12 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 
 			e.mu.RLock()
 			provider, ok := e.providers[a.Provider]
+			modelNorm := e.modelNorm
 			e.mu.RUnlock()
 
-			var snap QuotaSnapshot
+			var snap UsageSnapshot
 			if !ok {
-				snap = QuotaSnapshot{
+				snap = UsageSnapshot{
 					ProviderID: a.Provider,
 					AccountID:  a.ID,
 					Timestamp:  time.Now(),
@@ -115,7 +124,7 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 				var err error
 				snap, err = provider.Fetch(fetchCtx, a)
 				if err != nil {
-					snap = QuotaSnapshot{
+					snap = UsageSnapshot{
 						ProviderID: a.Provider,
 						AccountID:  a.ID,
 						Timestamp:  time.Now(),
@@ -123,11 +132,17 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 						Message:    err.Error(),
 					}
 				}
+				snap = NormalizeUsageSnapshotWithConfig(snap, modelNorm)
+				missing := provider.DashboardWidget().MissingMetrics(snap)
+				if len(missing) > 0 {
+					snap.SetDiagnostic("widget_missing_metrics", fmt.Sprintf("%v", missing))
+				}
 			}
+			snap = NormalizeUsageSnapshotWithConfig(snap, modelNorm)
 
 			results <- struct {
 				id       string
-				snapshot QuotaSnapshot
+				snapshot UsageSnapshot
 			}{a.ID, snap}
 		}(acct)
 	}
@@ -145,7 +160,7 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 
 	e.mu.RLock()
 	fn := e.onUpdate
-	snaps := make(map[string]QuotaSnapshot, len(e.snapshots))
+	snaps := make(map[string]UsageSnapshot, len(e.snapshots))
 	for k, v := range e.snapshots {
 		snaps[k] = v
 	}

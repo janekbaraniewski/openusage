@@ -37,19 +37,72 @@ type TimePoint struct {
 	Value float64 `json:"value"` // metric value at that date
 }
 
-type QuotaSnapshot struct {
+type UsageSnapshot struct {
 	ProviderID  string                 `json:"provider_id"`
 	AccountID   string                 `json:"account_id"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Status      Status                 `json:"status"`
 	Metrics     map[string]Metric      `json:"metrics"`                // keys like "rpm", "tpm", "rpd"
 	Resets      map[string]time.Time   `json:"resets,omitempty"`       // e.g. "rpm_reset"
-	Raw         map[string]string      `json:"raw,omitempty"`          // redacted header dump / CLI lines
+	Attributes  map[string]string      `json:"attributes,omitempty"`   // normalized provider/account metadata
+	Diagnostics map[string]string      `json:"diagnostics,omitempty"`  // non-fatal errors, warnings, probe/debug notes
+	Raw         map[string]string      `json:"raw,omitempty"`          // deprecated compatibility bag (use Attributes/Diagnostics)
+	ModelUsage  []ModelUsageRecord     `json:"model_usage,omitempty"`  // per-model usage rows with canonical IDs
 	DailySeries map[string][]TimePoint `json:"daily_series,omitempty"` // time-indexed data (e.g. "messages", "cost", "tokens_<model>")
 	Message     string                 `json:"message,omitempty"`      // human-readable summary
 }
 
-func (s QuotaSnapshot) WorstPercent() float64 {
+func (s *UsageSnapshot) EnsureMaps() {
+	if s.Metrics == nil {
+		s.Metrics = make(map[string]Metric)
+	}
+	if s.Resets == nil {
+		s.Resets = make(map[string]time.Time)
+	}
+	if s.Attributes == nil {
+		s.Attributes = make(map[string]string)
+	}
+	if s.Diagnostics == nil {
+		s.Diagnostics = make(map[string]string)
+	}
+	if s.Raw == nil {
+		s.Raw = make(map[string]string)
+	}
+}
+
+func (s *UsageSnapshot) SetAttribute(key, value string) {
+	if key == "" || value == "" {
+		return
+	}
+	s.EnsureMaps()
+	s.Attributes[key] = value
+}
+
+func (s *UsageSnapshot) SetDiagnostic(key, value string) {
+	if key == "" || value == "" {
+		return
+	}
+	s.EnsureMaps()
+	s.Diagnostics[key] = value
+}
+
+func (s UsageSnapshot) MetaValue(key string) (string, bool) {
+	if key == "" {
+		return "", false
+	}
+	if v, ok := s.Attributes[key]; ok && v != "" {
+		return v, true
+	}
+	if v, ok := s.Diagnostics[key]; ok && v != "" {
+		return v, true
+	}
+	if v, ok := s.Raw[key]; ok && v != "" {
+		return v, true
+	}
+	return "", false
+}
+
+func (s UsageSnapshot) WorstPercent() float64 {
 	worst := float64(100)
 	found := false
 	for _, m := range s.Metrics {

@@ -8,28 +8,41 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const defaultBaseURL = "https://api.anthropic.com/v1"
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "anthropic" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Anthropic",
-		Capabilities: []string{"headers"},
-		DocURL:       "https://docs.anthropic.com/en/api/rate-limits",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "anthropic",
+			Info: core.ProviderInfo{
+				Name:         "Anthropic",
+				Capabilities: []string{"headers"},
+				DocURL:       "https://docs.anthropic.com/en/api/rate-limits",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "ANTHROPIC_API_KEY",
+				DefaultAccountID: "anthropic",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set ANTHROPIC_API_KEY to a valid Anthropic API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRolePeach)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -46,7 +59,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	url := baseURL + "/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("anthropic: creating request: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("anthropic: creating request: %w", err)
 	}
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -54,11 +67,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("anthropic: request failed: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("anthropic: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),

@@ -116,6 +116,7 @@ func main() {
 
 	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
 	engine := core.NewEngine(interval)
+	engine.SetModelNormalizationConfig(cfg.ModelNormalization)
 
 	for _, p := range providers.AllProviders() {
 		engine.RegisterProvider(p)
@@ -130,9 +131,12 @@ func main() {
 		allAccounts,
 	)
 	model.SetOnAddAccount(engine.AddAccount)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	model.SetOnRefresh(func() {
+		go engine.RefreshAll(context.Background())
+	})
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
-	engine.OnUpdate(func(snaps map[string]core.QuotaSnapshot) {
+	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
 		p.Send(tui.SnapshotsMsg(snaps))
 	})
 

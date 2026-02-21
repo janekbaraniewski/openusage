@@ -30,6 +30,15 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.AutoDetect {
 		t.Error("expected auto_detect to be true by default")
 	}
+	if !cfg.ModelNormalization.Enabled {
+		t.Error("expected model normalization enabled by default")
+	}
+	if cfg.ModelNormalization.GroupBy != core.ModelNormalizationGroupLineage {
+		t.Errorf("default group_by = %q", cfg.ModelNormalization.GroupBy)
+	}
+	if cfg.ModelNormalization.MinConfidence != 0.80 {
+		t.Errorf("default min_confidence = %f, want 0.80", cfg.ModelNormalization.MinConfidence)
+	}
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
@@ -491,5 +500,45 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 	}
 	if loaded.Dashboard.Providers[1].Enabled {
 		t.Error("expected anthropic-work enabled=false")
+	}
+}
+
+func TestLoadFrom_ModelNormalizationConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "model_normalization": {
+    "enabled": false,
+    "group_by": "release",
+    "min_confidence": 0.65,
+    "overrides": [
+      {
+        "provider": "cursor",
+        "raw_model_id": "claude-4.6-opus-high-thinking",
+        "canonical_lineage_id": "anthropic/claude-opus-4.6"
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ModelNormalization.Enabled {
+		t.Fatal("expected model normalization enabled=false")
+	}
+	if cfg.ModelNormalization.GroupBy != core.ModelNormalizationGroupRelease {
+		t.Fatalf("group_by = %q", cfg.ModelNormalization.GroupBy)
+	}
+	if cfg.ModelNormalization.MinConfidence != 0.65 {
+		t.Fatalf("min_confidence = %.2f", cfg.ModelNormalization.MinConfidence)
+	}
+	if len(cfg.ModelNormalization.Overrides) != 1 {
+		t.Fatalf("overrides len = %d, want 1", len(cfg.ModelNormalization.Overrides))
 	}
 }

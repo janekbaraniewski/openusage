@@ -8,28 +8,41 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const defaultBaseURL = "https://api.groq.com/openai/v1"
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "groq" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Groq",
-		Capabilities: []string{"headers", "daily_limits"},
-		DocURL:       "https://console.groq.com/docs/rate-limits",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "groq",
+			Info: core.ProviderInfo{
+				Name:         "Groq",
+				Capabilities: []string{"headers", "daily_limits"},
+				DocURL:       "https://console.groq.com/docs/rate-limits",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "GROQ_API_KEY",
+				DefaultAccountID: "groq",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set GROQ_API_KEY to a valid Groq API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleYellow)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -46,17 +59,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	url := baseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("groq: creating request: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("groq: creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("groq: request failed: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("groq: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),
@@ -95,7 +108,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func buildStatusMessage(snap core.QuotaSnapshot) string {
+func buildStatusMessage(snap core.UsageSnapshot) string {
 	var parts []string
 	for _, key := range []string{"rpm", "rpd"} {
 		if m, ok := snap.Metrics[key]; ok && m.Remaining != nil && m.Limit != nil {

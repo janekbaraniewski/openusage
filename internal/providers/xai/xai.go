@@ -10,6 +10,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const defaultBaseURL = "https://api.x.ai/v1"
@@ -28,24 +29,36 @@ type apiKeyResponse struct {
 	TotalGranted     *float64 `json:"total_granted"`
 }
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "xai" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "xAI (Grok)",
-		Capabilities: []string{"headers", "api_key_info"},
-		DocURL:       "https://docs.x.ai/docs",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "xai",
+			Info: core.ProviderInfo{
+				Name:         "xAI (Grok)",
+				Capabilities: []string{"headers", "api_key_info"},
+				DocURL:       "https://docs.x.ai/docs",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "XAI_API_KEY",
+				DefaultAccountID: "xai",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set XAI_API_KEY to a valid xAI API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleMaroon)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -59,7 +72,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		baseURL = defaultBaseURL
 	}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),
@@ -87,7 +100,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	url := baseURL + "/api-key"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -143,7 +156,7 @@ func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, 
 	return nil
 }
 
-func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	url := baseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

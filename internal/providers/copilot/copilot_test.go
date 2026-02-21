@@ -184,17 +184,17 @@ func TestCopilotInternalUserParsing(t *testing.T) {
 	if cu.LimitedUserResetDate != "2026-03-17" {
 		t.Errorf("LimitedUserResetDate = %q", cu.LimitedUserResetDate)
 	}
-	if cu.MonthlyQuotas == nil || cu.MonthlyQuotas.Chat == nil || *cu.MonthlyQuotas.Chat != 500 {
-		t.Error("MonthlyQuotas.Chat should be 500")
+	if cu.MonthlyUsage == nil || cu.MonthlyUsage.Chat == nil || *cu.MonthlyUsage.Chat != 500 {
+		t.Error("MonthlyUsage.Chat should be 500")
 	}
-	if cu.MonthlyQuotas.Completions == nil || *cu.MonthlyQuotas.Completions != 4000 {
-		t.Error("MonthlyQuotas.Completions should be 4000")
+	if cu.MonthlyUsage.Completions == nil || *cu.MonthlyUsage.Completions != 4000 {
+		t.Error("MonthlyUsage.Completions should be 4000")
 	}
-	if cu.LimitedUserQuotas == nil || cu.LimitedUserQuotas.Chat == nil || *cu.LimitedUserQuotas.Chat != 470 {
-		t.Error("LimitedUserQuotas.Chat should be 470")
+	if cu.LimitedUserUsage == nil || cu.LimitedUserUsage.Chat == nil || *cu.LimitedUserUsage.Chat != 470 {
+		t.Error("LimitedUserUsage.Chat should be 470")
 	}
-	if cu.LimitedUserQuotas.Completions == nil || *cu.LimitedUserQuotas.Completions != 3900 {
-		t.Error("LimitedUserQuotas.Completions should be 3900")
+	if cu.LimitedUserUsage.Completions == nil || *cu.LimitedUserUsage.Completions != 3900 {
+		t.Error("LimitedUserUsage.Completions should be 3900")
 	}
 	if len(cu.OrganizationLoginList) != 1 || cu.OrganizationLoginList[0] != "myorg" {
 		t.Errorf("OrganizationLoginList = %v", cu.OrganizationLoginList)
@@ -207,7 +207,7 @@ func TestCopilotInternalUserParsing(t *testing.T) {
 	}
 }
 
-func TestCopilotInternalUserParsing_NoQuotas(t *testing.T) {
+func TestCopilotInternalUserParsing_NoUsageLimits(t *testing.T) {
 	body := `{
 		"login": "prouser",
 		"access_type_sku": "copilot_pro",
@@ -224,15 +224,15 @@ func TestCopilotInternalUserParsing_NoQuotas(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if cu.LimitedUserQuotas != nil {
-		t.Error("expected nil LimitedUserQuotas for pro user")
+	if cu.LimitedUserUsage != nil {
+		t.Error("expected nil LimitedUserUsage for pro user")
 	}
-	if cu.MonthlyQuotas != nil {
-		t.Error("expected nil MonthlyQuotas for pro user")
+	if cu.MonthlyUsage != nil {
+		t.Error("expected nil MonthlyUsage for pro user")
 	}
 }
 
-func TestCopilotInternalUserParsing_QuotaSnapshots(t *testing.T) {
+func TestCopilotInternalUserParsing_UsageSnapshots(t *testing.T) {
 	body := `{
 		"login": "testuser",
 		"access_type_sku": "free_limited_copilot",
@@ -264,45 +264,45 @@ func TestCopilotInternalUserParsing_QuotaSnapshots(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if cu.QuotaSnapshots == nil || cu.QuotaSnapshots.Chat == nil {
+	if cu.UsageSnapshots == nil || cu.UsageSnapshots.Chat == nil {
 		t.Fatal("expected chat quota snapshot")
 	}
-	if cu.QuotaSnapshots.Chat.Entitlement == nil || *cu.QuotaSnapshots.Chat.Entitlement != 500 {
-		t.Fatalf("chat entitlement = %v, want 500", cu.QuotaSnapshots.Chat.Entitlement)
+	if cu.UsageSnapshots.Chat.Entitlement == nil || *cu.UsageSnapshots.Chat.Entitlement != 500 {
+		t.Fatalf("chat entitlement = %v, want 500", cu.UsageSnapshots.Chat.Entitlement)
 	}
-	if cu.QuotaSnapshots.PremiumInteractions == nil || cu.QuotaSnapshots.PremiumInteractions.Remaining == nil || *cu.QuotaSnapshots.PremiumInteractions.Remaining != 45 {
-		t.Fatalf("premium remaining = %v, want 45", cu.QuotaSnapshots.PremiumInteractions)
+	if cu.UsageSnapshots.PremiumInteractions == nil || cu.UsageSnapshots.PremiumInteractions.Remaining == nil || *cu.UsageSnapshots.PremiumInteractions.Remaining != 45 {
+		t.Fatalf("premium remaining = %v, want 45", cu.UsageSnapshots.PremiumInteractions)
 	}
 }
 
-func TestApplyCopilotInternalUser_QuotaSnapshotMetrics(t *testing.T) {
+func TestApplyCopilotInternalUser_UsageSnapshotMetrics(t *testing.T) {
 	p := New()
 	cu := &copilotInternalUser{
 		AccessTypeSKU:     "free_limited_copilot",
 		CopilotPlan:       "individual",
-		QuotaResetDateUTC: "2026-03-17T00:00:00Z",
-		QuotaSnapshots: &copilotQuotaSnapshots{
-			Chat: &copilotQuotaSnapshot{
+		UsageResetDateUTC: "2026-03-17T00:00:00Z",
+		UsageSnapshots: &copilotUsageSnapshots{
+			Chat: &copilotUsageSnapshot{
 				Entitlement:    float64Ptr(500),
-				QuotaRemaining: float64Ptr(470),
-				QuotaID:        "chat",
+				UsageRemaining: float64Ptr(470),
+				UsageID:        "chat",
 			},
-			Completions: &copilotQuotaSnapshot{
+			Completions: &copilotUsageSnapshot{
 				Entitlement:    float64Ptr(4000),
-				QuotaRemaining: float64Ptr(3900),
-				QuotaID:        "completions",
+				UsageRemaining: float64Ptr(3900),
+				UsageID:        "completions",
 			},
-			PremiumInteractions: &copilotQuotaSnapshot{
+			PremiumInteractions: &copilotUsageSnapshot{
 				Entitlement:      float64Ptr(50),
 				Remaining:        float64Ptr(45),
-				QuotaID:          "premium",
+				UsageID:          "premium",
 				TimestampUTC:     "2026-02-21T00:00:00Z",
 				OveragePermitted: boolPtr(true),
 			},
 		},
 	}
 
-	snap := &core.QuotaSnapshot{
+	snap := &core.UsageSnapshot{
 		Metrics: make(map[string]core.Metric),
 		Resets:  make(map[string]time.Time),
 		Raw:     make(map[string]string),
@@ -543,7 +543,7 @@ func TestResetDateParsing(t *testing.T) {
 	}
 }
 
-func TestQuotaStatusMessage(t *testing.T) {
+func TestUsageStatusMessage(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  map[string]string
@@ -573,10 +573,10 @@ func TestQuotaStatusMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			snap := &core.QuotaSnapshot{Raw: tt.raw}
-			got := quotaStatusMessage(snap)
+			snap := &core.UsageSnapshot{Raw: tt.raw}
+			got := usageStatusMessage(snap)
 			if got != tt.want {
-				t.Errorf("quotaStatusMessage() = %q, want %q", got, tt.want)
+				t.Errorf("usageStatusMessage() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -866,7 +866,7 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	mkSession("s1", "gpt-5-mini", "2026-02-20T01:00:00Z", "2026-02-20T01:10:00Z")
 	mkSession("s2", "claude-sonnet-4.6", "2026-02-20T02:00:00Z", "2026-02-20T02:10:00Z")
 
-	snap := &core.QuotaSnapshot{
+	snap := &core.UsageSnapshot{
 		Metrics:     make(map[string]core.Metric),
 		Resets:      make(map[string]time.Time),
 		Raw:         make(map[string]string),
@@ -902,6 +902,9 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	}
 	if m := snap.Metrics["messages_today"]; m.Used == nil || *m.Used <= 0 {
 		t.Fatalf("messages_today missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["tool_read_file"]; m.Used == nil || *m.Used != 2 {
+		t.Fatalf("tool_read_file = %+v, want 2 calls", m)
 	}
 	if _, ok := snap.Metrics["context_window"]; !ok {
 		t.Fatal("missing context_window metric")

@@ -30,15 +30,18 @@ type ProviderInfo struct {
 	DocURL       string   // link to vendor's rate-limit documentation
 }
 
-type QuotaProvider interface {
+type UsageProvider interface {
 	ID() string
 
 	Describe() ProviderInfo
+
+	// Spec defines provider-level auth/setup metadata and presentation defaults.
+	Spec() ProviderSpec
 
 	// DashboardWidget defines how provider metrics should be presented in dashboard tiles.
 	DashboardWidget() DashboardWidget
 	// DetailWidget defines how sections should be rendered in the details panel.
 	DetailWidget() DetailWidget
 
-	Fetch(ctx context.Context, acct AccountConfig) (QuotaSnapshot, error)
+	Fetch(ctx context.Context, acct AccountConfig) (UsageSnapshot, error)
 }

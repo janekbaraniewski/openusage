@@ -2,10 +2,11 @@ package copilot
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleSapphire
 	cfg.ShowClientComposition = true
+	cfg.ShowToolComposition = true
 	cfg.GaugePriority = []string{
 		"chat_quota", "completions_quota", "premium_interactions_quota", "context_window",
 		"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm",
@@ -52,8 +53,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["cli_input_tokens"] = "cli in"
 	cfg.CompactMetricLabelOverrides["7d_tokens"] = "7d tok"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }
