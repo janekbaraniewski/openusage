@@ -137,8 +137,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		Timestamp:   time.Now(),
 		Status:      core.StatusOK,
 		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
 		Raw:         make(map[string]string),
 		DailySeries: make(map[string][]core.TimePoint),
+	}
+	if acct.ExtraData != nil {
+		if email := strings.TrimSpace(acct.ExtraData["email"]); email != "" {
+			snap.Raw["account_email"] = email
+		}
+		if membership := strings.TrimSpace(acct.ExtraData["membership"]); membership != "" {
+			snap.Raw["membership_type"] = membership
+		}
 	}
 
 	if acct.Token != "" {
@@ -234,6 +243,24 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 		Unit:      "%",
 		Window:    "billing-cycle",
 	}
+	autoPctUsed := pu.AutoPercentUsed
+	autoPctRemaining := 100.0 - autoPctUsed
+	snap.Metrics["plan_auto_percent_used"] = core.Metric{
+		Used:      &autoPctUsed,
+		Remaining: &autoPctRemaining,
+		Limit:     &hundredPct,
+		Unit:      "%",
+		Window:    "billing-cycle",
+	}
+	apiPctUsed := pu.APIPercentUsed
+	apiPctRemaining := 100.0 - apiPctUsed
+	snap.Metrics["plan_api_percent_used"] = core.Metric{
+		Used:      &apiPctUsed,
+		Remaining: &apiPctRemaining,
+		Limit:     &hundredPct,
+		Unit:      "%",
+		Window:    "billing-cycle",
+	}
 
 	su := periodUsage.SpendLimitUsage
 	if su.PooledLimit > 0 {
@@ -258,13 +285,12 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 	}
 
 	snap.Raw["display_message"] = periodUsage.DisplayMessage
+	snap.Raw["display_threshold"] = strconv.FormatFloat(periodUsage.DisplayThreshold, 'f', -1, 64)
 	snap.Raw["billing_cycle_start"] = formatTimestamp(periodUsage.BillingCycleStart)
 	snap.Raw["billing_cycle_end"] = formatTimestamp(periodUsage.BillingCycleEnd)
 
 	if t := parseTimestamp(periodUsage.BillingCycleEnd); !t.IsZero() {
-		if snap.Resets != nil {
-			snap.Resets["billing_cycle_end"] = t
-		}
+		snap.Resets["billing_cycle_end"] = t
 	}
 
 	if su.PooledLimit > 0 && su.PooledRemaining > 0 {
@@ -309,6 +335,16 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 	if err := p.callDashboardAPI(ctx, token, "GetPlanInfo", &planInfo); err == nil {
 		snap.Raw["plan_name"] = planInfo.PlanInfo.PlanName
 		snap.Raw["plan_price"] = planInfo.PlanInfo.Price
+		snap.Raw["plan_billing_cycle_end"] = formatTimestamp(planInfo.PlanInfo.BillingCycleEnd)
+		if planInfo.PlanInfo.IncludedAmountCents > 0 {
+			snap.Raw["plan_included_amount_cents"] = strconv.FormatFloat(planInfo.PlanInfo.IncludedAmountCents, 'f', -1, 64)
+			planIncludedAmountUSD := planInfo.PlanInfo.IncludedAmountCents / 100.0
+			snap.Metrics["plan_included_amount"] = core.Metric{
+				Used:   &planIncludedAmountUSD,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
+		}
 	}
 
 	var aggUsage aggregatedUsageResp
@@ -340,6 +376,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 	var profile stripeProfileResp
 	if err := p.callRESTAPI(ctx, token, "/auth/full_stripe_profile", &profile); err == nil {
 		snap.Raw["membership_type"] = profile.MembershipType
+		snap.Raw["is_team_member"] = strconv.FormatBool(profile.IsTeamMember)
 		snap.Raw["team_membership"] = profile.TeamMembershipType
 		snap.Raw["individual_membership"] = profile.IndividualMembershipType
 		if profile.IsTeamMember {
@@ -349,6 +386,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 
 	var limitPolicy usageLimitPolicyResp
 	if err := p.callDashboardAPI(ctx, token, "GetUsageLimitPolicyStatus", &limitPolicy); err == nil {
+		snap.Raw["can_configure_spend_limit"] = strconv.FormatBool(limitPolicy.CanConfigureSpendLimit)
 		snap.Raw["limit_policy_type"] = limitPolicy.LimitType
 	}
 
@@ -441,6 +479,8 @@ func applyModelAggregations(snap *core.QuotaSnapshot, aggregations []modelAggreg
 
 		inputTokens := strings.TrimSpace(agg.InputTokens)
 		outputTokens := strings.TrimSpace(agg.OutputTokens)
+		cacheWriteTokens := strings.TrimSpace(agg.CacheWriteTokens)
+		cacheReadTokens := strings.TrimSpace(agg.CacheReadTokens)
 
 		if agg.TotalCents > 0 {
 			costDollars := agg.TotalCents / 100.0
@@ -456,11 +496,84 @@ func applyModelAggregations(snap *core.QuotaSnapshot, aggregations []modelAggreg
 		if outputTokens != "" {
 			snap.Raw[fmt.Sprintf("model_%s_output_tokens", modelIntent)] = outputTokens
 		}
-		if agg.TotalCents > 0 || inputTokens != "" || outputTokens != "" {
+		if cacheWriteTokens != "" {
+			snap.Raw[fmt.Sprintf("model_%s_cache_write_tokens", modelIntent)] = cacheWriteTokens
+		}
+		if cacheReadTokens != "" {
+			snap.Raw[fmt.Sprintf("model_%s_cache_read_tokens", modelIntent)] = cacheReadTokens
+		}
+		if agg.Tier > 0 {
+			snap.Raw[fmt.Sprintf("model_%s_tier", modelIntent)] = strconv.Itoa(agg.Tier)
+		}
+
+		if parsed, ok := parseModelTokenCount(inputTokens); ok {
+			v := parsed
+			snap.Metrics[fmt.Sprintf("model_%s_input_tokens", modelIntent)] = core.Metric{
+				Used:   &v,
+				Unit:   "tokens",
+				Window: "billing-cycle",
+			}
+		}
+		if parsed, ok := parseModelTokenCount(outputTokens); ok {
+			v := parsed
+			snap.Metrics[fmt.Sprintf("model_%s_output_tokens", modelIntent)] = core.Metric{
+				Used:   &v,
+				Unit:   "tokens",
+				Window: "billing-cycle",
+			}
+		}
+		cacheWrite := float64(0)
+		cacheRead := float64(0)
+		hasCacheWrite := false
+		hasCacheRead := false
+		if parsed, ok := parseModelTokenCount(cacheWriteTokens); ok {
+			cacheWrite = parsed
+			hasCacheWrite = true
+			v := parsed
+			snap.Metrics[fmt.Sprintf("model_%s_cache_write_tokens", modelIntent)] = core.Metric{
+				Used:   &v,
+				Unit:   "tokens",
+				Window: "billing-cycle",
+			}
+		}
+		if parsed, ok := parseModelTokenCount(cacheReadTokens); ok {
+			cacheRead = parsed
+			hasCacheRead = true
+			v := parsed
+			snap.Metrics[fmt.Sprintf("model_%s_cache_read_tokens", modelIntent)] = core.Metric{
+				Used:   &v,
+				Unit:   "tokens",
+				Window: "billing-cycle",
+			}
+		}
+		if hasCacheWrite || hasCacheRead {
+			cached := cacheWrite + cacheRead
+			snap.Metrics[fmt.Sprintf("model_%s_cached_tokens", modelIntent)] = core.Metric{
+				Used:   &cached,
+				Unit:   "tokens",
+				Window: "billing-cycle",
+			}
+		}
+
+		if agg.TotalCents > 0 || inputTokens != "" || outputTokens != "" || cacheWriteTokens != "" || cacheReadTokens != "" {
 			applied = true
 		}
 	}
 	return applied
+}
+
+func parseModelTokenCount(raw string) (float64, bool) {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return 0, false
+	}
+	cleaned = strings.ReplaceAll(cleaned, ",", "")
+	cleaned = strings.ReplaceAll(cleaned, "_", "")
+	v, err := strconv.ParseFloat(cleaned, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, billingCycleEnd string, aggregations []modelAggregation) {
