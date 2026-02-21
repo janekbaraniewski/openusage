@@ -2,7 +2,7 @@ package cursor
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleLavender
 	cfg.GaugePriority = []string{
@@ -17,8 +17,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["plan_auto_percent_used"] = "auto"
 	cfg.CompactMetricLabelOverrides["plan_api_percent_used"] = "api"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

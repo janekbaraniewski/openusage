@@ -2,7 +2,7 @@ package copilot
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleSapphire
 	cfg.ShowClientComposition = true
@@ -52,8 +52,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["cli_input_tokens"] = "cli in"
 	cfg.CompactMetricLabelOverrides["7d_tokens"] = "7d tok"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

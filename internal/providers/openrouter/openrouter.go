@@ -13,6 +13,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const (
@@ -202,24 +203,36 @@ type endpointStats struct {
 	Provider         string
 }
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "openrouter" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "OpenRouter",
-		Capabilities: []string{"key_endpoint", "credits_endpoint", "activity_endpoint", "generation_stats", "per_model_breakdown", "headers"},
-		DocURL:       "https://openrouter.ai/docs/api-reference/api-keys/get-current-key",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "openrouter",
+			Info: core.ProviderInfo{
+				Name:         "OpenRouter",
+				Capabilities: []string{"key_endpoint", "credits_endpoint", "activity_endpoint", "generation_stats", "per_model_breakdown", "headers"},
+				DocURL:       "https://openrouter.ai/docs/api-reference/api-keys/get-current-key",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "OPENROUTER_API_KEY",
+				DefaultAccountID: "openrouter",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set OPENROUTER_API_KEY to a valid OpenRouter API key."},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -233,7 +246,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		baseURL = defaultBaseURL
 	}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),
@@ -271,7 +284,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	for _, endpoint := range []string{"/key", "/auth/key"} {
 		url := baseURL + endpoint
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -325,7 +338,7 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 	return fmt.Errorf("key endpoint not available (HTTP 404)")
 }
 
-func applyKeyData(data *keyData, snap *core.QuotaSnapshot) {
+func applyKeyData(data *keyData, snap *core.UsageSnapshot) {
 	usage := data.Usage
 	var remaining *float64
 	if data.LimitRemaining != nil {
@@ -448,7 +461,7 @@ func applyKeyData(data *keyData, snap *core.QuotaSnapshot) {
 	}
 }
 
-func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	url := baseURL + "/credits"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -502,7 +515,7 @@ func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey strin
 	return nil
 }
 
-func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	const (
 		pageSizeHint = 100
 		maxPages     = 20
@@ -611,7 +624,7 @@ func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, sn
 	return nil
 }
 
-func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	var analytics analyticsResponse
 	var activityEndpoint string
 
@@ -950,7 +963,7 @@ func normalizeActivityDate(raw string) (string, time.Time, bool) {
 }
 
 func emitAnalyticsPerModelMetrics(
-	snap *core.QuotaSnapshot,
+	snap *core.UsageSnapshot,
 	modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelRequests map[string]float64,
 ) {
 	modelSet := make(map[string]struct{})
@@ -1000,7 +1013,7 @@ func emitAnalyticsPerModelMetrics(
 }
 
 func emitAnalyticsPerProviderMetrics(
-	snap *core.QuotaSnapshot,
+	snap *core.UsageSnapshot,
 	providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
 ) {
 	providerSet := make(map[string]struct{})
@@ -1057,7 +1070,7 @@ func emitAnalyticsPerProviderMetrics(
 	}
 }
 
-func emitAnalyticsEndpointMetrics(snap *core.QuotaSnapshot, endpointStatsMap map[string]*endpointStats) {
+func emitAnalyticsEndpointMetrics(snap *core.UsageSnapshot, endpointStatsMap map[string]*endpointStats) {
 	type endpointEntry struct {
 		id    string
 		stats *endpointStats
@@ -1131,7 +1144,7 @@ func mapToSortedTimePoints(m map[string]float64) []core.TimePoint {
 	return points
 }
 
-func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	allGenerations, err := p.fetchAllGenerations(ctx, baseURL, apiKey)
 	if err != nil {
 		if errors.Is(err, errGenerationListUnsupported) {
@@ -1598,7 +1611,7 @@ func parseAPIErrorMessage(body []byte) string {
 	return strings.TrimSpace(apiErr.Error.Message)
 }
 
-func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaSnapshot) {
+func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageSnapshot) {
 	type entry struct {
 		name  string
 		stats *modelStats
@@ -1681,7 +1694,7 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaS
 	}
 }
 
-func emitPerProviderMetrics(providerStatsMap map[string]*providerStats, snap *core.QuotaSnapshot) {
+func emitPerProviderMetrics(providerStatsMap map[string]*providerStats, snap *core.UsageSnapshot) {
 	type entry struct {
 		name  string
 		stats *providerStats

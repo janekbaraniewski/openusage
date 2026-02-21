@@ -17,11 +17,13 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 var cursorAPIBase = "https://api2.cursor.sh"
 
 type Provider struct {
+	providerbase.Base
 	mu                    sync.RWMutex
 	modelAggregationCache map[string]cachedModelAggregation // account ID -> latest model aggregation
 }
@@ -34,17 +36,25 @@ type cachedModelAggregation struct {
 
 func New() *Provider {
 	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "cursor",
+			Info: core.ProviderInfo{
+				Name:         "Cursor IDE",
+				Capabilities: []string{"dashboard_api", "billing", "spend_tracking", "model_aggregation", "local_tracking"},
+				DocURL:       "https://www.cursor.com/",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type: core.ProviderAuthTypeToken,
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{
+					"Authenticate in Cursor so usage/billing endpoints are available.",
+					"Ensure Cursor local state is readable for fallback aggregation.",
+				},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 		modelAggregationCache: make(map[string]cachedModelAggregation),
-	}
-}
-
-func (p *Provider) ID() string { return "cursor" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Cursor IDE",
-		Capabilities: []string{"dashboard_api", "billing", "spend_tracking", "model_aggregation", "local_tracking"},
-		DocURL:       "https://www.cursor.com/",
 	}
 }
 
@@ -130,8 +140,8 @@ type dailyStats struct {
 	ComposerAcceptedLines  int    `json:"composerAcceptedLines"`
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
-	snap := core.QuotaSnapshot{
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
 		Timestamp:   time.Now(),
@@ -204,7 +214,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.UsageSnapshot) error {
 	var periodUsage currentPeriodUsageResp
 	if err := p.callDashboardAPI(ctx, token, "GetCurrentPeriodUsage", &periodUsage); err != nil {
 		return fmt.Errorf("GetCurrentPeriodUsage: %w", err)
@@ -459,7 +469,7 @@ func (p *Provider) doPost(ctx context.Context, token, url string, result interfa
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-func applyModelAggregations(snap *core.QuotaSnapshot, aggregations []modelAggregation) bool {
+func applyModelAggregations(snap *core.UsageSnapshot, aggregations []modelAggregation) bool {
 	if len(aggregations) == 0 {
 		return false
 	}
@@ -595,7 +605,7 @@ func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, bill
 	}
 }
 
-func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, billingCycleEnd string, snap *core.QuotaSnapshot) bool {
+func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, billingCycleEnd string, snap *core.UsageSnapshot) bool {
 	if accountID == "" {
 		return false
 	}
@@ -619,7 +629,7 @@ func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, bi
 	return applyModelAggregations(snap, copied)
 }
 
-func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core.UsageSnapshot) error {
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro&_journal_mode=WAL", dbPath))
 	if err != nil {
 		return fmt.Errorf("opening tracking DB: %w", err)
@@ -657,7 +667,7 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 	return nil
 }
 
-func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.UsageSnapshot) error {
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro&_journal_mode=WAL", dbPath))
 	if err != nil {
 		return fmt.Errorf("opening state DB: %w", err)
@@ -713,7 +723,7 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Qu
 	return nil
 }
 
-func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *core.QuotaSnapshot) {
+func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT key, value FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats.v1.5.%' ORDER BY key ASC`)
 	if err != nil {

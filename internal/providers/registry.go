@@ -17,8 +17,8 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
 )
 
-func AllProviders() []core.QuotaProvider {
-	return []core.QuotaProvider{
+func AllProviders() []core.UsageProvider {
+	return []core.UsageProvider{
 		openai.New(),
 		anthropic.New(),
 		openrouter.New(),

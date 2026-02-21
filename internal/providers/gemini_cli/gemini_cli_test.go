@@ -138,7 +138,7 @@ func TestFetch_NoData(t *testing.T) {
 	}
 }
 
-func TestFetch_QuotaAPI(t *testing.T) {
+func TestFetch_UsageAPI(t *testing.T) {
 	var tokenCalled, loadCalled, quotaCalled bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +151,7 @@ func TestFetch_QuotaAPI(t *testing.T) {
 			loadCalled = true
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"cloudaicompanionProject":"test-project-123","currentTier":{"id":"FREE"}}`)
-		case "/v1internal:retrieveUserQuota":
+		case "/v1internal:retrieveUserUsage":
 			quotaCalled = true
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"buckets":[
@@ -200,15 +200,15 @@ func TestFetch_QuotaAPI(t *testing.T) {
 		t.Error("loadCodeAssist endpoint was not called")
 	}
 
-	quota, err := retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, server.URL)
+	quota, err := retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, server.URL)
 	if err != nil {
-		t.Fatalf("retrieveUserQuota() error: %v", err)
+		t.Fatalf("retrieveUserUsage() error: %v", err)
 	}
 	if len(quota.Buckets) != 2 {
 		t.Fatalf("got %d buckets, want 2", len(quota.Buckets))
 	}
 	if !quotaCalled {
-		t.Error("retrieveUserQuota endpoint was not called")
+		t.Error("retrieveUserUsage endpoint was not called")
 	}
 
 	flash := quota.Buckets[0]

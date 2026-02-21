@@ -47,10 +47,10 @@ const (
 	maxLeftWidth = 38
 )
 
-type SnapshotsMsg map[string]core.QuotaSnapshot
+type SnapshotsMsg map[string]core.UsageSnapshot
 
 type Model struct {
-	snapshots map[string]core.QuotaSnapshot
+	snapshots map[string]core.UsageSnapshot
 	sortedIDs []string
 	cursor    int
 	mode      viewMode
@@ -106,7 +106,7 @@ func NewModel(
 	accounts []core.AccountConfig,
 ) Model {
 	model := Model{
-		snapshots:             make(map[string]core.QuotaSnapshot),
+		snapshots:             make(map[string]core.UsageSnapshot),
 		warnThreshold:         warnThresh,
 		critThreshold:         critThresh,
 		experimentalAnalytics: experimentalAnalytics,
@@ -170,7 +170,7 @@ func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 
 func (m Model) validateKeyCmd(accountID, providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		var provider core.QuotaProvider
+		var provider core.UsageProvider
 		for _, p := range providers.AllProviders() {
 			if p.ID() == providerID {
 				provider = p
@@ -851,7 +851,7 @@ func (m Model) renderList(w, h int) string {
 	return padToSize(content, w, h)
 }
 
-func (m Model) renderListItem(snap core.QuotaSnapshot, selected bool, w int) string {
+func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) string {
 	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
 
 	icon := StatusIcon(snap.Status)
@@ -937,7 +937,7 @@ type providerDisplayInfo struct {
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
 }
 
-func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) providerDisplayInfo {
+func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) providerDisplayInfo {
 	info := providerDisplayInfo{gaugePercent: -1}
 
 	switch snap.Status {
@@ -1140,26 +1140,26 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 		return info
 	}
 
-	hasQuota := false
-	worstQuotaPct := float64(100)
-	var quotaKey string
-	quotaKeys := sortedMetricKeys(snap.Metrics)
-	for _, key := range quotaKeys {
+	hasUsage := false
+	worstUsagePct := float64(100)
+	var usageKey string
+	usageKeys := sortedMetricKeys(snap.Metrics)
+	for _, key := range usageKeys {
 		m := snap.Metrics[key]
 		pct := m.Percent()
 		if pct >= 0 {
-			hasQuota = true
-			if pct < worstQuotaPct {
-				worstQuotaPct = pct
-				quotaKey = key
+			hasUsage = true
+			if pct < worstUsagePct {
+				worstUsagePct = pct
+				usageKey = key
 			}
 		}
 	}
-	if hasQuota {
+	if hasUsage {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		info.gaugePercent = 100 - worstQuotaPct
-		info.summary = fmt.Sprintf("%.0f%% used", 100-worstQuotaPct)
+		info.gaugePercent = 100 - worstUsagePct
+		info.summary = fmt.Sprintf("%.0f%% used", 100-worstUsagePct)
 		if snap.ProviderID == "gemini_cli" {
 			if m, ok := snap.Metrics["total_conversations"]; ok && m.Used != nil {
 				info.detail = fmt.Sprintf("%.0f conversations", *m.Used)
@@ -1171,9 +1171,9 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 			}
 			return info
 		}
-		if quotaKey != "" {
-			qm := snap.Metrics[quotaKey]
-			parts := []string{metricLabel(widget, quotaKey)}
+		if usageKey != "" {
+			qm := snap.Metrics[usageKey]
+			parts := []string{metricLabel(widget, usageKey)}
 			if qm.Window != "" && qm.Window != "all_time" && qm.Window != "current_period" {
 				parts = append(parts, qm.Window)
 			}
@@ -1238,7 +1238,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot, widget core.DashboardWidget) pr
 
 // computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view
 // for providers that expose both balance and usage dimensions.
-func computeDetailedCreditsDisplayInfo(snap core.QuotaSnapshot, info providerDisplayInfo) providerDisplayInfo {
+func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDisplayInfo) providerDisplayInfo {
 	// Prefer account-level purchased credits when available.
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
@@ -1259,7 +1259,7 @@ func computeDetailedCreditsDisplayInfo(snap core.QuotaSnapshot, info providerDis
 		if weekly, ok := snap.Metrics["usage_weekly"]; ok && weekly.Used != nil {
 			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *weekly.Used))
 		}
-		if models, ok := snap.Raw["activity_models"]; ok && models != "" {
+		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
 		}
 		info.detail = strings.Join(detailParts, " · ")
@@ -1282,7 +1282,7 @@ func computeDetailedCreditsDisplayInfo(snap core.QuotaSnapshot, info providerDis
 		if burn, ok := snap.Metrics["burn_rate"]; ok && burn.Used != nil {
 			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *burn.Used))
 		}
-		if models, ok := snap.Raw["activity_models"]; ok && models != "" {
+		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
 		}
 		info.detail = strings.Join(detailParts, " · ")
@@ -1296,11 +1296,11 @@ func computeDetailedCreditsDisplayInfo(snap core.QuotaSnapshot, info providerDis
 	return info
 }
 
-func providerSummary(snap core.QuotaSnapshot) string {
+func providerSummary(snap core.UsageSnapshot) string {
 	return computeDisplayInfo(snap, dashboardWidget(snap.ProviderID)).summary
 }
 
-func bestMetricPercent(snap core.QuotaSnapshot) float64 {
+func bestMetricPercent(snap core.UsageSnapshot) float64 {
 	hasSpendLimit := false
 	if m, ok := snap.Metrics["spend_limit"]; ok && m.Limit != nil && *m.Limit > 0 {
 		hasSpendLimit = true
@@ -1494,8 +1494,8 @@ func (m Model) isProviderEnabled(id string) bool {
 	return enabled
 }
 
-func (m Model) visibleSnapshots() map[string]core.QuotaSnapshot {
-	out := make(map[string]core.QuotaSnapshot, len(m.snapshots))
+func (m Model) visibleSnapshots() map[string]core.UsageSnapshot {
+	out := make(map[string]core.UsageSnapshot, len(m.snapshots))
 	for id, snap := range m.snapshots {
 		if m.isProviderEnabled(id) {
 			out[id] = snap

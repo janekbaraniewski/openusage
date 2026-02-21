@@ -510,7 +510,7 @@ func TestFindLatestSessionFile(t *testing.T) {
 	}
 }
 
-func metricUsed(t *testing.T, snap core.QuotaSnapshot, key string) float64 {
+func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 	t.Helper()
 	metric, ok := snap.Metrics[key]
 	if !ok {

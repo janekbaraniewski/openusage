@@ -63,7 +63,7 @@ func ParseRateLimitGroup(h http.Header, limitHeader, remainingHeader, resetHeade
 	}
 }
 
-func ApplyRateLimitGroup(h http.Header, snap *core.QuotaSnapshot, key, unit, window, limitH, remainH, resetH string) {
+func ApplyRateLimitGroup(h http.Header, snap *core.UsageSnapshot, key, unit, window, limitH, remainH, resetH string) {
 	rlg := ParseRateLimitGroup(h, limitH, remainH, resetH)
 	if rlg == nil {
 		return

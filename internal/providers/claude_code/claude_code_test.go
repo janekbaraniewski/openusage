@@ -271,7 +271,7 @@ func TestProvider_Fetch_WithJSONL(t *testing.T) {
 	os.WriteFile(sessionFile, []byte(content), 0644)
 
 	p := New()
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  "test",
 		Timestamp:  time.Now(),
@@ -342,7 +342,7 @@ func TestProvider_Fetch_WithJSONL(t *testing.T) {
 }
 
 func TestNormalizeModelUsage_ConvertsLegacyKeys(t *testing.T) {
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		Metrics: map[string]core.Metric{
 			"input_tokens_claude_opus_4_6":  {Used: float64Ptr(1200), Unit: "tokens", Window: "all-time"},
 			"output_tokens_claude_opus_4_6": {Used: float64Ptr(300), Unit: "tokens", Window: "all-time"},
@@ -383,7 +383,7 @@ func TestReadSettings(t *testing.T) {
 	os.WriteFile(settingsPath, []byte(`{"model":"claude-opus-4-6","alwaysThinkingEnabled":true}`), 0644)
 
 	p := New()
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		Metrics: make(map[string]core.Metric),
 		Raw:     make(map[string]string),
 	}
@@ -420,7 +420,7 @@ func TestReadAccount_FullDetails(t *testing.T) {
 	os.WriteFile(accountPath, []byte(acctJSON), 0644)
 
 	p := New()
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		Metrics: make(map[string]core.Metric),
 		Raw:     make(map[string]string),
 	}
@@ -464,7 +464,7 @@ func TestApplyUsageResponse_ClampsExpiredBucketToZero(t *testing.T) {
 	past := now.Add(-10 * time.Second).Format(time.RFC3339)
 	future := now.Add(6 * time.Hour).Format(time.RFC3339)
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		Metrics: make(map[string]core.Metric),
 		Resets:  make(map[string]time.Time),
 	}
@@ -502,7 +502,7 @@ func TestApplyUsageResponse_KeepsFutureBucketValue(t *testing.T) {
 	now := time.Date(2026, 2, 20, 20, 0, 0, 0, time.UTC)
 	future := now.Add(2 * time.Hour).Format(time.RFC3339)
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		Metrics: make(map[string]core.Metric),
 		Resets:  make(map[string]time.Time),
 	}
@@ -620,7 +620,7 @@ func TestReadConversationJSONL_DedupesRequestUsageAndToolCalls(t *testing.T) {
 	}
 
 	p := New()
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   "dedupe-test",
 		Timestamp:   time.Now(),

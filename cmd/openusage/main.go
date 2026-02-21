@@ -132,7 +132,7 @@ func main() {
 	model.SetOnAddAccount(engine.AddAccount)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	engine.OnUpdate(func(snaps map[string]core.QuotaSnapshot) {
+	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
 		p.Send(tui.SnapshotsMsg(snaps))
 	})
 

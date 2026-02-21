@@ -2,7 +2,7 @@ package codex
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleGreen
 	cfg.ShowClientComposition = true
@@ -29,8 +29,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["rate_limit_code_review_primary"] = "Code Review Limit"
 	cfg.MetricLabelOverrides["rate_limit_code_review_secondary"] = "Code Review Secondary"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

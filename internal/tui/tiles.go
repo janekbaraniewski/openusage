@@ -202,7 +202,7 @@ func (m Model) renderTiles(w, h int) string {
 	return padToSize(strings.Join(visible, "\n"), w, h)
 }
 
-func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bool, tileW, tileContentH int) string {
+func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bool, tileW, tileContentH int) string {
 	innerW := tileW - 2*tilePadH
 	if innerW < 10 {
 		innerW = 10
@@ -454,7 +454,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bo
 	return border.Render(content)
 }
 
-func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int) []string {
+func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -524,24 +524,8 @@ func gaugeLabel(widget core.DashboardWidget, key string, window ...string) strin
 	return metricLabel(widget, key)
 }
 
-var metricsNoGauge = map[string]bool{
-	"context_window": true,
-}
-
 func metricUsedPercent(key string, met core.Metric) float64 {
-	if metricsNoGauge[key] {
-		return -1
-	}
-	if met.Unit == "%" && met.Used != nil {
-		return *met.Used
-	}
-	if met.Limit != nil && met.Remaining != nil && *met.Limit > 0 {
-		return (*met.Limit - *met.Remaining) / *met.Limit * 100
-	}
-	if met.Limit != nil && met.Used != nil && *met.Limit > 0 {
-		return *met.Used / *met.Limit * 100
-	}
-	return -1
+	return core.MetricUsedPercent(key, met)
 }
 
 func metricHasGauge(key string, met core.Metric) bool {
@@ -555,7 +539,7 @@ type compactMetricRowSpec struct {
 	maxSegments int
 }
 
-func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
+func buildTileCompactMetricSummaryLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
 	if len(snap.Metrics) == 0 || len(widget.CompactRows) == 0 {
 		return nil, nil
 	}
@@ -808,7 +792,7 @@ func compactMetricAmount(v float64, unit string) string {
 	}
 }
 
-func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, skipKeys map[string]bool) []string {
+func (m Model) buildTileMetricLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, skipKeys map[string]bool) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -869,7 +853,7 @@ func shouldSuppressMetricLine(widget core.DashboardWidget, key string, met core.
 		}
 	}
 
-	if widget.SuppressZeroNonQuotaMetrics && met.Used != nil && *met.Used == 0 && met.Limit == nil && met.Remaining == nil {
+	if widget.SuppressZeroNonUsageMetrics && met.Used != nil && *met.Used == 0 && met.Limit == nil && met.Remaining == nil {
 		return true
 	}
 
@@ -894,8 +878,9 @@ func hasAnyPrefix(value string, prefixes []string) bool {
 	return false
 }
 
-func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
-	if len(snap.Raw) == 0 {
+func buildTileMetaLines(snap core.UsageSnapshot, innerW int) []string {
+	meta := snapshotMetaEntries(snap)
+	if len(meta) == 0 {
 		return nil
 	}
 
@@ -923,7 +908,7 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 
 	var lines []string
 	for _, e := range order {
-		val, ok := snap.Raw[e.key]
+		val, ok := meta[e.key]
 		if !ok || val == "" {
 			continue
 		}
@@ -939,19 +924,19 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 	return lines
 }
 
-func buildTileHeaderMetaLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
+func buildTileHeaderMetaLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
 	var pills []string
 	pills = append(pills, buildTileCyclePills(snap)...)
 	pills = append(pills, buildTileResetPills(snap, widget, animFrame)...)
 	return wrapTilePills(pills, innerW)
 }
 
-func buildTileCyclePills(snap core.QuotaSnapshot) []string {
+func buildTileCyclePills(snap core.UsageSnapshot) []string {
 	var pills []string
-	if pill := buildTileCyclePill("Billing", snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"]); pill != "" {
+	if pill := buildTileCyclePill("Billing", snapshotMeta(snap, "billing_cycle_start"), snapshotMeta(snap, "billing_cycle_end")); pill != "" {
 		pills = append(pills, pill)
 	}
-	if pill := buildTileCyclePill("5h Block", snap.Raw["block_start"], snap.Raw["block_end"]); pill != "" {
+	if pill := buildTileCyclePill("5h Block", snapshotMeta(snap, "block_start"), snapshotMeta(snap, "block_end")); pill != "" {
 		pills = append(pills, pill)
 	}
 	return pills
@@ -1086,7 +1071,7 @@ var resetLabelMap = map[string]string{
 	"gh_graphql_rpm":       "GraphQL",
 }
 
-func collectActiveResetEntries(snap core.QuotaSnapshot, widget core.DashboardWidget) []resetEntry {
+func collectActiveResetEntries(snap core.UsageSnapshot, widget core.DashboardWidget) []resetEntry {
 	if len(snap.Resets) == 0 {
 		return nil
 	}
@@ -1113,7 +1098,7 @@ func collectActiveResetEntries(snap core.QuotaSnapshot, widget core.DashboardWid
 	return entries
 }
 
-func resetLabelForKey(snap core.QuotaSnapshot, widget core.DashboardWidget, key string) string {
+func resetLabelForKey(snap core.UsageSnapshot, widget core.DashboardWidget, key string) string {
 	if widget.ResetStyle == core.DashboardResetStyleCompactModelResets {
 		if label := compactModelResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
 			return label
@@ -1237,7 +1222,7 @@ func buildCompactModelResetPills(entries []resetEntry) []string {
 	return pills
 }
 
-func buildTileResetPills(snap core.QuotaSnapshot, widget core.DashboardWidget, animFrame int) []string {
+func buildTileResetPills(snap core.UsageSnapshot, widget core.DashboardWidget, animFrame int) []string {
 	_ = animFrame
 	entries := collectActiveResetEntries(snap, widget)
 	if len(entries) == 0 {
@@ -1269,7 +1254,7 @@ func buildTileResetPills(snap core.QuotaSnapshot, widget core.DashboardWidget, a
 	return pills
 }
 
-func buildTileResetLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
+func buildTileResetLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
 	return wrapTilePills(buildTileResetPills(snap, widget, animFrame), innerW)
 }
 
@@ -1337,7 +1322,7 @@ type clientMixEntry struct {
 	series    []core.TimePoint
 }
 
-func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allModels, usedKeys := collectProviderModelMix(snap)
 	if len(allModels) == 0 {
 		return nil, nil
@@ -1422,7 +1407,7 @@ func limitModelMix(models []modelMixEntry, expanded bool, maxVisible int) ([]mod
 	return models[:maxVisible], len(models) - maxVisible
 }
 
-func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[string]bool) {
+func collectProviderModelMix(snap core.UsageSnapshot) ([]modelMixEntry, map[string]bool) {
 	type agg struct {
 		cost   float64
 		input  float64
@@ -1471,7 +1456,7 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[stri
 		}
 	}
 
-	for key, raw := range snap.Raw {
+	for key, raw := range snapshotMetaEntries(snap) {
 		if usedKeys[key] {
 			continue
 		}
@@ -1509,7 +1494,7 @@ func collectProviderModelMix(snap core.QuotaSnapshot) ([]modelMixEntry, map[stri
 	return models, usedKeys
 }
 
-func buildProviderVendorCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allProviders, usedKeys := collectProviderVendorMix(snap)
 	if len(allProviders) == 0 {
 		return nil, nil
@@ -1624,7 +1609,7 @@ func buildProviderVendorCompositionLines(snap core.QuotaSnapshot, innerW int, ex
 	return lines, usedKeys
 }
 
-func collectProviderVendorMix(snap core.QuotaSnapshot) ([]providerMixEntry, map[string]bool) {
+func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[string]bool) {
 	type agg struct {
 		cost     float64
 		input    float64
@@ -1676,7 +1661,7 @@ func collectProviderVendorMix(snap core.QuotaSnapshot) ([]providerMixEntry, map[
 		}
 	}
 
-	for key, raw := range snap.Raw {
+	for key, raw := range snapshotMetaEntries(snap) {
 		if usedKeys[key] || !strings.HasPrefix(key, "provider_") {
 			continue
 		}
@@ -1741,7 +1726,7 @@ func limitProviderMix(providers []providerMixEntry, expanded bool, maxVisible in
 	return providers[:maxVisible], len(providers) - maxVisible
 }
 
-func buildProviderDailyTrendLines(snap core.QuotaSnapshot, innerW int) []string {
+func buildProviderDailyTrendLines(snap core.UsageSnapshot, innerW int) []string {
 	type trendDef struct {
 		label string
 		keys  []string
@@ -1818,7 +1803,7 @@ func tailSeriesValues(points []core.TimePoint, max int) []float64 {
 	return values
 }
 
-func buildProviderClientCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+func buildProviderClientCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allClients, usedKeys := collectProviderClientMix(snap)
 	if len(allClients) == 0 {
 		return nil, nil
@@ -1914,7 +1899,7 @@ func buildProviderClientCompositionLines(snap core.QuotaSnapshot, innerW int, ex
 	return lines, usedKeys
 }
 
-func collectProviderClientMix(snap core.QuotaSnapshot) ([]clientMixEntry, map[string]bool) {
+func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {
 	byClient := make(map[string]*clientMixEntry)
 	usedKeys := make(map[string]bool)
 

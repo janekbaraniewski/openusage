@@ -2,7 +2,7 @@ package claude_code
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleGreen
 	cfg.ShowClientComposition = true
@@ -99,8 +99,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["7d_web_fetch_requests"] = "7d fetch"
 	cfg.CompactMetricLabelOverrides["burn_rate"] = "burn"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

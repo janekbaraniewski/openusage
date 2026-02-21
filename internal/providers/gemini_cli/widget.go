@@ -2,7 +2,7 @@ package gemini_cli
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleBlue
 	cfg.ShowClientComposition = true
@@ -26,8 +26,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["tokens_today"] = "Today Tokens"
 	cfg.MetricLabelOverrides["7d_tokens"] = "7-Day Tokens"
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

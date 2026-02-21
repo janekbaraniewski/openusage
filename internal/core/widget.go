@@ -57,6 +57,14 @@ type DashboardRawGroup struct {
 	Keys  []string
 }
 
+// WidgetDataSpec describes the expected metric payload for a dashboard widget.
+// RequiredMetricKeys provide a strict contract; MetricPrefixes provide extensibility.
+type WidgetDataSpec struct {
+	RequiredMetricKeys []string
+	OptionalMetricKeys []string
+	MetricPrefixes     []string
+}
+
 type DashboardWidget struct {
 	DisplayStyle DashboardDisplayStyle
 	ResetStyle   DashboardResetStyle
@@ -88,7 +96,9 @@ type DashboardWidget struct {
 	// Hide noisy metrics that are often zero-value for this provider.
 	SuppressZeroMetricKeys []string
 	// Hide all zero-valued non-quota metrics.
-	SuppressZeroNonQuotaMetrics bool
+	SuppressZeroNonUsageMetrics bool
+
+	DataSpec WidgetDataSpec
 }
 
 func DefaultDashboardWidget() DashboardWidget {
@@ -182,5 +192,32 @@ func DefaultDashboardWidget() DashboardWidget {
 			"total_conversations":  "conv",
 			"recent_requests":      "recent",
 		},
+		DataSpec: WidgetDataSpec{
+			OptionalMetricKeys: []string{
+				"rpm", "tpm", "rpd", "tpd",
+				"spend_limit", "plan_spend", "credit_balance", "credits",
+				"messages_today", "sessions_today", "tool_calls_today",
+			},
+			MetricPrefixes: []string{
+				"rate_limit_", "model_", "client_",
+				"today_", "7d_", "30d_", "analytics_",
+			},
+		},
 	}
+}
+
+func (w DashboardWidget) MissingMetrics(snap UsageSnapshot) []string {
+	if len(w.DataSpec.RequiredMetricKeys) == 0 {
+		return nil
+	}
+	missing := make([]string, 0, len(w.DataSpec.RequiredMetricKeys))
+	for _, key := range w.DataSpec.RequiredMetricKeys {
+		if key == "" {
+			continue
+		}
+		if _, ok := snap.Metrics[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const (
@@ -33,17 +34,30 @@ const (
 	maxBreakdownRaw     = 6
 )
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "gemini_cli" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Gemini CLI",
-		Capabilities: []string{"local_config", "oauth_status", "conversation_count", "local_sessions", "token_usage", "by_model", "by_client", "quota_api"},
-		DocURL:       "https://github.com/google-gemini/gemini-cli",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "gemini_cli",
+			Info: core.ProviderInfo{
+				Name:         "Gemini CLI",
+				Capabilities: []string{"local_config", "oauth_status", "conversation_count", "local_sessions", "token_usage", "by_model", "by_client", "quota_api"},
+				DocURL:       "https://github.com/google-gemini/gemini-cli",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type: core.ProviderAuthTypeOAuth,
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{
+					"Install and authenticate Gemini CLI locally.",
+					"Verify OAuth credentials are available in the Gemini CLI config directory.",
+				},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 	}
 }
 
@@ -100,11 +114,11 @@ type loadCodeAssistResponse struct {
 	CloudAICompanionProject string           `json:"cloudaicompanionProject,omitempty"`
 }
 
-type retrieveUserQuotaRequest struct {
+type retrieveUserUsageRequest struct {
 	Project string `json:"project"`
 }
 
-type retrieveUserQuotaResponse struct {
+type retrieveUserUsageResponse struct {
 	Buckets []bucketInfo `json:"buckets,omitempty"`
 }
 
@@ -155,8 +169,8 @@ type usageEntry struct {
 	Data tokenUsage
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
-	snap := core.QuotaSnapshot{
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
 		Timestamp:   time.Now(),
@@ -308,7 +322,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	}
 
 	if creds.RefreshToken != "" {
-		if err := p.fetchQuotaFromAPI(ctx, &snap, creds, acct); err != nil {
+		if err := p.fetchUsageFromAPI(ctx, &snap, creds, acct); err != nil {
 			log.Printf("[gemini_cli] quota API error: %v", err)
 			snap.Raw["quota_api_error"] = err.Error()
 		}
@@ -333,7 +347,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchQuotaFromAPI(ctx context.Context, snap *core.QuotaSnapshot, creds oauthCreds, acct core.AccountConfig) error {
+func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapshot, creds oauthCreds, acct core.AccountConfig) error {
 	accessToken, err := refreshAccessToken(ctx, creds.RefreshToken)
 	if err != nil {
 		snap.Status = core.StatusAuth
@@ -364,9 +378,9 @@ func (p *Provider) fetchQuotaFromAPI(ctx context.Context, snap *core.QuotaSnapsh
 	}
 	snap.Raw["project_id"] = projectID
 
-	quota, err := retrieveUserQuota(ctx, accessToken, projectID)
+	quota, err := retrieveUserUsage(ctx, accessToken, projectID)
 	if err != nil {
-		return fmt.Errorf("retrieveUserQuota: %w", err)
+		return fmt.Errorf("retrieveUserUsage: %w", err)
 	}
 
 	if len(quota.Buckets) == 0 {
@@ -501,23 +515,23 @@ func loadCodeAssistWithEndpoint(ctx context.Context, accessToken, existingProjec
 	return resp.CloudAICompanionProject, nil
 }
 
-func retrieveUserQuota(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, error) {
-	return retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
+func retrieveUserUsage(ctx context.Context, accessToken, projectID string) (*retrieveUserUsageResponse, error) {
+	return retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
 }
 
-func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, error) {
-	reqBody := retrieveUserQuotaRequest{
+func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserUsageResponse, error) {
+	reqBody := retrieveUserUsageRequest{
 		Project: projectID,
 	}
 
-	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL)
+	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserUsage", reqBody, baseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	var resp retrieveUserQuotaResponse
+	var resp retrieveUserUsageResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("parse retrieveUserQuota response: %w", err)
+		return nil, fmt.Errorf("parse retrieveUserUsage response: %w", err)
 	}
 
 	return &resp, nil
@@ -601,7 +615,7 @@ func (t geminiMessageToken) toUsage() tokenUsage {
 	}
 }
 
-func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.QuotaSnapshot) (int, error) {
+func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSnapshot) (int, error) {
 	files, err := findGeminiSessionFiles(tmpDir)
 	if err != nil {
 		return 0, err
@@ -820,7 +834,7 @@ func readGeminiChatFile(path string) (*geminiChatFile, error) {
 	return &chat, nil
 }
 
-func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map[string]map[string]float64, snap *core.QuotaSnapshot) {
+func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map[string]map[string]float64, snap *core.UsageSnapshot) {
 	entries := sortUsageEntries(totals)
 	if len(entries) == 0 {
 		return
@@ -851,7 +865,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 	snap.Raw[prefix+"_usage"] = formatUsageSummary(entries, maxBreakdownRaw)
 }
 
-func emitClientSessionMetrics(clientSessions map[string]int, snap *core.QuotaSnapshot) {
+func emitClientSessionMetrics(clientSessions map[string]int, snap *core.UsageSnapshot) {
 	type entry struct {
 		name  string
 		count int
@@ -882,7 +896,7 @@ func emitClientSessionMetrics(clientSessions map[string]int, snap *core.QuotaSna
 	}
 }
 
-func setUsageMetric(snap *core.QuotaSnapshot, key string, value float64) {
+func setUsageMetric(snap *core.UsageSnapshot, key string, value float64) {
 	if value <= 0 {
 		return
 	}
@@ -1076,7 +1090,7 @@ func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
 	return points
 }
 
-func storeSeries(snap *core.QuotaSnapshot, key string, values map[string]float64) {
+func storeSeries(snap *core.UsageSnapshot, key string, values map[string]float64) {
 	if len(values) == 0 {
 		return
 	}
@@ -1123,7 +1137,7 @@ func sumLastNDays(values map[string]float64, days int) float64 {
 	return total
 }
 
-func setUsedMetric(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	if value <= 0 {
 		return
 	}

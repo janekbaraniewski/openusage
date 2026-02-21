@@ -9,6 +9,7 @@ import (
 
 var (
 	providerSpecsOnce sync.Once
+	providerSpecs     map[string]core.ProviderSpec
 	providerWidgets   map[string]core.DashboardWidget
 	providerDetails   map[string]core.DetailWidget
 	providerOrder     []string
@@ -16,10 +17,16 @@ var (
 
 func loadProviderSpecs() {
 	providerSpecsOnce.Do(func() {
+		providerSpecs = make(map[string]core.ProviderSpec)
 		providerWidgets = make(map[string]core.DashboardWidget)
 		providerDetails = make(map[string]core.DetailWidget)
 		for _, p := range providers.AllProviders() {
-			id := p.ID()
+			spec := p.Spec()
+			id := spec.ID
+			if id == "" {
+				id = p.ID()
+			}
+			providerSpecs[id] = spec
 			providerWidgets[id] = p.DashboardWidget()
 			providerDetails[id] = p.DetailWidget()
 			providerOrder = append(providerOrder, id)
@@ -56,27 +63,54 @@ func apiKeyProviderEntries() []apiKeyProviderEntry {
 
 	var entries []apiKeyProviderEntry
 	for _, id := range providerOrder {
-		widget := dashboardWidget(id)
-		if widget.APIKeyEnv == "" {
+		spec := providerSpecs[id]
+		if spec.Auth.Type != core.ProviderAuthTypeAPIKey {
 			continue
 		}
-		accountID := widget.DefaultAccountID
+		widget := dashboardWidget(id)
+		envVar := spec.Auth.APIKeyEnv
+		if envVar == "" {
+			envVar = widget.APIKeyEnv
+		}
+		if envVar == "" {
+			continue
+		}
+		accountID := spec.Auth.DefaultAccountID
+		if accountID == "" {
+			accountID = widget.DefaultAccountID
+		}
 		if accountID == "" {
 			accountID = id
 		}
 		entries = append(entries, apiKeyProviderEntry{
 			ProviderID: id,
 			AccountID:  accountID,
-			EnvVar:     widget.APIKeyEnv,
+			EnvVar:     envVar,
 		})
 	}
 	return entries
 }
 
 func isAPIKeyProvider(providerID string) bool {
+	loadProviderSpecs()
+	spec, ok := providerSpecs[providerID]
+	if !ok {
+		return false
+	}
+	if spec.Auth.Type == core.ProviderAuthTypeAPIKey && spec.Auth.APIKeyEnv != "" {
+		return true
+	}
 	return dashboardWidget(providerID).APIKeyEnv != ""
 }
 
 func envVarForProvider(providerID string) string {
+	loadProviderSpecs()
+	spec, ok := providerSpecs[providerID]
+	if !ok {
+		return ""
+	}
+	if spec.Auth.APIKeyEnv != "" {
+		return spec.Auth.APIKeyEnv
+	}
 	return dashboardWidget(providerID).APIKeyEnv
 }

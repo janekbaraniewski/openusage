@@ -2,11 +2,9 @@ package openrouter
 
 import "github.com/janekbaraniewski/openusage/internal/core"
 
-func (p *Provider) DashboardWidget() core.DashboardWidget {
+func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleRosewater
-	cfg.APIKeyEnv = "OPENROUTER_API_KEY"
-	cfg.DefaultAccountID = "openrouter"
 	cfg.DisplayStyle = core.DashboardDisplayStyleDetailedCredits
 	cfg.GaugePriority = []string{
 		"credit_balance", "credits",
@@ -37,7 +35,7 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 		"analytics_7d_byok_cost", "analytics_30d_byok_cost",
 		"today_streamed_percent",
 	}
-	cfg.SuppressZeroNonQuotaMetrics = true
+	cfg.SuppressZeroNonUsageMetrics = true
 	cfg.MetricLabelOverrides["usage_daily"] = "Today Usage"
 	cfg.MetricLabelOverrides["usage_weekly"] = "This Week"
 	cfg.MetricLabelOverrides["usage_monthly"] = "This Month"
@@ -174,8 +172,4 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 		},
 	)
 	return cfg
-}
-
-func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DefaultDetailWidget()
 }

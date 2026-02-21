@@ -146,7 +146,7 @@ func TestProvider_Fetch_WithMockAPI(t *testing.T) {
 
 	p := &Provider{}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  "test-cursor-api",
 		Metrics:    make(map[string]core.Metric),

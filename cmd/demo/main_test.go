@@ -81,16 +81,16 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 	}
 }
 
-func snapshotByProvider(snaps map[string]core.QuotaSnapshot, providerID string) (core.QuotaSnapshot, bool) {
+func snapshotByProvider(snaps map[string]core.UsageSnapshot, providerID string) (core.UsageSnapshot, bool) {
 	for _, snap := range snaps {
 		if snap.ProviderID == providerID {
 			return snap, true
 		}
 	}
-	return core.QuotaSnapshot{}, false
+	return core.UsageSnapshot{}, false
 }
 
-func hasModelBurnMetrics(snap core.QuotaSnapshot) bool {
+func hasModelBurnMetrics(snap core.UsageSnapshot) bool {
 	for key, m := range snap.Metrics {
 		if m.Used == nil {
 			continue
@@ -105,7 +105,7 @@ func hasModelBurnMetrics(snap core.QuotaSnapshot) bool {
 	return false
 }
 
-func hasClientMixMetrics(snap core.QuotaSnapshot) bool {
+func hasClientMixMetrics(snap core.UsageSnapshot) bool {
 	for key, m := range snap.Metrics {
 		if m.Used == nil {
 			continue

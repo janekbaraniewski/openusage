@@ -10,6 +10,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const defaultBaseURL = "https://api.mistral.ai/v1"
@@ -34,24 +35,36 @@ type usageData struct {
 	TotalCost    float64 `json:"total_cost"`
 }
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "mistral" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Mistral AI",
-		Capabilities: []string{"headers", "billing_subscription", "billing_usage"},
-		DocURL:       "https://docs.mistral.ai/getting-started/models/",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "mistral",
+			Info: core.ProviderInfo{
+				Name:         "Mistral AI",
+				Capabilities: []string{"headers", "billing_subscription", "billing_usage"},
+				DocURL:       "https://docs.mistral.ai/getting-started/models/",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "MISTRAL_API_KEY",
+				DefaultAccountID: "mistral",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set MISTRAL_API_KEY to a valid Mistral API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleFlamingo)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -65,7 +78,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		baseURL = defaultBaseURL
 	}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),
@@ -97,7 +110,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchSubscription(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchSubscription(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	url := baseURL + "/billing/subscription"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -148,7 +161,7 @@ func (p *Provider) fetchSubscription(ctx context.Context, baseURL, apiKey string
 	return nil
 }
 
-func (p *Provider) fetchUsage(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchUsage(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	now := time.Now()
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
@@ -216,7 +229,7 @@ func (p *Provider) fetchUsage(ctx context.Context, baseURL, apiKey string, snap 
 	return nil
 }
 
-func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
 	url := baseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

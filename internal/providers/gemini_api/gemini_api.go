@@ -11,6 +11,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -27,24 +28,36 @@ type modelInfo struct {
 	OutputTokenLimit           int      `json:"outputTokenLimit"`
 }
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "gemini_api" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "Google Gemini API",
-		Capabilities: []string{"headers", "model_limits", "auth_check"},
-		DocURL:       "https://ai.google.dev/gemini-api/docs/rate-limits",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "gemini_api",
+			Info: core.ProviderInfo{
+				Name:         "Google Gemini API",
+				Capabilities: []string{"headers", "model_limits", "auth_check"},
+				DocURL:       "https://ai.google.dev/gemini-api/docs/rate-limits",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "GEMINI_API_KEY",
+				DefaultAccountID: "gemini-api",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set GEMINI_API_KEY to a valid Gemini API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleBlue)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -58,7 +71,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		baseURL = defaultBaseURL
 	}
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),
@@ -135,7 +148,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) parseRetryInfo(body io.Reader, snap *core.QuotaSnapshot) {
+func (p *Provider) parseRetryInfo(body io.Reader, snap *core.UsageSnapshot) {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return
@@ -170,7 +183,7 @@ func (p *Provider) extractGenerativeModels(models []modelInfo) []string {
 	return names
 }
 
-func (p *Provider) extractTokenLimits(models []modelInfo, snap *core.QuotaSnapshot) {
+func (p *Provider) extractTokenLimits(models []modelInfo, snap *core.UsageSnapshot) {
 	for _, m := range models {
 		if strings.Contains(m.Name, "gemini-2.5-flash") || strings.Contains(m.Name, "gemini-2.0-flash") {
 			if m.InputTokenLimit > 0 {

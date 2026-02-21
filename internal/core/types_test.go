@@ -55,8 +55,8 @@ func TestMetricPercent(t *testing.T) {
 	}
 }
 
-func TestQuotaSnapshotWorstPercent(t *testing.T) {
-	snap := QuotaSnapshot{
+func TestUsageSnapshotWorstPercent(t *testing.T) {
+	snap := UsageSnapshot{
 		Timestamp: time.Now(),
 		Metrics: map[string]Metric{
 			"rpm": {Limit: float64Ptr(100), Remaining: float64Ptr(80), Unit: "requests", Window: "1m"},
@@ -71,8 +71,8 @@ func TestQuotaSnapshotWorstPercent(t *testing.T) {
 	}
 }
 
-func TestQuotaSnapshotWorstPercentNoData(t *testing.T) {
-	snap := QuotaSnapshot{
+func TestUsageSnapshotWorstPercentNoData(t *testing.T) {
+	snap := UsageSnapshot{
 		Timestamp: time.Now(),
 		Metrics:   map[string]Metric{},
 	}

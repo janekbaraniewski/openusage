@@ -8,6 +8,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const (
@@ -15,24 +16,36 @@ const (
 	defaultModel   = "gpt-4.1-mini"
 )
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "openai" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "OpenAI",
-		Capabilities: []string{"headers"},
-		DocURL:       "https://platform.openai.com/docs/guides/rate-limits",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "openai",
+			Info: core.ProviderInfo{
+				Name:         "OpenAI",
+				Capabilities: []string{"headers"},
+				DocURL:       "https://platform.openai.com/docs/guides/rate-limits",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type:             core.ProviderAuthTypeAPIKey,
+				APIKeyEnv:        "OPENAI_API_KEY",
+				DefaultAccountID: "openai",
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{"Set OPENAI_API_KEY to a valid OpenAI API key."},
+			},
+			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleGreen)),
+		}),
 	}
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey := acct.ResolveAPIKey()
 	if apiKey == "" {
-		return core.QuotaSnapshot{
+		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
@@ -53,17 +66,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	url := baseURL + "/models/" + model
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("openai: creating request: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("openai: creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return core.QuotaSnapshot{}, fmt.Errorf("openai: request failed: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("openai: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	snap := core.QuotaSnapshot{
+	snap := core.UsageSnapshot{
 		ProviderID: p.ID(),
 		AccountID:  acct.ID,
 		Timestamp:  time.Now(),

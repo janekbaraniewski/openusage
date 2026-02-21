@@ -43,13 +43,13 @@ func main() {
 	}
 }
 
-func buildDemoSnapshots() map[string]core.QuotaSnapshot {
+func buildDemoSnapshots() map[string]core.UsageSnapshot {
 	now := time.Now()
 	rng := rand.New(rand.NewSource(now.UnixNano()))
-	snaps := make(map[string]core.QuotaSnapshot)
+	snaps := make(map[string]core.UsageSnapshot)
 
 	// claude-code
-	snaps["claude-code"] = core.QuotaSnapshot{
+	snaps["claude-code"] = core.UsageSnapshot{
 		ProviderID: "claude_code",
 		AccountID:  "claude-code",
 		Timestamp:  now,
@@ -165,7 +165,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// codex-cli
-	snaps["codex-cli"] = core.QuotaSnapshot{
+	snaps["codex-cli"] = core.UsageSnapshot{
 		ProviderID: "codex",
 		AccountID:  "codex-cli",
 		Timestamp:  now,
@@ -221,7 +221,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// copilot
-	snaps["copilot"] = core.QuotaSnapshot{
+	snaps["copilot"] = core.UsageSnapshot{
 		ProviderID: "copilot",
 		AccountID:  "copilot",
 		Timestamp:  now,
@@ -334,7 +334,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// cursor-ide
-	snaps["cursor-ide"] = core.QuotaSnapshot{
+	snaps["cursor-ide"] = core.UsageSnapshot{
 		ProviderID: "cursor",
 		AccountID:  "cursor-ide",
 		Timestamp:  now,
@@ -381,7 +381,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// gemini-cli
-	snaps["gemini-cli"] = core.QuotaSnapshot{
+	snaps["gemini-cli"] = core.UsageSnapshot{
 		ProviderID: "gemini_cli",
 		AccountID:  "gemini-cli",
 		Timestamp:  now,
@@ -447,7 +447,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// openrouter
-	snaps["openrouter"] = core.QuotaSnapshot{
+	snaps["openrouter"] = core.UsageSnapshot{
 		ProviderID: "openrouter",
 		AccountID:  "openrouter",
 		Timestamp:  now,
@@ -548,7 +548,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	}
 
 	// zen
-	snaps["zen"] = core.QuotaSnapshot{
+	snaps["zen"] = core.UsageSnapshot{
 		ProviderID: "zen",
 		AccountID:  "zen",
 		Timestamp:  now,
@@ -676,7 +676,7 @@ func buildDemoSnapshots() map[string]core.QuotaSnapshot {
 	return snaps
 }
 
-func addMissingDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time) {
+func addMissingDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time) {
 	present := make(map[string]bool, len(snaps))
 	for _, snap := range snaps {
 		present[snap.ProviderID] = true
@@ -716,8 +716,8 @@ func demoAccountID(providerID string) string {
 	}
 }
 
-func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.QuotaSnapshot {
-	snap := core.QuotaSnapshot{
+func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.UsageSnapshot {
+	snap := core.UsageSnapshot{
 		ProviderID: providerID,
 		AccountID:  accountID,
 		Timestamp:  now,
@@ -820,7 +820,7 @@ func demoDefaultSnapshot(providerID, accountID string, now time.Time) core.Quota
 	return snap
 }
 
-func randomizeDemoSnapshots(snaps map[string]core.QuotaSnapshot, now time.Time, rng *rand.Rand) {
+func randomizeDemoSnapshots(snaps map[string]core.UsageSnapshot, now time.Time, rng *rand.Rand) {
 	for accountID, snap := range snaps {
 		for key, metric := range snap.Metrics {
 			snap.Metrics[key] = randomizeDemoMetric(metric, rng)
@@ -937,7 +937,7 @@ func demoSeries(now time.Time, values ...float64) []core.TimePoint {
 	return series
 }
 
-func demoMessageForSnapshot(snap core.QuotaSnapshot) string {
+func demoMessageForSnapshot(snap core.UsageSnapshot) string {
 	switch snap.ProviderID {
 	case "openai":
 		if remaining, limit, ok := metricRemainingAndLimit(snap.Metrics, "rpm"); ok {

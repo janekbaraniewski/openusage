@@ -14,23 +14,37 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "claude_code" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name: "Claude Code CLI",
-		Capabilities: []string{
-			"local_stats", "daily_activity", "model_tokens",
-			"account_info", "jsonl_conversations", "5h_billing_blocks",
-			"cost_estimation", "burn_rate", "session_tracking",
-		},
-		DocURL: "https://code.claude.com/",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "claude_code",
+			Info: core.ProviderInfo{
+				Name: "Claude Code CLI",
+				Capabilities: []string{
+					"local_stats", "daily_activity", "model_tokens",
+					"account_info", "jsonl_conversations", "5h_billing_blocks",
+					"cost_estimation", "burn_rate", "session_tracking",
+				},
+				DocURL: "https://code.claude.com/",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type: core.ProviderAuthTypeLocal,
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{
+					"Install Claude Code and authenticate in the CLI.",
+					"Ensure Claude Code local stats/config files are readable.",
+				},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 	}
 }
 
@@ -276,8 +290,8 @@ func buildStatsCandidates(explicitPath, claudeDir, home string) []string {
 	return out
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
-	snap := core.QuotaSnapshot{
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
 		Timestamp:   time.Now(),
@@ -361,7 +375,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) readUsageAPI(orgUUID string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readUsageAPI(orgUUID string, snap *core.UsageSnapshot) error {
 	cookies, err := getClaudeSessionCookies()
 	if err != nil {
 		return fmt.Errorf("cookie extraction: %w", err)
@@ -378,7 +392,7 @@ func (p *Provider) readUsageAPI(orgUUID string, snap *core.QuotaSnapshot) error 
 	return nil
 }
 
-func applyUsageResponse(usage *usageResponse, snap *core.QuotaSnapshot, now time.Time) {
+func applyUsageResponse(usage *usageResponse, snap *core.UsageSnapshot, now time.Time) {
 	applyUsageBucket := func(metricKey, window, resetKey string, bucket *usageBucket) {
 		if bucket == nil {
 			return
@@ -423,7 +437,7 @@ func parseReset(raw string) (time.Time, bool) {
 	return t, true
 }
 
-func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readStats(path string, snap *core.UsageSnapshot) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading stats cache: %w", err)
@@ -646,7 +660,7 @@ func (p *Provider) readStats(path string, snap *core.QuotaSnapshot) error {
 	return nil
 }
 
-func (p *Provider) readAccount(path string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readAccount(path string, snap *core.UsageSnapshot) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading account config: %w", err)
@@ -723,7 +737,7 @@ func (p *Provider) readAccount(path string, snap *core.QuotaSnapshot) error {
 	return nil
 }
 
-func (p *Provider) readSettings(path string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readSettings(path string, snap *core.UsageSnapshot) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading settings: %w", err)
@@ -744,7 +758,7 @@ func (p *Provider) readSettings(path string, snap *core.QuotaSnapshot) error {
 	return nil
 }
 
-func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
 	jsonlFiles := collectJSONLFiles(projectsDir)
 	if altProjectsDir != "" {
 		jsonlFiles = append(jsonlFiles, collectJSONLFiles(altProjectsDir)...)
@@ -1804,7 +1818,7 @@ func floatPtr(v float64) *float64 {
 	return &v
 }
 
-func setMetricMax(snap *core.QuotaSnapshot, key string, value float64, unit, window string) {
+func setMetricMax(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	if value <= 0 {
 		return
 	}
@@ -1819,7 +1833,7 @@ func setMetricMax(snap *core.QuotaSnapshot, key string, value float64, unit, win
 	}
 }
 
-func normalizeModelUsage(snap *core.QuotaSnapshot) {
+func normalizeModelUsage(snap *core.UsageSnapshot) {
 	modelTotals := make(map[string]*modelUsageTotals)
 	legacyMetricKeys := make([]string, 0, 16)
 
@@ -1901,7 +1915,7 @@ func parseMetricNumber(raw string) (float64, bool) {
 	return v, true
 }
 
-func buildModelUsageSummaryRaw(snap *core.QuotaSnapshot) {
+func buildModelUsageSummaryRaw(snap *core.UsageSnapshot) {
 	type entry struct {
 		name   string
 		input  float64

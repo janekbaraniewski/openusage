@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
 const (
@@ -33,17 +34,30 @@ const (
 
 var errLiveUsageAuth = errors.New("live usage auth failed")
 
-type Provider struct{}
+type Provider struct {
+	providerbase.Base
+}
 
-func New() *Provider { return &Provider{} }
-
-func (p *Provider) ID() string { return "codex" }
-
-func (p *Provider) Describe() core.ProviderInfo {
-	return core.ProviderInfo{
-		Name:         "OpenAI Codex CLI",
-		Capabilities: []string{"local_sessions", "live_usage_endpoint", "rate_limits", "token_usage", "credits", "by_model", "by_client"},
-		DocURL:       "https://github.com/openai/codex",
+func New() *Provider {
+	return &Provider{
+		Base: providerbase.New(core.ProviderSpec{
+			ID: "codex",
+			Info: core.ProviderInfo{
+				Name:         "OpenAI Codex CLI",
+				Capabilities: []string{"local_sessions", "live_usage_endpoint", "rate_limits", "token_usage", "credits", "by_model", "by_client"},
+				DocURL:       "https://github.com/openai/codex",
+			},
+			Auth: core.ProviderAuthSpec{
+				Type: core.ProviderAuthTypeToken,
+			},
+			Setup: core.ProviderSetupSpec{
+				Quickstart: []string{
+					"Install Codex CLI and authenticate via `codex auth`.",
+					"Ensure local Codex history/config paths are readable.",
+				},
+			},
+			Dashboard: dashboardWidget(),
+		}),
 	}
 }
 
@@ -158,8 +172,8 @@ type usageEntry struct {
 	Data tokenUsage
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.QuotaSnapshot, error) {
-	snap := core.QuotaSnapshot{
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
 		Timestamp:   time.Now(),
@@ -256,7 +270,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, configDir string, snap *core.QuotaSnapshot) (bool, error) {
+func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, configDir string, snap *core.UsageSnapshot) (bool, error) {
 	authPath := filepath.Join(configDir, "auth.json")
 	if acct.ExtraData != nil && acct.ExtraData["auth_file"] != "" {
 		authPath = acct.ExtraData["auth_file"]
@@ -324,7 +338,7 @@ func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, 
 	return true, nil
 }
 
-func applyUsagePayload(payload *usagePayload, snap *core.QuotaSnapshot) {
+func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) {
 	if payload == nil {
 		return
 	}
@@ -359,7 +373,7 @@ func applyUsagePayload(payload *usagePayload, snap *core.QuotaSnapshot) {
 	applyUsageCredits(payload.Credits, snap)
 }
 
-func applyUsageCredits(credits *usageCredits, snap *core.QuotaSnapshot) {
+func applyUsageCredits(credits *usageCredits, snap *core.UsageSnapshot) {
 	if credits == nil {
 		return
 	}
@@ -399,7 +413,7 @@ func formatCreditsBalance(balance any) string {
 	return ""
 }
 
-func applyUsageLimitDetails(details *usageLimitDetails, primaryKey, secondaryKey string, snap *core.QuotaSnapshot) {
+func applyUsageLimitDetails(details *usageLimitDetails, primaryKey, secondaryKey string, snap *core.UsageSnapshot) {
 	if details == nil {
 		return
 	}
@@ -407,7 +421,7 @@ func applyUsageLimitDetails(details *usageLimitDetails, primaryKey, secondaryKey
 	applyUsageWindowMetric(details.SecondaryWindow, secondaryKey, snap)
 }
 
-func applyUsageWindowMetric(window *usageWindowInfo, key string, snap *core.QuotaSnapshot) {
+func applyUsageWindowMetric(window *usageWindowInfo, key string, snap *core.UsageSnapshot) {
 	if window == nil || key == "" {
 		return
 	}
@@ -535,7 +549,7 @@ func truncateForError(value string, max int) string {
 	return value[:max-3] + "..."
 }
 
-func (p *Provider) readLatestSession(sessionsDir string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapshot) error {
 	latestFile, err := findLatestSessionFile(sessionsDir)
 	if err != nil {
 		return fmt.Errorf("finding latest session: %w", err)
@@ -666,7 +680,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.QuotaSnapsho
 	return nil
 }
 
-func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.QuotaSnapshot) error {
+func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.UsageSnapshot) error {
 	modelTotals := make(map[string]tokenUsage)
 	clientTotals := make(map[string]tokenUsage)
 	modelDaily := make(map[string]map[string]float64)
@@ -775,7 +789,7 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Quo
 	return nil
 }
 
-func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map[string]map[string]float64, snap *core.QuotaSnapshot) {
+func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map[string]map[string]float64, snap *core.UsageSnapshot) {
 	entries := sortUsageEntries(totals)
 	if len(entries) == 0 {
 		return
@@ -807,7 +821,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 	snap.Raw[rawKey] = formatUsageSummary(entries, maxBreakdownRaw)
 }
 
-func emitClientSessionMetrics(clientSessions map[string]int, snap *core.QuotaSnapshot) {
+func emitClientSessionMetrics(clientSessions map[string]int, snap *core.UsageSnapshot) {
 	type entry struct {
 		name  string
 		count int
@@ -838,7 +852,7 @@ func emitClientSessionMetrics(clientSessions map[string]int, snap *core.QuotaSna
 	}
 }
 
-func setUsageMetric(snap *core.QuotaSnapshot, key string, value float64) {
+func setUsageMetric(snap *core.UsageSnapshot, key string, value float64) {
 	if value <= 0 {
 		return
 	}
@@ -1064,7 +1078,7 @@ func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
 	return points
 }
 
-func (p *Provider) applyRateLimitStatus(snap *core.QuotaSnapshot) {
+func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {
 	if snap.Status == core.StatusAuth || snap.Status == core.StatusError || snap.Status == core.StatusUnknown || snap.Status == core.StatusUnsupported {
 		return
 	}
@@ -1158,7 +1172,7 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 	return lastPayload, scanner.Err()
 }
 
-func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.QuotaSnapshot) {
+func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) {
 	dayCounts := make(map[string]int) // "2025-01-15" → count
 
 	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {

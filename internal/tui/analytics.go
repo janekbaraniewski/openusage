@@ -33,7 +33,7 @@ type costData struct {
 	usageGauges   []usageGaugeEntry
 	tokenActivity []tokenActivityEntry
 	timeSeries    []timeSeriesGroup
-	snapshots     map[string]core.QuotaSnapshot
+	snapshots     map[string]core.UsageSnapshot
 }
 
 type timeSeriesGroup struct {
@@ -99,7 +99,7 @@ type collapsedGaugeGroup struct {
 	resetIn  string
 }
 
-func extractCostData(snapshots map[string]core.QuotaSnapshot, filter string) costData {
+func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) costData {
 	var data costData
 	data.snapshots = snapshots
 	lowerFilter := strings.ToLower(filter)
@@ -166,7 +166,7 @@ func extractCostData(snapshots map[string]core.QuotaSnapshot, filter string) cos
 	return data
 }
 
-func extractProviderCost(snap core.QuotaSnapshot) float64 {
+func extractProviderCost(snap core.UsageSnapshot) float64 {
 	modelTotal := 0.0
 	for key, m := range snap.Metrics {
 		if m.Used == nil || *m.Used <= 0 {
@@ -200,7 +200,7 @@ func extractProviderCost(snap core.QuotaSnapshot) float64 {
 	return 0
 }
 
-func extractTodayCost(snap core.QuotaSnapshot) float64 {
+func extractTodayCost(snap core.UsageSnapshot) float64 {
 	for _, key := range []string{"today_api_cost", "daily_cost_usd", "today_cost", "usage_daily"} {
 		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
 			return *m.Used
@@ -209,7 +209,7 @@ func extractTodayCost(snap core.QuotaSnapshot) float64 {
 	return 0
 }
 
-func extract7DayCost(snap core.QuotaSnapshot) float64 {
+func extract7DayCost(snap core.UsageSnapshot) float64 {
 	for _, key := range []string{"7d_api_cost", "usage_weekly"} {
 		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
 			return *m.Used
@@ -218,7 +218,7 @@ func extract7DayCost(snap core.QuotaSnapshot) float64 {
 	return 0
 }
 
-func extractAllModels(snap core.QuotaSnapshot, provColor lipgloss.Color) []modelCostEntry {
+func extractAllModels(snap core.UsageSnapshot, provColor lipgloss.Color) []modelCostEntry {
 	type md struct {
 		cost   float64
 		input  float64
@@ -321,7 +321,7 @@ func extractAllModels(snap core.QuotaSnapshot, provColor lipgloss.Color) []model
 	return result
 }
 
-func extractBudgets(snap core.QuotaSnapshot, color lipgloss.Color) []budgetEntry {
+func extractBudgets(snap core.UsageSnapshot, color lipgloss.Color) []budgetEntry {
 	var result []budgetEntry
 
 	if m, ok := snap.Metrics["spend_limit"]; ok && m.Limit != nil && m.Used != nil && *m.Limit > 0 {
@@ -358,7 +358,7 @@ func extractBudgets(snap core.QuotaSnapshot, color lipgloss.Color) []budgetEntry
 	return result
 }
 
-func extractUsageGauges(snap core.QuotaSnapshot, color lipgloss.Color) []usageGaugeEntry {
+func extractUsageGauges(snap core.UsageSnapshot, color lipgloss.Color) []usageGaugeEntry {
 	var result []usageGaugeEntry
 
 	mkeys := sortedMetricKeys(snap.Metrics)
@@ -388,7 +388,7 @@ func extractUsageGauges(snap core.QuotaSnapshot, color lipgloss.Color) []usageGa
 	return result
 }
 
-func extractTokenActivity(snap core.QuotaSnapshot, color lipgloss.Color) []tokenActivityEntry {
+func extractTokenActivity(snap core.UsageSnapshot, color lipgloss.Color) []tokenActivityEntry {
 	var result []tokenActivityEntry
 
 	sessionIn, sessionOut, sessionCached, sessionTotal := float64(0), float64(0), float64(0), float64(0)
@@ -1007,7 +1007,7 @@ func renderRateLimitsSection(data costData, w int) string {
 	return sb.String()
 }
 
-func collapseUsageGauges(gauges []usageGaugeEntry, snapshots map[string]core.QuotaSnapshot) []collapsedGaugeGroup {
+func collapseUsageGauges(gauges []usageGaugeEntry, snapshots map[string]core.UsageSnapshot) []collapsedGaugeGroup {
 	type groupKey struct {
 		provider string
 		pctRound int
