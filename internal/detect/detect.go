@@ -142,7 +142,7 @@ func detectGHCopilot(result *Result) {
 	result.Tools = append(result.Tools, tool)
 
 	addAccount(result, core.AccountConfig{
-		ID:       "copilot-auto",
+		ID:       "copilot",
 		Provider: "copilot",
 		Auth:     "cli",
 		Binary:   bin,
@@ -187,7 +187,7 @@ func detectGeminiCLI(result *Result) {
 	result.Tools = append(result.Tools, tool)
 
 	acct := core.AccountConfig{
-		ID:        "gemini-cli-auto",
+		ID:        "gemini-cli",
 		Provider:  "gemini_cli",
 		Auth:      "oauth",
 		Binary:    bin,
@@ -223,15 +223,15 @@ var envKeyMapping = []struct {
 	Provider  string
 	AccountID string
 }{
-	{"OPENAI_API_KEY", "openai", "openai-auto"},
-	{"ANTHROPIC_API_KEY", "anthropic", "anthropic-auto"},
-	{"OPENROUTER_API_KEY", "openrouter", "openrouter-auto"},
-	{"GROQ_API_KEY", "groq", "groq-auto"},
-	{"MISTRAL_API_KEY", "mistral", "mistral-auto"},
-	{"DEEPSEEK_API_KEY", "deepseek", "deepseek-auto"},
-	{"XAI_API_KEY", "xai", "xai-auto"},
-	{"GEMINI_API_KEY", "gemini_api", "gemini-api-auto"},
-	{"GOOGLE_API_KEY", "gemini_api", "gemini-google-auto"},
+	{"OPENAI_API_KEY", "openai", "openai"},
+	{"ANTHROPIC_API_KEY", "anthropic", "anthropic"},
+	{"OPENROUTER_API_KEY", "openrouter", "openrouter"},
+	{"GROQ_API_KEY", "groq", "groq"},
+	{"MISTRAL_API_KEY", "mistral", "mistral"},
+	{"DEEPSEEK_API_KEY", "deepseek", "deepseek"},
+	{"XAI_API_KEY", "xai", "xai"},
+	{"GEMINI_API_KEY", "gemini_api", "gemini-api"},
+	{"GOOGLE_API_KEY", "gemini_api", "gemini-google"},
 }
 
 func detectEnvKeys(result *Result) {

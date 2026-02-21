@@ -41,6 +41,19 @@ func LoadCredentialsFrom(path string) (Credentials, error) {
 	if creds.Keys == nil {
 		creds.Keys = make(map[string]string)
 	}
+	if len(creds.Keys) > 0 {
+		normalized := make(map[string]string, len(creds.Keys))
+		for accountID, key := range creds.Keys {
+			id := normalizeAccountID(accountID)
+			if id == "" {
+				continue
+			}
+			if _, exists := normalized[id]; !exists || accountID == id {
+				normalized[id] = key
+			}
+		}
+		creds.Keys = normalized
+	}
 
 	return creds, nil
 }
@@ -50,6 +63,11 @@ func SaveCredential(accountID, apiKey string) error {
 }
 
 func SaveCredentialTo(path, accountID, apiKey string) error {
+	accountID = normalizeAccountID(accountID)
+	if accountID == "" {
+		return fmt.Errorf("account ID is empty")
+	}
+
 	credMu.Lock()
 	defer credMu.Unlock()
 
@@ -68,6 +86,11 @@ func DeleteCredential(accountID string) error {
 }
 
 func DeleteCredentialFrom(path, accountID string) error {
+	accountID = normalizeAccountID(accountID)
+	if accountID == "" {
+		return fmt.Errorf("account ID is empty")
+	}
+
 	credMu.Lock()
 	defer credMu.Unlock()
 

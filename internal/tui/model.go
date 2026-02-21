@@ -976,7 +976,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 			remaining = *m.Remaining
 		}
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f spent", *m.Used, *m.Limit)
 		info.detail = fmt.Sprintf("$%.0f remaining", remaining)
 		if pct := m.Percent(); pct >= 0 {
@@ -987,7 +987,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["plan_spend"]; ok && m.Used != nil && m.Limit != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f plan", *m.Used, *m.Limit)
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
@@ -1000,7 +1000,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["plan_total_spend_usd"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		if lm, ok2 := snap.Metrics["plan_limit_usd"]; ok2 && lm.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.0f plan", *m.Used, *lm.Limit)
 		} else {
@@ -1016,7 +1016,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["credits"]; ok {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		if m.Remaining != nil && m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f credits", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -1031,7 +1031,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Remaining != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		if m.Limit != nil {
 			info.summary = fmt.Sprintf("$%.2f / $%.2f", *m.Remaining, *m.Limit)
 			if pct := m.Percent(); pct >= 0 {
@@ -1044,7 +1044,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 	}
 	if m, ok := snap.Metrics["total_balance"]; ok && m.Remaining != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("%.2f %s available", *m.Remaining, m.Unit)
 		return info
 	}
@@ -1111,7 +1111,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["today_api_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		parts := []string{fmt.Sprintf("~$%.2f today", *m.Used)}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -1137,7 +1137,7 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["5h_block_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("~$%.2f / 5h block", *m.Used)
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			info.detail = fmt.Sprintf("$%.2f/h burn rate", *br.Used)
@@ -1176,13 +1176,13 @@ func computeDisplayInfo(snap core.QuotaSnapshot) providerDisplayInfo {
 
 	if m, ok := snap.Metrics["total_cost_usd"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("$%.2f total", *m.Used)
 		return info
 	}
 	if m, ok := snap.Metrics["all_time_api_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Spend"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("~$%.2f total (API est.)", *m.Used)
 		return info
 	}
@@ -1260,7 +1260,7 @@ func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayI
 	// Fallback: key-level credits/usage from /key.
 	if m, ok := snap.Metrics["credits"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
-		info.tagLabel = "Usage"
+		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("$%.4f used", *m.Used)
 
 		var detailParts []string
@@ -1282,7 +1282,7 @@ func computeOpenRouterDisplayInfo(snap core.QuotaSnapshot, info providerDisplayI
 
 	// Fallback to generic
 	info.tagEmoji = "💰"
-	info.tagLabel = "OpenRouter"
+	info.tagLabel = "Credits"
 	info.summary = "Connected"
 	return info
 }

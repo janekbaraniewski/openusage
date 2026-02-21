@@ -140,3 +140,55 @@ func TestSaveCredential_OverwritesExisting(t *testing.T) {
 		t.Errorf("key = %q, want sk-new-key", creds.Keys["openai-personal"])
 	}
 }
+
+func TestLoadCredentialsFrom_NormalizesLegacyAutoIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	content := `{
+  "keys": {
+    "openai-auto": "sk-old",
+    "openai": "sk-new",
+    "gemini-api-auto": "g1",
+    "copilot-auto": "c1"
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	creds, err := LoadCredentialsFrom(path)
+	if err != nil {
+		t.Fatalf("LoadCredentialsFrom error: %v", err)
+	}
+
+	if len(creds.Keys) != 3 {
+		t.Fatalf("keys count = %d, want 3", len(creds.Keys))
+	}
+	if creds.Keys["openai"] != "sk-new" {
+		t.Errorf("openai key = %q, want sk-new", creds.Keys["openai"])
+	}
+	if creds.Keys["gemini-api"] != "g1" {
+		t.Errorf("gemini-api key = %q, want g1", creds.Keys["gemini-api"])
+	}
+	if creds.Keys["copilot"] != "c1" {
+		t.Errorf("copilot key = %q, want c1", creds.Keys["copilot"])
+	}
+}
+
+func TestDeleteCredentialFrom_WithLegacyAccountID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+
+	if err := SaveCredentialTo(path, "openai-auto", "sk-test-key"); err != nil {
+		t.Fatalf("SaveCredentialTo error: %v", err)
+	}
+	if err := DeleteCredentialFrom(path, "openai"); err != nil {
+		t.Fatalf("DeleteCredentialFrom error: %v", err)
+	}
+
+	creds, err := LoadCredentialsFrom(path)
+	if err != nil {
+		t.Fatalf("LoadCredentialsFrom error: %v", err)
+	}
+	if len(creds.Keys) != 0 {
+		t.Fatalf("keys count = %d, want 0", len(creds.Keys))
+	}
+}

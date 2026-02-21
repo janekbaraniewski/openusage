@@ -446,14 +446,14 @@ var defaultAPIKeyAccounts = []struct {
 	ProviderID string
 	AccountID  string
 }{
-	{"openai", "openai-auto"},
-	{"anthropic", "anthropic-auto"},
-	{"openrouter", "openrouter-auto"},
-	{"groq", "groq-auto"},
-	{"mistral", "mistral-auto"},
-	{"deepseek", "deepseek-auto"},
-	{"xai", "xai-auto"},
-	{"gemini_api", "gemini-api-auto"},
+	{"openai", "openai"},
+	{"anthropic", "anthropic"},
+	{"openrouter", "openrouter"},
+	{"groq", "groq"},
+	{"mistral", "mistral"},
+	{"deepseek", "deepseek"},
+	{"xai", "xai"},
+	{"gemini_api", "gemini-api"},
 }
 
 // apiKeysTabIDs returns account IDs for the API Keys tab, including
