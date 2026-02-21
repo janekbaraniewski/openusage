@@ -14,5 +14,8 @@ func (p *Provider) DashboardWidget() core.DashboardWidget {
 			MaxSegments: 3,
 		},
 	}
+	cfg.CompactMetricLabelOverrides["gh_core_rpm"] = "core"
+	cfg.CompactMetricLabelOverrides["gh_search_rpm"] = "search"
+	cfg.CompactMetricLabelOverrides["gh_graphql_rpm"] = "graphql"
 	return cfg
 }

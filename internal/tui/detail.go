@@ -22,7 +22,7 @@ const (
 func DetailTabs(snap core.QuotaSnapshot) []string {
 	tabs := []string{"All"}
 	if len(snap.Metrics) > 0 {
-		groups := groupMetrics(snap.Metrics)
+		groups := groupMetrics(snap.Metrics, dashboardWidget(snap.ProviderID))
 		for _, g := range groups {
 			tabs = append(tabs, g.title)
 		}
@@ -65,17 +65,17 @@ func RenderDetailContent(snap core.QuotaSnapshot, w int, warnThresh, critThresh 
 	showInfo := tabName == "Info" || showAll
 
 	if len(snap.Metrics) > 0 {
-		groups := groupMetrics(snap.Metrics)
+		groups := groupMetrics(snap.Metrics, widget)
 		for _, group := range groups {
 			if showAll || group.title == tabName {
-				renderMetricGroup(&sb, group, w, warnThresh, critThresh, snap.DailySeries)
+				renderMetricGroup(&sb, group, widget, w, warnThresh, critThresh, snap.DailySeries)
 			}
 		}
 	}
 
 	if showTimers && len(snap.Resets) > 0 {
 		sb.WriteString("\n")
-		renderTimersSection(&sb, snap.Resets, w)
+		renderTimersSection(&sb, snap.Resets, widget, w)
 	}
 
 	if showInfo && len(snap.Raw) > 0 {
@@ -308,11 +308,11 @@ type metricEntry struct {
 	metric core.Metric
 }
 
-func groupMetrics(metrics map[string]core.Metric) []metricGroup {
+func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget) []metricGroup {
 	groups := make(map[string]*metricGroup)
 
 	for key, m := range metrics {
-		groupName, label, order := classifyMetric(key, m)
+		groupName, label, order := classifyMetric(key, m, widget)
 		g, ok := groups[groupName]
 		if !ok {
 			g = &metricGroup{title: groupName, order: order}
@@ -338,7 +338,19 @@ func groupMetrics(metrics map[string]core.Metric) []metricGroup {
 	return result
 }
 
-func classifyMetric(key string, m core.Metric) (group, label string, order int) {
+func classifyMetric(key string, m core.Metric, widget core.DashboardWidget) (group, label string, order int) {
+	if override, ok := widget.MetricGroupOverrides[key]; ok && override.Group != "" {
+		label = override.Label
+		if label == "" {
+			label = metricLabel(widget, key)
+		}
+		order = override.Order
+		if order <= 0 {
+			order = 4
+		}
+		return override.Group, label, order
+	}
+
 	lk := strings.ToLower(key)
 
 	switch {
@@ -346,11 +358,11 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	case key == "rpm" || key == "tpm" || key == "rpd" || key == "tpd":
 		return "Usage", strings.ToUpper(key), 1
 	case strings.HasPrefix(key, "rate_limit_"):
-		return "Usage", prettifyKey(strings.TrimPrefix(key, "rate_limit_")), 1
+		return "Usage", metricLabel(widget, strings.TrimPrefix(key, "rate_limit_")), 1
 	case key == "rpm_headers" || key == "tpm_headers":
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 	case key == "gh_api_rpm" || key == "copilot_chat":
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 
 	case key == "plan_percent_used":
 		return "Usage", "Plan Used", 1
@@ -367,26 +379,26 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 		return "Usage", "Monthly Budget", 1
 
 	case (key == "credits" || key == "credit_balance") && m.Limit != nil:
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 
 	case key == "context_window":
 		return "Usage", "Context Window", 1
 
 	// Time-bucketed usage (daily, weekly, monthly)
 	case key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly":
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 	case key == "limit_remaining":
 		return "Usage", "Limit Remaining", 1
 
 	case m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", prettifyQuotaKey(key), 1
+		return "Usage", prettifyQuotaKey(key, widget), 1
 
 	case m.Unit == "%" && (m.Used != nil || m.Remaining != nil):
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 
 	case m.Used != nil && m.Limit != nil &&
 		!strings.Contains(lk, "token") && m.Unit != "%" && m.Unit != "USD":
-		return "Usage", prettifyKey(key), 1
+		return "Usage", metricLabel(widget, key), 1
 
 	case strings.HasPrefix(key, "model_") &&
 		!strings.HasSuffix(key, "_input_tokens") &&
@@ -395,30 +407,22 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 
 	case key == "plan_included" || key == "plan_bonus" ||
 		key == "plan_total_spend_usd" || key == "plan_limit_usd":
-		return "Spending", prettifyKey(strings.TrimPrefix(key, "plan_")), 2
+		return "Spending", metricLabel(widget, strings.TrimPrefix(key, "plan_")), 2
 
 	case key == "individual_spend":
 		return "Spending", "Individual Spend", 2
 
-	// BYOK spending metrics
-	case strings.HasPrefix(key, "byok_") && strings.Contains(lk, "cost"):
-		return "Spending", prettifyKey(key), 2
-	case strings.HasPrefix(key, "today_byok_") || strings.HasPrefix(key, "7d_byok_") || strings.HasPrefix(key, "30d_byok_"):
-		return "Spending", prettifyKey(key), 2
-	case key == "byok_usage" || key == "byok_daily" || key == "byok_weekly" || key == "byok_monthly":
-		return "Spending", prettifyKey(key), 2
-
 	case strings.Contains(lk, "cost") || strings.Contains(lk, "burn_rate"):
-		return "Spending", prettifyKey(key), 2
+		return "Spending", metricLabel(widget, key), 2
 
 	case key == "credits" || key == "credit_balance":
-		return "Spending", prettifyKey(key), 2
+		return "Spending", metricLabel(widget, key), 2
 
 	case key == "monthly_spend" || key == "monthly_budget":
-		return "Spending", prettifyKey(key), 2
+		return "Spending", metricLabel(widget, key), 2
 
 	case strings.HasSuffix(key, "_balance"):
-		return "Spending", prettifyKey(key), 2
+		return "Spending", metricLabel(widget, key), 2
 
 	case strings.HasPrefix(key, "input_tokens_") || strings.HasPrefix(key, "output_tokens_"):
 		return "Tokens", key, 3
@@ -430,38 +434,41 @@ func classifyMetric(key string, m core.Metric) (group, label string, order int) 
 	// Per-model reasoning and cached tokens
 	case strings.HasPrefix(key, "model_") &&
 		(strings.HasSuffix(key, "_reasoning_tokens") || strings.HasSuffix(key, "_cached_tokens") || strings.HasSuffix(key, "_image_tokens")):
-		return "Tokens", prettifyKey(key), 3
+		return "Tokens", metricLabel(widget, key), 3
 
 	case strings.HasPrefix(key, "session_"):
-		return "Tokens", prettifyKey(strings.TrimPrefix(key, "session_")), 3
+		return "Tokens", metricLabel(widget, strings.TrimPrefix(key, "session_")), 3
 
 	// Additional today metrics
 	case strings.HasPrefix(key, "today_") && strings.Contains(lk, "token"):
-		return "Tokens", prettifyKey(key), 3
+		return "Tokens", metricLabel(widget, key), 3
 
 	case strings.Contains(lk, "token"):
-		return "Tokens", prettifyKey(key), 3
+		return "Tokens", metricLabel(widget, key), 3
 
 	case strings.HasPrefix(key, "tab_") || strings.HasPrefix(key, "composer_"):
-		return "Activity", prettifyKey(key), 4
-
-	// Media and request metrics
-	case strings.HasPrefix(key, "today_") && (strings.Contains(lk, "media") || strings.Contains(lk, "audio") || strings.Contains(lk, "cancelled")):
-		return "Activity", prettifyKey(key), 4
-	case key == "recent_requests" || key == "daily_projected":
-		return "Activity", prettifyKey(key), 4
+		return "Activity", metricLabel(widget, key), 4
 
 	case strings.Contains(lk, "message") || strings.Contains(lk, "session") ||
 		strings.Contains(lk, "conversation") || strings.Contains(lk, "tool_call") ||
 		strings.Contains(lk, "request"):
-		return "Activity", prettifyKey(key), 4
+		return "Activity", metricLabel(widget, key), 4
 
 	default:
-		return "Activity", prettifyKey(key), 4
+		return "Activity", metricLabel(widget, key), 4
 	}
 }
 
-func prettifyQuotaKey(key string) string {
+func metricLabel(widget core.DashboardWidget, key string) string {
+	if widget.MetricLabelOverrides != nil {
+		if label, ok := widget.MetricLabelOverrides[key]; ok && label != "" {
+			return label
+		}
+	}
+	return prettifyKey(key)
+}
+
+func prettifyQuotaKey(key string, widget core.DashboardWidget) string {
 	lastUnderscore := strings.LastIndex(key, "_")
 	if lastUnderscore > 0 && lastUnderscore < len(key)-1 {
 		suffix := key[lastUnderscore+1:]
@@ -470,7 +477,7 @@ func prettifyQuotaKey(key string) string {
 			return prettifyModelHyphens(prefix) + " " + titleCase(suffix)
 		}
 	}
-	return prettifyKey(key)
+	return metricLabel(widget, key)
 }
 
 func prettifyModelHyphens(name string) string {
@@ -494,7 +501,7 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-func renderMetricGroup(sb *strings.Builder, group metricGroup, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint) {
+func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint) {
 	sb.WriteString("\n")
 	renderDetailSectionHeader(sb, group.title, w)
 
@@ -504,9 +511,9 @@ func renderMetricGroup(sb *strings.Builder, group metricGroup, w int, warnThresh
 	case "Spending":
 		renderSpendingSection(sb, group.entries, w)
 	case "Tokens":
-		renderTokensSection(sb, group.entries, w, series)
+		renderTokensSection(sb, group.entries, widget, w, series)
 	case "Activity":
-		renderActivitySection(sb, group.entries, w, series)
+		renderActivitySection(sb, group.entries, widget, w, series)
 	}
 }
 
@@ -579,7 +586,7 @@ func renderSpendingSection(sb *strings.Builder, entries []metricEntry, w int) {
 	}
 }
 
-func renderTokensSection(sb *strings.Builder, entries []metricEntry, w int, series map[string][]core.TimePoint) {
+func renderTokensSection(sb *strings.Builder, entries []metricEntry, widget core.DashboardWidget, w int, series map[string][]core.TimePoint) {
 	labelW := sectionLabelWidth(w)
 
 	var perModelTokens []metricEntry
@@ -606,12 +613,12 @@ func renderTokensSection(sb *strings.Builder, entries []metricEntry, w int, seri
 		renderTokenUsageTable(sb, perModelTokens, w)
 	}
 
-	renderSectionSparklines(sb, w, series, []string{
+	renderSectionSparklines(sb, widget, w, series, []string{
 		"tokens_total", "tokens_input", "tokens_output",
 	})
 }
 
-func renderActivitySection(sb *strings.Builder, entries []metricEntry, w int, series map[string][]core.TimePoint) {
+func renderActivitySection(sb *strings.Builder, entries []metricEntry, widget core.DashboardWidget, w int, series map[string][]core.TimePoint) {
 	labelW := sectionLabelWidth(w)
 
 	for _, e := range entries {
@@ -620,12 +627,12 @@ func renderActivitySection(sb *strings.Builder, entries []metricEntry, w int, se
 			labelStyle.Width(labelW).Render(e.label), valueStyle.Render(val)))
 	}
 
-	renderSectionSparklines(sb, w, series, []string{
+	renderSectionSparklines(sb, widget, w, series, []string{
 		"messages", "sessions", "tool_calls",
 	})
 }
 
-func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, w int) {
+func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, widget core.DashboardWidget, w int) {
 	labelW := sectionLabelWidth(w)
 	renderDetailSectionHeader(sb, "Timers", w)
 
@@ -637,7 +644,7 @@ func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, w int
 
 	for _, k := range timerKeys {
 		t := resets[k]
-		label := prettifyKey(k)
+		label := metricLabel(widget, k)
 		remaining := time.Until(t)
 		dateStr := t.Format("Jan 02 15:04")
 
@@ -668,7 +675,7 @@ func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, w int
 	}
 }
 
-func renderSectionSparklines(sb *strings.Builder, w int, series map[string][]core.TimePoint, candidates []string) {
+func renderSectionSparklines(sb *strings.Builder, widget core.DashboardWidget, w int, series map[string][]core.TimePoint, candidates []string) {
 	if len(series) == 0 {
 		return
 	}
@@ -696,7 +703,7 @@ func renderSectionSparklines(sb *strings.Builder, w int, series map[string][]cor
 		c := colors[colorIdx%len(colors)]
 		colorIdx++
 		spark := RenderSparkline(values, sparkW, c)
-		label := prettifyKey(key)
+		label := metricLabel(widget, key)
 		sb.WriteString(fmt.Sprintf("  %s %s\n", dimStyle.Render(label), spark))
 	}
 
@@ -723,7 +730,7 @@ func renderSectionSparklines(sb *strings.Builder, w int, series map[string][]cor
 				c := colors[colorIdx%len(colors)]
 				colorIdx++
 				spark := RenderSparkline(values, sparkW, c)
-				label := prettifyKey(key)
+				label := metricLabel(widget, key)
 				sb.WriteString(fmt.Sprintf("  %s %s\n", dimStyle.Render(label), spark))
 			}
 		}
@@ -1271,58 +1278,11 @@ func formatDuration(d time.Duration) string {
 }
 
 var prettifyKeyOverrides = map[string]string{
-	"5h_block_cost":   "5h Block Cost≈",
-	"5h_block_input":  "5h Block In",
-	"5h_block_output": "5h Block Out",
-	"5h_block_msgs":   "5h Block Msgs",
-	"burn_rate":       "Burn Rate",
-
-	"today_api_cost":    "Today Cost≈",
-	"7d_api_cost":       "7-Day Cost≈",
-	"7d_messages":       "7-Day Messages",
-	"7d_input_tokens":   "7-Day Input",
-	"7d_output_tokens":  "7-Day Output",
-	"all_time_api_cost": "All-Time Cost≈",
-
-	"messages_today":   "Today Messages",
-	"tool_calls_today": "Today Tools",
-	"sessions_today":   "Today Sessions",
-	"total_messages":   "All-Time Msgs",
-	"total_sessions":   "All-Time Sessions",
-	"total_cost_usd":   "All-Time Cost",
-
-	"usage_five_hour":        "5-Hour Usage",
-	"usage_seven_day":        "7-Day Usage",
-	"usage_seven_day_sonnet": "7d Sonnet Usage",
-	"usage_seven_day_opus":   "7d Opus Usage",
-	"usage_seven_day_cowork": "7d Cowork Usage",
-
-	// Extended usage and billing metrics
-	"usage_daily":                "Today Usage",
-	"usage_weekly":               "This Week",
-	"usage_monthly":              "This Month",
-	"byok_usage":                 "BYOK Total",
-	"byok_daily":                 "BYOK Today",
-	"byok_weekly":                "BYOK This Week",
-	"byok_monthly":               "BYOK This Month",
-	"7d_byok_cost":               "7-Day BYOK Cost",
-	"30d_byok_cost":              "30-Day BYOK Cost",
-	"today_byok_cost":            "Today BYOK Cost",
-	"today_reasoning_tokens":     "Today Reasoning",
-	"today_cached_tokens":        "Today Cached",
-	"today_image_tokens":         "Today Image Tokens",
-	"today_media_prompts":        "Media Prompts",
-	"today_audio_inputs":         "Audio Inputs",
-	"today_search_results":       "Search Results",
-	"today_media_completions":    "Media Completions",
-	"today_cancelled":            "Cancelled Requests",
-	"analytics_requests":         "Analytics Requests",
-	"analytics_byok_cost":        "Analytics BYOK",
-	"analytics_reasoning_tokens": "Analytics Reasoning",
-	"30d_api_cost":               "30-Day Cost≈",
-	"daily_projected":            "Daily Projected",
-	"limit_remaining":            "Limit Remaining",
-	"recent_requests":            "Recent Requests",
+	"plan_percent_used":    "Plan Used",
+	"plan_total_spend_usd": "Total Plan Spend",
+	"spend_limit":          "Spend Limit",
+	"individual_spend":     "Individual Spend",
+	"context_window":       "Context Window",
 }
 
 func prettifyKey(key string) string {

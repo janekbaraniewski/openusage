@@ -46,6 +46,12 @@ type DashboardCompactRow struct {
 	MaxSegments int
 }
 
+type DashboardMetricGroupOverride struct {
+	Group string
+	Label string
+	Order int
+}
+
 type DashboardRawGroup struct {
 	Label string
 	Keys  []string
@@ -64,10 +70,13 @@ type DashboardWidget struct {
 	// reset entries meets/exceeds this value, reset pills are grouped.
 	ResetCompactThreshold int
 
-	GaugePriority []string
-	GaugeMaxLines int
-	CompactRows   []DashboardCompactRow
-	RawGroups     []DashboardRawGroup
+	GaugePriority               []string
+	GaugeMaxLines               int
+	CompactRows                 []DashboardCompactRow
+	RawGroups                   []DashboardRawGroup
+	MetricLabelOverrides        map[string]string
+	MetricGroupOverrides        map[string]DashboardMetricGroupOverride
+	CompactMetricLabelOverrides map[string]string
 
 	HideMetricKeys     []string
 	HideMetricPrefixes []string
@@ -129,6 +138,47 @@ func DefaultDashboardWidget() DashboardWidget {
 					"binary", "project_id", "quota_api",
 				},
 			},
+		},
+		MetricLabelOverrides: map[string]string{
+			"plan_percent_used":    "Plan Used",
+			"plan_total_spend_usd": "Total Plan Spend",
+			"spend_limit":          "Spend Limit",
+			"individual_spend":     "Individual Spend",
+			"context_window":       "Context Window",
+			"messages_today":       "Today Messages",
+			"tool_calls_today":     "Today Tools",
+			"sessions_today":       "Today Sessions",
+			"total_messages":       "All-Time Msgs",
+			"total_sessions":       "All-Time Sessions",
+			"total_cost_usd":       "All-Time Cost",
+			"burn_rate":            "Burn Rate",
+		},
+		MetricGroupOverrides: map[string]DashboardMetricGroupOverride{},
+		CompactMetricLabelOverrides: map[string]string{
+			"plan_spend":           "plan",
+			"plan_included":        "incl",
+			"plan_bonus":           "bonus",
+			"spend_limit":          "cap",
+			"individual_spend":     "mine",
+			"plan_percent_used":    "used",
+			"plan_total_spend_usd": "plan",
+			"plan_limit_usd":       "limit",
+			"credit_balance":       "balance",
+			"credits":              "credits",
+			"monthly_spend":        "month",
+			"rpm":                  "rpm",
+			"tpm":                  "tpm",
+			"rpd":                  "rpd",
+			"tpd":                  "tpd",
+			"chat_quota":           "chat",
+			"completions_quota":    "comp",
+			"context_window":       "ctx",
+			"messages_today":       "msgs",
+			"sessions_today":       "sess",
+			"tool_calls_today":     "tools",
+			"requests_today":       "req",
+			"total_conversations":  "conv",
+			"recent_requests":      "recent",
 		},
 	}
 }
