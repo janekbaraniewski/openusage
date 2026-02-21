@@ -242,3 +242,149 @@ func TestProvider_Fetch_APIUnauthorized(t *testing.T) {
 		t.Error("Expected error for unauthorized request")
 	}
 }
+
+func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointErrors(t *testing.T) {
+	var aggCalls int
+	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
+		aggCalls++
+		if aggCalls == 1 {
+			json.NewEncoder(w).Encode(aggregatedUsageResp{
+				Aggregations: []modelAggregation{
+					{
+						ModelIntent:  "claude-4.5-opus",
+						InputTokens:  "12345",
+						OutputTokens: "678",
+						TotalCents:   987.0,
+					},
+				},
+			})
+			return
+		}
+		http.Error(w, "temporary upstream error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	prevBase := cursorAPIBase
+	cursorAPIBase = server.URL
+	defer func() { cursorAPIBase = prevBase }()
+
+	p := New()
+	acct := core.AccountConfig{ID: "cursor-cache-error", Provider: "cursor", Token: "test-token"}
+
+	first, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("first Fetch returned error: %v", err)
+	}
+	if _, ok := first.Metrics["model_claude-4.5-opus_cost"]; !ok {
+		t.Fatalf("first Fetch missing model cost metric")
+	}
+
+	second, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("second Fetch returned error: %v", err)
+	}
+	metric, ok := second.Metrics["model_claude-4.5-opus_cost"]
+	if !ok {
+		t.Fatalf("second Fetch missing cached model cost metric")
+	}
+	if metric.Used == nil || *metric.Used != 9.87 {
+		t.Fatalf("second Fetch model cost = %v, want 9.87", metric.Used)
+	}
+	if second.Raw["model_claude-4.5-opus_input_tokens"] != "12345" {
+		t.Fatalf("second Fetch missing cached input tokens, got %q", second.Raw["model_claude-4.5-opus_input_tokens"])
+	}
+}
+
+func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointReturnsEmpty(t *testing.T) {
+	var aggCalls int
+	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
+		aggCalls++
+		if aggCalls == 1 {
+			json.NewEncoder(w).Encode(aggregatedUsageResp{
+				Aggregations: []modelAggregation{
+					{
+						ModelIntent:  "gemini-2.5-pro",
+						InputTokens:  "23456",
+						OutputTokens: "789",
+						TotalCents:   123.0,
+					},
+				},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
+	}))
+	defer server.Close()
+
+	prevBase := cursorAPIBase
+	cursorAPIBase = server.URL
+	defer func() { cursorAPIBase = prevBase }()
+
+	p := New()
+	acct := core.AccountConfig{ID: "cursor-cache-empty", Provider: "cursor", Token: "test-token"}
+
+	first, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("first Fetch returned error: %v", err)
+	}
+	if _, ok := first.Metrics["model_gemini-2.5-pro_cost"]; !ok {
+		t.Fatalf("first Fetch missing model cost metric")
+	}
+
+	second, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("second Fetch returned error: %v", err)
+	}
+	metric, ok := second.Metrics["model_gemini-2.5-pro_cost"]
+	if !ok {
+		t.Fatalf("second Fetch missing cached model cost metric")
+	}
+	if metric.Used == nil || *metric.Used != 1.23 {
+		t.Fatalf("second Fetch model cost = %v, want 1.23", metric.Used)
+	}
+	if second.Raw["model_gemini-2.5-pro_output_tokens"] != "789" {
+		t.Fatalf("second Fetch missing cached output tokens, got %q", second.Raw["model_gemini-2.5-pro_output_tokens"])
+	}
+}
+
+func newCursorAPITestMux(aggregateHandler http.HandlerFunc) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(currentPeriodUsageResp{
+			BillingCycleStart: "1768055295000",
+			BillingCycleEnd:   "1770733695000",
+			PlanUsage: planUsage{
+				TotalSpend:       4500,
+				IncludedSpend:    2000,
+				BonusSpend:       2500,
+				Limit:            2000,
+				TotalPercentUsed: 65,
+			},
+			SpendLimitUsage: spendLimitUsage{
+				PooledLimit:     50000,
+				PooledUsed:      10000,
+				PooledRemaining: 40000,
+				IndividualUsed:  8000,
+				LimitType:       "team",
+			},
+			DisplayMessage: "You've used 65% of your plan",
+		})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(planInfoResp{
+			PlanInfo: struct {
+				PlanName            string  `json:"planName"`
+				IncludedAmountCents float64 `json:"includedAmountCents"`
+				Price               string  `json:"price"`
+				BillingCycleEnd     string  `json:"billingCycleEnd"`
+			}{
+				PlanName:            "Team",
+				IncludedAmountCents: 2000,
+				Price:               "$40/mo",
+				BillingCycleEnd:     "1770733695000",
+			},
+		})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", aggregateHandler)
+	return mux
+}

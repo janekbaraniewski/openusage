@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -18,13 +19,24 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-const (
-	cursorAPIBase = "https://api2.cursor.sh"
-)
+var cursorAPIBase = "https://api2.cursor.sh"
 
-type Provider struct{}
+type Provider struct {
+	mu                    sync.RWMutex
+	modelAggregationCache map[string]cachedModelAggregation // account ID -> latest model aggregation
+}
 
-func New() *Provider { return &Provider{} }
+type cachedModelAggregation struct {
+	BillingCycleStart string
+	BillingCycleEnd   string
+	Aggregations      []modelAggregation
+}
+
+func New() *Provider {
+	return &Provider{
+		modelAggregationCache: make(map[string]cachedModelAggregation),
+	}
+}
 
 func (p *Provider) ID() string { return "cursor" }
 
@@ -177,6 +189,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		return snap, nil
 	}
 
+	p.applyCachedModelAggregations(acct.ID, "", "", &snap)
+
 	snap.Message = "Local Cursor IDE usage tracking (API unavailable)"
 	return snap, nil
 }
@@ -298,19 +312,19 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Qu
 	}
 
 	var aggUsage aggregatedUsageResp
-	if err := p.callDashboardAPI(ctx, token, "GetAggregatedUsageEvents", &aggUsage); err == nil {
-		var totalCostCents float64
-		for _, agg := range aggUsage.Aggregations {
-			costDollars := agg.TotalCents / 100.0
-			key := fmt.Sprintf("model_%s_cost", agg.ModelIntent)
-			snap.Metrics[key] = core.Metric{
-				Used:   &costDollars,
-				Unit:   "USD",
-				Window: "billing-cycle",
-			}
-			snap.Raw[fmt.Sprintf("model_%s_input_tokens", agg.ModelIntent)] = agg.InputTokens
-			snap.Raw[fmt.Sprintf("model_%s_output_tokens", agg.ModelIntent)] = agg.OutputTokens
-			totalCostCents += agg.TotalCents
+	aggErr := p.callDashboardAPI(ctx, token, "GetAggregatedUsageEvents", &aggUsage)
+	aggApplied := false
+	if aggErr == nil {
+		aggApplied = applyModelAggregations(snap, aggUsage.Aggregations)
+		if aggApplied {
+			p.storeModelAggregationCache(snap.AccountID, snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"], aggUsage.Aggregations)
+		}
+	}
+	if !aggApplied && p.applyCachedModelAggregations(snap.AccountID, snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"], snap) {
+		if aggErr != nil {
+			log.Printf("[cursor] using cached model aggregation after API error: %v", aggErr)
+		} else {
+			log.Printf("[cursor] using cached model aggregation after empty API aggregation response")
 		}
 	}
 
@@ -405,6 +419,91 @@ func (p *Provider) doPost(ctx context.Context, token, url string, result interfa
 	}
 
 	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+func applyModelAggregations(snap *core.QuotaSnapshot, aggregations []modelAggregation) bool {
+	if len(aggregations) == 0 {
+		return false
+	}
+	if snap.Metrics == nil {
+		snap.Metrics = make(map[string]core.Metric)
+	}
+	if snap.Raw == nil {
+		snap.Raw = make(map[string]string)
+	}
+
+	var applied bool
+	for _, agg := range aggregations {
+		modelIntent := strings.TrimSpace(agg.ModelIntent)
+		if modelIntent == "" {
+			continue
+		}
+
+		inputTokens := strings.TrimSpace(agg.InputTokens)
+		outputTokens := strings.TrimSpace(agg.OutputTokens)
+
+		if agg.TotalCents > 0 {
+			costDollars := agg.TotalCents / 100.0
+			snap.Metrics[fmt.Sprintf("model_%s_cost", modelIntent)] = core.Metric{
+				Used:   &costDollars,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
+		}
+		if inputTokens != "" {
+			snap.Raw[fmt.Sprintf("model_%s_input_tokens", modelIntent)] = inputTokens
+		}
+		if outputTokens != "" {
+			snap.Raw[fmt.Sprintf("model_%s_output_tokens", modelIntent)] = outputTokens
+		}
+		if agg.TotalCents > 0 || inputTokens != "" || outputTokens != "" {
+			applied = true
+		}
+	}
+	return applied
+}
+
+func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, billingCycleEnd string, aggregations []modelAggregation) {
+	if accountID == "" || len(aggregations) == 0 {
+		return
+	}
+	copied := make([]modelAggregation, len(aggregations))
+	copy(copied, aggregations)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.modelAggregationCache == nil {
+		p.modelAggregationCache = make(map[string]cachedModelAggregation)
+	}
+	p.modelAggregationCache[accountID] = cachedModelAggregation{
+		BillingCycleStart: billingCycleStart,
+		BillingCycleEnd:   billingCycleEnd,
+		Aggregations:      copied,
+	}
+}
+
+func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, billingCycleEnd string, snap *core.QuotaSnapshot) bool {
+	if accountID == "" {
+		return false
+	}
+
+	p.mu.RLock()
+	cached, ok := p.modelAggregationCache[accountID]
+	p.mu.RUnlock()
+	if !ok || len(cached.Aggregations) == 0 {
+		return false
+	}
+
+	if billingCycleStart != "" && cached.BillingCycleStart != "" && billingCycleStart != cached.BillingCycleStart {
+		return false
+	}
+	if billingCycleEnd != "" && cached.BillingCycleEnd != "" && billingCycleEnd != cached.BillingCycleEnd {
+		return false
+	}
+
+	copied := make([]modelAggregation, len(cached.Aggregations))
+	copy(copied, cached.Aggregations)
+	return applyModelAggregations(snap, copied)
 }
 
 func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core.QuotaSnapshot) error {
