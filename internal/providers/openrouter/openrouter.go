@@ -3,6 +3,7 @@ package openrouter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,115 +23,139 @@ const (
 	generationMaxAge      = 30 * 24 * time.Hour
 )
 
-// keyResponse represents the newer /key endpoint with detailed usage breakdowns
+var errGenerationListUnsupported = errors.New("generation list endpoint unsupported")
+
 type keyResponse struct {
+	Data keyData `json:"data"`
+}
+
+type keyData struct {
+	Label              string    `json:"label"`
+	Name               string    `json:"name"`
+	Usage              float64   `json:"usage"`
+	Limit              *float64  `json:"limit"`
+	LimitRemaining     *float64  `json:"limit_remaining"`
+	UsageDaily         *float64  `json:"usage_daily"`
+	UsageWeekly        *float64  `json:"usage_weekly"`
+	UsageMonthly       *float64  `json:"usage_monthly"`
+	ByokUsage          *float64  `json:"byok_usage"`
+	ByokUsageInference *float64  `json:"byok_usage_inference"`
+	ByokUsageDaily     *float64  `json:"byok_usage_daily"`
+	ByokUsageWeekly    *float64  `json:"byok_usage_weekly"`
+	ByokUsageMonthly   *float64  `json:"byok_usage_monthly"`
+	IsFreeTier         bool      `json:"is_free_tier"`
+	IsManagementKey    bool      `json:"is_management_key"`
+	IsProvisioningKey  bool      `json:"is_provisioning_key"`
+	IncludeByokInLimit bool      `json:"include_byok_in_limit"`
+	LimitReset         string    `json:"limit_reset"`
+	ExpiresAt          string    `json:"expires_at"`
+	RateLimit          rateLimit `json:"rate_limit"`
+}
+
+type creditsDetailResponse struct {
 	Data struct {
-		Label               string   `json:"label"`
-		Limit               *float64 `json:"limit"`
-		Usage               float64  `json:"usage"`
-		UsageDaily          float64  `json:"usage_daily"`
-		UsageWeekly         float64  `json:"usage_weekly"`
-		UsageMonthly        float64  `json:"usage_monthly"`
-		ByokUsage           float64  `json:"byok_usage"`
-		ByokUsageDaily      float64  `json:"byok_usage_daily"`
-		ByokUsageWeekly     float64  `json:"byok_usage_weekly"`
-		ByokUsageMonthly    float64  `json:"byok_usage_monthly"`
-		IsFreeTier          bool     `json:"is_free_tier"`
-		IsManagementKey     bool     `json:"is_management_key"`
-		IsProvisioningKey bool     `json:"is_provisioning_key"`
-		LimitRemaining      *float64 `json:"limit_remaining"`
-		LimitReset          *string  `json:"limit_reset"`
-		IncludeByokInLimit  bool     `json:"include_byok_in_limit"`
-		ExpiresAt           *string  `json:"expires_at"`
-		RateLimit           struct {
-			Requests int    `json:"requests"`
-			Interval string `json:"interval"`
-			Note     string `json:"note"`
-		} `json:"rate_limit"`
+		TotalCredits     float64  `json:"total_credits"`
+		TotalUsage       float64  `json:"total_usage"`
+		RemainingBalance *float64 `json:"remaining_balance"`
 	} `json:"data"`
 }
 
-// creditsResponse represents the /credits endpoint
-type creditsResponse struct {
-	Data struct {
-		TotalCredits     float64 `json:"total_credits"`
-		TotalUsage       float64 `json:"total_usage"`
-		RemainingBalance float64 `json:"remaining_balance"`
-	} `json:"data"`
+type rateLimit struct {
+	Requests int    `json:"requests"`
+	Interval string `json:"interval"`
+	Note     string `json:"note"`
 }
 
-// activityResponse represents the newer /activity endpoint
-type activityResponse struct {
-	Data []activityEntry `json:"data"`
+type keysResponse struct {
+	Data []keyListEntry `json:"data"`
 }
 
-type activityEntry struct {
-	Date               string  `json:"date"`
-	Model              string  `json:"model"`
-	ModelPermaslug     string  `json:"model_permaslug"`
-	EndpointID         string  `json:"endpoint_id"`
-	ProviderName       string  `json:"provider_name"`
-	Usage              float64 `json:"usage"`
-	ByokUsageInference float64 `json:"byok_usage_inference"`
-	Requests           float64 `json:"requests"`
-	PromptTokens       float64 `json:"prompt_tokens"`
-	CompletionTokens   float64 `json:"completion_tokens"`
-	ReasoningTokens    float64 `json:"reasoning_tokens"`
+type keyListEntry struct {
+	Hash               string   `json:"hash"`
+	Name               string   `json:"name"`
+	Label              string   `json:"label"`
+	Disabled           bool     `json:"disabled"`
+	Limit              *float64 `json:"limit"`
+	LimitRemaining     *float64 `json:"limit_remaining"`
+	LimitReset         string   `json:"limit_reset"`
+	IncludeByokInLimit bool     `json:"include_byok_in_limit"`
+	Usage              float64  `json:"usage"`
+	UsageDaily         float64  `json:"usage_daily"`
+	UsageWeekly        float64  `json:"usage_weekly"`
+	UsageMonthly       float64  `json:"usage_monthly"`
+	ByokUsage          float64  `json:"byok_usage"`
+	ByokUsageDaily     float64  `json:"byok_usage_daily"`
+	ByokUsageWeekly    float64  `json:"byok_usage_weekly"`
+	ByokUsageMonthly   float64  `json:"byok_usage_monthly"`
+	CreatedAt          string   `json:"created_at"`
+	UpdatedAt          *string  `json:"updated_at"`
+	ExpiresAt          *string  `json:"expires_at"`
 }
 
-// generationEntry represents a single generation with all available fields
 type generationEntry struct {
-	ID                           string             `json:"id"`
-	UpstreamID                   *string            `json:"upstream_id"`
-	TotalCost                    float64            `json:"total_cost"`
-	CacheDiscount                *float64           `json:"cache_discount"`
-	UpstreamInferenceCost        *float64           `json:"upstream_inference_cost"`
-	CreatedAt                    string             `json:"created_at"`
-	Model                        string             `json:"model"`
-	AppID                        *int               `json:"app_id"`
-	Streamed                     *bool              `json:"streamed"`
-	Cancelled                    *bool              `json:"cancelled"`
-	ProviderName                 *string            `json:"provider_name"`
-	Latency                      *int               `json:"latency"`
-	ModerationLatency            *int               `json:"moderation_latency"`
-	GenerationTime               *int               `json:"generation_time"`
-	FinishReason                 *string            `json:"finish_reason"`
-	TokensPrompt                 *int               `json:"tokens_prompt"`
-	TokensCompletion             *int               `json:"tokens_completion"`
-	NativeTokensPrompt           *int               `json:"native_tokens_prompt"`
-	NativeTokensCompletion       *int               `json:"native_tokens_completion"`
-	NativeTokensCompletionImages *int               `json:"native_tokens_completion_images"`
-	NativeTokensReasoning        *int               `json:"native_tokens_reasoning"`
-	NativeTokensCached           *int               `json:"native_tokens_cached"`
-	NumMediaPrompt               *int               `json:"num_media_prompt"`
-	NumInputAudioPrompt          *int               `json:"num_input_audio_prompt"`
-	NumMediaCompletion           *int               `json:"num_media_completion"`
-	NumSearchResults             *int               `json:"num_search_results"`
-	Origin                       string             `json:"origin"`
-	Usage                        float64            `json:"usage"`
-	IsByok                       bool               `json:"is_byok"`
-	NativeFinishReason           *string            `json:"native_finish_reason"`
-	ExternalUser                 *string            `json:"external_user"`
-	APIType                      *string            `json:"api_type"`
-	Router                       *string            `json:"router"`
-	ProviderResponses            []providerResponse `json:"provider_responses"`
-}
-
-type providerResponse struct {
-	ID             string   `json:"id"`
-	EndpointID     string   `json:"endpoint_id"`
-	ModelPermaslug string   `json:"model_permaslug"`
-	ProviderName   string   `json:"provider_name"`
-	Status         *float64 `json:"status"`
-	Latency        float64  `json:"latency"`
-	IsByok         bool     `json:"is_byok"`
+	ID                     string   `json:"id"`
+	Model                  string   `json:"model"`
+	TotalCost              float64  `json:"total_cost"`
+	IsByok                 bool     `json:"is_byok"`
+	UpstreamInferenceCost  *float64 `json:"upstream_inference_cost"`
+	Cancelled              bool     `json:"cancelled"`
+	PromptTokens           int      `json:"tokens_prompt"`
+	CompletionTokens       int      `json:"tokens_completion"`
+	NativePromptTokens     *int     `json:"native_tokens_prompt"`
+	NativeCompletionTokens *int     `json:"native_tokens_completion"`
+	NativeReasoningTokens  *int     `json:"native_tokens_reasoning"`
+	NativeCachedTokens     *int     `json:"native_tokens_cached"`
+	NativeImageTokens      *int     `json:"native_tokens_completion_images"`
+	CreatedAt              string   `json:"created_at"`
+	Streamed               bool     `json:"streamed"`
+	GenerationTime         *int     `json:"generation_time"`
+	Latency                *int     `json:"latency"`
+	ProviderName           string   `json:"provider_name"`
+	CacheDiscount          *float64 `json:"cache_discount"`
+	Origin                 string   `json:"origin"`
+	AppID                  *int     `json:"app_id"`
+	NumMediaPrompt         *int     `json:"num_media_prompt"`
+	NumMediaCompletion     *int     `json:"num_media_completion"`
+	NumInputAudioPrompt    *int     `json:"num_input_audio_prompt"`
+	NumSearchResults       *int     `json:"num_search_results"`
+	Finish                 string   `json:"finish_reason"`
+	UpstreamID             string   `json:"upstream_id"`
+	ModerationLatency      *int     `json:"moderation_latency"`
 }
 
 type generationStatsResponse struct {
 	Data []generationEntry `json:"data"`
 }
 
-// modelStats tracks per-model statistics
+type analyticsEntry struct {
+	Date               string  `json:"date"`
+	Model              string  `json:"model"`
+	ModelPermaslug     string  `json:"model_permaslug"`
+	ProviderName       string  `json:"provider_name"`
+	EndpointID         string  `json:"endpoint_id"`
+	Usage              float64 `json:"usage"`
+	ByokUsageInference float64 `json:"byok_usage_inference"`
+	TotalCost          float64 `json:"total_cost"`
+	TotalTokens        int     `json:"total_tokens"`
+	PromptTokens       int     `json:"prompt_tokens"`
+	CompletionTokens   int     `json:"completion_tokens"`
+	ReasoningTokens    int     `json:"reasoning_tokens"`
+	Requests           int     `json:"requests"`
+}
+
+type analyticsResponse struct {
+	Data []analyticsEntry `json:"data"`
+}
+
+type apiErrorResponse struct {
+	Error struct {
+		Message string `json:"message"`
+		Code    int    `json:"code"`
+		Name    string `json:"name"`
+	} `json:"error"`
+	Success bool `json:"success"`
+}
+
 type modelStats struct {
 	Requests         int
 	PromptTokens     int
@@ -139,40 +164,18 @@ type modelStats struct {
 	CachedTokens     int
 	ImageTokens      int
 	TotalCost        float64
-	ByokCost         float64
 	TotalLatencyMs   int
 	LatencyCount     int
 	CacheDiscountUSD float64
-	MediaPrompts     int
-	AudioInputs      int
-	MediaCompletions int
-	SearchResults    int
-	CancelledCount   int
 	Providers        map[string]int
-	Routers          map[string]int
-	FinishReasons    map[string]int
 }
 
-// providerStats tracks per-provider statistics
 type providerStats struct {
 	Requests         int
 	PromptTokens     int
 	CompletionTokens int
 	TotalCost        float64
 	Models           map[string]int
-	FallbackAttempts int
-}
-
-// routerStats tracks per-router statistics
-type routerStats struct {
-	Requests int
-	Cost     float64
-}
-
-// apiTypeStats tracks per-API type statistics
-type apiTypeStats struct {
-	Requests int
-	Cost     float64
 }
 
 type Provider struct{}
@@ -184,8 +187,8 @@ func (p *Provider) ID() string { return "openrouter" }
 func (p *Provider) Describe() core.ProviderInfo {
 	return core.ProviderInfo{
 		Name:         "OpenRouter",
-		Capabilities: []string{"credits_endpoint", "usage_endpoint", "generation_stats", "per_model_breakdown", "per_provider_breakdown", "byok_tracking", "reasoning_tokens", "cached_tokens", "media_tracking", "headers"},
-		DocURL:       "https://openrouter.ai/docs/api-reference/limits",
+		Capabilities: []string{"key_endpoint", "credits_endpoint", "activity_endpoint", "generation_stats", "per_model_breakdown", "headers"},
+		DocURL:       "https://openrouter.ai/docs/api-reference/api-keys/get-current-key",
 	}
 }
 
@@ -215,29 +218,26 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 		Raw:        make(map[string]string),
 	}
 
-	// Try the newer /key endpoint first (more detailed), fall back to /auth/key
-	keyErr := p.fetchKey(ctx, baseURL, apiKey, &snap)
-	if keyErr != nil {
-		// Fall back to /auth/key
-		if err := p.fetchAuthKey(ctx, baseURL, apiKey, &snap); err != nil {
-			snap.Status = core.StatusError
-			snap.Message = fmt.Sprintf("key error: %v", err)
-			return snap, nil
-		}
+	if err := p.fetchAuthKey(ctx, baseURL, apiKey, &snap); err != nil {
+		snap.Status = core.StatusError
+		snap.Message = fmt.Sprintf("auth/key error: %v", err)
+		return snap, nil
 	}
 
-	if err := p.fetchCredits(ctx, baseURL, apiKey, &snap); err != nil {
-		snap.Raw["credits_error"] = err.Error()
+	if err := p.fetchCreditsDetail(ctx, baseURL, apiKey, &snap); err != nil {
+		snap.Raw["credits_detail_error"] = err.Error()
+	}
+
+	if snap.Raw["is_management_key"] == "true" {
+		if err := p.fetchKeysMeta(ctx, baseURL, apiKey, &snap); err != nil {
+			snap.Raw["keys_error"] = err.Error()
+		}
 	}
 
 	snap.DailySeries = make(map[string][]core.TimePoint)
 
-	// Try newer /activity endpoint first, fall back to /analytics/user-activity
-	activityErr := p.fetchActivity(ctx, baseURL, apiKey, &snap)
-	if activityErr != nil {
-		if err := p.fetchAnalytics(ctx, baseURL, apiKey, &snap); err != nil {
-			snap.Raw["activity_error"] = err.Error()
-		}
+	if err := p.fetchAnalytics(ctx, baseURL, apiKey, &snap); err != nil {
+		snap.Raw["analytics_error"] = err.Error()
 	}
 
 	if err := p.fetchGenerationStats(ctx, baseURL, apiKey, &snap); err != nil {
@@ -247,186 +247,75 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Quo
 	return snap, nil
 }
 
-// fetchKey uses the newer /key endpoint with detailed usage breakdowns
-func (p *Provider) fetchKey(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
-	url := baseURL + "/key"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+	for _, endpoint := range []string{"/key", "/auth/key"} {
+		url := baseURL + endpoint
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("creating request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("request failed: %w", err)
+		}
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("endpoint not available (HTTP %d)", resp.StatusCode)
-	}
+		snap.Raw = parsers.RedactHeaders(resp.Header)
+		if resp.StatusCode == http.StatusNotFound && endpoint == "/key" {
+			resp.Body.Close()
+			continue
+		}
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		snap.Status = core.StatusAuth
-		snap.Message = "HTTP 401 - check API key"
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("reading body: %w", readErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			snap.Status = core.StatusAuth
+			snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
+			return nil
+		case http.StatusOK:
+		default:
+			return fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+
+		var keyResp keyResponse
+		if err := json.Unmarshal(body, &keyResp); err != nil {
+			snap.Status = core.StatusError
+			snap.Message = "failed to parse key response"
+			return nil
+		}
+
+		applyKeyData(&keyResp.Data, snap)
+		parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm_headers", "requests", "1m",
+			"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
+		parsers.ApplyRateLimitGroup(resp.Header, snap, "tpm_headers", "tokens", "1m",
+			"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
 		return nil
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading body: %w", err)
-	}
-
-	var keyData keyResponse
-	if err := json.Unmarshal(body, &keyData); err != nil {
-		return fmt.Errorf("parsing response: %w", err)
-	}
-
-	data := keyData.Data
-
-	// Basic usage metric
-	if data.Limit != nil {
-		remaining := *data.Limit - data.Usage
-		snap.Metrics["credits"] = core.Metric{
-			Limit:     data.Limit,
-			Used:      &data.Usage,
-			Remaining: &remaining,
-			Unit:      "USD",
-			Window:    "lifetime",
-		}
-	} else {
-		snap.Metrics["credits"] = core.Metric{
-			Used:   &data.Usage,
-			Unit:   "USD",
-			Window: "lifetime",
-		}
-	}
-
-	// Time-bucketed usage metrics
-	snap.Metrics["usage_daily"] = core.Metric{Used: &data.UsageDaily, Unit: "USD", Window: "today"}
-	snap.Metrics["usage_weekly"] = core.Metric{Used: &data.UsageWeekly, Unit: "USD", Window: "week"}
-	snap.Metrics["usage_monthly"] = core.Metric{Used: &data.UsageMonthly, Unit: "USD", Window: "month"}
-
-	// BYOK usage metrics
-	snap.Metrics["byok_usage"] = core.Metric{Used: &data.ByokUsage, Unit: "USD", Window: "lifetime"}
-	snap.Metrics["byok_daily"] = core.Metric{Used: &data.ByokUsageDaily, Unit: "USD", Window: "today"}
-	snap.Metrics["byok_weekly"] = core.Metric{Used: &data.ByokUsageWeekly, Unit: "USD", Window: "week"}
-	snap.Metrics["byok_monthly"] = core.Metric{Used: &data.ByokUsageMonthly, Unit: "USD", Window: "month"}
-
-	// Rate limit
-	if data.RateLimit.Requests > 0 {
-		rl := float64(data.RateLimit.Requests)
-		snap.Metrics["rpm"] = core.Metric{
-			Limit:  &rl,
-			Unit:   "requests",
-			Window: data.RateLimit.Interval,
-		}
-	}
-
-	// Limit remaining
-	if data.LimitRemaining != nil {
-		snap.Metrics["limit_remaining"] = core.Metric{
-			Remaining: data.LimitRemaining,
-			Unit:      "USD",
-			Window:    "current",
-		}
-	}
-
-	// Raw metadata
-	snap.Raw["key_label"] = data.Label
-	if data.IsFreeTier {
-		snap.Raw["tier"] = "free"
-	} else {
-		snap.Raw["tier"] = "paid"
-	}
-	if data.IsManagementKey {
-		snap.Raw["key_type"] = "management"
-	} else if data.IsProvisioningKey {
-		snap.Raw["key_type"] = "provisioning"
-	} else {
-		snap.Raw["key_type"] = "standard"
-	}
-	if data.LimitReset != nil {
-		snap.Raw["limit_reset"] = *data.LimitReset
-	}
-	if data.ExpiresAt != nil {
-		snap.Raw["expires_at"] = *data.ExpiresAt
-	}
-	if data.RateLimit.Note != "" {
-		snap.Raw["rate_limit_note"] = data.RateLimit.Note
-	}
-	snap.Raw["include_byok_in_limit"] = fmt.Sprintf("%v", data.IncludeByokInLimit)
-
-	// Apply rate limit headers
-	snap.Raw = parsers.RedactHeaders(resp.Header)
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm_headers", "requests", "1m",
-		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "tpm_headers", "tokens", "1m",
-		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
-
-	snap.Status = core.StatusOK
-	snap.Message = fmt.Sprintf("$%.4f used (daily: $%.4f, weekly: $%.4f, monthly: $%.4f)",
-		data.Usage, data.UsageDaily, data.UsageWeekly, data.UsageMonthly)
-
-	return nil
+	return fmt.Errorf("key endpoint not available (HTTP 404)")
 }
 
-// fetchAuthKey is the fallback to /auth/key endpoint
-func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
-	url := baseURL + "/auth/key"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d - check API key", resp.StatusCode)
-		return nil
+func applyKeyData(data *keyData, snap *core.QuotaSnapshot) {
+	usage := data.Usage
+	var remaining *float64
+	if data.LimitRemaining != nil {
+		remaining = data.LimitRemaining
+	} else if data.Limit != nil {
+		r := *data.Limit - usage
+		remaining = &r
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading body: %w", err)
-	}
-
-	var credits struct {
-		Data struct {
-			Label      string   `json:"label"`
-			Usage      float64  `json:"usage"`
-			Limit      *float64 `json:"limit"`
-			IsFreeTier bool     `json:"is_free_tier"`
-			RateLimit  struct {
-				Requests int    `json:"requests"`
-				Interval string `json:"interval"`
-			} `json:"rate_limit"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &credits); err != nil {
-		snap.Status = core.StatusError
-		snap.Message = "failed to parse credits response"
-		return nil
-	}
-
-	usage := credits.Data.Usage
-	if credits.Data.Limit != nil {
-		remaining := *credits.Data.Limit - usage
+	if data.Limit != nil {
 		snap.Metrics["credits"] = core.Metric{
-			Limit:     credits.Data.Limit,
+			Limit:     data.Limit,
 			Used:      &usage,
-			Remaining: &remaining,
+			Remaining: remaining,
 			Unit:      "USD",
 			Window:    "lifetime",
 		}
@@ -438,37 +327,104 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 		}
 	}
 
-	if credits.Data.RateLimit.Requests > 0 {
-		rl := float64(credits.Data.RateLimit.Requests)
-		snap.Metrics["rpm"] = core.Metric{
-			Limit:  &rl,
-			Unit:   "requests",
-			Window: credits.Data.RateLimit.Interval,
+	if remaining != nil {
+		snap.Metrics["limit_remaining"] = core.Metric{
+			Used:   remaining,
+			Unit:   "USD",
+			Window: "current_period",
 		}
 	}
 
-	snap.Raw["key_label"] = credits.Data.Label
-	if credits.Data.IsFreeTier {
+	if data.UsageDaily != nil {
+		snap.Metrics["usage_daily"] = core.Metric{Used: data.UsageDaily, Unit: "USD", Window: "1d"}
+	}
+	if data.UsageWeekly != nil {
+		snap.Metrics["usage_weekly"] = core.Metric{Used: data.UsageWeekly, Unit: "USD", Window: "7d"}
+	}
+	if data.UsageMonthly != nil {
+		snap.Metrics["usage_monthly"] = core.Metric{Used: data.UsageMonthly, Unit: "USD", Window: "30d"}
+	}
+	if data.ByokUsage != nil && *data.ByokUsage > 0 {
+		snap.Metrics["byok_usage"] = core.Metric{Used: data.ByokUsage, Unit: "USD", Window: "lifetime"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if data.ByokUsageDaily != nil && *data.ByokUsageDaily > 0 {
+		snap.Metrics["byok_daily"] = core.Metric{Used: data.ByokUsageDaily, Unit: "USD", Window: "1d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if data.ByokUsageWeekly != nil && *data.ByokUsageWeekly > 0 {
+		snap.Metrics["byok_weekly"] = core.Metric{Used: data.ByokUsageWeekly, Unit: "USD", Window: "7d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if data.ByokUsageMonthly != nil && *data.ByokUsageMonthly > 0 {
+		snap.Metrics["byok_monthly"] = core.Metric{Used: data.ByokUsageMonthly, Unit: "USD", Window: "30d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if data.ByokUsageInference != nil && *data.ByokUsageInference > 0 {
+		snap.Metrics["today_byok_cost"] = core.Metric{Used: data.ByokUsageInference, Unit: "USD", Window: "1d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+
+	if data.RateLimit.Requests > 0 {
+		rl := float64(data.RateLimit.Requests)
+		snap.Metrics["rpm"] = core.Metric{
+			Limit:  &rl,
+			Unit:   "requests",
+			Window: data.RateLimit.Interval,
+		}
+	}
+
+	keyLabel := data.Label
+	if keyLabel == "" {
+		keyLabel = data.Name
+	}
+	if keyLabel != "" {
+		snap.Raw["key_label"] = keyLabel
+	}
+	if data.IsFreeTier {
 		snap.Raw["tier"] = "free"
 	} else {
 		snap.Raw["tier"] = "paid"
 	}
 
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm_headers", "requests", "1m",
-		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "tpm_headers", "tokens", "1m",
-		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
+	snap.Raw["is_free_tier"] = fmt.Sprintf("%t", data.IsFreeTier)
+	snap.Raw["is_management_key"] = fmt.Sprintf("%t", data.IsManagementKey)
+	snap.Raw["is_provisioning_key"] = fmt.Sprintf("%t", data.IsProvisioningKey)
+	snap.Raw["include_byok_in_limit"] = fmt.Sprintf("%t", data.IncludeByokInLimit)
+	if data.RateLimit.Note != "" {
+		snap.Raw["rate_limit_note"] = data.RateLimit.Note
+	}
+
+	switch {
+	case data.IsManagementKey:
+		snap.Raw["key_type"] = "management"
+	case data.IsProvisioningKey:
+		snap.Raw["key_type"] = "provisioning"
+	default:
+		snap.Raw["key_type"] = "standard"
+	}
+
+	if data.LimitReset != "" {
+		snap.Raw["limit_reset"] = data.LimitReset
+		if t, err := time.Parse(time.RFC3339, data.LimitReset); err == nil {
+			snap.Resets["limit_reset"] = t
+		}
+	}
+	if data.ExpiresAt != "" {
+		snap.Raw["expires_at"] = data.ExpiresAt
+		if t, err := time.Parse(time.RFC3339, data.ExpiresAt); err == nil {
+			snap.Resets["key_expires"] = t
+		}
+	}
 
 	snap.Status = core.StatusOK
 	snap.Message = fmt.Sprintf("$%.4f used", usage)
-	if credits.Data.Limit != nil {
-		snap.Message += fmt.Sprintf(" / $%.2f limit", *credits.Data.Limit)
+	if data.Limit != nil {
+		snap.Message += fmt.Sprintf(" / $%.2f limit", *data.Limit)
 	}
-
-	return nil
 }
 
-func (p *Provider) fetchCredits(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
 	url := baseURL + "/credits"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -491,15 +447,19 @@ func (p *Provider) fetchCredits(ctx context.Context, baseURL, apiKey string, sna
 		return err
 	}
 
-	var detail creditsResponse
+	var detail creditsDetailResponse
 	if err := json.Unmarshal(body, &detail); err != nil {
 		return err
 	}
 
-	if detail.Data.TotalCredits > 0 {
+	remaining := detail.Data.TotalCredits - detail.Data.TotalUsage
+	if detail.Data.RemainingBalance != nil {
+		remaining = *detail.Data.RemainingBalance
+	}
+
+	if detail.Data.TotalCredits > 0 || detail.Data.TotalUsage > 0 || remaining > 0 {
 		totalCredits := detail.Data.TotalCredits
 		totalUsage := detail.Data.TotalUsage
-		remaining := detail.Data.RemainingBalance
 
 		snap.Metrics["credit_balance"] = core.Metric{
 			Limit:     &totalCredits,
@@ -508,14 +468,18 @@ func (p *Provider) fetchCredits(ctx context.Context, baseURL, apiKey string, sna
 			Unit:      "USD",
 			Window:    "lifetime",
 		}
+
+		snap.Message = fmt.Sprintf("$%.4f used", totalUsage)
+		if totalCredits > 0 {
+			snap.Message += fmt.Sprintf(" / $%.2f credits", totalCredits)
+		}
 	}
 
 	return nil
 }
 
-// fetchActivity uses the newer /activity endpoint with reasoning tokens and BYOK tracking
-func (p *Provider) fetchActivity(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
-	url := baseURL + "/activity"
+func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+	url := baseURL + "/keys"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -528,102 +492,230 @@ func (p *Provider) fetchActivity(ctx context.Context, baseURL, apiKey string, sn
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("activity endpoint not available (HTTP %d)", resp.StatusCode)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
 
-	var activity activityResponse
-	if err := json.Unmarshal(body, &activity); err != nil {
-		return fmt.Errorf("parsing activity: %w", err)
+	if resp.StatusCode == http.StatusForbidden {
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	costByDate := make(map[string]float64)
-	tokensByDate := make(map[string]float64)
-	reasoningByDate := make(map[string]float64)
-	byokByDate := make(map[string]float64)
+	var keys keysResponse
+	if err := json.Unmarshal(body, &keys); err != nil {
+		return fmt.Errorf("parsing keys list: %w", err)
+	}
 
-	for _, entry := range activity.Data {
-		if entry.Date == "" {
+	snap.Raw["keys_total"] = fmt.Sprintf("%d", len(keys.Data))
+
+	active := 0
+	for _, k := range keys.Data {
+		if !k.Disabled {
+			active++
+		}
+	}
+	snap.Raw["keys_active"] = fmt.Sprintf("%d", active)
+
+	currentLabel := snap.Raw["key_label"]
+	if currentLabel == "" {
+		return nil
+	}
+
+	var current *keyListEntry
+	for i := range keys.Data {
+		if keys.Data[i].Label == currentLabel {
+			current = &keys.Data[i]
+			break
+		}
+	}
+	if current == nil {
+		snap.Raw["key_lookup"] = "not_in_keys_list"
+		return nil
+	}
+
+	if current.Name != "" {
+		snap.Raw["key_name"] = current.Name
+	}
+	snap.Raw["key_disabled"] = fmt.Sprintf("%t", current.Disabled)
+	if current.CreatedAt != "" {
+		snap.Raw["key_created_at"] = current.CreatedAt
+	}
+	if current.UpdatedAt != nil && *current.UpdatedAt != "" {
+		snap.Raw["key_updated_at"] = *current.UpdatedAt
+	}
+	if current.Hash != "" {
+		hash := current.Hash
+		if len(hash) > 12 {
+			hash = hash[:12]
+		}
+		snap.Raw["key_hash_prefix"] = hash
+	}
+
+	return nil
+}
+
+func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
+	var analytics analyticsResponse
+	var activityEndpoint string
+
+	for _, endpoint := range []string{"/activity", "/analytics/user-activity"} {
+		url := baseURL + endpoint
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		if endpoint == "/activity" && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden) {
+			if resp.StatusCode == http.StatusForbidden {
+				msg := parseAPIErrorMessage(body)
+				if msg == "" {
+					msg = "activity endpoint requires management key"
+				}
+				return fmt.Errorf("%s (HTTP 403)", msg)
+			}
 			continue
 		}
-		costByDate[entry.Date] += entry.Usage
-		tokensByDate[entry.Date] += entry.PromptTokens + entry.CompletionTokens
-		reasoningByDate[entry.Date] += entry.ReasoningTokens
-		byokByDate[entry.Date] += entry.ByokUsageInference
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("analytics endpoint not available (HTTP 404)")
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+
+		if err := json.Unmarshal(body, &analytics); err != nil {
+			return fmt.Errorf("parsing analytics: %w", err)
+		}
+		activityEndpoint = endpoint
+		break
 	}
 
-	if len(costByDate) > 0 {
-		snap.DailySeries["activity_cost"] = mapToSortedTimePoints(costByDate)
-	}
-	if len(tokensByDate) > 0 {
-		snap.DailySeries["activity_tokens"] = mapToSortedTimePoints(tokensByDate)
-	}
-	if len(reasoningByDate) > 0 {
-		snap.DailySeries["activity_reasoning_tokens"] = mapToSortedTimePoints(reasoningByDate)
-	}
-	if len(byokByDate) > 0 {
-		snap.DailySeries["activity_byok_cost"] = mapToSortedTimePoints(byokByDate)
-	}
-
-	return nil
-}
-
-// fetchAnalytics is the fallback to the older /analytics/user-activity endpoint
-func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
-	url := baseURL + "/analytics/user-activity"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
+	if activityEndpoint == "" {
 		return fmt.Errorf("analytics endpoint not available (HTTP 404)")
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	var analytics struct {
-		Data []struct {
-			Date        string  `json:"date"`
-			Model       string  `json:"model"`
-			TotalCost   float64 `json:"total_cost"`
-			TotalTokens int     `json:"total_tokens"`
-			Requests    int     `json:"requests"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &analytics); err != nil {
-		return fmt.Errorf("parsing analytics: %w", err)
-	}
+	snap.Raw["activity_endpoint"] = activityEndpoint
 
 	costByDate := make(map[string]float64)
 	tokensByDate := make(map[string]float64)
+	requestsByDate := make(map[string]float64)
+	byokCostByDate := make(map[string]float64)
+	reasoningTokensByDate := make(map[string]float64)
+	modelCost := make(map[string]float64)
+	modelByokCost := make(map[string]float64)
+	modelInputTokens := make(map[string]float64)
+	modelOutputTokens := make(map[string]float64)
+	modelReasoningTokens := make(map[string]float64)
+	modelRequests := make(map[string]float64)
+	providerCost := make(map[string]float64)
+	providerInputTokens := make(map[string]float64)
+	providerOutputTokens := make(map[string]float64)
+	providerReasoningTokens := make(map[string]float64)
+	providerRequests := make(map[string]float64)
+	models := make(map[string]struct{})
+	providers := make(map[string]struct{})
+
+	now := time.Now().UTC()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	thirtyDaysAgo := now.AddDate(0, 0, -30)
+
+	var todayByok, cost7dByok, cost30dByok float64
+	var minDate, maxDate string
+
 	for _, entry := range analytics.Data {
 		if entry.Date == "" {
 			continue
 		}
-		costByDate[entry.Date] += entry.TotalCost
-		tokensByDate[entry.Date] += float64(entry.TotalTokens)
+		date, entryDate, hasParsedDate := normalizeActivityDate(entry.Date)
+
+		cost := entry.Usage
+		if cost == 0 {
+			cost = entry.TotalCost
+		}
+		tokens := float64(entry.TotalTokens)
+		if tokens == 0 {
+			tokens = float64(entry.PromptTokens + entry.CompletionTokens + entry.ReasoningTokens)
+		}
+		byokCost := entry.ByokUsageInference
+		reasoningTokens := float64(entry.ReasoningTokens)
+		modelName := entry.Model
+		if modelName == "" {
+			modelName = entry.ModelPermaslug
+		}
+		if modelName == "" {
+			modelName = "unknown"
+		}
+		providerName := entry.ProviderName
+		if providerName == "" {
+			providerName = "unknown"
+		}
+
+		costByDate[date] += cost
+		tokensByDate[date] += tokens
+		requestsByDate[date] += float64(entry.Requests)
+		byokCostByDate[date] += byokCost
+		reasoningTokensByDate[date] += reasoningTokens
+		modelCost[modelName] += cost
+		modelByokCost[modelName] += byokCost
+		modelInputTokens[modelName] += float64(entry.PromptTokens)
+		modelOutputTokens[modelName] += float64(entry.CompletionTokens)
+		modelReasoningTokens[modelName] += reasoningTokens
+		modelRequests[modelName] += float64(entry.Requests)
+		providerCost[providerName] += cost
+		providerInputTokens[providerName] += float64(entry.PromptTokens)
+		providerOutputTokens[providerName] += float64(entry.CompletionTokens)
+		providerReasoningTokens[providerName] += reasoningTokens
+		providerRequests[providerName] += float64(entry.Requests)
+
+		models[modelName] = struct{}{}
+		providers[providerName] = struct{}{}
+
+		if minDate == "" || date < minDate {
+			minDate = date
+		}
+		if maxDate == "" || date > maxDate {
+			maxDate = date
+		}
+
+		if !hasParsedDate {
+			continue
+		}
+
+		if !entryDate.Before(todayStart) {
+			todayByok += byokCost
+		}
+		if entryDate.After(sevenDaysAgo) {
+			cost7dByok += byokCost
+		}
+		if entryDate.After(thirtyDaysAgo) {
+			cost30dByok += byokCost
+		}
+	}
+
+	snap.Raw["activity_rows"] = fmt.Sprintf("%d", len(analytics.Data))
+	if minDate != "" && maxDate != "" {
+		snap.Raw["activity_date_range"] = minDate + " .. " + maxDate
+	}
+	if len(models) > 0 {
+		snap.Raw["activity_models"] = fmt.Sprintf("%d", len(models))
+	}
+	if len(providers) > 0 {
+		snap.Raw["activity_providers"] = fmt.Sprintf("%d", len(providers))
 	}
 
 	if len(costByDate) > 0 {
@@ -632,8 +724,100 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	if len(tokensByDate) > 0 {
 		snap.DailySeries["analytics_tokens"] = mapToSortedTimePoints(tokensByDate)
 	}
+	if len(requestsByDate) > 0 {
+		snap.DailySeries["analytics_requests"] = mapToSortedTimePoints(requestsByDate)
+	}
+	if len(byokCostByDate) > 0 {
+		snap.DailySeries["analytics_byok_cost"] = mapToSortedTimePoints(byokCostByDate)
+	}
+	if len(reasoningTokensByDate) > 0 {
+		snap.DailySeries["analytics_reasoning_tokens"] = mapToSortedTimePoints(reasoningTokensByDate)
+	}
+	emitAnalyticsPerModelMetrics(snap, modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelRequests)
+	emitAnalyticsPerProviderRaw(snap, providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
+
+	if todayByok > 0 {
+		snap.Metrics["today_byok_cost"] = core.Metric{Used: &todayByok, Unit: "USD", Window: "1d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if cost7dByok > 0 {
+		snap.Metrics["7d_byok_cost"] = core.Metric{Used: &cost7dByok, Unit: "USD", Window: "7d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
+	if cost30dByok > 0 {
+		snap.Metrics["30d_byok_cost"] = core.Metric{Used: &cost30dByok, Unit: "USD", Window: "30d"}
+		snap.Raw["byok_in_use"] = "true"
+	}
 
 	return nil
+}
+
+func normalizeActivityDate(raw string) (string, time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			date := t.UTC().Format("2006-01-02")
+			return date, t.UTC(), true
+		}
+	}
+	if len(raw) >= 10 && raw[4] == '-' && raw[7] == '-' {
+		date := raw[:10]
+		if t, err := time.Parse("2006-01-02", date); err == nil {
+			return date, t.UTC(), true
+		}
+		return date, time.Time{}, false
+	}
+	return raw, time.Time{}, false
+}
+
+func emitAnalyticsPerModelMetrics(
+	snap *core.QuotaSnapshot,
+	modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelRequests map[string]float64,
+) {
+	for model := range modelCost {
+		safe := sanitizeName(model)
+		prefix := "model_" + safe
+
+		if v := modelCost[model]; v > 0 {
+			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if v := modelByokCost[model]; v > 0 {
+			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if v := modelInputTokens[model]; v > 0 {
+			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := modelOutputTokens[model]; v > 0 {
+			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := modelReasoningTokens[model]; v > 0 {
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := modelRequests[model]; v > 0 {
+			snap.Raw[prefix+"_requests"] = fmt.Sprintf("%.0f", v)
+		}
+	}
+}
+
+func emitAnalyticsPerProviderRaw(
+	snap *core.QuotaSnapshot,
+	providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
+) {
+	for provider := range providerCost {
+		prefix := "provider_" + sanitizeName(strings.ToLower(provider))
+		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%.0f", providerRequests[provider])
+		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", providerCost[provider])
+		snap.Raw[prefix+"_prompt_tokens"] = fmt.Sprintf("%.0f", providerInputTokens[provider])
+		snap.Raw[prefix+"_completion_tokens"] = fmt.Sprintf("%.0f", providerOutputTokens[provider])
+		if providerReasoningTokens[provider] > 0 {
+			snap.Raw[prefix+"_reasoning_tokens"] = fmt.Sprintf("%.0f", providerReasoningTokens[provider])
+		}
+	}
 }
 
 func mapToSortedTimePoints(m map[string]float64) []core.TimePoint {
@@ -650,6 +834,11 @@ func mapToSortedTimePoints(m map[string]float64) []core.TimePoint {
 func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey string, snap *core.QuotaSnapshot) error {
 	allGenerations, err := p.fetchAllGenerations(ctx, baseURL, apiKey)
 	if err != nil {
+		if errors.Is(err, errGenerationListUnsupported) {
+			snap.Raw["generation_note"] = "generation list endpoint unavailable without IDs"
+			snap.Raw["generations_fetched"] = "0"
+			return nil
+		}
 		return err
 	}
 
@@ -660,32 +849,27 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 
 	snap.Raw["generations_fetched"] = fmt.Sprintf("%d", len(allGenerations))
 
-	now := time.Now()
+	now := time.Now().UTC()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	burnCutoff := now.Add(-60 * time.Minute)
 
 	modelStatsMap := make(map[string]*modelStats)
 	providerStatsMap := make(map[string]*providerStats)
-	routerStatsMap := make(map[string]*routerStats)
-	apiTypeStatsMap := make(map[string]*apiTypeStats)
 
 	var todayPrompt, todayCompletion, todayRequests int
-	var todayCost, todayByokCost float64
+	var todayReasoning, todayCached, todayImageTokens int
+	var todayMediaPrompt, todayMediaCompletion, todayAudioInputs, todaySearchResults, todayCancelled int
+	var todayCost float64
 	var todayLatencyMs, todayLatencyCount int
-	var todayReasoningTokens, todayCachedTokens int
-	var todayMediaPrompts, todayAudioInputs, todayMediaCompletions int
-	var todayCancelled int
 	var totalRequests int
 
 	var cost7d, cost30d, burnCost float64
-	var byokCost7d, byokCost30d float64
+	var todayByokCost, cost7dByok, cost30dByok float64
 
 	dailyCost := make(map[string]float64)
-	dailyByokCost := make(map[string]float64)
 	dailyRequests := make(map[string]float64)
-	dailyModelTokens := make(map[string]map[string]float64)
-	dailyModelReasoning := make(map[string]map[string]float64)
+	dailyModelTokens := make(map[string]map[string]float64) // model -> date -> tokens
 
 	for _, g := range allGenerations {
 		totalRequests++
@@ -698,16 +882,15 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 			}
 		}
 
-		// Period cost aggregation
+		// Period cost aggregation (all fetched generations, up to 30 days)
 		cost30d += g.TotalCost
-		if g.IsByok && g.UpstreamInferenceCost != nil {
-			byokCost30d += *g.UpstreamInferenceCost
-		}
 		if ts.After(sevenDaysAgo) {
 			cost7d += g.TotalCost
-			if g.IsByok && g.UpstreamInferenceCost != nil {
-				byokCost7d += *g.UpstreamInferenceCost
-			}
+		}
+		byokCost := generationByokCost(g)
+		cost30dByok += byokCost
+		if ts.After(sevenDaysAgo) {
+			cost7dByok += byokCost
 		}
 
 		// Burn rate: last 60 minutes
@@ -718,9 +901,6 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		// Daily aggregation
 		dateKey := ts.UTC().Format("2006-01-02")
 		dailyCost[dateKey] += g.TotalCost
-		if g.IsByok && g.UpstreamInferenceCost != nil {
-			dailyByokCost[dateKey] += *g.UpstreamInferenceCost
-		}
 		dailyRequests[dateKey]++
 
 		modelKey := g.Model
@@ -729,81 +909,66 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		}
 		if _, ok := dailyModelTokens[modelKey]; !ok {
 			dailyModelTokens[modelKey] = make(map[string]float64)
-			dailyModelReasoning[modelKey] = make(map[string]float64)
 		}
-		if g.TokensPrompt != nil && g.TokensCompletion != nil {
-			dailyModelTokens[modelKey][dateKey] += float64(*g.TokensPrompt + *g.TokensCompletion)
-		}
-		if g.NativeTokensReasoning != nil {
-			dailyModelReasoning[modelKey][dateKey] += float64(*g.NativeTokensReasoning)
-		}
+		dailyModelTokens[modelKey][dateKey] += float64(g.PromptTokens + g.CompletionTokens)
 
 		if !ts.After(todayStart) {
 			continue
 		}
 
-		// Today-only stats
 		todayRequests++
-		if g.TokensPrompt != nil {
-			todayPrompt += *g.TokensPrompt
-		}
-		if g.TokensCompletion != nil {
-			todayCompletion += *g.TokensCompletion
-		}
+		todayPrompt += g.PromptTokens
+		todayCompletion += g.CompletionTokens
 		todayCost += g.TotalCost
-		if g.IsByok && g.UpstreamInferenceCost != nil {
-			todayByokCost += *g.UpstreamInferenceCost
+		todayByokCost += byokCost
+		if g.Cancelled {
+			todayCancelled++
+		}
+		if g.NativeReasoningTokens != nil {
+			todayReasoning += *g.NativeReasoningTokens
+		}
+		if g.NativeCachedTokens != nil {
+			todayCached += *g.NativeCachedTokens
+		}
+		if g.NativeImageTokens != nil {
+			todayImageTokens += *g.NativeImageTokens
+		}
+		if g.NumMediaPrompt != nil {
+			todayMediaPrompt += *g.NumMediaPrompt
+		}
+		if g.NumMediaCompletion != nil {
+			todayMediaCompletion += *g.NumMediaCompletion
+		}
+		if g.NumInputAudioPrompt != nil {
+			todayAudioInputs += *g.NumInputAudioPrompt
+		}
+		if g.NumSearchResults != nil {
+			todaySearchResults += *g.NumSearchResults
 		}
 
 		if g.Latency != nil && *g.Latency > 0 {
 			todayLatencyMs += *g.Latency
 			todayLatencyCount++
 		}
-		if g.NativeTokensReasoning != nil {
-			todayReasoningTokens += *g.NativeTokensReasoning
-		}
-		if g.NativeTokensCached != nil {
-			todayCachedTokens += *g.NativeTokensCached
-		}
-		if g.NumMediaPrompt != nil {
-			todayMediaPrompts += *g.NumMediaPrompt
-		}
-		if g.NumInputAudioPrompt != nil {
-			todayAudioInputs += *g.NumInputAudioPrompt
-		}
-		if g.NumMediaCompletion != nil {
-			todayMediaCompletions += *g.NumMediaCompletion
-		}
-		if g.Cancelled != nil && *g.Cancelled {
-			todayCancelled++
-		}
 
-		// Per-model stats
 		ms, ok := modelStatsMap[modelKey]
 		if !ok {
-			ms = &modelStats{Providers: make(map[string]int), Routers: make(map[string]int), FinishReasons: make(map[string]int)}
+			ms = &modelStats{Providers: make(map[string]int)}
 			modelStatsMap[modelKey] = ms
 		}
 		ms.Requests++
-		if g.TokensPrompt != nil {
-			ms.PromptTokens += *g.TokensPrompt
+		ms.PromptTokens += g.PromptTokens
+		ms.CompletionTokens += g.CompletionTokens
+		if g.NativeReasoningTokens != nil {
+			ms.ReasoningTokens += *g.NativeReasoningTokens
 		}
-		if g.TokensCompletion != nil {
-			ms.CompletionTokens += *g.TokensCompletion
+		if g.NativeCachedTokens != nil {
+			ms.CachedTokens += *g.NativeCachedTokens
 		}
-		if g.NativeTokensReasoning != nil {
-			ms.ReasoningTokens += *g.NativeTokensReasoning
-		}
-		if g.NativeTokensCached != nil {
-			ms.CachedTokens += *g.NativeTokensCached
-		}
-		if g.NativeTokensCompletionImages != nil {
-			ms.ImageTokens += *g.NativeTokensCompletionImages
+		if g.NativeImageTokens != nil {
+			ms.ImageTokens += *g.NativeImageTokens
 		}
 		ms.TotalCost += g.TotalCost
-		if g.IsByok && g.UpstreamInferenceCost != nil {
-			ms.ByokCost += *g.UpstreamInferenceCost
-		}
 		if g.Latency != nil && *g.Latency > 0 {
 			ms.TotalLatencyMs += *g.Latency
 			ms.LatencyCount++
@@ -811,32 +976,13 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		if g.CacheDiscount != nil && *g.CacheDiscount > 0 {
 			ms.CacheDiscountUSD += *g.CacheDiscount
 		}
-		if g.NumMediaPrompt != nil {
-			ms.MediaPrompts += *g.NumMediaPrompt
-		}
-		if g.NumInputAudioPrompt != nil {
-			ms.AudioInputs += *g.NumInputAudioPrompt
-		}
-		if g.NumMediaCompletion != nil {
-			ms.MediaCompletions += *g.NumMediaCompletion
-		}
-		if g.Cancelled != nil && *g.Cancelled {
-			ms.CancelledCount++
-		}
-		if g.ProviderName != nil && *g.ProviderName != "" {
-			ms.Providers[*g.ProviderName]++
-		}
-		if g.Router != nil && *g.Router != "" {
-			ms.Routers[*g.Router]++
-		}
-		if g.FinishReason != nil && *g.FinishReason != "" {
-			ms.FinishReasons[*g.FinishReason]++
+		if g.ProviderName != "" {
+			ms.Providers[g.ProviderName]++
 		}
 
-		// Per-provider stats
-		provKey := "unknown"
-		if g.ProviderName != nil && *g.ProviderName != "" {
-			provKey = *g.ProviderName
+		provKey := g.ProviderName
+		if provKey == "" {
+			provKey = "unknown"
 		}
 		ps, ok := providerStatsMap[provKey]
 		if !ok {
@@ -844,42 +990,12 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 			providerStatsMap[provKey] = ps
 		}
 		ps.Requests++
-		if g.TokensPrompt != nil {
-			ps.PromptTokens += *g.TokensPrompt
-		}
-		if g.TokensCompletion != nil {
-			ps.CompletionTokens += *g.TokensCompletion
-		}
+		ps.PromptTokens += g.PromptTokens
+		ps.CompletionTokens += g.CompletionTokens
 		ps.TotalCost += g.TotalCost
 		ps.Models[modelKey]++
-		ps.FallbackAttempts += len(g.ProviderResponses) - 1
-
-		// Per-router stats
-		if g.Router != nil && *g.Router != "" {
-			rs, ok := routerStatsMap[*g.Router]
-			if !ok {
-				rs = &routerStats{}
-				routerStatsMap[*g.Router] = rs
-			}
-			rs.Requests++
-			rs.Cost += g.TotalCost
-		}
-
-		// Per-API type stats
-		apiType := "unknown"
-		if g.APIType != nil && *g.APIType != "" {
-			apiType = *g.APIType
-		}
-		ats, ok := apiTypeStatsMap[apiType]
-		if !ok {
-			ats = &apiTypeStats{}
-			apiTypeStatsMap[apiType] = ats
-		}
-		ats.Requests++
-		ats.Cost += g.TotalCost
 	}
 
-	// Emit today's metrics
 	if todayRequests > 0 {
 		reqs := float64(todayRequests)
 		snap.Metrics["today_requests"] = core.Metric{Used: &reqs, Unit: "requests", Window: "today"}
@@ -891,44 +1007,46 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		snap.Metrics["today_output_tokens"] = core.Metric{Used: &out, Unit: "tokens", Window: "today"}
 
 		snap.Metrics["today_cost"] = core.Metric{Used: &todayCost, Unit: "USD", Window: "today"}
-
 		if todayByokCost > 0 {
 			snap.Metrics["today_byok_cost"] = core.Metric{Used: &todayByokCost, Unit: "USD", Window: "today"}
+			snap.Raw["byok_in_use"] = "true"
+		}
+		if todayReasoning > 0 {
+			v := float64(todayReasoning)
+			snap.Metrics["today_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if todayCached > 0 {
+			v := float64(todayCached)
+			snap.Metrics["today_cached_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if todayImageTokens > 0 {
+			v := float64(todayImageTokens)
+			snap.Metrics["today_image_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+		}
+		if todayMediaPrompt > 0 {
+			v := float64(todayMediaPrompt)
+			snap.Metrics["today_media_prompts"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
+		}
+		if todayMediaCompletion > 0 {
+			v := float64(todayMediaCompletion)
+			snap.Metrics["today_media_completions"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
+		}
+		if todayAudioInputs > 0 {
+			v := float64(todayAudioInputs)
+			snap.Metrics["today_audio_inputs"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
+		}
+		if todaySearchResults > 0 {
+			v := float64(todaySearchResults)
+			snap.Metrics["today_search_results"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
+		}
+		if todayCancelled > 0 {
+			v := float64(todayCancelled)
+			snap.Metrics["today_cancelled"] = core.Metric{Used: &v, Unit: "count", Window: "today"}
 		}
 
 		if todayLatencyCount > 0 {
 			avgLatency := float64(todayLatencyMs) / float64(todayLatencyCount) / 1000.0
 			snap.Metrics["today_avg_latency"] = core.Metric{Used: &avgLatency, Unit: "seconds", Window: "today"}
-		}
-
-		if todayReasoningTokens > 0 {
-			rt := float64(todayReasoningTokens)
-			snap.Metrics["today_reasoning_tokens"] = core.Metric{Used: &rt, Unit: "tokens", Window: "today"}
-		}
-
-		if todayCachedTokens > 0 {
-			ct := float64(todayCachedTokens)
-			snap.Metrics["today_cached_tokens"] = core.Metric{Used: &ct, Unit: "tokens", Window: "today"}
-		}
-
-		if todayMediaPrompts > 0 {
-			mp := float64(todayMediaPrompts)
-			snap.Metrics["today_media_prompts"] = core.Metric{Used: &mp, Unit: "items", Window: "today"}
-		}
-
-		if todayAudioInputs > 0 {
-			ai := float64(todayAudioInputs)
-			snap.Metrics["today_audio_inputs"] = core.Metric{Used: &ai, Unit: "items", Window: "today"}
-		}
-
-		if todayMediaCompletions > 0 {
-			mc := float64(todayMediaCompletions)
-			snap.Metrics["today_media_completions"] = core.Metric{Used: &mc, Unit: "items", Window: "today"}
-		}
-
-		if todayCancelled > 0 {
-			canc := float64(todayCancelled)
-			snap.Metrics["today_cancelled"] = core.Metric{Used: &canc, Unit: "requests", Window: "today"}
 		}
 	}
 
@@ -938,27 +1056,25 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	// Period cost metrics
 	snap.Metrics["7d_api_cost"] = core.Metric{Used: &cost7d, Unit: "USD", Window: "7d"}
 	snap.Metrics["30d_api_cost"] = core.Metric{Used: &cost30d, Unit: "USD", Window: "30d"}
-
-	if byokCost7d > 0 {
-		snap.Metrics["7d_byok_cost"] = core.Metric{Used: &byokCost7d, Unit: "USD", Window: "7d"}
+	if cost7dByok > 0 {
+		snap.Metrics["7d_byok_cost"] = core.Metric{Used: &cost7dByok, Unit: "USD", Window: "7d"}
+		snap.Raw["byok_in_use"] = "true"
 	}
-	if byokCost30d > 0 {
-		snap.Metrics["30d_byok_cost"] = core.Metric{Used: &byokCost30d, Unit: "USD", Window: "30d"}
+	if cost30dByok > 0 {
+		snap.Metrics["30d_byok_cost"] = core.Metric{Used: &cost30dByok, Unit: "USD", Window: "30d"}
+		snap.Raw["byok_in_use"] = "true"
 	}
 
 	// Burn rate
 	if burnCost > 0 {
-		burnRate := burnCost
+		burnRate := burnCost // cost in the last 60 minutes ≈ cost/hour
 		dailyProjected := burnRate * 24
 		snap.Metrics["burn_rate"] = core.Metric{Used: &burnRate, Unit: "USD/hour", Window: "1h"}
 		snap.Metrics["daily_projected"] = core.Metric{Used: &dailyProjected, Unit: "USD", Window: "24h"}
 	}
 
-	// DailySeries
+	// DailySeries: cost, requests, and per-model tokens
 	snap.DailySeries["cost"] = mapToSortedTimePoints(dailyCost)
-	if len(dailyByokCost) > 0 {
-		snap.DailySeries["byok_cost"] = mapToSortedTimePoints(dailyByokCost)
-	}
 	snap.DailySeries["requests"] = mapToSortedTimePoints(dailyRequests)
 
 	// Per-model token series (top 5 models by total tokens)
@@ -987,33 +1103,8 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		snap.DailySeries[key] = mapToSortedTimePoints(mt.byDate)
 	}
 
-	// Per-model reasoning token series
-	var modelReasoningTotals []modelTokenTotal
-	for model, dateMap := range dailyModelReasoning {
-		var total float64
-		for _, v := range dateMap {
-			total += v
-		}
-		if total > 0 {
-			modelReasoningTotals = append(modelReasoningTotals, modelTokenTotal{model, total, dateMap})
-		}
-	}
-	sort.Slice(modelReasoningTotals, func(i, j int) bool {
-		return modelReasoningTotals[i].total > modelReasoningTotals[j].total
-	})
-	topNR := 5
-	if len(modelReasoningTotals) < topNR {
-		topNR = len(modelReasoningTotals)
-	}
-	for _, mt := range modelReasoningTotals[:topNR] {
-		key := "reasoning_tokens_" + sanitizeName(mt.model)
-		snap.DailySeries[key] = mapToSortedTimePoints(mt.byDate)
-	}
-
 	emitPerModelMetrics(modelStatsMap, snap)
 	emitPerProviderMetrics(providerStatsMap, snap)
-	emitPerRouterMetrics(routerStatsMap, snap)
-	emitPerAPITypeMetrics(apiTypeStatsMap, snap)
 
 	return nil
 }
@@ -1021,7 +1112,7 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey string) ([]generationEntry, error) {
 	var all []generationEntry
 	offset := 0
-	cutoff := time.Now().Add(-generationMaxAge)
+	cutoff := time.Now().UTC().Add(-generationMaxAge)
 
 	for offset < maxGenerationsToFetch {
 		remaining := maxGenerationsToFetch - offset
@@ -1041,15 +1132,24 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 		if err != nil {
 			return all, err
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return all, fmt.Errorf("HTTP %d", resp.StatusCode)
-		}
-
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			return all, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusBadRequest {
+				lowerBody := strings.ToLower(string(body))
+				lowerMsg := strings.ToLower(parseAPIErrorMessage(body))
+				if strings.Contains(lowerMsg, "expected string") && strings.Contains(lowerMsg, "id") {
+					return all, errGenerationListUnsupported
+				}
+				hasID := strings.Contains(lowerBody, "\"id\"") || strings.Contains(lowerBody, "\\\"id\\\"") || strings.Contains(lowerBody, "for id")
+				if strings.Contains(lowerBody, "expected string") && hasID {
+					return all, errGenerationListUnsupported
+				}
+			}
+			return all, fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
 
 		var gen generationStatsResponse
@@ -1079,6 +1179,24 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 	return all, nil
 }
 
+func generationByokCost(g generationEntry) float64 {
+	if !g.IsByok && g.UpstreamInferenceCost == nil {
+		return 0
+	}
+	if g.UpstreamInferenceCost != nil && *g.UpstreamInferenceCost > 0 {
+		return *g.UpstreamInferenceCost
+	}
+	return g.TotalCost
+}
+
+func parseAPIErrorMessage(body []byte) string {
+	var apiErr apiErrorResponse
+	if err := json.Unmarshal(body, &apiErr); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(apiErr.Error.Message)
+}
+
 func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaSnapshot) {
 	type entry struct {
 		name  string
@@ -1103,26 +1221,20 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaS
 		snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &outputTokens, Unit: "tokens", Window: "today"}
 
 		if e.stats.ReasoningTokens > 0 {
-			rt := float64(e.stats.ReasoningTokens)
-			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &rt, Unit: "tokens", Window: "today"}
+			reasoningTokens := float64(e.stats.ReasoningTokens)
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &reasoningTokens, Unit: "tokens", Window: "today"}
 		}
-
 		if e.stats.CachedTokens > 0 {
-			ct := float64(e.stats.CachedTokens)
-			snap.Metrics[prefix+"_cached_tokens"] = core.Metric{Used: &ct, Unit: "tokens", Window: "today"}
+			cachedTokens := float64(e.stats.CachedTokens)
+			snap.Metrics[prefix+"_cached_tokens"] = core.Metric{Used: &cachedTokens, Unit: "tokens", Window: "today"}
 		}
-
 		if e.stats.ImageTokens > 0 {
-			it := float64(e.stats.ImageTokens)
-			snap.Metrics[prefix+"_image_tokens"] = core.Metric{Used: &it, Unit: "tokens", Window: "today"}
+			imageTokens := float64(e.stats.ImageTokens)
+			snap.Metrics[prefix+"_image_tokens"] = core.Metric{Used: &imageTokens, Unit: "tokens", Window: "today"}
 		}
 
 		costUSD := e.stats.TotalCost
 		snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &costUSD, Unit: "USD", Window: "today"}
-
-		if e.stats.ByokCost > 0 {
-			snap.Metrics[prefix+"_byok_cost"] = core.Metric{Used: &e.stats.ByokCost, Unit: "USD", Window: "today"}
-		}
 
 		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%d", e.stats.Requests)
 
@@ -1135,22 +1247,6 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaS
 			snap.Raw[prefix+"_cache_savings"] = fmt.Sprintf("$%.6f", e.stats.CacheDiscountUSD)
 		}
 
-		if e.stats.MediaPrompts > 0 {
-			snap.Raw[prefix+"_media_prompts"] = fmt.Sprintf("%d", e.stats.MediaPrompts)
-		}
-
-		if e.stats.AudioInputs > 0 {
-			snap.Raw[prefix+"_audio_inputs"] = fmt.Sprintf("%d", e.stats.AudioInputs)
-		}
-
-		if e.stats.MediaCompletions > 0 {
-			snap.Raw[prefix+"_media_completions"] = fmt.Sprintf("%d", e.stats.MediaCompletions)
-		}
-
-		if e.stats.CancelledCount > 0 {
-			snap.Raw[prefix+"_cancelled"] = fmt.Sprintf("%d", e.stats.CancelledCount)
-		}
-
 		if len(e.stats.Providers) > 0 {
 			var provList []string
 			for prov := range e.stats.Providers {
@@ -1158,24 +1254,6 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.QuotaS
 			}
 			sort.Strings(provList)
 			snap.Raw[prefix+"_providers"] = strings.Join(provList, ", ")
-		}
-
-		if len(e.stats.Routers) > 0 {
-			var routerList []string
-			for router := range e.stats.Routers {
-				routerList = append(routerList, router)
-			}
-			sort.Strings(routerList)
-			snap.Raw[prefix+"_routers"] = strings.Join(routerList, ", ")
-		}
-
-		if len(e.stats.FinishReasons) > 0 {
-			var reasons []string
-			for reason, count := range e.stats.FinishReasons {
-				reasons = append(reasons, fmt.Sprintf("%s:%d", reason, count))
-			}
-			sort.Strings(reasons)
-			snap.Raw[prefix+"_finish_reasons"] = strings.Join(reasons, ", ")
 		}
 	}
 }
@@ -1199,31 +1277,11 @@ func emitPerProviderMetrics(providerStatsMap map[string]*providerStats, snap *co
 		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", e.stats.TotalCost)
 		snap.Raw[prefix+"_prompt_tokens"] = fmt.Sprintf("%d", e.stats.PromptTokens)
 		snap.Raw[prefix+"_completion_tokens"] = fmt.Sprintf("%d", e.stats.CompletionTokens)
-		if e.stats.FallbackAttempts > 0 {
-			snap.Raw[prefix+"_fallback_attempts"] = fmt.Sprintf("%d", e.stats.FallbackAttempts)
-		}
-	}
-}
-
-func emitPerRouterMetrics(routerStatsMap map[string]*routerStats, snap *core.QuotaSnapshot) {
-	for name, stats := range routerStatsMap {
-		prefix := "router_" + sanitizeName(strings.ToLower(name))
-		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%d", stats.Requests)
-		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", stats.Cost)
-	}
-}
-
-func emitPerAPITypeMetrics(apiTypeStatsMap map[string]*apiTypeStats, snap *core.QuotaSnapshot) {
-	for apiType, stats := range apiTypeStatsMap {
-		prefix := "api_type_" + sanitizeName(strings.ToLower(apiType))
-		snap.Raw[prefix+"_requests"] = fmt.Sprintf("%d", stats.Requests)
-		snap.Raw[prefix+"_cost"] = fmt.Sprintf("$%.6f", stats.Cost)
 	}
 }
 
 func sanitizeName(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, " ", "_")
-	name = strings.ReplaceAll(name, ":", "_")
 	return name
 }
