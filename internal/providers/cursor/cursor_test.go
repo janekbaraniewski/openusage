@@ -530,6 +530,87 @@ func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
 	}
 }
 
+func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *testing.T) {
+	now := time.Now()
+	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
+		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.Add(-1 * time.Hour).UnixMilli()},
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(currentPeriodUsageResp{
+			BillingCycleStart: "1768055295000",
+			BillingCycleEnd:   "1770733695000",
+			PlanUsage: planUsage{
+				TotalSpend:       4500,
+				IncludedSpend:    2000,
+				BonusSpend:       2500,
+				Limit:            2000,
+				TotalPercentUsed: 65,
+			},
+			SpendLimitUsage: spendLimitUsage{
+				PooledLimit:     50000,
+				PooledUsed:      10000,
+				PooledRemaining: 40000,
+				IndividualUsed:  8000,
+				LimitType:       "team",
+			},
+			DisplayMessage: "You've used 65% of your plan",
+		})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		json.NewEncoder(w).Encode(planInfoResp{})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetHardLimit", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(hardLimitResp{})
+	})
+	mux.HandleFunc("/auth/full_stripe_profile", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(stripeProfileResp{})
+	})
+	mux.HandleFunc("/aiserver.v1.DashboardService/GetUsageLimitPolicyStatus", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(usageLimitPolicyResp{})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	prevBase := cursorAPIBase
+	cursorAPIBase = server.URL
+	defer func() { cursorAPIBase = prevBase }()
+
+	p := New()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	snap, err := p.Fetch(ctx, core.AccountConfig{
+		ID:       "cursor-optional-timeout",
+		Provider: "cursor",
+		Token:    "test-token",
+		ExtraData: map[string]string{
+			"tracking_db": trackingDBPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	if _, ok := snap.Metrics["plan_spend"]; !ok {
+		t.Fatalf("expected API plan_spend metric to be present")
+	}
+
+	if m, ok := snap.Metrics["total_ai_requests"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected local total_ai_requests to be preserved, got %+v", m)
+	}
+
+	if _, ok := snap.Raw["tracking_db_error"]; ok {
+		t.Fatalf("did not expect tracking_db_error when local data is available")
+	}
+}
+
 func newCursorAPITestMux(aggregateHandler http.HandlerFunc) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {

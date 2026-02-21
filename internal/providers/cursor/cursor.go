@@ -161,17 +161,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasAPIData := false
-	if acct.Token != "" {
-		apiErr := p.fetchFromAPI(ctx, acct.Token, &snap)
-		if apiErr == nil {
-			hasAPIData = true
-		} else {
-			log.Printf("[cursor] API fetch failed, falling back to local data: %v", apiErr)
-			snap.Raw["api_error"] = apiErr.Error()
-		}
-	}
-
 	trackingDBPath := ""
 	stateDBPath := ""
 	if acct.ExtraData != nil {
@@ -186,7 +175,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	var hasLocalData bool
-
 	if trackingDBPath != "" {
 		if err := p.readTrackingDB(ctx, trackingDBPath, &snap); err != nil {
 			log.Printf("[cursor] tracking DB error: %v", err)
@@ -202,6 +190,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			snap.Raw["state_db_error"] = err.Error()
 		} else {
 			hasLocalData = true
+		}
+	}
+
+	hasAPIData := false
+	if acct.Token != "" {
+		apiErr := p.fetchFromAPI(ctx, acct.Token, &snap)
+		if apiErr == nil {
+			hasAPIData = true
+		} else {
+			log.Printf("[cursor] API fetch failed, falling back to local data: %v", apiErr)
+			snap.Raw["api_error"] = apiErr.Error()
 		}
 	}
 
