@@ -126,6 +126,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"/", "Filter providers"},
 		{"PgUp/PgDn", "Scroll selected tile"},
 		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
+		{"Ctrl+O", "Expand/collapse model list"},
 		{"[ ]", "Switch detail tabs"},
 		{"1-3 / ←→", "Switch settings tabs"},
 		{"Space / Enter", "Apply setting in modal"},

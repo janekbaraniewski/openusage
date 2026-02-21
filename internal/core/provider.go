@@ -35,5 +35,8 @@ type QuotaProvider interface {
 
 	Describe() ProviderInfo
 
+	// DashboardWidget defines how provider metrics should be presented in dashboard tiles.
+	DashboardWidget() DashboardWidget
+
 	Fetch(ctx context.Context, acct AccountConfig) (QuotaSnapshot, error)
 }

@@ -100,7 +100,8 @@ func (m Model) renderTiles(w, h int) string {
 	for i, id := range ids {
 		snap := m.snapshots[id]
 		selected := i == m.cursor
-		rendered := m.renderTile(snap, selected, tileW, tileMaxHeight)
+		modelMixExpanded := selected && m.expandedModelMixTiles[id]
+		rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, tileMaxHeight)
 		tiles = append(tiles, strings.Split(rendered, "\n"))
 	}
 
@@ -201,7 +202,7 @@ func (m Model) renderTiles(w, h int) string {
 	return padToSize(strings.Join(visible, "\n"), w, h)
 }
 
-func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileContentH int) string {
+func (m Model) renderTile(snap core.QuotaSnapshot, selected, modelMixExpanded bool, tileW, tileContentH int) string {
 	innerW := tileW - 2*tilePadH
 	if innerW < 10 {
 		innerW = 10
@@ -213,7 +214,8 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		return s
 	}
 
-	di := computeDisplayInfo(snap)
+	widget := dashboardWidget(snap.ProviderID)
+	di := computeDisplayInfo(snap, widget)
 	provColor := ProviderColor(snap.ProviderID)
 	accentSep := lipgloss.NewStyle().Foreground(provColor).Render(strings.Repeat("━", innerW))
 	dimSep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", innerW))
@@ -257,7 +259,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	} else {
 		hdrLine2 = dimStyle.Render(truncate(provID))
 	}
-	headerMeta := buildTileHeaderMetaLines(snap, innerW, m.animFrame)
+	headerMeta := buildTileHeaderMetaLines(snap, widget, innerW, m.animFrame)
 
 	header := []string{hdrLine1, hdrLine2}
 	if len(headerMeta) > 0 {
@@ -288,7 +290,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	}
 	var sections []section
 
-	gaugeLines := m.buildTileGaugeLines(snap, innerW)
+	gaugeLines := m.buildTileGaugeLines(snap, widget, innerW)
 	if len(gaugeLines) > 0 {
 		s := []string{""}
 		s = append(s, gaugeLines...)
@@ -313,17 +315,17 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		}})
 	}
 
-	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLines(snap, innerW)
+	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLines(snap, widget, innerW)
 
-	if snap.ProviderID == "openrouter" {
-		modelMixLines := buildOpenRouterModelCompositionLines(snap, innerW)
+	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter {
+		modelMixLines := buildOpenRouterModelCompositionLines(snap, innerW, modelMixExpanded)
 		if len(modelMixLines) > 0 {
 			s := []string{""}
 			s = append(s, modelMixLines...)
 			sections = append(sections, section{s})
 		}
 	} else {
-		modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW)
+		modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW, modelMixExpanded)
 		if len(modelBurnLines) > 0 {
 			s := []string{""}
 			s = append(s, modelBurnLines...)
@@ -345,7 +347,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 		sections = append(sections, section{s})
 	}
 
-	metricLines := m.buildTileMetricLines(snap, innerW, compactMetricKeys)
+	metricLines := m.buildTileMetricLines(snap, widget, innerW, compactMetricKeys)
 	if len(metricLines) > 0 {
 		s := []string{""}
 		s = append(s, metricLines...)
@@ -371,7 +373,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	}
 
 	if len(headerMeta) == 0 {
-		resetLines := buildTileResetLines(snap, innerW, m.animFrame)
+		resetLines := buildTileResetLines(snap, widget, innerW, m.animFrame)
 		if len(resetLines) > 0 {
 			s := []string{""}
 			s = append(s, resetLines...)
@@ -422,7 +424,7 @@ func (m Model) renderTile(snap core.QuotaSnapshot, selected bool, tileW, tileCon
 	return border.Render(content)
 }
 
-func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string {
+func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -432,43 +434,17 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
-	switch snap.ProviderID {
-	case "openrouter":
-		keys = prioritizeMetricKeys(keys, []string{
-			"credit_balance", "credits",
-			"usage_daily", "usage_weekly", "usage_monthly",
-			"byok_daily", "byok_weekly", "byok_monthly",
-			"today_byok_cost", "7d_byok_cost", "30d_byok_cost",
-			"today_cost", "7d_api_cost", "30d_api_cost",
-			"today_requests", "today_input_tokens", "today_output_tokens",
-			"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens",
-			"recent_requests", "burn_rate", "daily_projected", "limit_remaining",
-		})
-	case "cursor":
-		keys = prioritizeMetricKeys(keys, []string{
-			"spend_limit", "plan_spend", "plan_percent_used", "chat_quota", "completions_quota",
-		})
-	case "claude_code":
-		keys = prioritizeMetricKeys(keys, []string{
-			"usage_five_hour", "usage_seven_day", "plan_percent_used",
-		})
-	case "codex":
-		keys = prioritizeMetricKeys(keys, []string{
-			"rate_limit_primary", "rate_limit_secondary", "context_window",
-		})
-	default:
-		keys = prioritizeMetricKeys(keys, []string{
-			"spend_limit", "plan_spend", "credits", "credit_balance",
-		})
-	}
+	keys = prioritizeMetricKeys(keys, widget.GaugePriority)
 
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
 	if gaugeW < 6 {
 		gaugeW = 6
 	}
-	maxLines := maxTileGaugeLines(snap.ProviderID)
+	maxLines := widget.GaugeMaxLines
+	if maxLines <= 0 {
+		maxLines = 2
+	}
 
 	var lines []string
 	for _, key := range keys {
@@ -491,15 +467,6 @@ func (m Model) buildTileGaugeLines(snap core.QuotaSnapshot, innerW int) []string
 		}
 	}
 	return lines
-}
-
-func maxTileGaugeLines(providerID string) int {
-	switch providerID {
-	case "openrouter":
-		return 1
-	default:
-		return 2
-	}
 }
 
 func gaugeLabel(key string, window ...string) string {
@@ -586,47 +553,32 @@ type compactMetricRowSpec struct {
 	maxSegments int
 }
 
-func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, innerW int) ([]string, map[string]bool) {
-	if len(snap.Metrics) == 0 || snap.ProviderID == "openrouter" {
+func buildTileCompactMetricSummaryLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
+	if len(snap.Metrics) == 0 || len(widget.CompactRows) == 0 {
 		return nil, nil
 	}
 
-	var specs []compactMetricRowSpec
-	switch snap.ProviderID {
-	case "cursor":
-		specs = []compactMetricRowSpec{
-			{label: "Credits", keys: []string{"plan_spend", "plan_included", "plan_bonus"}, maxSegments: 4},
-			{label: "Usage", keys: []string{"spend_limit", "individual_spend", "plan_percent_used"}, maxSegments: 4},
+	specs := make([]compactMetricRowSpec, 0, len(widget.CompactRows))
+	for _, row := range widget.CompactRows {
+		spec := compactMetricRowSpec{
+			label:       row.Label,
+			keys:        row.Keys,
+			maxSegments: row.MaxSegments,
 		}
-	case "claude_code":
-		specs = []compactMetricRowSpec{
-			{label: "Credits", keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "burn_rate"}, maxSegments: 4},
-			{label: "Activity", keys: []string{"messages_today", "sessions_today", "tool_calls_today", "7d_messages"}, maxSegments: 4},
-			{label: "Tokens", keys: []string{"5h_block_input", "5h_block_output", "7d_input_tokens", "7d_output_tokens"}, maxSegments: 4},
+		if row.Matcher.Prefix != "" || row.Matcher.Suffix != "" {
+			prefix := row.Matcher.Prefix
+			suffix := row.Matcher.Suffix
+			spec.match = func(key string, _ core.Metric) bool {
+				if prefix != "" && !strings.HasPrefix(key, prefix) {
+					return false
+				}
+				if suffix != "" && !strings.HasSuffix(key, suffix) {
+					return false
+				}
+				return true
+			}
 		}
-	case "codex":
-		specs = []compactMetricRowSpec{
-			{label: "Session", keys: []string{"session_input_tokens", "session_output_tokens", "session_cached_tokens", "session_reasoning_tokens"}, maxSegments: 4},
-			{label: "Limits", keys: []string{"rate_limit_primary", "rate_limit_secondary", "context_window"}, maxSegments: 3},
-		}
-	case "copilot":
-		specs = []compactMetricRowSpec{
-			{label: "Quota", keys: []string{"chat_quota", "completions_quota"}, maxSegments: 3},
-			{label: "Rate", keys: []string{"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm"}, maxSegments: 3},
-			{
-				label: "Seats",
-				match: func(key string, _ core.Metric) bool {
-					return strings.HasPrefix(key, "org_") && strings.HasSuffix(key, "_seats")
-				},
-				maxSegments: 3,
-			},
-		}
-	default:
-		specs = []compactMetricRowSpec{
-			{label: "Credits", keys: []string{"credit_balance", "credits", "plan_spend", "plan_total_spend_usd", "total_cost_usd", "today_api_cost", "7d_api_cost", "all_time_api_cost", "monthly_spend"}, maxSegments: 4},
-			{label: "Usage", keys: []string{"spend_limit", "plan_percent_used", "usage_five_hour", "usage_seven_day", "rpm", "tpm", "rpd", "tpd"}, maxSegments: 4},
-			{label: "Activity", keys: []string{"messages_today", "sessions_today", "tool_calls_today", "requests_today", "total_conversations", "recent_requests"}, maxSegments: 4},
-		}
+		specs = append(specs, spec)
 	}
 
 	consumed := make(map[string]bool)
@@ -867,7 +819,7 @@ func compactMetricAmount(v float64, unit string) string {
 	}
 }
 
-func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int, skipKeys map[string]bool) []string {
+func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, skipKeys map[string]bool) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -888,12 +840,11 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int, skipKey
 		if skipKeys != nil && skipKeys[key] {
 			continue
 		}
-		if snap.ProviderID == "openrouter" &&
-			(strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "provider_")) {
+		if hasAnyPrefix(key, widget.HideMetricPrefixes) || containsString(widget.HideMetricKeys, key) {
 			continue
 		}
 		met := snap.Metrics[key]
-		if snap.ProviderID == "openrouter" && shouldHideOpenRouterMetricLine(key, met, snap.Metrics) {
+		if shouldSuppressMetricLine(widget, key, met, snap.Metrics) {
 			continue
 		}
 		if metricHasGauge(key, met) {
@@ -914,28 +865,43 @@ func (m Model) buildTileMetricLines(snap core.QuotaSnapshot, innerW int, skipKey
 	return lines
 }
 
-func shouldHideOpenRouterMetricLine(key string, met core.Metric, all map[string]core.Metric) bool {
+func shouldSuppressMetricLine(widget core.DashboardWidget, key string, met core.Metric, all map[string]core.Metric) bool {
 	// Key-level usage on /key is often zero/no-limit even when account has non-zero /credits totals.
 	// Hide noisy zero rows and prefer the higher-signal credit_balance summary.
-	if key == "credits" {
+	if widget.DisplayStyle == core.DashboardDisplayStyleOpenRouter && key == "credits" {
 		if _, hasBalance := all["credit_balance"]; hasBalance {
 			return true
 		}
 	}
 
-	if key == "usage_daily" || key == "usage_weekly" || key == "usage_monthly" ||
-		key == "byok_usage" || key == "byok_daily" || key == "byok_weekly" || key == "byok_monthly" ||
-		key == "today_byok_cost" || key == "7d_byok_cost" || key == "30d_byok_cost" {
+	if containsString(widget.SuppressZeroMetricKeys, key) {
 		if met.Used == nil || *met.Used == 0 {
 			return true
 		}
 	}
 
-	// Generic suppression for zero non-quota values in OpenRouter tile detail rows.
-	if met.Used != nil && *met.Used == 0 && met.Limit == nil && met.Remaining == nil {
+	if widget.SuppressZeroNonQuotaMetrics && met.Used != nil && *met.Used == 0 && met.Limit == nil && met.Remaining == nil {
 		return true
 	}
 
+	return false
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyPrefix(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -984,10 +950,10 @@ func buildTileMetaLines(snap core.QuotaSnapshot, innerW int) []string {
 	return lines
 }
 
-func buildTileHeaderMetaLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
+func buildTileHeaderMetaLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
 	var pills []string
 	pills = append(pills, buildTileCyclePills(snap)...)
-	pills = append(pills, buildTileResetPills(snap, animFrame)...)
+	pills = append(pills, buildTileResetPills(snap, widget, animFrame)...)
 	return wrapTilePills(pills, innerW)
 }
 
@@ -1131,7 +1097,7 @@ var resetLabelMap = map[string]string{
 	"gh_graphql_rpm":       "GraphQL",
 }
 
-func collectActiveResetEntries(snap core.QuotaSnapshot) []resetEntry {
+func collectActiveResetEntries(snap core.QuotaSnapshot, widget core.DashboardWidget) []resetEntry {
 	if len(snap.Resets) == 0 {
 		return nil
 	}
@@ -1144,7 +1110,7 @@ func collectActiveResetEntries(snap core.QuotaSnapshot) []resetEntry {
 		}
 		entries = append(entries, resetEntry{
 			key:   key,
-			label: resetLabelForKey(snap, key),
+			label: resetLabelForKey(snap, widget, key),
 			dur:   dur,
 			at:    t,
 		})
@@ -1158,8 +1124,8 @@ func collectActiveResetEntries(snap core.QuotaSnapshot) []resetEntry {
 	return entries
 }
 
-func resetLabelForKey(snap core.QuotaSnapshot, key string) string {
-	if snap.ProviderID == "gemini_cli" {
+func resetLabelForKey(snap core.QuotaSnapshot, widget core.DashboardWidget, key string) string {
+	if widget.ResetStyle == core.DashboardResetStyleGeminiCompact {
 		if label := compactGeminiResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
 			return label
 		}
@@ -1285,15 +1251,21 @@ func buildGeminiResetPills(entries []resetEntry) []string {
 	return pills
 }
 
-func buildTileResetPills(snap core.QuotaSnapshot, animFrame int) []string {
+func buildTileResetPills(snap core.QuotaSnapshot, widget core.DashboardWidget, animFrame int) []string {
 	_ = animFrame
-	entries := collectActiveResetEntries(snap)
+	entries := collectActiveResetEntries(snap, widget)
 	if len(entries) == 0 {
 		return nil
 	}
 
-	if snap.ProviderID == "gemini_cli" && len(entries) > 4 {
-		return buildGeminiResetPills(entries)
+	if widget.ResetStyle == core.DashboardResetStyleGeminiCompact {
+		threshold := widget.ResetCompactThreshold
+		if threshold <= 0 {
+			threshold = 4
+		}
+		if len(entries) >= threshold {
+			return buildGeminiResetPills(entries)
+		}
 	}
 
 	pills := make([]string, 0, len(entries))
@@ -1311,8 +1283,8 @@ func buildTileResetPills(snap core.QuotaSnapshot, animFrame int) []string {
 	return pills
 }
 
-func buildTileResetLines(snap core.QuotaSnapshot, innerW int, animFrame int) []string {
-	return wrapTilePills(buildTileResetPills(snap, animFrame), innerW)
+func buildTileResetLines(snap core.QuotaSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
+	return wrapTilePills(buildTileResetPills(snap, widget, animFrame), innerW)
 }
 
 func renderDotLeaderRow(label, value string, totalW int) string {
@@ -1360,15 +1332,16 @@ type openRouterModelMix struct {
 	output float64
 }
 
-func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int) []string {
-	models := collectOpenRouterModelMix(snap)
-	if len(models) == 0 {
+func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) []string {
+	allModels := collectOpenRouterModelMix(snap)
+	if len(allModels) == 0 {
 		return nil
 	}
+	models, hiddenCount := limitModelMix(allModels, expanded, 5)
 
 	totalCost := float64(0)
 	totalTokens := float64(0)
-	for _, m := range models {
+	for _, m := range allModels {
 		totalCost += m.cost
 		totalTokens += m.input + m.output
 	}
@@ -1428,19 +1401,23 @@ func buildOpenRouterModelCompositionLines(snap core.QuotaSnapshot, innerW int) [
 		)
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
 	}
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more models (Ctrl+O)", hiddenCount)))
+	}
 
 	return lines
 }
 
-func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int) ([]string, map[string]bool) {
-	models, usedKeys := collectProviderModelMix(snap)
-	if len(models) == 0 {
+func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allModels, usedKeys := collectProviderModelMix(snap)
+	if len(allModels) == 0 {
 		return nil, nil
 	}
+	models, hiddenCount := limitModelMix(allModels, expanded, 5)
 
 	totalCost := float64(0)
 	totalTokens := float64(0)
-	for _, m := range models {
+	for _, m := range allModels {
 		totalCost += m.cost
 		totalTokens += m.input + m.output
 	}
@@ -1502,8 +1479,18 @@ func buildProviderModelCompositionLines(snap core.QuotaSnapshot, innerW int) ([]
 		}
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
 	}
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more models (Ctrl+O)", hiddenCount)))
+	}
 
 	return lines, usedKeys
+}
+
+func limitModelMix(models []openRouterModelMix, expanded bool, maxVisible int) ([]openRouterModelMix, int) {
+	if expanded || maxVisible <= 0 || len(models) <= maxVisible {
+		return models, 0
+	}
+	return models[:maxVisible], len(models) - maxVisible
 }
 
 func collectProviderModelMix(snap core.QuotaSnapshot) ([]openRouterModelMix, map[string]bool) {
