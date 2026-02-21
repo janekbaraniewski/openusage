@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +225,131 @@ func TestFetch_QuotaAPI(t *testing.T) {
 	}
 	if pro.RemainingFraction == nil || *pro.RemainingFraction != 0.10 {
 		t.Errorf("bucket[1].RemainingFraction = %v, want 0.10", pro.RemainingFraction)
+	}
+}
+
+func TestFetch_SessionUsageBreakdowns(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	creds := oauthCreds{
+		AccessToken: "ya29.test",
+		Scope:       "openid https://www.googleapis.com/auth/cloud-platform",
+		TokenType:   "Bearer",
+		ExpiryDate:  4102444800000, // 2100-01-01 in millis
+	}
+	writeJSON(t, filepath.Join(tmpDir, "oauth_creds.json"), creds)
+	writeJSON(t, filepath.Join(tmpDir, "google_accounts.json"), googleAccounts{Active: "test@example.com"})
+	writeJSON(t, filepath.Join(tmpDir, "settings.json"), map[string]any{
+		"security": map[string]any{
+			"auth": map[string]any{
+				"selectedType": "oauth-personal",
+			},
+		},
+	})
+
+	chatDir := filepath.Join(tmpDir, "tmp", "proj-hash", "chats")
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+
+	chat := map[string]any{
+		"sessionId":   "session-1",
+		"startTime":   "2026-02-01T10:00:00Z",
+		"lastUpdated": "2026-02-01T10:05:00Z",
+		"messages": []map[string]any{
+			{
+				"type":      "user",
+				"timestamp": "2026-02-01T10:00:10Z",
+				"content":   "hello",
+			},
+			{
+				"type":      "gemini",
+				"timestamp": "2026-02-01T10:01:00Z",
+				"model":     "gemini-3-flash-preview",
+				"tokens": map[string]any{
+					"input":    90,
+					"output":   10,
+					"cached":   0,
+					"thoughts": 5,
+					"tool":     0,
+					"total":    100,
+				},
+				"toolCalls": []map[string]any{{"name": "run_command"}},
+			},
+			{
+				"type":      "user",
+				"timestamp": "2026-02-01T10:02:00Z",
+				"content":   "more",
+			},
+			{
+				"type":      "gemini",
+				"timestamp": "2026-02-01T10:03:00Z",
+				"model":     "gemini-3-flash-preview",
+				"tokens": map[string]any{
+					"input":    190,
+					"output":   25,
+					"cached":   20,
+					"thoughts": 10,
+					"tool":     0,
+					"total":    220,
+				},
+				"toolCalls": []map[string]any{{"name": "web_search"}, {"name": "run_command"}},
+			},
+		},
+	}
+	writeJSON(t, filepath.Join(chatDir, "session-2026-02-01T10-00-aaaa1111.json"), chat)
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-gemini-cli",
+		Provider:  "gemini_cli",
+		ExtraData: map[string]string{"config_dir": tmpDir},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK (message: %s)", snap.Status, snap.Message)
+	}
+
+	if m, ok := snap.Metrics["model_gemini_3_flash_preview_input_tokens"]; !ok || m.Used == nil || *m.Used != 190 {
+		t.Fatalf("model_gemini_3_flash_preview_input_tokens = %v, want 190", m.Used)
+	}
+	if m, ok := snap.Metrics["model_gemini_3_flash_preview_output_tokens"]; !ok || m.Used == nil || *m.Used != 25 {
+		t.Fatalf("model_gemini_3_flash_preview_output_tokens = %v, want 25", m.Used)
+	}
+	if m, ok := snap.Metrics["client_cli_total_tokens"]; !ok || m.Used == nil || *m.Used != 220 {
+		t.Fatalf("client_cli_total_tokens = %v, want 220", m.Used)
+	}
+	if m, ok := snap.Metrics["client_cli_sessions"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("client_cli_sessions = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["messages_today"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("messages_today = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_calls_today"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("tool_calls_today = %v, want 3", m.Used)
+	}
+	if m, ok := snap.Metrics["7d_tokens"]; !ok || m.Used == nil || *m.Used != 220 {
+		t.Fatalf("7d_tokens = %v, want 220", m.Used)
+	}
+	if m, ok := snap.Metrics["total_conversations"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("total_conversations = %v, want 1", m.Used)
+	}
+	if !strings.Contains(snap.Raw["model_usage"], "gemini-3-flash-preview") {
+		t.Fatalf("model_usage = %q, expected model name", snap.Raw["model_usage"])
+	}
+
+	modelSeries := snap.DailySeries["tokens_model_gemini_3_flash_preview"]
+	if len(modelSeries) != 1 || modelSeries[0].Value != 220 {
+		t.Fatalf("tokens_model_gemini_3_flash_preview series = %+v, want one point at 220", modelSeries)
+	}
+	clientSeries := snap.DailySeries["tokens_client_cli"]
+	if len(clientSeries) != 1 || clientSeries[0].Value != 220 {
+		t.Fatalf("tokens_client_cli series = %+v, want one point at 220", clientSeries)
 	}
 }
 
