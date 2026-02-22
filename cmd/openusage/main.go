@@ -19,6 +19,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "telemetry" {
+		if err := runTelemetryCLI(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Telemetry command failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if os.Getenv("OPENUSAGE_DEBUG") == "" {
 		log.SetOutput(io.Discard)
 	} else {
@@ -136,12 +144,24 @@ func main() {
 	})
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
-	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
-		p.Send(tui.SnapshotsMsg(snaps))
-	})
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	telemetryRuntime, telemetryErr := startAppTelemetryRuntime(ctx, interval)
+	if telemetryErr != nil {
+		log.Printf("Warning: telemetry runtime disabled: %v", telemetryErr)
+	}
+
+	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
+		if telemetryRuntime != nil {
+			telemetryRuntime.ingestProviderSnapshots(ctx, snaps)
+			snaps = applyTelemetryOverlay(ctx, telemetryRuntime.dbPath, snaps)
+		}
+		p.Send(tui.SnapshotsMsg(snaps))
+	})
+	if telemetryRuntime != nil {
+		startTelemetryOverlayBroadcaster(ctx, engine, p, telemetryRuntime.dbPath, interval)
+	}
 
 	go engine.Run(ctx)
 
