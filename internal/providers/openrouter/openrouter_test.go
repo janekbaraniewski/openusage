@@ -671,6 +671,223 @@ func TestFetch_AnalyticsEndpoint(t *testing.T) {
 	}
 }
 
+func TestFetch_AnalyticsTotalTokensOnly_TracksModelAndNormalizesName(t *testing.T) {
+	now := todayISO()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":1.0,"limit":100.0,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":100.0,"total_usage":1.0,"remaining_balance":99.0}}`))
+		case "/analytics/user-activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[
+				{"date":"2026-02-20","model":"Qwen/Qwen3-Coder-Flash","total_cost":0.0,"total_tokens":4000,"requests":1},
+				{"date":"2026-02-21","model":"qwen/qwen3-coder-flash","total_cost":0.0,"total_tokens":8000,"requests":1}
+			]}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-1","model":"openai/gpt-4o","total_cost":0.001,"tokens_prompt":10,"tokens_completion":5,"created_at":"%s","provider_name":"OpenAI"}
+			]}`, now)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_ANALYTICS_TOTAL_ONLY", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_ANALYTICS_TOTAL_ONLY")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-analytics-total-only",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_ANALYTICS_TOTAL_ONLY",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK; message=%s", snap.Status, snap.Message)
+	}
+
+	tok, ok := snap.Metrics["model_qwen_qwen3-coder-flash_total_tokens"]
+	if !ok {
+		t.Fatal("missing normalized qwen total tokens metric")
+	}
+	if tok.Used == nil || *tok.Used != 12000 {
+		t.Fatalf("model_qwen_qwen3-coder-flash_total_tokens = %v, want 12000", tok.Used)
+	}
+
+	reqs, ok := snap.Metrics["model_qwen_qwen3-coder-flash_requests"]
+	if !ok {
+		t.Fatal("missing normalized qwen requests metric")
+	}
+	if reqs.Used == nil || *reqs.Used != 2 {
+		t.Fatalf("model_qwen_qwen3-coder-flash_requests = %v, want 2", reqs.Used)
+	}
+
+	if _, ok := snap.Metrics["model_Qwen_Qwen3-Coder-Flash_total_tokens"]; ok {
+		t.Fatal("unexpected unnormalized model metric key present")
+	}
+
+	foundQwenRecord := false
+	for _, rec := range snap.ModelUsage {
+		if rec.RawModelID != "qwen/qwen3-coder-flash" {
+			continue
+		}
+		foundQwenRecord = true
+		if rec.TotalTokens == nil || *rec.TotalTokens != 12000 {
+			t.Fatalf("qwen model_usage total_tokens = %v, want 12000", rec.TotalTokens)
+		}
+		if rec.Requests == nil || *rec.Requests != 2 {
+			t.Fatalf("qwen model_usage requests = %v, want 2", rec.Requests)
+		}
+	}
+	if !foundQwenRecord {
+		t.Fatal("expected normalized qwen model_usage record")
+	}
+}
+
+func TestFetch_GenerationPerModel_FallsBackTo30dWhenAnalyticsUnavailable(t *testing.T) {
+	now := time.Now().UTC()
+	today := now.Format(time.RFC3339)
+	tenDaysAgo := now.AddDate(0, 0, -10).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":1.0,"limit":100.0,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":100.0,"total_usage":1.0,"remaining_balance":99.0}}`))
+		case "/activity", "/analytics/user-activity":
+			w.WriteHeader(http.StatusNotFound)
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-1","model":"qwen/qwen3-coder-flash","total_cost":0.20,"tokens_prompt":1000,"tokens_completion":2000,"created_at":"%s","provider_name":"Novita"},
+				{"id":"gen-2","model":"QWEN/QWEN3-CODER-FLASH","total_cost":0.30,"tokens_prompt":3000,"tokens_completion":4000,"created_at":"%s","provider_name":"Novita"}
+			]}`, today, tenDaysAgo)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_GEN_30D", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_GEN_30D")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-gen-30d",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_GEN_30D",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	inp, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]
+	if !ok || inp.Used == nil {
+		t.Fatalf("missing model_qwen_qwen3-coder-flash_input_tokens metric: %+v", inp)
+	}
+	if *inp.Used != 4000 {
+		t.Fatalf("input tokens = %v, want 4000", *inp.Used)
+	}
+	if inp.Window != "30d" {
+		t.Fatalf("input window = %q, want 30d", inp.Window)
+	}
+
+	out, ok := snap.Metrics["model_qwen_qwen3-coder-flash_output_tokens"]
+	if !ok || out.Used == nil {
+		t.Fatalf("missing model_qwen_qwen3-coder-flash_output_tokens metric: %+v", out)
+	}
+	if *out.Used != 6000 {
+		t.Fatalf("output tokens = %v, want 6000", *out.Used)
+	}
+
+	reqs, ok := snap.Metrics["model_qwen_qwen3-coder-flash_requests"]
+	if !ok || reqs.Used == nil {
+		t.Fatalf("missing model_qwen_qwen3-coder-flash_requests metric: %+v", reqs)
+	}
+	if *reqs.Used != 2 {
+		t.Fatalf("requests = %v, want 2", *reqs.Used)
+	}
+}
+
+func TestFetch_AnalyticsPerModel_AvoidsGenerationDoubleCount(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":1.0,"limit":100.0,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":100.0,"total_usage":1.0,"remaining_balance":99.0}}`))
+		case "/activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[
+				{"date":"2026-02-20","model":"qwen/qwen3-coder-flash","total_cost":0.0,"total_tokens":9000,"requests":3}
+			]}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-1","model":"qwen/qwen3-coder-flash","total_cost":0.2,"tokens_prompt":5000,"tokens_completion":5000,"created_at":"%s","provider_name":"Novita"}
+			]}`, now)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_NO_DOUBLE", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_NO_DOUBLE")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-no-double",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_NO_DOUBLE",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	tok, ok := snap.Metrics["model_qwen_qwen3-coder-flash_total_tokens"]
+	if !ok || tok.Used == nil {
+		t.Fatalf("missing analytics total tokens metric: %+v", tok)
+	}
+	if *tok.Used != 9000 {
+		t.Fatalf("total_tokens = %v, want 9000 (analytics only)", *tok.Used)
+	}
+
+	if _, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]; ok {
+		t.Fatal("unexpected generation input_tokens metric present; expected analytics to be authoritative")
+	}
+}
+
 func TestFetch_PeriodCosts(t *testing.T) {
 	now := time.Now().UTC()
 	today := now.Format(time.RFC3339)
@@ -1540,6 +1757,231 @@ func TestFetch_ActivityForbidden_ReportsManagementKeyRequirement(t *testing.T) {
 	}
 	if !strings.Contains(snap.Message, "$2.2500 used / $10.00 credits") {
 		t.Fatalf("message = %q, want credits-detail based message", snap.Message)
+	}
+}
+
+func TestFetch_ActivityForbidden_FallsBackToAnalyticsUserActivity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"std-key","usage":0.5,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":2.25}}`))
+		case "/activity":
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"message":"Only management keys can fetch activity for an account","code":403}}`))
+		case "/analytics/user-activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[
+				{"date":"2026-02-21","model":"qwen/qwen3-coder-flash","total_cost":0.918,"total_tokens":3058944,"requests":72}
+			]}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_ACTIVITY_FALLBACK", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_ACTIVITY_FALLBACK")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-activity-fallback",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_ACTIVITY_FALLBACK",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK; message=%s", snap.Status, snap.Message)
+	}
+	if _, ok := snap.Raw["analytics_error"]; ok {
+		t.Fatalf("unexpected analytics_error: %q", snap.Raw["analytics_error"])
+	}
+	if got := snap.Raw["activity_endpoint"]; got != "/analytics/user-activity" {
+		t.Fatalf("activity_endpoint = %q, want /analytics/user-activity", got)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_total_tokens"]; !ok || m.Used == nil || *m.Used != 3058944 {
+		t.Fatalf("missing/invalid qwen total tokens metric: %+v", m)
+	}
+}
+
+func TestFetch_TransactionAnalyticsNestedPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"std-key","usage":0.5,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":2.25}}`))
+		case "/api/internal/v1/transaction-analytics":
+			if r.URL.RawQuery != "window=1mo" {
+				t.Fatalf("unexpected query: %q", r.URL.RawQuery)
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"cachedAt":"2026-02-22T00:00:00Z","data":[
+				{"date":"2026-02-21 00:00:00","model_permaslug":"qwen/qwen3-coder-flash","usage":0.91764,"requests":72,"prompt_tokens":3052166,"completion_tokens":6778,"reasoning_tokens":0,"cached_tokens":1508864}
+			]}}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_TX_ANALYTICS", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_TX_ANALYTICS")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-tx-analytics",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_TX_ANALYTICS",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK; message=%s", snap.Status, snap.Message)
+	}
+	if got := snap.Raw["activity_endpoint"]; got != "/api/internal/v1/transaction-analytics?window=1mo" {
+		t.Fatalf("activity_endpoint = %q, want transaction analytics endpoint", got)
+	}
+	if got := snap.Raw["activity_cached_at"]; got != "2026-02-22T00:00:00Z" {
+		t.Fatalf("activity_cached_at = %q, want 2026-02-22T00:00:00Z", got)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]; !ok || m.Used == nil || *m.Used != 3052166 {
+		t.Fatalf("missing/invalid qwen input tokens metric: %+v", m)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_output_tokens"]; !ok || m.Used == nil || *m.Used != 6778 {
+		t.Fatalf("missing/invalid qwen output tokens metric: %+v", m)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_cached_tokens"]; !ok || m.Used == nil || *m.Used != 1508864 {
+		t.Fatalf("missing/invalid qwen cached tokens metric: %+v", m)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_cost_usd"]; !ok || m.Used == nil || math.Abs(*m.Used-0.91764) > 0.000001 {
+		t.Fatalf("missing/invalid qwen cost metric: %+v", m)
+	}
+}
+
+func TestFetch_TransactionAnalyticsNumericCachedAtAndByokRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"std-key","usage":0.5,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":2.25}}`))
+		case "/api/internal/v1/transaction-analytics":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"cachedAt":1771717984900,"data":[
+				{"date":"2026-02-21 00:00:00","model_permaslug":"qwen/qwen3-coder-flash","usage":0.91764,"requests":72,"byok_requests":3,"prompt_tokens":3052166,"completion_tokens":6778,"reasoning_tokens":0,"cached_tokens":1508864}
+			]}}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_TX_ANALYTICS_NUM", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_TX_ANALYTICS_NUM")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-tx-analytics-num",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_TX_ANALYTICS_NUM",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if got := snap.Raw["activity_cached_at"]; got != "2026-02-21T23:53:04Z" {
+		t.Fatalf("activity_cached_at = %q, want 2026-02-21T23:53:04Z", got)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_byok_requests"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("missing/invalid byok requests metric: %+v", m)
+	}
+}
+
+func TestFetch_TransactionAnalyticsURL_UsesRootWhenBaseURLHasAPIV1(t *testing.T) {
+	var seenInternalPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/api/v1/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"std-key","usage":0.5,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/api/v1/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":2.25}}`))
+		case "/api/internal/v1/transaction-analytics":
+			seenInternalPath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"cachedAt":1771717984900,"data":[
+				{"date":"2026-02-21 00:00:00","model_permaslug":"qwen/qwen3-coder-flash","usage":0.91764,"requests":72,"prompt_tokens":3052166,"completion_tokens":6778,"reasoning_tokens":0,"cached_tokens":1508864}
+			]}}`))
+		case "/api/v1/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_TX_URL", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_TX_URL")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-tx-url",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_TX_URL",
+		BaseURL:   server.URL + "/api/v1",
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK; message=%s", snap.Status, snap.Message)
+	}
+	if seenInternalPath != "/api/internal/v1/transaction-analytics" {
+		t.Fatalf("internal analytics path = %q, want /api/internal/v1/transaction-analytics", seenInternalPath)
+	}
+	if got := snap.Raw["activity_endpoint"]; got != "/api/internal/v1/transaction-analytics?window=1mo" {
+		t.Fatalf("activity_endpoint = %q, want transaction analytics endpoint", got)
 	}
 }
 
