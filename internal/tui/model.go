@@ -1358,6 +1358,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 // computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view
 // for providers that expose both balance and usage dimensions.
 func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDisplayInfo) providerDisplayInfo {
+	metricUsed := func(key string) *float64 {
+		if m, ok := snap.Metrics[key]; ok && m.Used != nil {
+			return m.Used
+		}
+		return nil
+	}
+
 	// Prefer account-level purchased credits when available.
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
@@ -1372,11 +1379,17 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 		}
 
 		detailParts := []string{fmt.Sprintf("$%.2f remaining", *m.Remaining)}
-		if daily, ok := snap.Metrics["usage_daily"]; ok && daily.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *daily.Used))
+		switch {
+		case metricUsed("today_cost") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("today_cost")))
+		case metricUsed("usage_daily") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("usage_daily")))
 		}
-		if weekly, ok := snap.Metrics["usage_weekly"]; ok && weekly.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *weekly.Used))
+		switch {
+		case metricUsed("7d_api_cost") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("7d_api_cost")))
+		case metricUsed("usage_weekly") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("usage_weekly")))
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))

@@ -12,6 +12,7 @@ type ModelNormalizationOverride struct {
 	RawModelID       string `json:"raw_model_id"`
 	CanonicalLineage string `json:"canonical_lineage_id"`
 	CanonicalRelease string `json:"canonical_release_id,omitempty"`
+	CanonicalModel   string `json:"canonical_model,omitempty"`
 }
 
 type ModelNormalizationConfig struct {
@@ -54,6 +55,7 @@ type ModelUsageRecord struct {
 	CanonicalVendor    string `json:"canonical_vendor,omitempty"`
 	CanonicalFamily    string `json:"canonical_family,omitempty"`
 	CanonicalVariant   string `json:"canonical_variant,omitempty"`
+	Canonical          string `json:"canonical,omitempty"` // Canonical model name for consistent identification
 
 	Confidence float64 `json:"confidence,omitempty"` // 0..1
 	Reason     string  `json:"reason,omitempty"`

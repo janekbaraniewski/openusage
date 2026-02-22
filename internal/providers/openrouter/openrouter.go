@@ -639,11 +639,15 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	var activityEndpoint string
 	var activityCachedAt string
 	forbiddenMsg := ""
+	yesterdayUTC := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 
 	for _, endpoint := range []string{
-		"/api/internal/v1/transaction-analytics?window=1mo",
 		"/activity",
+		"/activity?date=" + yesterdayUTC,
 		"/analytics/user-activity",
+		// Internal endpoint is web-dashboard oriented and may require session auth;
+		// keep it as a last-resort fallback only.
+		"/api/internal/v1/transaction-analytics?window=1mo",
 	} {
 		url := analyticsEndpointURL(baseURL, endpoint)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -651,6 +655,9 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 			return err
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Cache-Control", "no-cache, no-store, max-age=0")
+		req.Header.Set("Pragma", "no-cache")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -863,6 +870,12 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	snap.Raw["activity_rows"] = fmt.Sprintf("%d", len(analytics.Data))
 	if minDate != "" && maxDate != "" {
 		snap.Raw["activity_date_range"] = minDate + " .. " + maxDate
+	}
+	if minDate != "" {
+		snap.Raw["activity_min_date"] = minDate
+	}
+	if maxDate != "" {
+		snap.Raw["activity_max_date"] = maxDate
 	}
 	if len(models) > 0 {
 		snap.Raw["activity_models"] = fmt.Sprintf("%d", len(models))
@@ -1645,12 +1658,48 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	}
 
 	hasAnalyticsModelRows := strings.TrimSpace(snap.Raw["activity_rows"]) != "" && strings.TrimSpace(snap.Raw["activity_rows"]) != "0"
-	if !hasAnalyticsModelRows {
-		emitPerModelMetrics(modelStatsMap, snap)
-		emitPerProviderMetrics(providerStatsMap, snap)
+	if hasAnalyticsModelRows {
+		if analyticsRowsStale(snap, time.Now().UTC()) {
+			snap.Raw["activity_rows_stale"] = "true"
+		} else {
+			snap.Raw["activity_rows_stale"] = "false"
+		}
 	}
+	// Always compute model/provider burn from live generation feed.
+	// Analytics endpoints are cached by OpenRouter and can lag model mix updates.
+	emitPerModelMetrics(modelStatsMap, snap)
+	emitPerProviderMetrics(providerStatsMap, snap)
+	snap.Raw["model_mix_source"] = "generation_live"
 
 	return nil
+}
+
+func analyticsRowsStale(snap *core.UsageSnapshot, now time.Time) bool {
+	cachedAtRaw := strings.TrimSpace(snap.Raw["activity_cached_at"])
+	if cachedAtRaw != "" {
+		if t, err := time.Parse(time.RFC3339, cachedAtRaw); err == nil {
+			// Activity cache older than 10 minutes is considered stale for model mix.
+			return now.UTC().Sub(t.UTC()) > 10*time.Minute
+		}
+	}
+
+	maxDateRaw := strings.TrimSpace(snap.Raw["activity_max_date"])
+	if maxDateRaw == "" {
+		if dateRange := strings.TrimSpace(snap.Raw["activity_date_range"]); dateRange != "" {
+			if idx := strings.LastIndex(dateRange, ".."); idx >= 0 {
+				maxDateRaw = strings.TrimSpace(dateRange[idx+2:])
+			}
+		}
+	}
+	if maxDateRaw == "" {
+		return false
+	}
+	day, err := time.Parse("2006-01-02", maxDateRaw)
+	if err != nil {
+		return false
+	}
+	todayUTC := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	return day.UTC().Before(todayUTC)
 }
 
 func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey string) ([]generationEntry, error) {
@@ -1783,6 +1832,11 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageS
 			cachedTokens := float64(e.stats.CachedTokens)
 			snap.Metrics[prefix+"_cached_tokens"] = core.Metric{Used: &cachedTokens, Unit: "tokens", Window: "30d"}
 			rec.CachedTokens = core.Float64Ptr(cachedTokens)
+		}
+		totalTokens := float64(e.stats.PromptTokens + e.stats.CompletionTokens + e.stats.ReasoningTokens + e.stats.CachedTokens)
+		if totalTokens > 0 {
+			snap.Metrics[prefix+"_total_tokens"] = core.Metric{Used: &totalTokens, Unit: "tokens", Window: "30d"}
+			rec.TotalTokens = core.Float64Ptr(totalTokens)
 		}
 		if e.stats.ImageTokens > 0 {
 			imageTokens := float64(e.stats.ImageTokens)

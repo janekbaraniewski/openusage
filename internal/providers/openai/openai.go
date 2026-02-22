@@ -9,6 +9,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -63,12 +64,14 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		model = defaultModel
 	}
 
-	url := baseURL + "/models/" + model
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	headers := map[string]string{
+		"Authorization": "Bearer " + apiKey,
+	}
+
+	req, err := shared.CreateStandardRequest(ctx, baseURL, "/models/"+model, apiKey, headers)
 	if err != nil {
 		return core.UsageSnapshot{}, fmt.Errorf("openai: creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -76,23 +79,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	defer resp.Body.Close()
 
-	snap := core.UsageSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Metrics:    make(map[string]core.Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        parsers.RedactHeaders(resp.Header),
-	}
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
-		return snap, nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
+	snap, err := shared.ProcessStandardResponse(resp, acct, p.ID())
+	if err != nil {
+		return core.UsageSnapshot{}, fmt.Errorf("openai: processing response: %w", err)
 	}
 
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpm", "requests", "1m",

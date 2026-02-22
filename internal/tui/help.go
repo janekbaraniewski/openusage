@@ -134,8 +134,6 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	}
 	if m.experimentalAnalytics {
 		actionKeys = append(actionKeys,
-			struct{ key, desc string }{"1-5", "Jump to analytics sub-tab"},
-			struct{ key, desc string }{"← → / h l", "Navigate analytics tabs"},
 			struct{ key, desc string }{"s", "Cycle sort (analytics)"},
 		)
 	}

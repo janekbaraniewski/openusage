@@ -386,6 +386,154 @@ func TestFetch_NoSyntheticUsageWithoutCloudWindows(t *testing.T) {
 	}
 }
 
+func TestFetch_CloudSettingsFallbackUsage(t *testing.T) {
+	cloudServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/me":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":    "acct-123",
+				"email": "user@example.com",
+				"name":  "user",
+				"plan":  "free",
+			})
+		case "/api/tags":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"models":[{"name":"qwen3:32b-cloud"}]}`))
+		case "/settings":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`
+<html><body>
+<span>Session usage</span><span>3.8% used</span>
+<div class="local-time" data-time="2026-02-22T01:00:00Z">Resets in 44 minutes</div>
+<span>Weekly usage</span><span>1.9% used</span>
+<div class="local-time" data-time="2026-02-23T00:00:00Z">Resets in 1 day</div>
+</body></html>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer cloudServer.Close()
+
+	os.Setenv("TEST_OLLAMA_KEY", "test-key")
+	defer os.Unsetenv("TEST_OLLAMA_KEY")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-ollama-cloud",
+		Provider:  "ollama",
+		Auth:      "api_key",
+		APIKeyEnv: "TEST_OLLAMA_KEY",
+		ExtraData: map[string]string{
+			"cloud_base_url": cloudServer.URL + "/api/v1",
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK", snap.Status)
+	}
+
+	if m, ok := snap.Metrics["usage_five_hour"]; !ok || m.Used == nil || *m.Used != 3.8 {
+		t.Fatalf("usage_five_hour = %+v, want 3.8", m)
+	}
+	if m, ok := snap.Metrics["usage_weekly"]; !ok || m.Used == nil || *m.Used != 1.9 || m.Window != "1w" {
+		t.Fatalf("usage_weekly = %+v, want used=1.9 window=1w", m)
+	}
+	if m, ok := snap.Metrics["usage_one_day"]; !ok || m.Used == nil || *m.Used != 1.9 {
+		t.Fatalf("usage_one_day = %+v, want 1.9 alias", m)
+	}
+	if _, ok := snap.Resets["usage_weekly"]; !ok {
+		t.Fatal("expected usage_weekly reset")
+	}
+}
+
+func TestFetchServerLogs_CountsAnthropicMessagesPath(t *testing.T) {
+	localServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/version":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"version":"0.16.3"}`))
+		case "/api/status":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"cloud":{"disabled":false,"source":"config"}}`))
+		case "/api/tags":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		case "/api/ps":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer localServer.Close()
+
+	tmpDir := t.TempDir()
+	logDir := filepath.Join(tmpDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	serverConfigPath := filepath.Join(tmpDir, "server.json")
+	if err := os.WriteFile(serverConfigPath, []byte(`{"disable_ollama_cloud":false}`), 0o644); err != nil {
+		t.Fatalf("write server config: %v", err)
+	}
+
+	now := time.Now().In(time.Local)
+	today := now.Format("2006/01/02")
+	t0 := now.Add(-1 * time.Minute).Format("15:04:05")
+	logData := fmt.Sprintf(`[GIN] %s - %s | 200 | 640ms | 127.0.0.1 | POST     "/v1/messages"`+"\n", today, t0)
+	if err := os.WriteFile(filepath.Join(logDir, "server.log"), []byte(logData), 0o644); err != nil {
+		t.Fatalf("write server log: %v", err)
+	}
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:       "test-ollama",
+		Provider: "ollama",
+		Auth:     "local",
+		BaseURL:  localServer.URL,
+		ExtraData: map[string]string{
+			"logs_dir":      logDir,
+			"server_config": serverConfigPath,
+			// No DB path on purpose; this test should be log-driven.
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if got := metricValue(snap, "requests_today"); got != 1 {
+		t.Fatalf("requests_today = %v, want 1", got)
+	}
+	if got := metricValue(snap, "chat_requests_today"); got != 1 {
+		t.Fatalf("chat_requests_today = %v, want 1", got)
+	}
+}
+
+func TestNormalizeModelName(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "Qwen3:32B:latest", want: "qwen3:32b"},
+		{in: "models/gpt-oss:20b", want: "gpt-oss:20b"},
+		{in: "https://ollama.com/library/deepseek-r1:70b-cloud", want: "deepseek-r1:70b-cloud"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got := normalizeModelName(tt.in)
+			if got != tt.want {
+				t.Fatalf("normalizeModelName(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func metricValue(snap core.UsageSnapshot, key string) float64 {
 	m, ok := snap.Metrics[key]
 	if !ok || m.Remaining == nil {

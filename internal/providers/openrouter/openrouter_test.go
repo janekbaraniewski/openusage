@@ -831,8 +831,9 @@ func TestFetch_GenerationPerModel_FallsBackTo30dWhenAnalyticsUnavailable(t *test
 	}
 }
 
-func TestFetch_AnalyticsPerModel_AvoidsGenerationDoubleCount(t *testing.T) {
+func TestFetch_AnalyticsRows_GenerationModelMixIsAuthoritative(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
+	today := time.Now().UTC().Format("2006-01-02")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -846,7 +847,7 @@ func TestFetch_AnalyticsPerModel_AvoidsGenerationDoubleCount(t *testing.T) {
 		case "/activity":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"data":[
-				{"date":"2026-02-20","model":"qwen/qwen3-coder-flash","total_cost":0.0,"total_tokens":9000,"requests":3}
+				{"date":"` + today + `","model":"qwen/qwen3-coder-flash","total_cost":0.0,"total_tokens":9000,"requests":3}
 			]}`))
 		case "/generation":
 			w.WriteHeader(http.StatusOK)
@@ -877,14 +878,263 @@ func TestFetch_AnalyticsPerModel_AvoidsGenerationDoubleCount(t *testing.T) {
 
 	tok, ok := snap.Metrics["model_qwen_qwen3-coder-flash_total_tokens"]
 	if !ok || tok.Used == nil {
-		t.Fatalf("missing analytics total tokens metric: %+v", tok)
+		t.Fatalf("missing model total tokens metric: %+v", tok)
 	}
-	if *tok.Used != 9000 {
-		t.Fatalf("total_tokens = %v, want 9000 (analytics only)", *tok.Used)
+	if *tok.Used != 10000 {
+		t.Fatalf("total_tokens = %v, want 10000 (generation live)", *tok.Used)
 	}
 
-	if _, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]; ok {
-		t.Fatal("unexpected generation input_tokens metric present; expected analytics to be authoritative")
+	inp, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]
+	if !ok || inp.Used == nil || *inp.Used != 5000 {
+		t.Fatalf("model input tokens = %+v, want 5000 from generation", inp)
+	}
+	if got := snap.Raw["model_mix_source"]; got != "generation_live" {
+		t.Fatalf("model_mix_source = %q, want generation_live", got)
+	}
+}
+
+func TestFetch_AnalyticsCachedAt_GenerationLiveModelMix(t *testing.T) {
+	now := time.Now().UTC()
+	cachedAt := now.Add(-1 * time.Hour).Truncate(time.Second)
+	afterCache := now.Add(-20 * time.Minute).Truncate(time.Second)
+	beforeCache := now.Add(-2 * time.Hour).Truncate(time.Second)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":5.01,"limit":10.0,"usage_monthly":5.01,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":5.01,"remaining_balance":4.99}}`))
+		case "/api/internal/v1/transaction-analytics":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":{"data":[
+				{"date":"%s","model":"qwen/qwen3-coder-flash","total_cost":1.00,"total_tokens":1000,"requests":1}
+			],"cachedAt":"%s"}}`, now.Format("2006-01-02"), cachedAt.Format(time.RFC3339))))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-before","model":"qwen/qwen3-coder-flash","total_cost":0.50,"tokens_prompt":100,"tokens_completion":50,"created_at":"%s","provider_name":"Novita"},
+				{"id":"gen-after","model":"qwen/qwen3-coder-flash","total_cost":0.25,"tokens_prompt":80,"tokens_completion":20,"created_at":"%s","provider_name":"Novita"}
+			]}`, beforeCache.Format(time.RFC3339), afterCache.Format(time.RFC3339))))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_CACHE_DELTA", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_CACHE_DELTA")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-cache-delta",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_CACHE_DELTA",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	cost, ok := snap.Metrics["model_qwen_qwen3-coder-flash_cost_usd"]
+	if !ok || cost.Used == nil {
+		t.Fatalf("missing model cost metric: %+v", cost)
+	}
+	if math.Abs(*cost.Used-0.75) > 0.0001 {
+		t.Fatalf("model cost = %v, want 0.75 (generation live)", *cost.Used)
+	}
+
+	reqs, ok := snap.Metrics["model_qwen_qwen3-coder-flash_requests"]
+	if !ok || reqs.Used == nil {
+		t.Fatalf("missing model requests metric: %+v", reqs)
+	}
+	if math.Abs(*reqs.Used-2.0) > 0.0001 {
+		t.Fatalf("model requests = %v, want 2", *reqs.Used)
+	}
+
+	if got := snap.Raw["model_mix_source"]; got != "generation_live" {
+		t.Fatalf("model_mix_source = %q, want generation_live", got)
+	}
+}
+
+func TestFetch_AnalyticsMaxDate_GenerationLiveModelMix(t *testing.T) {
+	now := time.Now().UTC()
+	staleDay := now.AddDate(0, 0, -2).Format("2006-01-02")
+	newerTs := now.Add(-30 * time.Minute).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":5.74,"limit":10.0,"usage_monthly":5.74,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":5.74,"remaining_balance":4.26}}`))
+		case "/activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"date":"%s","model":"qwen/qwen3-coder-flash","total_cost":1.00,"total_tokens":1000,"requests":1}
+			]}`, staleDay)))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-new","model":"qwen/qwen3-coder-flash","total_cost":0.40,"tokens_prompt":120,"tokens_completion":80,"created_at":"%s","provider_name":"Novita"}
+			]}`, newerTs)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_MAXDATE_DELTA", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_MAXDATE_DELTA")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-maxdate-delta",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_MAXDATE_DELTA",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	cost, ok := snap.Metrics["model_qwen_qwen3-coder-flash_cost_usd"]
+	if !ok || cost.Used == nil {
+		t.Fatalf("missing model cost metric: %+v", cost)
+	}
+	if math.Abs(*cost.Used-0.40) > 0.0001 {
+		t.Fatalf("model cost = %v, want 0.40 (generation live)", *cost.Used)
+	}
+
+	if got := snap.Raw["model_mix_source"]; got != "generation_live" {
+		t.Fatalf("model_mix_source = %q, want generation_live", got)
+	}
+}
+
+func TestFetch_StaleAnalytics_GenerationLiveAndStaleMarker(t *testing.T) {
+	now := time.Now().UTC()
+	staleCachedAt := now.Add(-2 * time.Hour).Truncate(time.Second)
+	generationTs := now.Add(-5 * time.Minute).Truncate(time.Second)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":5.74,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":5.74,"remaining_balance":4.26}}`))
+		case "/api/internal/v1/transaction-analytics":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":{"data":[
+				{"date":"%s","model":"old/model","total_cost":3.0,"total_tokens":3000000,"requests":10}
+			],"cachedAt":"%s"}}`, now.AddDate(0, 0, -2).Format("2006-01-02"), staleCachedAt.Format(time.RFC3339))))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-1","model":"fresh/model","total_cost":0.40,"tokens_prompt":120,"tokens_completion":80,"created_at":"%s","provider_name":"Novita"}
+			]}`, generationTs.Format(time.RFC3339))))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_STALE_MIX", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_STALE_MIX")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-stale-mix",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_STALE_MIX",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := snap.Raw["activity_rows_stale"]; got != "true" {
+		t.Fatalf("activity_rows_stale = %q, want true", got)
+	}
+
+	if got := snap.Raw["model_mix_source"]; got != "generation_live" {
+		t.Fatalf("model_mix_source = %q, want generation_live", got)
+	}
+
+	if tok, ok := snap.Metrics["model_old_model_total_tokens"]; !ok || tok.Used == nil || *tok.Used != 3000000 {
+		t.Fatalf("old model total tokens metric missing/invalid: %+v", tok)
+	}
+	if cost, ok := snap.Metrics["model_fresh_model_cost_usd"]; !ok || cost.Used == nil || *cost.Used != 0.4 {
+		t.Fatalf("fresh model delta cost metric missing/invalid: %+v", cost)
+	}
+}
+
+func TestFetch_FreshAnalytics_GenerationLiveAndFreshMarker(t *testing.T) {
+	now := time.Now().UTC()
+	freshCachedAt := now.Add(-2 * time.Minute).Truncate(time.Second)
+	generationTs := now.Add(-1 * time.Minute).Truncate(time.Second)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"test","usage":5.74,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":200,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":5.74,"remaining_balance":4.26}}`))
+		case "/api/internal/v1/transaction-analytics":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":{"data":[
+				{"date":"%s","model":"qwen/qwen3-coder-flash","total_cost":1.0,"total_tokens":1000,"requests":1}
+			],"cachedAt":"%s"}}`, now.Format("2006-01-02"), freshCachedAt.Format(time.RFC3339))))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{"id":"gen-1","model":"qwen/qwen3-coder-flash","total_cost":0.10,"tokens_prompt":10,"tokens_completion":5,"created_at":"%s","provider_name":"Novita"}
+			]}`, generationTs.Format(time.RFC3339))))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_FRESH_MIX", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_FRESH_MIX")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-fresh-mix",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_FRESH_MIX",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	source := snap.Raw["model_mix_source"]
+	if source != "generation_live" {
+		t.Fatalf("model_mix_source = %q, want generation_live", source)
+	}
+	if got := snap.Raw["activity_rows_stale"]; got != "false" {
+		t.Fatalf("activity_rows_stale = %q, want false", got)
 	}
 }
 
@@ -1814,6 +2064,84 @@ func TestFetch_ActivityForbidden_FallsBackToAnalyticsUserActivity(t *testing.T) 
 	}
 	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_total_tokens"]; !ok || m.Used == nil || *m.Used != 3058944 {
 		t.Fatalf("missing/invalid qwen total tokens metric: %+v", m)
+	}
+}
+
+func TestFetch_ActivityDateFallback_UsesYesterdayAndNoCacheHeaders(t *testing.T) {
+	var seenEmptyDate bool
+	var seenFallbackDate string
+	var seenCacheControl string
+	var seenPragma string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"std-key","usage":0.5,"limit":10.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":10.0,"total_usage":2.25}}`))
+		case "/activity":
+			seenCacheControl = r.Header.Get("Cache-Control")
+			seenPragma = r.Header.Get("Pragma")
+			date := strings.TrimSpace(r.URL.Query().Get("date"))
+			if date == "" {
+				seenEmptyDate = true
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"error":{"message":"Date must be within the last 30 (completed) UTC days","code":400}}`))
+				return
+			}
+			seenFallbackDate = date
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[
+				{"date":"2026-02-21 00:00:00","model_permaslug":"qwen/qwen3-coder-flash","usage":0.91764,"requests":72,"prompt_tokens":3052166,"completion_tokens":6778,"reasoning_tokens":0,"cached_tokens":1508864}
+			]}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_ACTIVITY_DATE_FALLBACK", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_ACTIVITY_DATE_FALLBACK")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-activity-date-fallback",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_ACTIVITY_DATE_FALLBACK",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want OK; message=%s", snap.Status, snap.Message)
+	}
+	if !seenEmptyDate {
+		t.Fatal("expected initial /activity call without date")
+	}
+	if seenFallbackDate == "" {
+		t.Fatal("expected fallback /activity call with date query")
+	}
+	if seenCacheControl != "no-cache, no-store, max-age=0" {
+		t.Fatalf("cache-control = %q, want no-cache, no-store, max-age=0", seenCacheControl)
+	}
+	if seenPragma != "no-cache" {
+		t.Fatalf("pragma = %q, want no-cache", seenPragma)
+	}
+	if got := snap.Raw["activity_endpoint"]; !strings.HasPrefix(got, "/activity?date=") {
+		t.Fatalf("activity_endpoint = %q, want /activity?date=...", got)
+	}
+	if m, ok := snap.Metrics["model_qwen_qwen3-coder-flash_input_tokens"]; !ok || m.Used == nil || *m.Used != 3052166 {
+		t.Fatalf("missing/invalid qwen input tokens metric: %+v", m)
 	}
 }
 
