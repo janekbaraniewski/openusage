@@ -465,12 +465,13 @@ func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointReturns
 }
 
 func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
-	now := time.Now()
+	now := time.Now().In(time.Local)
+	anchor := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
 	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
-		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.Add(-2 * time.Hour).UnixMilli()},
-		{Hash: "h2", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.AddDate(0, 0, -1).UnixMilli()},
-		{Hash: "h3", Source: "tab", Model: "claude-4.5-opus", CreatedAt: now.Add(-1 * time.Hour).UnixMilli()},
-		{Hash: "h4", Source: "cli", Model: "gpt-4o", CreatedAt: now.Add(-90 * time.Minute).UnixMilli()},
+		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: anchor.Add(-2 * time.Hour).UnixMilli()},
+		{Hash: "h2", Source: "composer", Model: "claude-4.5-opus", CreatedAt: anchor.AddDate(0, 0, -1).UnixMilli()},
+		{Hash: "h3", Source: "tab", Model: "claude-4.5-opus", CreatedAt: anchor.Add(-1 * time.Hour).UnixMilli()},
+		{Hash: "h4", Source: "cli", Model: "gpt-4o", CreatedAt: anchor.Add(-90 * time.Minute).UnixMilli()},
 	})
 
 	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
