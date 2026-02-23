@@ -52,6 +52,42 @@ type UsageSnapshot struct {
 	Message     string                 `json:"message,omitempty"`      // human-readable summary
 }
 
+func NewUsageSnapshot(providerID, accountID string) UsageSnapshot {
+	return UsageSnapshot{
+		ProviderID: providerID,
+		AccountID:  accountID,
+		Timestamp:  time.Now(),
+		Metrics:    make(map[string]Metric),
+		Resets:     make(map[string]time.Time),
+		Raw:        make(map[string]string),
+	}
+}
+
+func NewAuthSnapshot(providerID, accountID, message string) UsageSnapshot {
+	return UsageSnapshot{
+		ProviderID: providerID,
+		AccountID:  accountID,
+		Timestamp:  time.Now(),
+		Status:     StatusAuth,
+		Message:    message,
+	}
+}
+
+func MergeAccounts(manual, autoDetected []AccountConfig) []AccountConfig {
+	seen := make(map[string]bool, len(manual))
+	result := make([]AccountConfig, 0, len(manual)+len(autoDetected))
+	for _, acct := range manual {
+		seen[acct.ID] = true
+		result = append(result, acct)
+	}
+	for _, acct := range autoDetected {
+		if !seen[acct.ID] {
+			result = append(result, acct)
+		}
+	}
+	return result
+}
+
 func (s *UsageSnapshot) EnsureMaps() {
 	if s.Metrics == nil {
 		s.Metrics = make(map[string]Metric)

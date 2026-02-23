@@ -24,6 +24,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -65,24 +66,18 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	snap := core.UsageSnapshot{
-		ProviderID:  p.ID(),
-		AccountID:   acct.ID,
-		Timestamp:   time.Now(),
-		Metrics:     make(map[string]core.Metric),
-		Resets:      make(map[string]time.Time),
-		Raw:         make(map[string]string),
-		DailySeries: make(map[string][]core.TimePoint),
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	cloudOnly := strings.EqualFold(acct.Auth, string(core.ProviderAuthTypeAPIKey))
+	if cloudOnly && authSnap != nil {
+		return *authSnap, nil
 	}
 
-	cloudOnly := strings.EqualFold(acct.Auth, string(core.ProviderAuthTypeAPIKey))
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
+	snap.DailySeries = make(map[string][]core.TimePoint)
 	hasData := false
 
 	if !cloudOnly {
-		localBaseURL := acct.BaseURL
-		if localBaseURL == "" {
-			localBaseURL = defaultLocalBaseURL
-		}
+		localBaseURL := shared.ResolveBaseURL(acct, defaultLocalBaseURL)
 
 		localOK, err := p.fetchLocalAPI(ctx, localBaseURL, &snap)
 		if err != nil {
@@ -107,7 +102,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	apiKey := acct.ResolveAPIKey()
 	if apiKey != "" {
 		cloudHasData, authFailed, limited, err := p.fetchCloudAPI(ctx, acct, apiKey, &snap)
 		if err != nil {
@@ -134,10 +128,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			}
 			snap.SetDiagnostic("cloud_auth_failed", "check OLLAMA_API_KEY")
 		}
-	} else if cloudOnly {
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("env var %s not set", acct.APIKeyEnv)
-		return snap, nil
 	}
 
 	finalizeUsageWindows(&snap)

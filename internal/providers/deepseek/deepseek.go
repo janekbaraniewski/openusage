@@ -7,11 +7,11 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -59,30 +59,13 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	apiKey := acct.ResolveAPIKey()
-	if apiKey == "" {
-		return core.UsageSnapshot{
-			ProviderID: p.ID(),
-			AccountID:  acct.ID,
-			Timestamp:  time.Now(),
-			Status:     core.StatusAuth,
-			Message:    fmt.Sprintf("env var %s not set", acct.APIKeyEnv),
-		}, nil
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	if authSnap != nil {
+		return *authSnap, nil
 	}
 
-	baseURL := acct.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
-	snap := core.UsageSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Metrics:    make(map[string]core.Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        make(map[string]string),
-	}
+	baseURL := shared.ResolveBaseURL(acct, defaultBaseURL)
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
 	if err := p.fetchBalance(ctx, baseURL+balancePath, apiKey, &snap); err != nil {
 		snap.Raw["balance_error"] = err.Error()
@@ -95,11 +78,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, err
 	}
 
-	if snap.Status == "" {
-		snap.Status = core.StatusOK
-		snap.Message = "OK"
-	}
-
+	shared.FinalizeStatus(&snap)
 	return snap, nil
 }
 

@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
@@ -44,21 +42,12 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	apiKey := acct.ResolveAPIKey()
-	if apiKey == "" {
-		return core.UsageSnapshot{
-			ProviderID: p.ID(),
-			AccountID:  acct.ID,
-			Timestamp:  time.Now(),
-			Status:     core.StatusAuth,
-			Message:    "no API key found (set OPENAI_API_KEY or configure token)",
-		}, nil
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	if authSnap != nil {
+		return *authSnap, nil
 	}
 
-	baseURL := acct.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
+	baseURL := shared.ResolveBaseURL(acct, defaultBaseURL)
 	model := acct.ProbeModel
 	if model == "" {
 		model = defaultModel
@@ -84,15 +73,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return core.UsageSnapshot{}, fmt.Errorf("openai: processing response: %w", err)
 	}
 
-	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpm", "requests", "1m",
-		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	parsers.ApplyRateLimitGroup(resp.Header, &snap, "tpm", "tokens", "1m",
-		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
-
-	if snap.Status == "" {
-		snap.Status = core.StatusOK
-		snap.Message = "OK"
-	}
-
+	shared.ApplyStandardRateLimits(resp, &snap)
+	shared.FinalizeStatus(&snap)
 	return snap, nil
 }

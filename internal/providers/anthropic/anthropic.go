@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
@@ -41,22 +40,12 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	apiKey := acct.ResolveAPIKey()
-	if apiKey == "" {
-		return core.UsageSnapshot{
-			ProviderID: p.ID(),
-			AccountID:  acct.ID,
-			Timestamp:  time.Now(),
-			Status:     core.StatusAuth,
-			Message:    "no API key found (set ANTHROPIC_API_KEY or configure token)",
-		}, nil
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	if authSnap != nil {
+		return *authSnap, nil
 	}
 
-	baseURL := acct.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
+	baseURL := shared.ResolveBaseURL(acct, defaultBaseURL)
 	headers := map[string]string{
 		"x-api-key":         apiKey,
 		"anthropic-version": "2023-06-01",
@@ -88,10 +77,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		"anthropic-ratelimit-tokens-remaining",
 		"anthropic-ratelimit-tokens-reset")
 
-	if snap.Status == "" {
-		snap.Status = core.StatusOK
-		snap.Message = "OK"
-	}
-
+	shared.FinalizeStatus(&snap)
 	return snap, nil
 }

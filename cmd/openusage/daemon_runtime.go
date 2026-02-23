@@ -38,11 +38,10 @@ func newDaemonViewRuntime(
 	providerLinks map[string]string,
 ) *daemonViewRuntime {
 	return &daemonViewRuntime{
-		client:              client,
-		socketPath:          strings.TrimSpace(socketPath),
-		verbose:             verbose,
-		request:             daemonReadModelRequestFromAccounts(accounts, providerLinks),
-		lastReadModelErrLog: time.Time{},
+		client:     client,
+		socketPath: strings.TrimSpace(socketPath),
+		verbose:    verbose,
+		request:    buildReadModelRequest(accounts, providerLinks),
 	}
 }
 
@@ -71,9 +70,7 @@ func (r *daemonViewRuntime) ensureClient(ctx context.Context) *telemetryDaemonCl
 	if client := r.currentClient(); client != nil {
 		return client
 	}
-
-	socketPath := strings.TrimSpace(r.socketPath)
-	if socketPath == "" {
+	if strings.TrimSpace(r.socketPath) == "" {
 		return nil
 	}
 
@@ -83,7 +80,6 @@ func (r *daemonViewRuntime) ensureClient(ctx context.Context) *telemetryDaemonCl
 	if client := r.currentClient(); client != nil {
 		return client
 	}
-
 	if !r.lastEnsureAttempt.IsZero() && time.Since(r.lastEnsureAttempt) < 1200*time.Millisecond {
 		return nil
 	}
@@ -92,7 +88,7 @@ func (r *daemonViewRuntime) ensureClient(ctx context.Context) *telemetryDaemonCl
 	ensureCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	client, err := ensureTelemetryDaemonRunning(ensureCtx, socketPath, r.verbose)
+	client, err := ensureTelemetryDaemonRunning(ensureCtx, r.socketPath, r.verbose)
 	if err != nil {
 		return nil
 	}
@@ -105,7 +101,7 @@ func (r *daemonViewRuntime) setAccounts(accounts []core.AccountConfig, providerL
 		return
 	}
 	r.requestMu.Lock()
-	r.request = daemonReadModelRequestFromAccounts(accounts, providerLinks)
+	r.request = buildReadModelRequest(accounts, providerLinks)
 	r.requestMu.Unlock()
 }
 
@@ -118,7 +114,70 @@ func (r *daemonViewRuntime) readRequest() daemonReadModelRequest {
 	return r.request
 }
 
-func daemonReadModelRequestFromAccounts(
+func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]core.UsageSnapshot {
+	if r == nil {
+		return nil
+	}
+	request := r.readRequest()
+	if len(request.Accounts) == 0 {
+		return nil
+	}
+
+	client := r.currentClient()
+	if client == nil {
+		client = r.ensureClient(ctx)
+	}
+
+	snaps, err := r.fetchReadModel(ctx, client, request)
+	if err != nil {
+		r.throttledLogError(err)
+		return nil
+	}
+	return snaps
+}
+
+func (r *daemonViewRuntime) fetchReadModel(
+	ctx context.Context,
+	client *telemetryDaemonClient,
+	request daemonReadModelRequest,
+) (map[string]core.UsageSnapshot, error) {
+	if client == nil {
+		return nil, fmt.Errorf("telemetry daemon unavailable")
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	snaps, err := client.ReadModel(readCtx, request)
+	cancel()
+
+	if err == nil {
+		return snaps, nil
+	}
+
+	r.setClient(nil)
+	recovered := r.ensureClient(ctx)
+	if recovered == nil {
+		return nil, err
+	}
+
+	retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
+	snaps, err = recovered.ReadModel(retryCtx, request)
+	retryCancel()
+	return snaps, err
+}
+
+func (r *daemonViewRuntime) throttledLogError(err error) {
+	r.readModelMu.Lock()
+	shouldLog := time.Since(r.lastReadModelErrLog) > 2*time.Second
+	if shouldLog {
+		r.lastReadModelErrLog = time.Now()
+	}
+	r.readModelMu.Unlock()
+	if shouldLog {
+		log.Printf("daemon read-model error: %v", err)
+	}
+}
+
+func buildReadModelRequest(
 	accounts []core.AccountConfig,
 	providerLinks map[string]string,
 ) daemonReadModelRequest {
@@ -140,110 +199,24 @@ func daemonReadModelRequestFromAccounts(
 	for source, target := range providerLinks {
 		source = strings.ToLower(strings.TrimSpace(source))
 		target = strings.ToLower(strings.TrimSpace(target))
-		if source == "" || target == "" {
-			continue
+		if source != "" && target != "" {
+			links[source] = target
 		}
-		links[source] = target
 	}
 	return daemonReadModelRequest{Accounts: outAccounts, ProviderLinks: links}
-}
-
-func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]core.UsageSnapshot {
-	if r == nil {
-		return map[string]core.UsageSnapshot{}
-	}
-
-	request := r.readRequest()
-	if len(request.Accounts) == 0 {
-		return map[string]core.UsageSnapshot{}
-	}
-
-	client := r.currentClient()
-	if client == nil {
-		client = r.ensureClient(ctx)
-	}
-
-	var (
-		snaps map[string]core.UsageSnapshot
-		err   error
-	)
-
-	if client == nil {
-		err = fmt.Errorf("telemetry daemon unavailable")
-	} else {
-		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		snaps, err = client.ReadModel(readCtx, request)
-		cancel()
-		if err != nil {
-			r.setClient(nil)
-			if recovered := r.ensureClient(ctx); recovered != nil {
-				retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
-				snaps, err = recovered.ReadModel(retryCtx, request)
-				retryCancel()
-				if err == nil {
-					client = recovered
-				}
-			}
-		}
-	}
-
-	if err != nil {
-		shouldLog := false
-		r.readModelMu.Lock()
-		if time.Since(r.lastReadModelErrLog) > 2*time.Second {
-			r.lastReadModelErrLog = time.Now()
-			shouldLog = true
-		}
-		r.readModelMu.Unlock()
-		if shouldLog {
-			log.Printf("daemon read-model error: %v", err)
-		}
-		return map[string]core.UsageSnapshot{}
-	}
-
-	return snaps
 }
 
 func startDaemonViewBroadcaster(
 	ctx context.Context,
 	program *tea.Program,
-	runtime *daemonViewRuntime,
+	rt *daemonViewRuntime,
 	refreshInterval time.Duration,
 ) {
-	interval := refreshInterval / 3
-	if interval <= 0 {
-		interval = 4 * time.Second
-	}
-	if interval < 1*time.Second {
-		interval = 1 * time.Second
-	}
-	if interval > 5*time.Second {
-		interval = 5 * time.Second
-	}
+	interval := clampDuration(refreshInterval/3, 1*time.Second, 5*time.Second)
 
 	go func() {
-		initial := runtime.readWithFallback(ctx)
-		if len(initial) > 0 {
-			program.Send(tui.SnapshotsMsg(initial))
-		}
-		if !snapshotsHaveUsableData(initial) {
-			warmTicker := time.NewTicker(1 * time.Second)
-			defer warmTicker.Stop()
-			for attempts := 0; attempts < 8; attempts++ {
-				select {
-				case <-ctx.Done():
-					return
-				case <-warmTicker.C:
-					snaps := runtime.readWithFallback(ctx)
-					if len(snaps) == 0 {
-						continue
-					}
-					program.Send(tui.SnapshotsMsg(snaps))
-					if snapshotsHaveUsableData(snaps) {
-						attempts = 8
-					}
-				}
-			}
+		if warmUp(ctx, program, rt) {
+			return
 		}
 
 		ticker := time.NewTicker(interval)
@@ -253,20 +226,56 @@ func startDaemonViewBroadcaster(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				snaps := runtime.readWithFallback(ctx)
-				if len(snaps) == 0 {
-					continue
+				if snaps := rt.readWithFallback(ctx); len(snaps) > 0 {
+					program.Send(tui.SnapshotsMsg(snaps))
 				}
-				program.Send(tui.SnapshotsMsg(snaps))
 			}
 		}
 	}()
 }
 
-func snapshotsHaveUsableData(snaps map[string]core.UsageSnapshot) bool {
-	if len(snaps) == 0 {
-		return false
+func warmUp(ctx context.Context, program *tea.Program, rt *daemonViewRuntime) (cancelled bool) {
+	if snaps := rt.readWithFallback(ctx); len(snaps) > 0 {
+		program.Send(tui.SnapshotsMsg(snaps))
+		if snapshotsHaveUsableData(snaps) {
+			return false
+		}
 	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for attempts := 0; attempts < 8; attempts++ {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-ticker.C:
+			snaps := rt.readWithFallback(ctx)
+			if len(snaps) == 0 {
+				continue
+			}
+			program.Send(tui.SnapshotsMsg(snaps))
+			if snapshotsHaveUsableData(snaps) {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func clampDuration(d, min, max time.Duration) time.Duration {
+	if d <= 0 {
+		return (min + max) / 2
+	}
+	if d < min {
+		return min
+	}
+	if d > max {
+		return max
+	}
+	return d
+}
+
+func snapshotsHaveUsableData(snaps map[string]core.UsageSnapshot) bool {
 	for _, snap := range snaps {
 		if snap.Status != core.StatusUnknown {
 			return true

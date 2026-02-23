@@ -1,37 +1,20 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/janekbaraniewski/openusage/internal/config"
-	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/detect"
-	"github.com/janekbaraniewski/openusage/internal/telemetry"
-	"github.com/janekbaraniewski/openusage/internal/tui"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "telemetry" {
-		if err := runTelemetryCLI(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "Telemetry command failed: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	if os.Getenv("OPENUSAGE_DEBUG") == "" {
-		log.SetOutput(io.Discard)
-	} else {
+	if os.Getenv("OPENUSAGE_DEBUG") != "" {
 		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(io.Discard)
 	}
 
 	cfg, err := config.Load()
@@ -41,172 +24,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	tui.SetThemeByName(cfg.Theme)
-
-	// Combine manual + cached auto-detected accounts for immediate display
-	allAccounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-	if cfg.AutoDetect {
-		result := detect.AutoDetect()
-
-		// Manual account IDs take precedence
-		manualIDs := make(map[string]bool, len(cfg.Accounts))
-		for _, acct := range cfg.Accounts {
-			manualIDs[acct.ID] = true
-		}
-		var autoDetected []core.AccountConfig
-		for _, acct := range result.Accounts {
-			if !manualIDs[acct.ID] {
-				autoDetected = append(autoDetected, acct)
-			}
-		}
-
-		cfg.AutoDetectedAccounts = autoDetected
-		if err := config.SaveAutoDetected(autoDetected); err != nil {
-			log.Printf("Warning: could not persist auto-detected accounts: %v", err)
-		}
-
-		allAccounts = mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-		if os.Getenv("OPENUSAGE_DEBUG") != "" {
-			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
-				fmt.Fprint(os.Stderr, result.Summary())
-				fmt.Fprintln(os.Stderr)
-			}
-		}
+	root := cobra.Command{
+		Use:   "openusage",
+		Short: "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
+		Run: func(_ *cobra.Command, _ []string) {
+			RunDashboard(cfg)
+		},
 	}
 
-	// Apply stored credentials for accounts missing API keys
-	{
-		credResult := detect.Result{Accounts: allAccounts}
-		detect.ApplyCredentials(&credResult)
-		allAccounts = credResult.Accounts
-	}
+	root.AddCommand(NewTelemetryCommand())
 
-	if len(allAccounts) == 0 {
-		fmt.Println("⚡ OpenUsage — No accounts configured or detected.")
-		fmt.Println()
-		fmt.Printf("Config path: %s\n\n", config.ConfigPath())
-		fmt.Println("Auto-detection checks for:")
-		fmt.Println("  • Cursor IDE       (local DBs + API)")
-		fmt.Println("  • Claude Code CLI  (stats-cache.json)")
-		fmt.Println("  • OpenAI Codex CLI (session usage windows + tokens)")
-		fmt.Println("  • GitHub Copilot   (gh CLI)")
-		fmt.Println("  • Gemini CLI       (gemini binary)")
-		fmt.Println("  • Aider CLI        (aider binary)")
-		fmt.Println("  • Environment variables:")
-		fmt.Println("    OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY,")
-		fmt.Println("    GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,")
-		fmt.Println("    XAI_API_KEY, OPENCODE_API_KEY (or ZEN_API_KEY), GEMINI_API_KEY, GOOGLE_API_KEY")
-		fmt.Println()
-		fmt.Println("Set any of the above env vars, install a tool, or create a config:")
-		fmt.Printf("  mkdir -p %s\n", config.ConfigDir())
-		fmt.Printf("  cat > %s <<'EOF'\n", config.ConfigPath())
-		fmt.Print(`{
-  "auto_detect": true,
-  "ui": {
-    "refresh_interval_seconds": 30,
-    "warn_threshold": 0.20,
-    "crit_threshold": 0.05
-  },
-  "accounts": [
-    {
-      "id": "openai-personal",
-      "provider": "openai",
-      "api_key_env": "OPENAI_API_KEY",
-      "probe_model": "gpt-4.1-mini"
-    }
-  ]
-}
-`)
-		fmt.Println("EOF")
-		os.Exit(0)
-	}
-
-	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
-
-	model := tui.NewModel(
-		cfg.UI.WarnThreshold,
-		cfg.UI.CritThreshold,
-		cfg.Experimental.Analytics,
-		cfg.Dashboard,
-		allAccounts,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	socketPath, socketErr := telemetry.DefaultSocketPath()
-	if socketErr != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving telemetry daemon socket path: %v\n", socketErr)
+	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
-	if value := strings.TrimSpace(os.Getenv("OPENUSAGE_TELEMETRY_SOCKET")); value != "" {
-		socketPath = value
-	}
-
-	viewRuntime := newDaemonViewRuntime(
-		nil,
-		socketPath,
-		os.Getenv("OPENUSAGE_DEBUG") != "",
-		allAccounts,
-		cfg.Telemetry.ProviderLinks,
-	)
-	var program *tea.Program
-
-	model.SetOnAddAccount(func(acct core.AccountConfig) {
-		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {
-			return
-		}
-		exists := false
-		for _, existing := range allAccounts {
-			if strings.EqualFold(strings.TrimSpace(existing.ID), strings.TrimSpace(acct.ID)) {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			allAccounts = append(allAccounts, acct)
-		}
-		viewRuntime.setAccounts(allAccounts, cfg.Telemetry.ProviderLinks)
-	})
-	model.SetOnRefresh(func() {
-		go func() {
-			snaps := viewRuntime.readWithFallback(ctx)
-			if len(snaps) > 0 && program != nil {
-				program.Send(tui.SnapshotsMsg(snaps))
-			}
-		}()
-	})
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	startDaemonViewBroadcaster(ctx, program, viewRuntime, interval)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-		program.Quit()
-	}()
-
-	if _, err := program.Run(); err != nil {
-		log.SetOutput(os.Stderr)
-		log.Fatalf("TUI error: %v", err)
-	}
-}
-
-// mergeAccounts combines manual and auto-detected accounts, with manual taking precedence by ID.
-func mergeAccounts(manual, autoDetected []core.AccountConfig) []core.AccountConfig {
-	seen := make(map[string]bool, len(manual))
-	result := make([]core.AccountConfig, 0, len(manual)+len(autoDetected))
-	for _, acct := range manual {
-		seen[acct.ID] = true
-		result = append(result, acct)
-	}
-	for _, acct := range autoDetected {
-		if !seen[acct.ID] {
-			result = append(result, acct)
-		}
-	}
-	return result
 }

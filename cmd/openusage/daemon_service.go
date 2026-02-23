@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -364,19 +363,8 @@ func xmlEscape(in string) string {
 	return replacer.Replace(in)
 }
 
-func runTelemetryDaemonInstall(args []string) error {
-	defaultSocketPath, err := telemetry.DefaultSocketPath()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry daemon socket path: %w", err)
-	}
-	fs := flag.NewFlagSet("telemetry daemon install", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
-	socketPath := fs.String("socket-path", defaultSocketPath, "path to telemetry daemon unix socket")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	manager, err := newDaemonServiceManager(strings.TrimSpace(*socketPath))
+func runTelemetryDaemonInstall(socketPath string) error {
+	manager, err := newDaemonServiceManager(socketPath)
 	if err != nil {
 		return err
 	}
@@ -390,19 +378,8 @@ func runTelemetryDaemonInstall(args []string) error {
 	return nil
 }
 
-func runTelemetryDaemonUninstall(args []string) error {
-	defaultSocketPath, err := telemetry.DefaultSocketPath()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry daemon socket path: %w", err)
-	}
-	fs := flag.NewFlagSet("telemetry daemon uninstall", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
-	socketPath := fs.String("socket-path", defaultSocketPath, "path to telemetry daemon unix socket")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	manager, err := newDaemonServiceManager(strings.TrimSpace(*socketPath))
+func runTelemetryDaemonUninstall(socketPath string) error {
+	manager, err := newDaemonServiceManager(socketPath)
 	if err != nil {
 		return err
 	}
@@ -416,23 +393,12 @@ func runTelemetryDaemonUninstall(args []string) error {
 	return nil
 }
 
-func runTelemetryDaemonStatus(args []string) error {
-	defaultSocketPath, err := telemetry.DefaultSocketPath()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry daemon socket path: %w", err)
-	}
-	fs := flag.NewFlagSet("telemetry daemon status", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
-	socketPath := fs.String("socket-path", defaultSocketPath, "path to telemetry daemon unix socket")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	manager, err := newDaemonServiceManager(strings.TrimSpace(*socketPath))
+func runTelemetryDaemonStatus(socketPath string) error {
+	manager, err := newDaemonServiceManager(socketPath)
 	if err != nil {
 		return err
 	}
-	client := newTelemetryDaemonClient(strings.TrimSpace(*socketPath))
+	client := newTelemetryDaemonClient(socketPath)
 	health, healthErr := client.HealthInfo(context.Background())
 	running := healthErr == nil
 
@@ -440,7 +406,7 @@ func runTelemetryDaemonStatus(args []string) error {
 		manager.kind,
 		manager.isInstalled(),
 		running,
-		strings.TrimSpace(*socketPath),
+		socketPath,
 	)
 	if healthErr != nil {
 		fmt.Printf("daemon health_error=%v\n", healthErr)

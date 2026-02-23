@@ -14,6 +14,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -240,30 +241,13 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	apiKey := acct.ResolveAPIKey()
-	if apiKey == "" {
-		return core.UsageSnapshot{
-			ProviderID: p.ID(),
-			AccountID:  acct.ID,
-			Timestamp:  time.Now(),
-			Status:     core.StatusAuth,
-			Message:    fmt.Sprintf("env var %s not set", acct.APIKeyEnv),
-		}, nil
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	if authSnap != nil {
+		return *authSnap, nil
 	}
 
-	baseURL := acct.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
-	snap := core.UsageSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Metrics:    make(map[string]core.Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        make(map[string]string),
-	}
+	baseURL := shared.ResolveBaseURL(acct, defaultBaseURL)
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
 	if err := p.fetchAuthKey(ctx, baseURL, apiKey, &snap); err != nil {
 		snap.Status = core.StatusError

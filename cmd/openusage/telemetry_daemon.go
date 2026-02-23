@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -64,85 +63,15 @@ type cachedReadModelEntry struct {
 	updatedAt time.Time
 }
 
-func runTelemetryDaemon(args []string) error {
-	if len(args) > 0 && !strings.HasPrefix(strings.TrimSpace(args[0]), "-") {
-		switch strings.ToLower(strings.TrimSpace(args[0])) {
-		case "install":
-			return runTelemetryDaemonInstall(args[1:])
-		case "uninstall":
-			return runTelemetryDaemonUninstall(args[1:])
-		case "status":
-			return runTelemetryDaemonStatus(args[1:])
-		default:
-			return fmt.Errorf("unknown daemon subcommand %q", args[0])
-		}
-	}
-	return runTelemetryDaemonServe(args)
-}
-
-func runTelemetryDaemonServe(args []string) error {
-	cfgFile, loadErr := config.Load()
-	if loadErr != nil {
-		cfgFile = config.DefaultConfig()
-	}
-
-	defaultDBPath, err := telemetry.DefaultDBPath()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry db path: %w", err)
-	}
-	defaultSpoolDir, err := telemetry.DefaultSpoolDir()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry spool dir: %w", err)
-	}
-	defaultSocketPath, err := telemetry.DefaultSocketPath()
-	if err != nil {
-		return fmt.Errorf("resolve telemetry daemon socket path: %w", err)
-	}
-
-	defaultInterval := time.Duration(cfgFile.UI.RefreshIntervalSeconds) * time.Second
-	if defaultInterval <= 0 {
-		defaultInterval = 30 * time.Second
-	}
-
-	fs := flag.NewFlagSet("telemetry daemon", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
-
-	dbPath := fs.String("db-path", defaultDBPath, "path to telemetry sqlite database")
-	spoolDir := fs.String("spool-dir", defaultSpoolDir, "path to telemetry spool directory")
-	socketPath := fs.String("socket-path", defaultSocketPath, "path to telemetry unix socket")
-	interval := fs.Duration("interval", defaultInterval, "default collector/poller interval")
-	collectInterval := fs.Duration("collect-interval", 0, "collector interval override (0 uses --interval)")
-	pollInterval := fs.Duration("poll-interval", 0, "provider poll interval override (0 uses --interval)")
-	verbose := fs.Bool("verbose", false, "enable daemon logs")
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if !*verbose {
+func runTelemetryDaemonServe(cfg telemetryDaemonConfig) error {
+	if !cfg.Verbose {
 		log.SetOutput(io.Discard)
-	}
-
-	resolvedCollectInterval := *collectInterval
-	if resolvedCollectInterval <= 0 {
-		resolvedCollectInterval = *interval
-	}
-	resolvedPollInterval := *pollInterval
-	if resolvedPollInterval <= 0 {
-		resolvedPollInterval = *interval
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	svc, err := startTelemetryDaemonService(ctx, telemetryDaemonConfig{
-		DBPath:          strings.TrimSpace(*dbPath),
-		SpoolDir:        strings.TrimSpace(*spoolDir),
-		SocketPath:      strings.TrimSpace(*socketPath),
-		CollectInterval: resolvedCollectInterval,
-		PollInterval:    resolvedPollInterval,
-		Verbose:         *verbose,
-	})
+	svc, err := startTelemetryDaemonService(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -450,11 +379,11 @@ func daemonReadModelRequestFromConfig() (daemonReadModelRequest, error) {
 	if err != nil {
 		return daemonReadModelRequest{}, err
 	}
-	accounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
+	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 	accounts = filterAccountsByDashboardConfig(accounts, cfg.Dashboard)
 	credResult := detect.Result{Accounts: accounts}
 	detect.ApplyCredentials(&credResult)
-	return daemonReadModelRequestFromAccounts(credResult.Accounts, cfg.Telemetry.ProviderLinks), nil
+	return buildReadModelRequest(credResult.Accounts, cfg.Telemetry.ProviderLinks), nil
 }
 
 func (s *telemetryDaemonService) runReadModelCacheLoop(ctx context.Context) {
@@ -518,6 +447,54 @@ func (s *telemetryDaemonService) runCollectLoop(ctx context.Context) {
 	}
 }
 
+type ingestTally struct {
+	processed int
+	ingested  int
+	deduped   int
+	failed    int
+}
+
+func (s *telemetryDaemonService) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {
+	var tally ingestTally
+	var retries []telemetry.IngestRequest
+	for _, req := range reqs {
+		tally.processed++
+		result, err := s.ingestRequest(ctx, req)
+		if err != nil {
+			tally.failed++
+			retries = append(retries, req)
+			continue
+		}
+		if result.Deduped {
+			tally.deduped++
+		} else {
+			tally.ingested++
+		}
+	}
+	return tally, retries
+}
+
+func (s *telemetryDaemonService) flushBacklog(ctx context.Context, retryReqs []telemetry.IngestRequest, limit int) (telemetry.FlushResult, int, []string) {
+	var warnings []string
+	enqueued := 0
+
+	s.pipelineMu.Lock()
+	if len(retryReqs) > 0 {
+		n, err := s.pipeline.EnqueueRequests(retryReqs)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("retry enqueue: %v", err))
+		} else {
+			enqueued = n
+		}
+	}
+	s.ingestMu.Lock()
+	flush, flushWarnings := flushInBatches(ctx, s.pipeline, limit)
+	s.ingestMu.Unlock()
+	s.pipelineMu.Unlock()
+
+	return flush, enqueued, append(warnings, flushWarnings...)
+}
+
 func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 	if s == nil {
 		return
@@ -525,22 +502,10 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 	started := time.Now()
 	const backlogFlushLimit = 2000
 
-	type collectorBatch struct {
-		name string
-		reqs []telemetry.IngestRequest
-	}
-
+	var allReqs []telemetry.IngestRequest
 	totalCollected := 0
-	warnings := make([]string, 0)
-	enqueued := 0
-	batches := make([]collectorBatch, 0, len(s.collectors))
-	directProcessed := 0
-	directIngested := 0
-	directDeduped := 0
-	directFailed := 0
+	var warnings []string
 
-	// File/SQLite scans can be expensive; collect outside the pipeline lock so
-	// hook ingestion and read-model requests don't block on collector I/O.
 	for _, collector := range s.collectors {
 		reqs, err := collector.Collect(ctx)
 		if err != nil {
@@ -548,83 +513,25 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 			continue
 		}
 		totalCollected += len(reqs)
-		if len(reqs) == 0 {
-			continue
-		}
-		batches = append(batches, collectorBatch{name: collector.Name(), reqs: reqs})
+		allReqs = append(allReqs, reqs...)
 	}
 
-	retryReqs := make([]telemetry.IngestRequest, 0)
-	for _, batch := range batches {
-		for _, req := range batch.reqs {
-			directProcessed++
-			result, err := s.ingestRequest(ctx, req)
-			if err != nil {
-				directFailed++
-				retryReqs = append(retryReqs, req)
-				continue
-			}
-			if result.Deduped {
-				directDeduped++
-			} else {
-				directIngested++
-			}
-		}
-	}
-
-	flush := telemetry.FlushResult{}
-	if len(retryReqs) > 0 {
-		s.pipelineMu.Lock()
-		n, err := s.pipeline.EnqueueRequests(retryReqs)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("retry enqueue: %v", err))
-		} else {
-			enqueued += n
-		}
-		s.ingestMu.Lock()
-		retryFlush, retryWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
-		s.ingestMu.Unlock()
-		s.pipelineMu.Unlock()
-		flush.Processed += retryFlush.Processed
-		flush.Ingested += retryFlush.Ingested
-		flush.Deduped += retryFlush.Deduped
-		flush.Failed += retryFlush.Failed
-		warnings = append(warnings, retryWarnings...)
-	} else {
-		// Always drain a bounded number of pending spool records so backlog
-		// continues to recover without delaying fresh telemetry updates.
-		s.pipelineMu.Lock()
-		s.ingestMu.Lock()
-		backlogFlush, backlogWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
-		s.ingestMu.Unlock()
-		s.pipelineMu.Unlock()
-		flush.Processed += backlogFlush.Processed
-		flush.Ingested += backlogFlush.Ingested
-		flush.Deduped += backlogFlush.Deduped
-		flush.Failed += backlogFlush.Failed
-		warnings = append(warnings, backlogWarnings...)
-	}
+	direct, retries := s.ingestBatch(ctx, allReqs)
+	flush, enqueued, flushWarnings := s.flushBacklog(ctx, retries, backlogFlushLimit)
+	warnings = append(warnings, flushWarnings...)
 
 	durationMs := time.Since(started).Milliseconds()
-	if totalCollected > 0 || directProcessed > 0 || enqueued > 0 || flush.Processed > 0 || len(warnings) > 0 {
+	if totalCollected > 0 || direct.processed > 0 || enqueued > 0 || flush.Processed > 0 || len(warnings) > 0 {
 		s.infof(
 			"collect_cycle",
 			"duration_ms=%d collected=%d direct_processed=%d direct_ingested=%d direct_deduped=%d direct_failed=%d enqueued=%d flush_processed=%d flush_ingested=%d flush_deduped=%d flush_failed=%d warnings=%d",
-			durationMs,
-			totalCollected,
-			directProcessed,
-			directIngested,
-			directDeduped,
-			directFailed,
-			enqueued,
-			flush.Processed,
-			flush.Ingested,
-			flush.Deduped,
-			flush.Failed,
+			durationMs, totalCollected,
+			direct.processed, direct.ingested, direct.deduped, direct.failed,
+			enqueued, flush.Processed, flush.Ingested, flush.Deduped, flush.Failed,
 			len(warnings),
 		)
-		for _, warning := range warnings {
-			s.warnf("collect_warning", "message=%q", warning)
+		for _, w := range warnings {
+			s.warnf("collect_warning", "message=%q", w)
 		}
 		return
 	}
@@ -766,7 +673,7 @@ func daemonAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfi
 	if err != nil {
 		return nil, core.DefaultModelNormalizationConfig(), err
 	}
-	accounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
+	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 	accounts = filterAccountsByDashboardConfig(accounts, cfg.Dashboard)
 	credResult := detect.Result{Accounts: accounts}
 	detect.ApplyCredentials(&credResult)
@@ -959,65 +866,39 @@ func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	processed := 0
-	ingested := 0
-	deduped := 0
-	failed := 0
-	warnings := make([]string, 0)
-	for _, req := range reqs {
-		processed++
-		result, err := s.ingestRequest(r.Context(), req)
-		if err != nil {
-			failed++
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		if result.Deduped {
-			deduped++
-		} else {
-			ingested++
-		}
+	tally, _ := s.ingestBatch(r.Context(), reqs)
+	var warnings []string
+	if tally.failed > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d ingest failures", tally.failed))
 	}
 
 	writeJSON(w, http.StatusOK, daemonHookResponse{
 		Source:    sourceName,
 		Enqueued:  len(reqs),
-		Processed: processed,
-		Ingested:  ingested,
-		Deduped:   deduped,
-		Failed:    failed,
+		Processed: tally.processed,
+		Ingested:  tally.ingested,
+		Deduped:   tally.deduped,
+		Failed:    tally.failed,
 		Warnings:  warnings,
 	})
 
 	durationMs := time.Since(started).Milliseconds()
-	if failed > 0 || len(warnings) > 0 {
-		s.warnf(
-			"hook_ingest",
-			"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d warnings=%d",
-			sourceName,
-			accountID,
-			durationMs,
-			len(reqs),
-			processed,
-			ingested,
-			deduped,
-			failed,
-			len(warnings),
-		)
+	logLevel := "hook_ingest"
+	shouldLog := tally.failed > 0 || s.shouldLog("hook_ingest_"+sourceName, 3*time.Second)
+	if !shouldLog {
 		return
 	}
-	if s.shouldLog("hook_ingest_"+sourceName, 3*time.Second) {
-		s.infof(
-			"hook_ingest",
+	if tally.failed > 0 {
+		s.warnf(logLevel,
 			"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
-			sourceName,
-			accountID,
-			durationMs,
-			len(reqs),
-			processed,
-			ingested,
-			deduped,
-			failed,
+			sourceName, accountID, durationMs,
+			len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
+		)
+	} else {
+		s.infof(logLevel,
+			"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
+			sourceName, accountID, durationMs,
+			len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
 		)
 	}
 }

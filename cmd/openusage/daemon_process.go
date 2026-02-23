@@ -19,88 +19,98 @@ func ensureTelemetryDaemonRunning(ctx context.Context, socketPath string, verbos
 	client := newTelemetryDaemonClient(socketPath)
 
 	health, healthErr := waitForTelemetryDaemonHealthInfo(ctx, client, 1200*time.Millisecond)
-	needsUpgrade := false
-	if healthErr == nil {
-		if daemonHealthCurrent(health) {
-			return client, nil
-		}
-		needsUpgrade = true
-	}
-
-	manager, managerErr := newDaemonServiceManager(socketPath)
-	if managerErr != nil {
-		return nil, managerErr
-	}
-	if needsUpgrade && !manager.isSupported() {
-		return nil, fmt.Errorf(
-			"telemetry daemon is out of date (running=%s expected=%s) and auto-upgrade is unsupported on %s",
-			daemonHealthVersion(health),
-			strings.TrimSpace(version.Version),
-			runtime.GOOS,
-		)
-	}
-	if manager.isSupported() {
-		if needsUpgrade {
-			if err := manager.install(); err != nil {
-				return nil, fmt.Errorf("upgrade telemetry daemon service: %w", err)
-			}
-		}
-		if !manager.isInstalled() {
-			return nil, fmt.Errorf("telemetry daemon service is not installed; run `%s`", manager.installHint())
-		}
-		if err := manager.start(); err != nil {
-			return nil, fmt.Errorf("start telemetry daemon service: %w\n%s", err, daemonStartupDiagnostics(manager, socketPath))
-		}
-		if waitErr := waitForTelemetryDaemonHealth(ctx, client, 25*time.Second); waitErr != nil {
-			return nil, fmt.Errorf("%w\n%s", waitErr, daemonStartupDiagnostics(manager, socketPath))
-		}
-		if finalHealth, finalErr := waitForTelemetryDaemonHealthInfo(ctx, client, 1500*time.Millisecond); finalErr == nil {
-			if !daemonHealthCurrent(finalHealth) {
-				return nil, fmt.Errorf(
-					"telemetry daemon is still out of date after restart (running=%s expected=%s)",
-					daemonHealthVersion(finalHealth),
-					strings.TrimSpace(version.Version),
-				)
-			}
-		}
+	if healthErr == nil && daemonHealthCurrent(health) {
 		return client, nil
 	}
 
-	// Unsupported OS: fallback to ad-hoc local process spawn.
+	needsUpgrade := healthErr == nil
+	return ensureViaServiceManager(ctx, client, socketPath, verbose, needsUpgrade, health)
+}
+
+func ensureViaServiceManager(
+	ctx context.Context,
+	client *telemetryDaemonClient,
+	socketPath string,
+	verbose bool,
+	needsUpgrade bool,
+	health daemonHealthResponse,
+) (*telemetryDaemonClient, error) {
+	manager, err := newDaemonServiceManager(socketPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if needsUpgrade && !manager.isSupported() {
+		return nil, fmt.Errorf(
+			"telemetry daemon is out of date (running=%s expected=%s) and auto-upgrade is unsupported on %s",
+			daemonHealthVersion(health), strings.TrimSpace(version.Version), runtime.GOOS,
+		)
+	}
+
+	if manager.isSupported() {
+		return startViaManagedService(ctx, client, manager, needsUpgrade, socketPath)
+	}
+
 	if err := spawnTelemetryDaemonProcess(socketPath, verbose); err != nil {
 		return nil, fmt.Errorf("start telemetry daemon: %w", err)
 	}
-	if waitErr := waitForTelemetryDaemonHealth(ctx, client, 25*time.Second); waitErr != nil {
-		return nil, waitErr
-	}
-	if finalHealth, finalErr := waitForTelemetryDaemonHealthInfo(ctx, client, 1500*time.Millisecond); finalErr == nil {
-		if !daemonHealthCurrent(finalHealth) {
-			return nil, fmt.Errorf(
-				"telemetry daemon is out of date (running=%s expected=%s)",
-				daemonHealthVersion(finalHealth),
-				strings.TrimSpace(version.Version),
-			)
-		}
+	if err := waitAndVerifyDaemon(ctx, client, socketPath); err != nil {
+		return nil, err
 	}
 	return client, nil
 }
 
-func daemonHealthVersion(health daemonHealthResponse) string {
-	versionText := strings.TrimSpace(health.DaemonVersion)
-	if versionText == "" {
-		return "unknown"
+func startViaManagedService(
+	ctx context.Context,
+	client *telemetryDaemonClient,
+	manager daemonServiceManager,
+	needsUpgrade bool,
+	socketPath string,
+) (*telemetryDaemonClient, error) {
+	if needsUpgrade {
+		if err := manager.install(); err != nil {
+			return nil, fmt.Errorf("upgrade telemetry daemon service: %w", err)
+		}
 	}
-	return versionText
+	if !manager.isInstalled() {
+		return nil, fmt.Errorf("telemetry daemon service is not installed; run `%s`", manager.installHint())
+	}
+	if err := manager.start(); err != nil {
+		return nil, fmt.Errorf("start telemetry daemon service: %w\n%s", err, daemonStartupDiagnostics(manager, socketPath))
+	}
+	if err := waitAndVerifyDaemon(ctx, client, socketPath); err != nil {
+		return nil, fmt.Errorf("%w\n%s", err, daemonStartupDiagnostics(manager, socketPath))
+	}
+	return client, nil
+}
+
+func waitAndVerifyDaemon(ctx context.Context, client *telemetryDaemonClient, socketPath string) error {
+	if err := waitForTelemetryDaemonHealth(ctx, client, 25*time.Second); err != nil {
+		return err
+	}
+	health, err := waitForTelemetryDaemonHealthInfo(ctx, client, 1500*time.Millisecond)
+	if err != nil {
+		return nil
+	}
+	if !daemonHealthCurrent(health) {
+		return fmt.Errorf(
+			"telemetry daemon is out of date (running=%s expected=%s)",
+			daemonHealthVersion(health), strings.TrimSpace(version.Version),
+		)
+	}
+	return nil
+}
+
+func daemonHealthVersion(health daemonHealthResponse) string {
+	if v := strings.TrimSpace(health.DaemonVersion); v != "" {
+		return v
+	}
+	return "unknown"
 }
 
 func daemonHealthCurrent(health daemonHealthResponse) bool {
 	expected := strings.TrimSpace(version.Version)
-	if expected == "" || strings.EqualFold(expected, "dev") {
-		return daemonHealthAPICompatible(health)
-	}
-	if !isReleaseSemverVersion(expected) {
-		// Local/dev builds (dirty, commit-suffixed, etc.) should not block dashboard startup
-		// on strict daemon binary version equality.
+	if expected == "" || strings.EqualFold(expected, "dev") || !isReleaseSemverVersion(expected) {
 		return daemonHealthAPICompatible(health)
 	}
 	return strings.TrimSpace(health.DaemonVersion) == expected && daemonHealthAPICompatible(health)
@@ -148,8 +158,8 @@ func waitForTelemetryDaemonHealthInfo(
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
 	deadline := time.Now().Add(timeout)
-	var latest daemonHealthResponse
 	var lastErr error
 	for time.Now().Before(deadline) {
 		if pingCtx.Err() != nil {
@@ -161,7 +171,6 @@ func waitForTelemetryDaemonHealthInfo(
 		if err == nil {
 			return health, nil
 		}
-		latest = health
 		lastErr = err
 		time.Sleep(220 * time.Millisecond)
 	}
@@ -169,9 +178,9 @@ func waitForTelemetryDaemonHealthInfo(
 		return daemonHealthResponse{}, pingCtx.Err()
 	}
 	if lastErr != nil {
-		return latest, fmt.Errorf("telemetry daemon did not become ready at %s: %w", client.socketPath, lastErr)
+		return daemonHealthResponse{}, fmt.Errorf("telemetry daemon did not become ready at %s: %w", client.socketPath, lastErr)
 	}
-	return latest, fmt.Errorf("telemetry daemon did not become ready at %s", client.socketPath)
+	return daemonHealthResponse{}, fmt.Errorf("telemetry daemon did not become ready at %s", client.socketPath)
 }
 
 func daemonStartupDiagnostics(manager daemonServiceManager, socketPath string) string {
@@ -201,17 +210,16 @@ func daemonStartupDiagnostics(manager daemonServiceManager, socketPath string) s
 	return strings.Join(lines, "\n")
 }
 
-func tailFile(path string, lines int) string {
+func tailFile(path string, maxLines int) string {
 	raw, err := os.ReadFile(strings.TrimSpace(path))
 	if err != nil {
 		return ""
 	}
-	return tailTextLines(string(raw), lines)
+	return tailTextLines(string(raw), maxLines)
 }
 
 func tailTextLines(text string, maxLines int) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
 	if text == "" {
 		return ""
 	}

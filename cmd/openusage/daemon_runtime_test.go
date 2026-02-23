@@ -7,7 +7,7 @@ import (
 import "github.com/janekbaraniewski/openusage/internal/core"
 
 func TestDaemonReadModelRequestFromAccounts_DedupsAndNormalizes(t *testing.T) {
-	req := daemonReadModelRequestFromAccounts(
+	req := buildReadModelRequest(
 		[]core.AccountConfig{
 			{ID: " codex-cli ", Provider: " codex "},
 			{ID: "codex-cli", Provider: "openai"},
