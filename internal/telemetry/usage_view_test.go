@@ -215,7 +215,7 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 	}
 }
 
-func TestApplyCanonicalUsageView_PreservesAuthoritativeModelAndDailyCost(t *testing.T) {
+func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
@@ -272,17 +272,17 @@ func TestApplyCanonicalUsageView_PreservesAuthoritativeModelAndDailyCost(t *test
 
 	snap := merged["openrouter"]
 	modelCost := snap.Metrics["model_qwen_qwen3_coder_flash_cost_usd"]
-	if modelCost.Used == nil || *modelCost.Used != rootModelCost {
-		t.Fatalf("model cost overwritten: %+v", modelCost)
+	if modelCost.Used == nil || *modelCost.Used != 9.99 {
+		t.Fatalf("model cost = %+v, want 9.99", modelCost)
 	}
-	if got := seriesValueByDate(snap.DailySeries["analytics_cost"], "2026-02-22"); got != rootDailyCost {
-		t.Fatalf("analytics_cost overwritten: got %v, want %v", got, rootDailyCost)
+	if got := seriesValueByDate(snap.DailySeries["analytics_cost"], "2026-02-22"); got != 9.99 {
+		t.Fatalf("analytics_cost = %v, want 9.99", got)
 	}
-	if got := seriesValueByDate(snap.DailySeries["analytics_requests"], "2026-02-22"); got != rootDailyReq {
-		t.Fatalf("analytics_requests overwritten: got %v, want %v", got, rootDailyReq)
+	if got := seriesValueByDate(snap.DailySeries["analytics_requests"], "2026-02-22"); got != 1 {
+		t.Fatalf("analytics_requests = %v, want 1", got)
 	}
-	if got := seriesValueByDate(snap.DailySeries["analytics_tokens"], "2026-02-22"); got != rootDailyTokens {
-		t.Fatalf("analytics_tokens overwritten: got %v, want %v", got, rootDailyTokens)
+	if got := seriesValueByDate(snap.DailySeries["analytics_tokens"], "2026-02-22"); got != 160 {
+		t.Fatalf("analytics_tokens = %v, want 160", got)
 	}
 }
 
