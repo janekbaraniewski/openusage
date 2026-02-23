@@ -209,25 +209,9 @@ func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]cor
 		}
 		r.readModelMu.RUnlock()
 
-		// Return seeded empty snapshots; UI keeps splash state until real data arrives.
-		seed := map[string]core.UsageSnapshot{}
-		now := time.Now().UTC()
-		for _, account := range request.Accounts {
-			seed[account.AccountID] = core.UsageSnapshot{
-				ProviderID:  account.ProviderID,
-				AccountID:   account.AccountID,
-				Timestamp:   now,
-				Status:      core.StatusUnknown,
-				Message:     "",
-				Metrics:     map[string]core.Metric{},
-				Resets:      map[string]time.Time{},
-				Attributes:  map[string]string{},
-				Diagnostics: map[string]string{},
-				Raw:         map[string]string{},
-				DailySeries: map[string][]core.TimePoint{},
-			}
-		}
-		return seed
+		// Return seeded snapshots with a progress/error hint so splash can render
+		// an actionable status while the daemon recovers.
+		return seedSnapshotsForAccounts(request.Accounts, syncStatusMessage(err))
 	}
 
 	r.readModelMu.RLock()
@@ -240,6 +224,32 @@ func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]cor
 	return snaps
 }
 
+func syncStatusMessage(err error) string {
+	if err == nil {
+		return "Connecting to telemetry daemon..."
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "Connecting to telemetry daemon..."
+	}
+	if idx := strings.Index(msg, "\n"); idx > 0 {
+		msg = strings.TrimSpace(msg[:idx])
+	}
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "not installed"):
+		return "Telemetry daemon not installed. Run: openusage telemetry daemon install"
+	case strings.Contains(lower, "declined"):
+		return "Telemetry daemon installation declined."
+	case strings.Contains(lower, "out of date"), strings.Contains(lower, "upgrade"):
+		return "Upgrading telemetry daemon..."
+	case strings.Contains(lower, "did not become ready"), strings.Contains(lower, "unavailable"):
+		return "Waiting for telemetry daemon..."
+	default:
+		return "Connecting to telemetry daemon..."
+	}
+}
+
 func startDaemonViewBroadcaster(
 	ctx context.Context,
 	program *tea.Program,
@@ -248,19 +258,38 @@ func startDaemonViewBroadcaster(
 ) {
 	interval := refreshInterval / 3
 	if interval <= 0 {
-		interval = 8 * time.Second
+		interval = 4 * time.Second
 	}
-	if interval < 2*time.Second {
-		interval = 2 * time.Second
+	if interval < 1*time.Second {
+		interval = 1 * time.Second
 	}
-	if interval > 10*time.Second {
-		interval = 10 * time.Second
+	if interval > 5*time.Second {
+		interval = 5 * time.Second
 	}
 
 	go func() {
 		initial := runtime.readWithFallback(ctx)
 		if len(initial) > 0 {
 			program.Send(tui.SnapshotsMsg(initial))
+		}
+		if !snapshotsHaveUsableData(initial) {
+			warmTicker := time.NewTicker(1 * time.Second)
+			defer warmTicker.Stop()
+			for attempts := 0; attempts < 8; attempts++ {
+				select {
+				case <-ctx.Done():
+					return
+				case <-warmTicker.C:
+					snaps := runtime.readWithFallback(ctx)
+					if len(snaps) == 0 {
+						continue
+					}
+					program.Send(tui.SnapshotsMsg(snaps))
+					if snapshotsHaveUsableData(snaps) {
+						attempts = 8
+					}
+				}
+			}
 		}
 
 		ticker := time.NewTicker(interval)
@@ -278,4 +307,19 @@ func startDaemonViewBroadcaster(
 			}
 		}
 	}()
+}
+
+func snapshotsHaveUsableData(snaps map[string]core.UsageSnapshot) bool {
+	if len(snaps) == 0 {
+		return false
+	}
+	for _, snap := range snaps {
+		if snap.Status != core.StatusUnknown {
+			return true
+		}
+		if len(snap.Metrics) > 0 || len(snap.Resets) > 0 || len(snap.DailySeries) > 0 || len(snap.ModelUsage) > 0 {
+			return true
+		}
+	}
+	return false
 }

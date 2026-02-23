@@ -22,9 +22,13 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/detect"
+	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
+	"github.com/janekbaraniewski/openusage/internal/version"
 )
+
+const telemetryDaemonAPIVersion = "v1"
 
 type telemetryDaemonConfig struct {
 	DBPath          string
@@ -45,6 +49,7 @@ type telemetryDaemonService struct {
 	providerByID map[string]core.UsageProvider
 
 	pipelineMu sync.Mutex
+	ingestMu   sync.Mutex
 	logMu      sync.Mutex
 	lastLogAt  map[string]time.Time
 
@@ -210,23 +215,6 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 		return nil, err
 	}
 
-	// Run compaction in background so daemon health is available immediately.
-	go func() {
-		compactCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		result, compactErr := svc.store.CompactUsage(compactCtx)
-		if compactErr != nil {
-			svc.warnf("compaction_failed", "error=%v", compactErr)
-			return
-		}
-		svc.infof(
-			"compaction_done",
-			"duplicate_events_removed=%d orphan_raw_events_removed=%d",
-			result.DuplicateEventsRemoved,
-			result.OrphanRawEventsRemoved,
-		)
-	}()
-
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
@@ -239,6 +227,24 @@ func (s *telemetryDaemonService) Close() error {
 		return nil
 	}
 	return s.store.Close()
+}
+
+func (s *telemetryDaemonService) ingestRequest(ctx context.Context, req telemetry.IngestRequest) (telemetry.IngestResult, error) {
+	if s == nil || s.store == nil {
+		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
+	}
+	s.ingestMu.Lock()
+	defer s.ingestMu.Unlock()
+	return s.store.Ingest(ctx, req)
+}
+
+func (s *telemetryDaemonService) ingestQuotaSnapshots(ctx context.Context, snapshots map[string]core.UsageSnapshot) error {
+	if s == nil || s.quotaIngest == nil {
+		return fmt.Errorf("quota ingestor unavailable")
+	}
+	s.ingestMu.Lock()
+	defer s.ingestMu.Unlock()
+	return s.quotaIngest.Ingest(ctx, snapshots)
 }
 
 func buildTelemetryCollectors() []telemetry.Collector {
@@ -487,7 +493,7 @@ func (s *telemetryDaemonService) refreshReadModelCacheFromConfig(ctx context.Con
 		return
 	}
 	cacheKey := daemonReadModelRequestKey(req)
-	s.refreshReadModelCacheAsync(ctx, cacheKey, req, 12*time.Second)
+	s.refreshReadModelCacheAsync(ctx, cacheKey, req, 60*time.Second)
 }
 
 func (s *telemetryDaemonService) runCollectLoop(ctx context.Context) {
@@ -547,7 +553,7 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 	for _, batch := range batches {
 		for _, req := range batch.reqs {
 			directProcessed++
-			result, err := s.store.Ingest(ctx, req)
+			result, err := s.ingestRequest(ctx, req)
 			if err != nil {
 				directFailed++
 				retryReqs = append(retryReqs, req)
@@ -570,7 +576,9 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 		} else {
 			enqueued += n
 		}
+		s.ingestMu.Lock()
 		retryFlush, retryWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
+		s.ingestMu.Unlock()
 		s.pipelineMu.Unlock()
 		flush.Processed += retryFlush.Processed
 		flush.Ingested += retryFlush.Ingested
@@ -581,7 +589,9 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 		// Always drain a bounded number of pending spool records so legacy backlog
 		// continues to recover without delaying fresh telemetry updates.
 		s.pipelineMu.Lock()
+		s.ingestMu.Lock()
 		backlogFlush, backlogWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
+		s.ingestMu.Unlock()
 		s.pipelineMu.Unlock()
 		flush.Processed += backlogFlush.Processed
 		flush.Ingested += backlogFlush.Ingested
@@ -723,7 +733,7 @@ func (s *telemetryDaemonService) pollProviders(ctx context.Context) {
 
 	ingestCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	ingestErr := s.quotaIngest.Ingest(ingestCtx, snapshots)
+	ingestErr := s.ingestQuotaSnapshots(ingestCtx, snapshots)
 	if ingestErr != nil && s.shouldLog("poll_ingest_warning", 10*time.Second) {
 		s.warnf("poll_ingest_warning", "error=%v", ingestErr)
 	}
@@ -896,7 +906,12 @@ func ensureSocketPathAvailable(socketPath string) error {
 }
 
 func (s *telemetryDaemonService) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":              "ok",
+		"daemon_version":      strings.TrimSpace(version.Version),
+		"api_version":         telemetryDaemonAPIVersion,
+		"integration_version": integrations.IntegrationVersion,
+	})
 }
 
 func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Request) {
@@ -946,7 +961,7 @@ func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Reque
 	warnings := make([]string, 0)
 	for _, req := range reqs {
 		processed++
-		result, err := s.store.Ingest(r.Context(), req)
+		result, err := s.ingestRequest(r.Context(), req)
 		if err != nil {
 			failed++
 			warnings = append(warnings, err.Error())
@@ -1024,34 +1039,15 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey); ok {
 		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
-			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 8*time.Second)
+			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
 		}
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 6500*time.Millisecond)
-	defer cancel()
-	snapshots, err := s.computeReadModel(ctx, req)
-	if err != nil {
-		// Try one more time from cache if a concurrent refresh finished meanwhile.
-		if cached, _, ok := s.readModelCacheGet(cacheKey); ok {
-			writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: cached})
-			return
-		}
-		if s.shouldLog("read_model_error", 5*time.Second) {
-			s.warnf(
-				"read_model_failed",
-				"duration_ms=%d accounts=%d error=%v",
-				time.Since(started).Milliseconds(),
-				len(req.Accounts),
-				err,
-			)
-		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("read-model apply failed: %v", err))
-		return
-	}
-
-	s.readModelCacheSet(cacheKey, snapshots)
+	// Dashboard reads must be lightweight and non-blocking. On cache miss, return
+	// seeded placeholders immediately and refresh cache asynchronously.
+	s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
+	snapshots := seedSnapshotsForAccounts(req.Accounts, "Preparing telemetry cache...")
 	writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {

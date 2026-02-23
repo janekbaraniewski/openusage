@@ -298,15 +298,20 @@ func TestSelectClientMixMode_PrefersTokensThenRequestsThenSessions(t *testing.T)
 	}
 }
 
-func TestSelectBurnMode_PrefersTokensThenCostThenRequests(t *testing.T) {
+func TestSelectBurnMode_PrefersCostThenTokensThenRequests(t *testing.T) {
 	mode, total := selectBurnMode(1200, 4.5, 10)
-	if mode != "tokens" || total != 1200 {
-		t.Fatalf("mode/total = %q %.1f, want tokens 1200", mode, total)
+	if mode != "cost" || total != 4.5 {
+		t.Fatalf("mode/total = %q %.1f, want cost 4.5", mode, total)
 	}
 
 	mode, total = selectBurnMode(0, 4.5, 10)
 	if mode != "cost" || total != 4.5 {
 		t.Fatalf("mode/total = %q %.1f, want cost 4.5", mode, total)
+	}
+
+	mode, total = selectBurnMode(1200, 0, 10)
+	if mode != "tokens" || total != 1200 {
+		t.Fatalf("mode/total = %q %.1f, want tokens 1200", mode, total)
 	}
 
 	mode, total = selectBurnMode(0, 0, 10)

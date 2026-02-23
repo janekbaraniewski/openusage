@@ -730,8 +730,7 @@ func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
 		if len(snap.Metrics) > 0 ||
 			len(snap.Resets) > 0 ||
 			len(snap.DailySeries) > 0 ||
-			len(snap.ModelUsage) > 0 ||
-			strings.TrimSpace(snap.Message) != "" {
+			len(snap.ModelUsage) > 0 {
 			return true
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -44,6 +45,14 @@ type telemetryToolAgg struct {
 	Calls1d float64
 }
 
+type telemetryProviderAgg struct {
+	Provider string
+	CostUSD  float64
+	Requests float64
+	Input    float64
+	Output   float64
+}
+
 type telemetryDayPoint struct {
 	Day      string
 	CostUSD  float64
@@ -57,6 +66,7 @@ type telemetryUsageAgg struct {
 	Scope        string
 	AccountID    string
 	Models       []telemetryModelAgg
+	Providers    []telemetryProviderAgg
 	Sources      []telemetrySourceAgg
 	Tools        []telemetryToolAgg
 	Daily        []telemetryDayPoint
@@ -163,6 +173,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 	if snap == nil || agg == nil {
 		return
 	}
+	authoritativeCost := usageAuthoritativeCost(*snap)
 	snap.EnsureMaps()
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
@@ -172,8 +183,42 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "model_") {
+			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "provider_") {
 			delete(snap.Metrics, key)
+		}
+	}
+	for key := range snap.Raw {
+		if strings.HasPrefix(key, "source_") ||
+			strings.HasPrefix(key, "client_") ||
+			strings.HasPrefix(key, "tool_") ||
+			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "provider_") ||
+			strings.HasPrefix(key, "usage_") ||
+			strings.HasPrefix(key, "analytics_") {
+			delete(snap.Raw, key)
+		}
+	}
+	for key := range snap.Attributes {
+		if strings.HasPrefix(key, "source_") ||
+			strings.HasPrefix(key, "client_") ||
+			strings.HasPrefix(key, "tool_") ||
+			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "provider_") ||
+			strings.HasPrefix(key, "usage_") ||
+			strings.HasPrefix(key, "analytics_") {
+			delete(snap.Attributes, key)
+		}
+	}
+	for key := range snap.Diagnostics {
+		if strings.HasPrefix(key, "source_") ||
+			strings.HasPrefix(key, "client_") ||
+			strings.HasPrefix(key, "tool_") ||
+			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "provider_") ||
+			strings.HasPrefix(key, "usage_") ||
+			strings.HasPrefix(key, "analytics_") {
+			delete(snap.Diagnostics, key)
 		}
 	}
 	for key := range snap.DailySeries {
@@ -188,6 +233,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		}
 	}
 
+	modelCostTotal := 0.0
 	for _, model := range agg.Models {
 		mk := sanitizeMetricID(model.Model)
 		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
@@ -197,6 +243,27 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
 		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
 		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
+		modelCostTotal += model.CostUSD
+	}
+	if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+		uk := "model_unattributed"
+		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+		snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+	}
+
+	providerCostTotal := 0.0
+	for _, provider := range agg.Providers {
+		pk := sanitizeMetricID(provider.Provider)
+		snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: "all"}
+		snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: "all"}
+		snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: "all"}
+		snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: "all"}
+		providerCostTotal += provider.CostUSD
+	}
+	if delta := authoritativeCost - providerCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+		uk := "provider_unattributed"
+		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+		snap.SetDiagnostic("telemetry_unattributed_provider_cost_usd", fmt.Sprintf("%.6f", delta))
 	}
 
 	for _, source := range agg.Sources {
@@ -222,6 +289,18 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
 	snap.DailySeries["analytics_requests"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Requests })
 	snap.DailySeries["analytics_tokens"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Tokens })
+	todayCost, weekCost, monthCost := usageCostWindowsUTC(agg.Daily, time.Now().UTC())
+	if todayCost > 0 {
+		snap.Metrics["today_cost"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
+		snap.Metrics["usage_daily"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
+	}
+	if weekCost > 0 {
+		snap.Metrics["7d_api_cost"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
+		snap.Metrics["usage_weekly"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
+	}
+	if monthCost > 0 {
+		snap.Metrics["analytics_30d_cost"] = core.Metric{Used: float64Ptr(monthCost), Unit: "USD", Window: "30d"}
+	}
 
 	for model, series := range agg.ModelDaily {
 		snap.DailySeries["usage_model_"+sanitizeMetricID(model)] = series
@@ -338,6 +417,10 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if err != nil {
 		return nil, err
 	}
+	providers, err := queryProviderAgg(ctx, db, filter)
+	if err != nil {
+		return nil, err
+	}
 	daily, err := queryDailyTotals(ctx, db, filter)
 	if err != nil {
 		return nil, err
@@ -360,6 +443,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	}
 
 	agg.Models = models
+	agg.Providers = providers
 	agg.Sources = sources
 	agg.Tools = tools
 	agg.Daily = daily
@@ -498,6 +582,39 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 	for rows.Next() {
 		var row telemetryToolAgg
 		if err := rows.Scan(&row.Tool, &row.Calls, &row.Calls1d); err != nil {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProviderAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
+		SELECT
+			COALESCE(NULLIF(TRIM(provider_id), ''), 'unknown') AS provider_name,
+			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+			SUM(COALESCE(requests, 1)) AS requests,
+			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+			SUM(COALESCE(output_tokens, 0)) AS output_tokens
+		FROM deduped_usage
+		WHERE 1=1
+		  AND event_type = 'message_usage'
+		  AND status != 'error'
+		GROUP BY provider_name
+		ORDER BY cost_usd DESC, requests DESC
+	`
+	rows, err := db.QueryContext(ctx, query, whereArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("canonical usage provider query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []telemetryProviderAgg
+	for rows.Next() {
+		var row telemetryProviderAgg
+		if err := rows.Scan(&row.Provider, &row.CostUSD, &row.Requests, &row.Input, &row.Output); err != nil {
 			continue
 		}
 		out = append(out, row)
@@ -772,6 +889,49 @@ func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float6
 		out = append(out, core.TimePoint{Date: row.Day, Value: pick(row)})
 	}
 	return out
+}
+
+func usageCostWindowsUTC(daily []telemetryDayPoint, now time.Time) (today float64, week float64, month float64) {
+	if len(daily) == 0 {
+		return 0, 0, 0
+	}
+	utcNow := now.UTC()
+	todayKey := utcNow.Format("2006-01-02")
+	weekStartKey := utcNow.AddDate(0, 0, -6).Format("2006-01-02")
+	monthStartKey := utcNow.AddDate(0, 0, -29).Format("2006-01-02")
+
+	for _, row := range daily {
+		day := strings.TrimSpace(row.Day)
+		if day == "" {
+			continue
+		}
+		if day == todayKey {
+			today += row.CostUSD
+		}
+		if day >= weekStartKey && day <= todayKey {
+			week += row.CostUSD
+		}
+		if day >= monthStartKey && day <= todayKey {
+			month += row.CostUSD
+		}
+	}
+	return today, week, month
+}
+
+func usageAuthoritativeCost(snap core.UsageSnapshot) float64 {
+	if m, ok := snap.Metrics["credit_balance"]; ok && m.Used != nil && *m.Used > 0 {
+		return *m.Used
+	}
+	if m, ok := snap.Metrics["spend_limit"]; ok && m.Used != nil && *m.Used > 0 {
+		return *m.Used
+	}
+	if m, ok := snap.Metrics["plan_total_spend_usd"]; ok && m.Used != nil && *m.Used > 0 {
+		return *m.Used
+	}
+	if m, ok := snap.Metrics["credits"]; ok && m.Used != nil && *m.Used > 0 {
+		return *m.Used
+	}
+	return 0
 }
 
 func sortedSeriesFromByDay(byDay map[string]float64) []core.TimePoint {

@@ -145,19 +145,15 @@ func main() {
 		socketPath = value
 	}
 
-	daemonClient, daemonErr := ensureTelemetryDaemonRunningInteractive(ctx, socketPath, os.Getenv("OPENUSAGE_DEBUG") != "")
-	if daemonErr != nil {
-		fmt.Fprintf(os.Stderr, "Telemetry daemon is unavailable: %v\n", daemonErr)
-		os.Exit(1)
-	}
 	viewRuntime := newDaemonViewRuntime(
-		daemonClient,
+		nil,
 		socketPath,
 		os.Getenv("OPENUSAGE_DEBUG") != "",
 		allAccounts,
 		cfg.Telemetry.ProviderLinks,
 	)
-	initialSnapshots := viewRuntime.readWithFallback(ctx)
+	initialReq := daemonReadModelRequestFromAccounts(allAccounts, cfg.Telemetry.ProviderLinks)
+	initialSnapshots := seedSnapshotsForAccounts(initialReq.Accounts, "Connecting to telemetry daemon...")
 	if len(initialSnapshots) > 0 {
 		model.SetInitialSnapshots(initialSnapshots)
 	}

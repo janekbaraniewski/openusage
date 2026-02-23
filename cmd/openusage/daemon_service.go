@@ -472,7 +472,7 @@ func runTelemetryDaemonStatus(args []string) error {
 		return err
 	}
 	client := newTelemetryDaemonClient(strings.TrimSpace(*socketPath))
-	healthErr := client.Health(context.Background())
+	health, healthErr := client.HealthInfo(context.Background())
 	running := healthErr == nil
 
 	fmt.Printf("daemon kind=%s installed=%t running=%t socket=%s\n",
@@ -483,6 +483,13 @@ func runTelemetryDaemonStatus(args []string) error {
 	)
 	if healthErr != nil {
 		fmt.Printf("daemon health_error=%v\n", healthErr)
+	} else {
+		fmt.Printf(
+			"daemon version=%s api=%s integration=%s\n",
+			strings.TrimSpace(health.DaemonVersion),
+			strings.TrimSpace(health.APIVersion),
+			strings.TrimSpace(health.IntegrationVersion),
+		)
 	}
 	return nil
 }

@@ -120,6 +120,16 @@ func TestSnapshotsReady(t *testing.T) {
 		t.Fatal("snapshotsReady(notReady) = true, want false")
 	}
 
+	messageOnly := map[string]core.UsageSnapshot{
+		"a": {
+			Status:  core.StatusUnknown,
+			Message: "connecting to telemetry daemon...",
+		},
+	}
+	if snapshotsReady(messageOnly) {
+		t.Fatal("snapshotsReady(messageOnly) = true, want false")
+	}
+
 	ready := map[string]core.UsageSnapshot{
 		"a": {
 			Status: core.StatusUnknown,

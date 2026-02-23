@@ -1648,8 +1648,9 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 				valueStr += fmt.Sprintf(" · %s", formatUSD(model.cost))
 			}
 		case "cost":
-			valueStr = fmt.Sprintf("%2.0f%% %s",
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s",
 				pct,
+				shortCompact(model.input+model.output),
 				formatUSD(model.cost),
 			)
 		case "requests":
@@ -1759,10 +1760,10 @@ func modelMixValue(model modelMixEntry, mode string) float64 {
 
 func selectBurnMode(totalTokens, totalCost, totalRequests float64) (mode string, total float64) {
 	switch {
-	case totalTokens > 0:
-		return "tokens", totalTokens
 	case totalCost > 0:
 		return "cost", totalCost
+	case totalTokens > 0:
+		return "tokens", totalTokens
 	default:
 		return "requests", totalRequests
 	}
@@ -1990,8 +1991,10 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 				valueStr += fmt.Sprintf(" · %s", formatUSD(provider.cost))
 			}
 		} else if mode == "cost" {
-			valueStr = fmt.Sprintf("%2.0f%% %s",
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req · %s",
 				pct,
+				shortCompact(provider.input+provider.output),
+				shortCompact(provider.requests),
 				formatUSD(provider.cost),
 			)
 		}

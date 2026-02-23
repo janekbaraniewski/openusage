@@ -20,7 +20,8 @@ func configureSQLiteConnection(db *sql.DB) error {
 		return fmt.Errorf("set busy_timeout: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// Keep multiple connections so daemon reads do not stall behind ingest writes.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
 	return nil
 }

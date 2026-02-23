@@ -343,6 +343,72 @@ func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t 
 	}
 }
 
+func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Date(2026, 2, 23, 9, 0, 0, 0, time.UTC)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		ModelRaw:      "qwen/qwen3-coder-flash",
+		InputTokens:   int64Ptr(120),
+		OutputTokens:  int64Ptr(40),
+		TotalTokens:   int64Ptr(160),
+		CostUSD:       float64Ptr(0.012),
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest message event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Metrics:    map[string]core.Metric{},
+			Attributes: map[string]string{
+				"provider_alibaba_cost": "999.0",
+				"model_qwen_cost_usd":   "999.0",
+				"telemetry_view":        "root",
+			},
+			Diagnostics: map[string]string{
+				"provider_openrouter_cost": "888.0",
+				"analytics_cost":           "777.0",
+			},
+		},
+	}
+
+	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["openrouter"]
+	for _, key := range []string{
+		"provider_alibaba_cost",
+		"model_qwen_cost_usd",
+		"provider_openrouter_cost",
+		"analytics_cost",
+	} {
+		if _, ok := snap.Attributes[key]; ok {
+			t.Fatalf("stale attribute key still present: %s", key)
+		}
+		if _, ok := snap.Diagnostics[key]; ok {
+			t.Fatalf("stale diagnostic key still present: %s", key)
+		}
+	}
+}
+
 func seriesValueByDate(points []core.TimePoint, date string) float64 {
 	for _, point := range points {
 		if point.Date == date {

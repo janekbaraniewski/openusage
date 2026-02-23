@@ -1265,6 +1265,8 @@ func prettifyModelName(name string) string {
 	result := strings.ReplaceAll(name, "_", "-")
 
 	switch strings.ToLower(result) {
+	case "unattributed":
+		return "unmapped spend (missing historical mapping)"
 	case "default":
 		return "default (auto)"
 	case "composer-1":

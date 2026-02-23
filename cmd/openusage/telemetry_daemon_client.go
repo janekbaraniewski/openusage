@@ -39,6 +39,13 @@ type daemonHookResponse struct {
 	Warnings  []string `json:"warnings,omitempty"`
 }
 
+type daemonHealthResponse struct {
+	Status             string `json:"status"`
+	DaemonVersion      string `json:"daemon_version,omitempty"`
+	APIVersion         string `json:"api_version,omitempty"`
+	IntegrationVersion string `json:"integration_version,omitempty"`
+}
+
 type telemetryDaemonClient struct {
 	socketPath string
 	http       *http.Client
@@ -63,22 +70,38 @@ func newTelemetryDaemonClient(socketPath string) *telemetryDaemonClient {
 }
 
 func (c *telemetryDaemonClient) Health(ctx context.Context) error {
+	_, err := c.HealthInfo(ctx)
+	return err
+}
+
+func (c *telemetryDaemonClient) HealthInfo(ctx context.Context) (daemonHealthResponse, error) {
 	if c == nil || strings.TrimSpace(c.socketPath) == "" {
-		return fmt.Errorf("daemon client is not configured")
+		return daemonHealthResponse{}, fmt.Errorf("daemon client is not configured")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/healthz", nil)
 	if err != nil {
-		return err
+		return daemonHealthResponse{}, err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return daemonHealthResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("daemon health status: %s", resp.Status)
+		return daemonHealthResponse{}, fmt.Errorf("daemon health status: %s", resp.Status)
 	}
-	return nil
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) == 0 {
+		return daemonHealthResponse{Status: "ok"}, nil
+	}
+	var out daemonHealthResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return daemonHealthResponse{}, fmt.Errorf("decode daemon health response: %w", err)
+	}
+	if strings.TrimSpace(out.Status) == "" {
+		out.Status = "ok"
+	}
+	return out, nil
 }
 
 func (c *telemetryDaemonClient) ReadModel(

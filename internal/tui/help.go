@@ -246,7 +246,7 @@ func (m Model) renderSplash(screenW, screenH int) string {
 	spinner := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).
 		Render(SpinnerFrames[spinnerIdx])
 	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
-		Render("Loading providers…")
+		Render(m.loadingSplashMessage())
 	statusLine := "  " + spinner + " " + subtitle
 
 	// Collect all lines: banner + blank + status
@@ -287,6 +287,27 @@ func (m Model) renderSplash(screenW, screenH int) string {
 		out.WriteString(line)
 	}
 	return out.String()
+}
+
+func (m Model) loadingSplashMessage() string {
+	if len(m.snapshots) == 0 {
+		return "Connecting to telemetry daemon..."
+	}
+	for _, id := range m.sortedIDs {
+		snap, ok := m.snapshots[id]
+		if !ok {
+			continue
+		}
+		if msg := strings.TrimSpace(snap.Message); msg != "" {
+			return msg
+		}
+	}
+	for _, snap := range m.snapshots {
+		if msg := strings.TrimSpace(snap.Message); msg != "" {
+			return msg
+		}
+	}
+	return "Connecting to telemetry daemon..."
 }
 
 func padRight(s string, width int) string {
