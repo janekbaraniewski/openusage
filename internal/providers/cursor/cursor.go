@@ -33,11 +33,11 @@ type Provider struct {
 }
 
 type cachedModelAggregation struct {
-	BillingCycleStart  string
-	BillingCycleEnd    string
-	Aggregations       []modelAggregation
-	EffectiveLimitUSD  float64 // cached plan/included limit for gauge fallback
-	BillingMetrics     map[string]core.Metric // cached billing metrics for local-only fallback
+	BillingCycleStart string
+	BillingCycleEnd   string
+	Aggregations      []modelAggregation
+	EffectiveLimitUSD float64                // cached plan/included limit for gauge fallback
+	BillingMetrics    map[string]core.Metric // cached billing metrics for local-only fallback
 }
 
 func New() *Provider {
@@ -116,12 +116,12 @@ type modelAggregation struct {
 }
 
 type aggregatedUsageResp struct {
-	Aggregations         []modelAggregation `json:"aggregations"`
-	TotalInputTokens     string             `json:"totalInputTokens"`
-	TotalOutputTokens    string             `json:"totalOutputTokens"`
-	TotalCacheWriteTokens string            `json:"totalCacheWriteTokens"`
-	TotalCacheReadTokens string             `json:"totalCacheReadTokens"`
-	TotalCostCents       float64            `json:"totalCostCents"`
+	Aggregations          []modelAggregation `json:"aggregations"`
+	TotalInputTokens      string             `json:"totalInputTokens"`
+	TotalOutputTokens     string             `json:"totalOutputTokens"`
+	TotalCacheWriteTokens string             `json:"totalCacheWriteTokens"`
+	TotalCacheReadTokens  string             `json:"totalCacheReadTokens"`
+	TotalCostCents        float64            `json:"totalCostCents"`
 }
 
 type stripeProfileResp struct {
@@ -319,10 +319,10 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	// All API endpoints are called independently so a single endpoint failure
 	// doesn't lose data from the others.
 	var (
-		hasPeriodUsage bool
-		periodUsage    currentPeriodUsageResp
-		pu             planUsage
-		su             spendLimitUsage
+		hasPeriodUsage                  bool
+		periodUsage                     currentPeriodUsageResp
+		pu                              planUsage
+		su                              spendLimitUsage
 		totalSpendDollars, limitDollars float64
 	)
 	if err := p.callDashboardAPI(ctx, token, "GetCurrentPeriodUsage", &periodUsage); err != nil {
@@ -1501,18 +1501,18 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 	defer rows.Close()
 
 	var (
-		totalCostCents   float64
-		totalRequests    int
-		totalSessions    int
-		totalLinesAdded  int
+		totalCostCents    float64
+		totalRequests     int
+		totalSessions     int
+		totalLinesAdded   int
 		totalLinesRemoved int
-		modelCosts       = make(map[string]float64)
-		modelRequests    = make(map[string]int)
-		modeSessions     = make(map[string]int)
-		dailyCost        = make(map[string]float64)
-		dailyRequests    = make(map[string]float64)
-		todayCostCents   float64
-		todayRequests    int
+		modelCosts        = make(map[string]float64)
+		modelRequests     = make(map[string]int)
+		modeSessions      = make(map[string]int)
+		dailyCost         = make(map[string]float64)
+		dailyRequests     = make(map[string]float64)
+		todayCostCents    float64
+		todayRequests     int
 	)
 
 	now := time.Now()

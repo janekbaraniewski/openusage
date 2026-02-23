@@ -171,7 +171,6 @@ func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOpti
 	return events, nil
 }
 
-
 // ParseTelemetryEventFile parses OpenCode event jsonl/ndjson files.
 func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
 	f, err := os.Open(path)

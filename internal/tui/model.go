@@ -11,10 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
-	"github.com/samber/lo"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/samber/lo"
 )
 
 type tickMsg time.Time
@@ -54,12 +54,12 @@ type SnapshotsMsg map[string]core.UsageSnapshot
 type DaemonStatus string
 
 const (
-	DaemonConnecting    DaemonStatus = "connecting"
-	DaemonNotInstalled  DaemonStatus = "not_installed"
-	DaemonStarting      DaemonStatus = "starting"
-	DaemonRunning       DaemonStatus = "running"
-	DaemonOutdated      DaemonStatus = "outdated"
-	DaemonError         DaemonStatus = "error"
+	DaemonConnecting   DaemonStatus = "connecting"
+	DaemonNotInstalled DaemonStatus = "not_installed"
+	DaemonStarting     DaemonStatus = "starting"
+	DaemonRunning      DaemonStatus = "running"
+	DaemonOutdated     DaemonStatus = "outdated"
+	DaemonError        DaemonStatus = "error"
 )
 
 type DaemonStatusMsg struct {

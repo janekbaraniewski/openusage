@@ -909,4 +909,3 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
-
