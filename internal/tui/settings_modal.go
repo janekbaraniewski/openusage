@@ -17,6 +17,8 @@ const (
 	settingsTabOrder
 	settingsTabTheme
 	settingsTabAPIKeys
+	settingsTabTelemetry
+	settingsTabIntegrations
 	settingsTabCount
 )
 
@@ -25,6 +27,8 @@ var settingsTabNames = []string{
 	"Order",
 	"Theme",
 	"API Keys",
+	"Telemetry",
+	"Integrations",
 }
 
 func (m *Model) openSettingsModal() {
@@ -42,6 +46,7 @@ func (m *Model) openSettingsModal() {
 	} else {
 		m.settingsThemeCursor = 0
 	}
+	m.refreshIntegrationStatuses()
 }
 
 func (m *Model) closeSettingsModal() {
@@ -95,15 +100,24 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab", "left", "h", "[":
 		m.settingsModalTab = (m.settingsModalTab + settingsTabCount - 1) % settingsTabCount
 		return m, nil
-	case "1", "2", "3", "4":
-		idx := int(msg.String()[0] - '1')
-		if idx >= 0 && idx < int(settingsTabCount) {
-			m.settingsModalTab = settingsModalTab(idx)
-		}
-		return m, nil
 	case "r":
+		if m.settingsModalTab == settingsTabIntegrations {
+			m.refreshIntegrationStatuses()
+			m.settingsStatus = "integration status refreshed"
+			return m, nil
+		}
 		m = m.requestRefresh()
 		return m, nil
+	}
+	if len(msg.String()) == 1 {
+		key := msg.String()[0]
+		if key >= '1' && key <= '9' {
+			idx := int(key - '1')
+			if idx >= 0 && idx < int(settingsTabCount) {
+				m.settingsModalTab = settingsModalTab(idx)
+				return m, nil
+			}
+		}
 	}
 
 	switch m.settingsModalTab {
@@ -224,6 +238,39 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.deleteCredentialCmd(id)
 			}
 		}
+	case settingsTabTelemetry:
+		// Read-only tab; no cursor interaction needed.
+	case settingsTabIntegrations:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsCursor > 0 {
+				m.settingsCursor--
+			}
+		case "down", "j":
+			if m.settingsCursor < len(m.integrationStatuses)-1 {
+				m.settingsCursor++
+			}
+		case "i", " ", "enter":
+			if len(m.integrationStatuses) == 0 {
+				return m, nil
+			}
+			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
+			entry := m.integrationStatuses[cursor]
+			m.settingsStatus = "installing integration..."
+			return m, m.installIntegrationCmd(entry.ID)
+		case "u":
+			if len(m.integrationStatuses) == 0 {
+				return m, nil
+			}
+			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
+			entry := m.integrationStatuses[cursor]
+			if !entry.NeedsUpgrade {
+				m.settingsStatus = "selected integration is already current"
+				return m, nil
+			}
+			m.settingsStatus = "upgrading integration..."
+			return m, m.installIntegrationCmd(entry.ID)
+		}
 	}
 
 	return m, nil
@@ -307,6 +354,10 @@ func (m Model) settingsModalHint() string {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabTelemetry:
+		return "Review unmapped telemetry providers  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabIntegrations:
+		return "Up/Down: select  ·  Enter/i: install/configure  ·  u: upgrade  ·  r: refresh  ·  Esc: close"
 	default:
 		return "Up/Down: select theme  ·  Space/Enter: apply theme  ·  Left/Right: switch tab  ·  Esc: close"
 	}
@@ -320,6 +371,10 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 		return m.renderSettingsOrderBody(w, h)
 	case settingsTabAPIKeys:
 		return m.renderSettingsAPIKeysBody(w, h)
+	case settingsTabTelemetry:
+		return m.renderSettingsTelemetryBody(w, h)
+	case settingsTabIntegrations:
+		return m.renderSettingsIntegrationsBody(w, h)
 	default:
 		return m.renderSettingsThemeBody(w, h)
 	}
@@ -517,6 +572,89 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			lines = append(lines, line)
 		}
 	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) renderSettingsTelemetryBody(w, h int) string {
+	unmapped := m.telemetryUnmappedProviders()
+	hints := m.telemetryProviderLinkHints()
+	configured := m.configuredProviderIDs()
+
+	var lines []string
+	if len(unmapped) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).Render("All telemetry providers are mapped."))
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("No action needed right now."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"))
+	for _, providerID := range unmapped {
+		lines = append(lines, "  - "+providerID)
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Map them in settings.json under telemetry.provider_links:")
+	lines = append(lines, "  <source_provider>=<configured_provider_id>")
+	if len(hints) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Hint:")
+		lines = append(lines, "  "+hints[0])
+	}
+	if len(configured) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Configured provider IDs:")
+		lines = append(lines, "  "+strings.Join(configured, ", "))
+	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) renderSettingsIntegrationsBody(w, h int) string {
+	statuses := m.integrationStatuses
+	if len(statuses) == 0 {
+		return padToSize(dimStyle.Render("No integration status available yet. Press r to refresh."), w, h)
+	}
+
+	cursor := clamp(m.settingsCursor, 0, len(statuses)-1)
+	start, end := listWindow(len(statuses), cursor, h-4)
+	lines := make([]string, 0, h)
+
+	for i := start; i < end; i++ {
+		entry := statuses[i]
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+
+		stateColor := colorRed
+		switch entry.State {
+		case "ready":
+			stateColor = colorGreen
+		case "outdated":
+			stateColor = colorYellow
+		case "partial":
+			stateColor = colorPeach
+		}
+
+		versionText := entry.DesiredVersion
+		if strings.TrimSpace(entry.InstalledVersion) != "" {
+			versionText = entry.InstalledVersion
+		}
+		stateText := lipgloss.NewStyle().Foreground(stateColor).Render(strings.ToUpper(entry.State))
+		line := fmt.Sprintf("%s%s  %s  %s", prefix, entry.Name, stateText, dimStyle.Render("v"+versionText))
+		lines = append(lines, line)
+		lines = append(lines, "    "+dimStyle.Render(entry.Summary))
+	}
+
+	selected := statuses[cursor]
+	lines = append(lines, "")
+	lines = append(lines, "Selected:")
+	lines = append(lines, fmt.Sprintf("  %s · installed=%t configured=%t", selected.Name, selected.Installed, selected.Configured))
+	if selected.NeedsUpgrade {
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorYellow).Render("Upgrade recommended: installed version differs from current integration version"))
+	}
+	lines = append(lines, "  Install/configure command writes plugin/hook files and updates tool configs automatically.")
 
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }

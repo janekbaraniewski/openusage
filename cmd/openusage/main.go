@@ -157,6 +157,10 @@ func main() {
 		allAccounts,
 		cfg.Telemetry.ProviderLinks,
 	)
+	initialSnapshots := viewRuntime.readWithFallback(ctx)
+	if len(initialSnapshots) > 0 {
+		model.SetInitialSnapshots(initialSnapshots)
+	}
 	var program *tea.Program
 
 	model.SetOnAddAccount(func(acct core.AccountConfig) {

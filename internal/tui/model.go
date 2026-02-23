@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 )
 
@@ -88,6 +89,7 @@ type Model struct {
 	settingsCursor      int
 	settingsThemeCursor int
 	settingsStatus      string
+	integrationStatuses []integrations.Status
 
 	apiKeyEditing       bool
 	apiKeyInput         string
@@ -130,6 +132,21 @@ func (m *Model) SetOnRefresh(fn func()) {
 	m.onRefresh = fn
 }
 
+// SetInitialSnapshots seeds the dashboard with already-available snapshots so
+// first paint can render real data without an intermediate syncing state.
+func (m *Model) SetInitialSnapshots(snaps map[string]core.UsageSnapshot) {
+	if m == nil || len(snaps) == 0 {
+		return
+	}
+	m.snapshots = snaps
+	m.refreshing = false
+	if snapshotsReady(snaps) {
+		m.hasData = true
+	}
+	m.ensureSnapshotProvidersKnown()
+	m.rebuildSortedIDs()
+}
+
 type themePersistedMsg struct {
 	err error
 }
@@ -151,6 +168,12 @@ type credentialSavedMsg struct {
 type credentialDeletedMsg struct {
 	AccountID string
 	Err       error
+}
+
+type integrationInstallResultMsg struct {
+	IntegrationID integrations.ID
+	Statuses      []integrations.Status
+	Err           error
 }
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
@@ -221,6 +244,18 @@ func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
 	return func() tea.Msg {
 		err := config.DeleteCredential(accountID)
 		return credentialDeletedMsg{AccountID: accountID, Err: err}
+	}
+}
+
+func (m Model) installIntegrationCmd(id integrations.ID) tea.Cmd {
+	return func() tea.Msg {
+		manager := integrations.NewDefaultManager()
+		err := manager.Install(id)
+		return integrationInstallResultMsg{
+			IntegrationID: id,
+			Statuses:      manager.ListStatuses(),
+			Err:           err,
+		}
 	}
 }
 
@@ -313,6 +348,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsStatus = "delete failed"
 		} else {
 			m.settingsStatus = "key deleted"
+		}
+		return m, nil
+
+	case integrationInstallResultMsg:
+		m.integrationStatuses = msg.Statuses
+		if msg.Err != nil {
+			errMsg := msg.Err.Error()
+			if len(errMsg) > 80 {
+				errMsg = errMsg[:77] + "..."
+			}
+			m.settingsStatus = "integration install failed: " + errMsg
+		} else {
+			m.settingsStatus = "integration installed"
 		}
 		return m, nil
 
@@ -758,6 +806,22 @@ func (m Model) renderHeader(w int) string {
 		spinnerStr = " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
 	}
 
+	ids := m.filteredIDs()
+	unmappedProviders := m.telemetryUnmappedProviders()
+
+	okCount, warnCount, errCount := 0, 0, 0
+	for _, id := range ids {
+		snap := m.snapshots[id]
+		switch snap.Status {
+		case core.StatusOK:
+			okCount++
+		case core.StatusNearLimit:
+			warnCount++
+		case core.StatusLimited, core.StatusError:
+			errCount++
+		}
+	}
+
 	var info string
 
 	if m.showSettingsModal {
@@ -770,29 +834,14 @@ func (m Model) renderHeader(w int) string {
 				info += " (filtered)"
 			}
 		default:
-			ids := m.filteredIDs()
 			info = fmt.Sprintf("⊞ %d providers", len(ids))
 			if m.filter != "" {
 				info += " (filtered)"
 			}
 		}
 	}
-
-	ids := m.filteredIDs()
-	okCount, warnCount, errCount, mappingCount := 0, 0, 0, 0
-	for _, id := range ids {
-		snap := m.snapshots[id]
-		switch snap.Status {
-		case core.StatusOK:
-			okCount++
-		case core.StatusNearLimit:
-			warnCount++
-		case core.StatusLimited, core.StatusError:
-			errCount++
-		}
-		if strings.TrimSpace(snap.Diagnostics["telemetry_unmapped_providers"]) != "" {
-			mappingCount++
-		}
+	if !m.showSettingsModal && len(unmappedProviders) > 0 {
+		info += " · detected additional providers, check settings"
 	}
 
 	statusInfo := ""
@@ -808,8 +857,10 @@ func (m Model) renderHeader(w int) string {
 		dot := PulseChar("✗", "✕", m.animFrame)
 		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d%s", errCount, dot))
 	}
-	if mappingCount > 0 {
-		statusInfo += lipgloss.NewStyle().Foreground(colorPeach).Render(fmt.Sprintf(" %d!", mappingCount))
+	if len(unmappedProviders) > 0 {
+		statusInfo += lipgloss.NewStyle().
+			Foreground(colorPeach).
+			Render(fmt.Sprintf(" ⚠ %d unmapped", len(unmappedProviders)))
 	}
 
 	infoRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(info)
@@ -1663,6 +1714,79 @@ func (m Model) settingsIDs() []string {
 	ids := make([]string, len(m.providerOrder))
 	copy(ids, m.providerOrder)
 	return ids
+}
+
+func (m Model) telemetryUnmappedProviders() []string {
+	seen := make(map[string]bool)
+	for _, snap := range m.snapshots {
+		raw := strings.TrimSpace(snap.Diagnostics["telemetry_unmapped_providers"])
+		if raw == "" {
+			continue
+		}
+		for _, token := range strings.Split(raw, ",") {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			seen[token] = true
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for providerID := range seen {
+		out = append(out, providerID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m Model) telemetryProviderLinkHints() []string {
+	seen := make(map[string]bool)
+	for _, snap := range m.snapshots {
+		hint := strings.TrimSpace(snap.Diagnostics["telemetry_provider_link_hint"])
+		if hint == "" {
+			continue
+		}
+		seen[hint] = true
+	}
+
+	out := make([]string, 0, len(seen))
+	for hint := range seen {
+		out = append(out, hint)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m Model) configuredProviderIDs() []string {
+	seen := make(map[string]bool)
+
+	for _, providerID := range m.accountProviders {
+		providerID = strings.TrimSpace(providerID)
+		if providerID == "" {
+			continue
+		}
+		seen[providerID] = true
+	}
+	for _, snap := range m.snapshots {
+		providerID := strings.TrimSpace(snap.ProviderID)
+		if providerID == "" {
+			continue
+		}
+		seen[providerID] = true
+	}
+
+	out := make([]string, 0, len(seen))
+	for providerID := range seen {
+		out = append(out, providerID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m *Model) refreshIntegrationStatuses() {
+	manager := integrations.NewDefaultManager()
+	m.integrationStatuses = manager.ListStatuses()
 }
 
 func (m Model) dashboardConfigProviders() []config.DashboardProviderConfig {

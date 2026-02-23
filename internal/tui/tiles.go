@@ -890,8 +890,6 @@ func buildTileMetaLines(snap core.UsageSnapshot, innerW int) []string {
 		label, key string
 	}
 	order := []metaEntry{
-		{"Unmapped", "telemetry_unmapped_providers"},
-		{"Link", "telemetry_provider_link_hint"},
 		{"Account", "account_email"},
 		{"Key", "key_label"},
 		{"Key Name", "key_name"},

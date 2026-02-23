@@ -128,7 +128,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
 		{"Ctrl+O", "Expand/collapse usage breakdowns"},
 		{"[ ]", "Switch detail tabs"},
-		{"1-3 / ←→", "Switch settings tabs"},
+		{fmt.Sprintf("1-%d / ←→", settingsTabCount), "Switch settings tabs"},
 		{"Space / Enter", "Apply setting in modal"},
 		{"Shift+J/K", "Reorder providers (order tab)"},
 	}

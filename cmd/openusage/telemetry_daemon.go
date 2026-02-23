@@ -182,14 +182,14 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 	}
 
 	svc := &telemetryDaemonService{
-		cfg:          cfg,
-		store:        store,
-		pipeline:     telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
-		collectors:   buildTelemetryCollectors(),
-		providerByID: providersByID(),
-		lastLogAt:    map[string]time.Time{},
-		readModelCache: map[string]cachedReadModelEntry{},
+		cfg:               cfg,
+		store:             store,
+		pipeline:          telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:       telemetry.NewQuotaSnapshotIngestor(store),
+		collectors:        buildTelemetryCollectors(),
+		providerByID:      providersByID(),
+		lastLogAt:         map[string]time.Time{},
+		readModelCache:    map[string]cachedReadModelEntry{},
 		readModelInFlight: map[string]bool{},
 	}
 
