@@ -45,3 +45,65 @@ func TestParseTelemetryConversationFile_DedupesByRequestIDAndExtractsToolEvents(
 		t.Fatalf("tool events = %d, want 2", toolCount)
 	}
 }
+
+func TestParseTelemetryHookPayload_ParsesUsageHook(t *testing.T) {
+	payload := []byte(`{
+		"hook_event_name":"Stop",
+		"session_id":"sess-1",
+		"request_id":"req-1",
+		"cwd":"/tmp/repo",
+		"model":"claude-opus-4-6",
+		"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":30,"cache_read_input_tokens":40,"reasoning_tokens":5}
+	}`)
+
+	events, err := ParseTelemetryHookPayload(payload, shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("parse hook payload: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.EventType != shared.TelemetryEventTypeMessageUsage {
+		t.Fatalf("event_type = %q, want message_usage", ev.EventType)
+	}
+	if ev.ProviderID != "anthropic" {
+		t.Fatalf("provider_id = %q, want anthropic", ev.ProviderID)
+	}
+	if ev.TotalTokens == nil || *ev.TotalTokens != 195 {
+		t.Fatalf("total_tokens = %+v, want 195", ev.TotalTokens)
+	}
+	if ev.WorkspaceID != "repo" {
+		t.Fatalf("workspace_id = %q, want repo", ev.WorkspaceID)
+	}
+}
+
+func TestParseTelemetryHookPayload_ParsesToolEvent(t *testing.T) {
+	payload := []byte(`{
+		"hook_event_name":"PostToolUse",
+		"session_id":"sess-1",
+		"request_id":"req-1",
+		"tool_name":"Bash",
+		"tool_call_id":"tool-1"
+	}`)
+
+	events, err := ParseTelemetryHookPayload(payload, shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("parse hook payload: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.EventType != shared.TelemetryEventTypeToolUsage {
+		t.Fatalf("event_type = %q, want tool_usage", ev.EventType)
+	}
+	if ev.ToolName != "bash" {
+		t.Fatalf("tool_name = %q, want bash", ev.ToolName)
+	}
+	if ev.ToolCallID != "tool-1" {
+		t.Fatalf("tool_call_id = %q, want tool-1", ev.ToolCallID)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,11 @@ func BuildDedupKey(event IngestRequest) string {
 		stableID = "fp:" + fallbackFingerprint(norm)
 	}
 
+	sourceSystem := stableKeyPart(string(norm.SourceSystem))
+	eventType := stableKeyPart(string(norm.EventType))
+	sessionID := stableKeyPart(norm.SessionID)
+	workspaceID := stableKeyPart(norm.WorkspaceID)
+
 	occurredBucket := ""
 	if !hasStableID && !norm.OccurredAt.IsZero() {
 		occurredBucket = norm.OccurredAt.UTC().Truncate(time.Millisecond).Format(time.RFC3339Nano)
@@ -39,6 +45,17 @@ func BuildDedupKey(event IngestRequest) string {
 	modelRaw := ""
 	modelCanonical := ""
 	toolName := ""
+	if hasStableID {
+		parts := []string{
+			sourceSystem,
+			eventType,
+			sessionID,
+			workspaceID,
+			stableKeyPart(stableID),
+		}
+		return hashStrings(parts...)
+	}
+
 	if !hasStableID {
 		tokenTuple = strings.Join([]string{
 			int64TupleValue(norm.InputTokens),
@@ -60,12 +77,14 @@ func BuildDedupKey(event IngestRequest) string {
 	}
 
 	parts := []string{
-		norm.AgentName,
-		norm.ProviderID,
-		norm.AccountID,
-		norm.SessionID,
-		stableID,
-		string(norm.EventType),
+		sourceSystem,
+		eventType,
+		stableKeyPart(norm.ProviderID),
+		stableKeyPart(norm.AccountID),
+		stableKeyPart(norm.AgentName),
+		sessionID,
+		workspaceID,
+		stableKeyPart(stableID),
 		occurredBucket,
 		tokenTuple,
 		costTuple,
@@ -78,10 +97,16 @@ func BuildDedupKey(event IngestRequest) string {
 
 func fallbackFingerprint(event IngestRequest) string {
 	parts := []string{
+		stableKeyPart(string(event.SourceSystem)),
+		stableKeyPart(string(event.EventType)),
+		stableKeyPart(event.ProviderID),
+		stableKeyPart(event.AccountID),
+		stableKeyPart(event.SessionID),
+		stableKeyPart(event.WorkspaceID),
 		event.OccurredAt.UTC().Truncate(time.Millisecond).Format(time.RFC3339Nano),
-		event.ModelRaw,
-		event.ModelCanonical,
-		event.ToolName,
+		stableKeyPart(event.ModelRaw),
+		stableKeyPart(event.ModelCanonical),
+		stableKeyPart(event.ToolName),
 		int64TupleValue(event.InputTokens),
 		int64TupleValue(event.OutputTokens),
 		int64TupleValue(event.ReasoningTokens),
@@ -103,7 +128,7 @@ func int64TupleValue(v *int64) string {
 	if v == nil {
 		return ""
 	}
-	return fmt.Sprintf("%d", *v)
+	return strconv.FormatInt(*v, 10)
 }
 
 func float64TupleValue(v *float64) string {
@@ -111,4 +136,8 @@ func float64TupleValue(v *float64) string {
 		return ""
 	}
 	return fmt.Sprintf("%.6f", *v)
+}
+
+func stableKeyPart(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }

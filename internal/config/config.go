@@ -22,6 +22,12 @@ type ExperimentalConfig struct {
 	Analytics bool `json:"analytics"`
 }
 
+type TelemetryConfig struct {
+	// ProviderLinks maps source telemetry provider IDs to configured provider IDs.
+	// Example: {"anthropic":"claude_code"}.
+	ProviderLinks map[string]string `json:"provider_links"`
+}
+
 type DashboardProviderConfig struct {
 	AccountID string `json:"account_id"`
 	Enabled   bool   `json:"enabled"`
@@ -54,6 +60,7 @@ type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
 	Experimental         ExperimentalConfig            `json:"experimental"`
+	Telemetry            TelemetryConfig               `json:"telemetry"`
 	Dashboard            DashboardConfig               `json:"dashboard"`
 	ModelNormalization   core.ModelNormalizationConfig `json:"model_normalization"`
 	AutoDetect           bool                          `json:"auto_detect"`
@@ -85,6 +92,7 @@ func DefaultConfig() Config {
 			CritThreshold:          0.05,
 		},
 		Experimental:       ExperimentalConfig{Analytics: false},
+		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
 	}
 }
@@ -133,6 +141,7 @@ func LoadFrom(path string) (Config, error) {
 		cfg.Theme = DefaultConfig().Theme
 	}
 	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
+	cfg.Telemetry = normalizeTelemetryConfig(cfg.Telemetry)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
@@ -164,6 +173,21 @@ func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 		out = append(out, acct)
 	}
 
+	return out
+}
+
+func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
+	out := TelemetryConfig{
+		ProviderLinks: map[string]string{},
+	}
+	for source, target := range in.ProviderLinks {
+		source = strings.ToLower(strings.TrimSpace(source))
+		target = strings.ToLower(strings.TrimSpace(target))
+		if source == "" || target == "" {
+			continue
+		}
+		out.ProviderLinks[source] = target
+	}
 	return out
 }
 

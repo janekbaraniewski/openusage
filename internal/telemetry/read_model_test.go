@@ -95,10 +95,10 @@ func TestApplyCanonicalTelemetryView_HydratesRootAndUsage(t *testing.T) {
 	}
 	modelMetric, ok := snap.Metrics["model_qwen_qwen3_coder_flash_input_tokens"]
 	if !ok || modelMetric.Used == nil || *modelMetric.Used != 120 {
-		t.Fatalf("missing overlay model metric, got %+v", modelMetric)
+		t.Fatalf("missing canonical usage model metric, got %+v", modelMetric)
 	}
-	if snap.Attributes["telemetry_overlay"] != "enabled" {
-		t.Fatalf("telemetry_overlay = %q, want enabled", snap.Attributes["telemetry_overlay"])
+	if snap.Attributes["telemetry_view"] != "canonical" {
+		t.Fatalf("telemetry_view = %q, want canonical", snap.Attributes["telemetry_view"])
 	}
 }
 
@@ -132,7 +132,7 @@ func TestApplyCanonicalTelemetryView_UsesBaseWhenNoRootSnapshot(t *testing.T) {
 	}
 }
 
-func TestApplyCanonicalTelemetryView_AddsTelemetryOnlyProviderSnapshot(t *testing.T) {
+func TestApplyCanonicalTelemetryView_FlagsUnmappedTelemetryProviders(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestApplyCanonicalTelemetryView_AddsTelemetryOnlyProviderSnapshot(t *testin
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    time.Date(2026, 2, 22, 15, 10, 0, 0, time.UTC),
 		ProviderID:    "anthropic",
-		AccountID:     "zen",
+		AccountID:     "opencode",
 		AgentName:     "opencode",
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-telemetry-only-1",
@@ -172,18 +172,62 @@ func TestApplyCanonicalTelemetryView_AddsTelemetryOnlyProviderSnapshot(t *testin
 		t.Fatalf("apply canonical telemetry view: %v", err)
 	}
 
-	telemetrySnap, ok := got["telemetry:anthropic"]
-	if !ok {
-		t.Fatalf("missing telemetry-only snapshot for anthropic")
+	openrouterSnap := got["openrouter"]
+	if gotDiag := openrouterSnap.Diagnostics["telemetry_unmapped_providers"]; gotDiag != "anthropic" {
+		t.Fatalf("telemetry_unmapped_providers = %q, want anthropic", gotDiag)
 	}
-	if telemetrySnap.ProviderID != "anthropic" {
-		t.Fatalf("provider_id = %q, want anthropic", telemetrySnap.ProviderID)
+}
+
+func TestApplyCanonicalTelemetryView_UsesProviderLinksForCanonicalUsage(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
 	}
-	if telemetrySnap.Attributes["telemetry_only"] != "true" {
-		t.Fatalf("telemetry_only attribute = %q, want true", telemetrySnap.Attributes["telemetry_only"])
+	defer store.Close()
+
+	input := int64(44)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    time.Date(2026, 2, 22, 15, 20, 0, 0, time.UTC),
+		ProviderID:    "anthropic",
+		AccountID:     "anthropic",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		MessageID:     "msg-link-1",
+		ModelRaw:      "claude-opus-4-6",
+		InputTokens:   &input,
+		TotalTokens:   &input,
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest linked usage: %v", err)
 	}
-	modelMetric, ok := telemetrySnap.Metrics["model_claude_opus_4_6_input_tokens"]
-	if !ok || modelMetric.Used == nil || *modelMetric.Used != 33 {
-		t.Fatalf("missing overlay model metric in telemetry-only snapshot: %+v", modelMetric)
+
+	base := map[string]core.UsageSnapshot{
+		"claude": {
+			ProviderID: "claude_code",
+			AccountID:  "claude-code",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+
+	got, err := ApplyCanonicalTelemetryViewWithOptions(context.Background(), dbPath, base, ReadModelOptions{
+		ProviderLinks: map[string]string{
+			"anthropic": "claude_code",
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply canonical telemetry view: %v", err)
+	}
+
+	snap := got["claude"]
+	modelMetric, ok := snap.Metrics["model_claude_opus_4_6_input_tokens"]
+	if !ok || modelMetric.Used == nil || *modelMetric.Used != 44 {
+		t.Fatalf("missing canonical usage model metric for linked provider: %+v", modelMetric)
+	}
+	if gotDiag := snap.Diagnostics["telemetry_unmapped_providers"]; gotDiag != "" {
+		t.Fatalf("unexpected telemetry_unmapped_providers = %q", gotDiag)
 	}
 }

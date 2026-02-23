@@ -60,7 +60,7 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 		"copilot":     {hasModelBurnData: true, hasClientMixData: true},
 		"gemini_cli":  {hasModelBurnData: true, hasClientMixData: true},
 		"openrouter":  {hasModelBurnData: true},
-		"zen":         {hasModelBurnData: true, hasPricingShowcase: true},
+		"opencode":    {hasModelBurnData: true, hasPricingShowcase: true},
 	}
 
 	for providerID, exp := range want {

@@ -96,7 +96,7 @@ func main() {
 		fmt.Println("  • Environment variables:")
 		fmt.Println("    OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY,")
 		fmt.Println("    GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,")
-		fmt.Println("    XAI_API_KEY, ZEN_API_KEY, OPENCODE_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY")
+		fmt.Println("    XAI_API_KEY, OPENCODE_API_KEY (or ZEN_API_KEY), GEMINI_API_KEY, GOOGLE_API_KEY")
 		fmt.Println()
 		fmt.Println("Set any of the above env vars, install a tool, or create a config:")
 		fmt.Printf("  mkdir -p %s\n", config.ConfigDir())
@@ -147,7 +147,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	telemetryRuntime, telemetryErr := startAppTelemetryRuntime(ctx, interval)
+	telemetryRuntime, telemetryErr := startAppTelemetryRuntime(ctx, interval, cfg.Telemetry.ProviderLinks)
 	if telemetryErr != nil {
 		log.Printf("Warning: telemetry runtime disabled: %v", telemetryErr)
 	}
@@ -155,12 +155,12 @@ func main() {
 	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
 		if telemetryRuntime != nil {
 			telemetryRuntime.ingestProviderSnapshots(ctx, snaps)
-			snaps = applyTelemetryOverlay(ctx, telemetryRuntime.dbPath, snaps)
+			snaps = telemetryRuntime.viewWithFallback(ctx, snaps)
 		}
 		p.Send(tui.SnapshotsMsg(snaps))
 	})
 	if telemetryRuntime != nil {
-		startTelemetryOverlayBroadcaster(ctx, engine, p, telemetryRuntime.dbPath, interval)
+		startTelemetryViewBroadcaster(ctx, engine, p, telemetryRuntime, interval)
 	}
 
 	go engine.Run(ctx)

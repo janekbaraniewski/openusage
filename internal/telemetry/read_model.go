@@ -37,9 +37,22 @@ type storedLimitEnvelope struct {
 	Snapshot storedLimitSnapshot `json:"snapshot"`
 }
 
+type ReadModelOptions struct {
+	ProviderLinks map[string]string
+}
+
 // ApplyCanonicalTelemetryView hydrates snapshots from canonical telemetry streams.
-// Root quota values come from limit_snapshot events, then usage overlays are applied.
+// Root quota values come from limit_snapshot events, then canonical usage aggregates are applied.
 func ApplyCanonicalTelemetryView(ctx context.Context, dbPath string, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
+	return ApplyCanonicalTelemetryViewWithOptions(ctx, dbPath, snaps, ReadModelOptions{})
+}
+
+func ApplyCanonicalTelemetryViewWithOptions(
+	ctx context.Context,
+	dbPath string,
+	snaps map[string]core.UsageSnapshot,
+	options ReadModelOptions,
+) (map[string]core.UsageSnapshot, error) {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
 		var err error
@@ -57,16 +70,20 @@ func ApplyCanonicalTelemetryView(ctx context.Context, dbPath string, snaps map[s
 		return snaps, fmt.Errorf("open telemetry read model db: %w", err)
 	}
 	defer db.Close()
+	if err := configureSQLiteConnection(db); err != nil {
+		return snaps, fmt.Errorf("configure telemetry read model db: %w", err)
+	}
 
 	merged, err := hydrateRootsFromLimitSnapshots(ctx, db, snaps)
 	if err != nil {
 		return snaps, err
 	}
-	merged, err = appendTelemetryOnlyProviderSnapshots(ctx, db, merged)
+	links := normalizeProviderLinks(options.ProviderLinks)
+	merged, err = annotateUnmappedTelemetryProviders(ctx, db, merged, links)
 	if err != nil {
 		return snaps, err
 	}
-	return applyProviderTelemetryOverlayWithDB(ctx, db, merged)
+	return applyCanonicalUsageViewWithDB(ctx, db, merged, links)
 }
 
 func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
@@ -170,70 +187,6 @@ func loadLatestLimitSnapshot(ctx context.Context, db *sql.DB, providerID, accoun
 	return &s, nil
 }
 
-func loadLatestLimitSnapshotAnyAccount(ctx context.Context, db *sql.DB, providerID string) (*core.UsageSnapshot, error) {
-	var (
-		payload    string
-		occurredAt string
-	)
-	err := db.QueryRowContext(ctx, `
-		SELECT r.source_payload, e.occurred_at
-		FROM usage_events e
-		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
-		WHERE e.event_type = 'limit_snapshot'
-		  AND e.provider_id = ?
-		  AND r.source_system = ?
-		ORDER BY e.occurred_at DESC
-		LIMIT 1
-	`, providerID, string(SourceSystemPoller)).Scan(&payload, &occurredAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load latest limit snapshot (%s): %w", providerID, err)
-	}
-
-	var envelope storedLimitEnvelope
-	if unmarshalErr := json.Unmarshal([]byte(payload), &envelope); unmarshalErr != nil {
-		return nil, nil
-	}
-
-	s := core.UsageSnapshot{
-		ProviderID:  firstNonEmptyNonBlank(envelope.Snapshot.ProviderID, providerID),
-		AccountID:   strings.TrimSpace(envelope.Snapshot.AccountID),
-		Status:      mapCoreStatus(envelope.Snapshot.Status),
-		Message:     strings.TrimSpace(envelope.Snapshot.Message),
-		Metrics:     make(map[string]core.Metric, len(envelope.Snapshot.Metrics)),
-		Resets:      make(map[string]time.Time, len(envelope.Snapshot.Resets)),
-		Attributes:  mapClone(envelope.Snapshot.Attributes),
-		Diagnostics: mapClone(envelope.Snapshot.Diagnostics),
-	}
-
-	for key, metric := range envelope.Snapshot.Metrics {
-		s.Metrics[key] = core.Metric{
-			Limit:     metric.Limit,
-			Remaining: metric.Remaining,
-			Used:      metric.Used,
-			Unit:      strings.TrimSpace(metric.Unit),
-			Window:    strings.TrimSpace(metric.Window),
-		}
-	}
-	for key, raw := range envelope.Snapshot.Resets {
-		ts, err := parseFlexibleTime(raw)
-		if err != nil {
-			continue
-		}
-		s.Resets[key] = ts
-	}
-
-	if ts, err := parseFlexibleTime(occurredAt); err == nil {
-		s.Timestamp = ts
-	} else {
-		s.Timestamp = time.Now().UTC()
-	}
-	s.SetAttribute("telemetry_root", "limit_snapshot")
-	return &s, nil
-}
-
 func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) core.UsageSnapshot {
 	merged := base
 	merged.ProviderID = firstNonEmptyNonBlank(root.ProviderID, merged.ProviderID)
@@ -258,87 +211,81 @@ func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) co
 	return merged
 }
 
-func appendTelemetryOnlyProviderSnapshots(
+func annotateUnmappedTelemetryProviders(
 	ctx context.Context,
 	db *sql.DB,
 	snaps map[string]core.UsageSnapshot,
+	providerLinks map[string]string,
 ) (map[string]core.UsageSnapshot, error) {
 	if db == nil {
 		return snaps, nil
 	}
 
 	out := make(map[string]core.UsageSnapshot, len(snaps))
-	providerSeen := make(map[string]bool, len(snaps))
+	configuredProviders := make(map[string]bool, len(snaps))
 	for accountID, snap := range snaps {
-		out[accountID] = snap
-		provider := strings.TrimSpace(snap.ProviderID)
+		s := snap
+		s.EnsureMaps()
+		delete(s.Diagnostics, "telemetry_unmapped_providers")
+		delete(s.Diagnostics, "telemetry_provider_link_hint")
+		out[accountID] = s
+
+		provider := strings.ToLower(strings.TrimSpace(s.ProviderID))
 		if provider != "" {
-			providerSeen[provider] = true
+			configuredProviders[provider] = true
 		}
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT provider_id, COALESCE(MAX(occurred_at), '')
+		SELECT provider_id
 		FROM usage_events
 		WHERE COALESCE(TRIM(provider_id), '') != ''
-		  AND event_type IN ('message_usage', 'tool_usage', 'limit_snapshot')
+		  AND event_type IN ('message_usage', 'tool_usage')
 		GROUP BY provider_id
 		ORDER BY provider_id ASC
 	`)
 	if err != nil {
-		return snaps, fmt.Errorf("list telemetry providers: %w", err)
+		return snaps, fmt.Errorf("list telemetry providers for mapping: %w", err)
 	}
 	defer rows.Close()
 
+	unmapped := make([]string, 0)
 	for rows.Next() {
-		var (
-			providerID string
-			lastAtRaw  string
-		)
-		if err := rows.Scan(&providerID, &lastAtRaw); err != nil {
+		var providerID string
+		if err := rows.Scan(&providerID); err != nil {
 			continue
 		}
-		providerID = strings.TrimSpace(providerID)
-		if providerID == "" || providerSeen[providerID] {
+		providerID = strings.ToLower(strings.TrimSpace(providerID))
+		if providerID == "" {
 			continue
 		}
-
-		snapKey := "telemetry:" + providerID
-		synthetic := core.UsageSnapshot{
-			ProviderID: providerID,
-			AccountID:  snapKey,
-			Timestamp:  time.Now().UTC(),
-			Status:     core.StatusOK,
-			Metrics:    map[string]core.Metric{},
-			Resets:     map[string]time.Time{},
-			Attributes: map[string]string{
-				"telemetry_only": "true",
-			},
-			Diagnostics: map[string]string{},
-			Raw:         map[string]string{},
-			Message:     "Telemetry-only provider (no local provider configured)",
+		if configuredProviders[providerID] {
+			continue
 		}
-		if ts, err := parseFlexibleTime(lastAtRaw); err == nil {
-			synthetic.Timestamp = ts
-			synthetic.SetAttribute("telemetry_last_event_at", ts.Format(time.RFC3339Nano))
+		if mappedTarget := providerLinks[providerID]; mappedTarget != "" {
+			if configuredProviders[mappedTarget] {
+				continue
+			}
+			unmapped = append(unmapped, providerID+"->"+mappedTarget)
+			continue
 		}
-
-		limitSnap, limitErr := loadLatestLimitSnapshotAnyAccount(ctx, db, providerID)
-		if limitErr != nil {
-			return snaps, limitErr
-		}
-		if limitSnap != nil {
-			synthetic = mergeLimitSnapshotRoot(synthetic, *limitSnap)
-			synthetic.AccountID = snapKey
-			synthetic.SetAttribute("telemetry_only", "true")
-		}
-
-		out[snapKey] = synthetic
-		providerSeen[providerID] = true
+		unmapped = append(unmapped, providerID)
 	}
 
 	if rowsErr := rows.Err(); rowsErr != nil {
-		return snaps, fmt.Errorf("scan telemetry providers: %w", rowsErr)
+		return snaps, fmt.Errorf("scan telemetry provider mappings: %w", rowsErr)
+	}
+	if len(unmapped) == 0 {
+		return out, nil
+	}
+
+	unmappedCSV := strings.Join(unmapped, ",")
+	for accountID, snap := range out {
+		s := snap
+		s.EnsureMaps()
+		s.SetDiagnostic("telemetry_unmapped_providers", unmappedCSV)
+		s.SetDiagnostic("telemetry_provider_link_hint", "Configure telemetry.provider_links.<source_provider>=<configured_provider_id> in settings.json")
+		out[accountID] = s
 	}
 	return out, nil
 }

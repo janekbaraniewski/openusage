@@ -30,6 +30,10 @@ func OpenStore(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: opening DB: %w", err)
 	}
+	if err := configureSQLiteConnection(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("telemetry: configure sqlite: %w", err)
+	}
 
 	store := NewStore(db)
 	if err := store.Init(context.Background()); err != nil {
@@ -250,60 +254,244 @@ func findEventIDByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string) (st
 	return eventID, nil
 }
 
-// enrichEventByDedupKey fills missing canonical fields from a duplicate event.
+type storedCanonicalEvent struct {
+	EventID        string
+	SourceChannel  string
+	ProviderID     sql.NullString
+	AccountID      sql.NullString
+	WorkspaceID    sql.NullString
+	SessionID      sql.NullString
+	TurnID         sql.NullString
+	MessageID      sql.NullString
+	ToolCallID     sql.NullString
+	ModelRaw       sql.NullString
+	ModelCanonical sql.NullString
+	ModelLineageID sql.NullString
+	InputTokens    sql.NullInt64
+	OutputTokens   sql.NullInt64
+	Reasoning      sql.NullInt64
+	CacheRead      sql.NullInt64
+	CacheWrite     sql.NullInt64
+	TotalTokens    sql.NullInt64
+	CostUSD        sql.NullFloat64
+	Requests       sql.NullInt64
+	ToolName       sql.NullString
+	Status         string
+}
+
+func loadCanonicalEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string) (storedCanonicalEvent, error) {
+	var row storedCanonicalEvent
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			e.event_id,
+			e.provider_id,
+			e.account_id,
+			e.workspace_id,
+			e.session_id,
+			e.turn_id,
+			e.message_id,
+			e.tool_call_id,
+			e.model_raw,
+			e.model_canonical,
+			e.model_lineage_id,
+			e.input_tokens,
+			e.output_tokens,
+			e.reasoning_tokens,
+			e.cache_read_tokens,
+			e.cache_write_tokens,
+			e.total_tokens,
+			e.cost_usd,
+			e.requests,
+			e.tool_name,
+			e.status,
+			COALESCE(r.source_channel, '')
+		FROM usage_events e
+		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+		WHERE e.dedup_key = ?
+		LIMIT 1
+	`, dedupKey).Scan(
+		&row.EventID,
+		&row.ProviderID,
+		&row.AccountID,
+		&row.WorkspaceID,
+		&row.SessionID,
+		&row.TurnID,
+		&row.MessageID,
+		&row.ToolCallID,
+		&row.ModelRaw,
+		&row.ModelCanonical,
+		&row.ModelLineageID,
+		&row.InputTokens,
+		&row.OutputTokens,
+		&row.Reasoning,
+		&row.CacheRead,
+		&row.CacheWrite,
+		&row.TotalTokens,
+		&row.CostUSD,
+		&row.Requests,
+		&row.ToolName,
+		&row.Status,
+		&row.SourceChannel,
+	)
+	return row, err
+}
+
+// enrichEventByDedupKey merges duplicate canonical fields with source priority.
+// Hook payloads take precedence over file/sqlite events when both provide values.
 func enrichEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string, norm IngestRequest) error {
-	_, err := tx.ExecContext(ctx, `
+	current, err := loadCanonicalEventByDedupKey(ctx, tx, dedupKey)
+	if err != nil {
+		return err
+	}
+
+	override := sourceChannelPriority(norm.SourceChannel) > sourceChannelPriority(SourceChannel(current.SourceChannel))
+
+	providerID := chooseString(current.ProviderID, norm.ProviderID, override)
+	accountID := chooseString(current.AccountID, norm.AccountID, override)
+	workspaceID := chooseString(current.WorkspaceID, norm.WorkspaceID, override)
+	sessionID := chooseString(current.SessionID, norm.SessionID, override)
+	turnID := chooseString(current.TurnID, norm.TurnID, override)
+	messageID := chooseString(current.MessageID, norm.MessageID, override)
+	toolCallID := chooseString(current.ToolCallID, norm.ToolCallID, override)
+	modelRaw := chooseString(current.ModelRaw, norm.ModelRaw, override)
+	modelCanonical := chooseString(current.ModelCanonical, norm.ModelCanonical, override)
+	modelLineage := chooseString(current.ModelLineageID, norm.ModelLineageID, override)
+	toolName := chooseString(current.ToolName, norm.ToolName, override)
+
+	inputTokens := chooseInt64(current.InputTokens, norm.InputTokens, override)
+	outputTokens := chooseInt64(current.OutputTokens, norm.OutputTokens, override)
+	reasoningTokens := chooseInt64(current.Reasoning, norm.ReasoningTokens, override)
+	cacheReadTokens := chooseInt64(current.CacheRead, norm.CacheReadTokens, override)
+	cacheWriteTokens := chooseInt64(current.CacheWrite, norm.CacheWriteTokens, override)
+	totalTokens := chooseInt64(current.TotalTokens, norm.TotalTokens, override)
+	costUSD := chooseFloat64(current.CostUSD, norm.CostUSD, override)
+	requests := chooseInt64(current.Requests, norm.Requests, override)
+	status := chooseStatus(current.Status, norm.Status, override)
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE usage_events
 		SET
-			provider_id = COALESCE(provider_id, ?),
-			account_id = COALESCE(account_id, ?),
-			workspace_id = COALESCE(workspace_id, ?),
-			session_id = COALESCE(session_id, ?),
-			turn_id = COALESCE(turn_id, ?),
-			message_id = COALESCE(message_id, ?),
-			tool_call_id = COALESCE(tool_call_id, ?),
-			model_raw = COALESCE(model_raw, ?),
-			model_canonical = COALESCE(model_canonical, ?),
-			model_lineage_id = COALESCE(model_lineage_id, ?),
-			input_tokens = COALESCE(input_tokens, ?),
-			output_tokens = COALESCE(output_tokens, ?),
-			reasoning_tokens = COALESCE(reasoning_tokens, ?),
-			cache_read_tokens = COALESCE(cache_read_tokens, ?),
-			cache_write_tokens = COALESCE(cache_write_tokens, ?),
-			total_tokens = COALESCE(total_tokens, ?),
-			cost_usd = COALESCE(cost_usd, ?),
-			requests = COALESCE(requests, ?),
-			tool_name = COALESCE(tool_name, ?),
-			status = CASE
-				WHEN status IN ('unknown', '') AND ? <> '' THEN ?
-				ELSE status
-			END
-		WHERE dedup_key = ?
+			provider_id = ?,
+			account_id = ?,
+			workspace_id = ?,
+			session_id = ?,
+			turn_id = ?,
+			message_id = ?,
+			tool_call_id = ?,
+			model_raw = ?,
+			model_canonical = ?,
+			model_lineage_id = ?,
+			input_tokens = ?,
+			output_tokens = ?,
+			reasoning_tokens = ?,
+			cache_read_tokens = ?,
+			cache_write_tokens = ?,
+			total_tokens = ?,
+			cost_usd = ?,
+			requests = ?,
+			tool_name = ?,
+			status = ?
+		WHERE event_id = ?
 	`,
-		nullable(norm.ProviderID),
-		nullable(norm.AccountID),
-		nullable(norm.WorkspaceID),
-		nullable(norm.SessionID),
-		nullable(norm.TurnID),
-		nullable(norm.MessageID),
-		nullable(norm.ToolCallID),
-		nullable(norm.ModelRaw),
-		nullable(norm.ModelCanonical),
-		nullable(norm.ModelLineageID),
-		nullableInt64(norm.InputTokens),
-		nullableInt64(norm.OutputTokens),
-		nullableInt64(norm.ReasoningTokens),
-		nullableInt64(norm.CacheReadTokens),
-		nullableInt64(norm.CacheWriteTokens),
-		nullableInt64(norm.TotalTokens),
-		nullableFloat64(norm.CostUSD),
-		nullableInt64(norm.Requests),
-		nullable(norm.ToolName),
-		string(norm.Status),
-		string(norm.Status),
-		dedupKey,
+		nullable(providerID),
+		nullable(accountID),
+		nullable(workspaceID),
+		nullable(sessionID),
+		nullable(turnID),
+		nullable(messageID),
+		nullable(toolCallID),
+		nullable(modelRaw),
+		nullable(modelCanonical),
+		nullable(modelLineage),
+		nullableInt64(inputTokens),
+		nullableInt64(outputTokens),
+		nullableInt64(reasoningTokens),
+		nullableInt64(cacheReadTokens),
+		nullableInt64(cacheWriteTokens),
+		nullableInt64(totalTokens),
+		nullableFloat64(costUSD),
+		nullableInt64(requests),
+		nullable(toolName),
+		string(status),
+		current.EventID,
 	)
 	return err
+}
+
+func sourceChannelPriority(channel SourceChannel) int {
+	switch channel {
+	case SourceChannelHook:
+		return 4
+	case SourceChannelSSE:
+		return 3
+	case SourceChannelSQLite, SourceChannelJSONL:
+		return 2
+	case SourceChannelAPI:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func chooseString(current sql.NullString, incoming string, override bool) string {
+	trimmedIncoming := strings.TrimSpace(incoming)
+	if !current.Valid || strings.TrimSpace(current.String) == "" {
+		return trimmedIncoming
+	}
+	if override && trimmedIncoming != "" {
+		return trimmedIncoming
+	}
+	return strings.TrimSpace(current.String)
+}
+
+func chooseInt64(current sql.NullInt64, incoming *int64, override bool) *int64 {
+	if !current.Valid {
+		if incoming == nil {
+			return nil
+		}
+		v := *incoming
+		return &v
+	}
+	if override && incoming != nil {
+		v := *incoming
+		return &v
+	}
+	v := current.Int64
+	return &v
+}
+
+func chooseFloat64(current sql.NullFloat64, incoming *float64, override bool) *float64 {
+	if !current.Valid {
+		if incoming == nil {
+			return nil
+		}
+		v := *incoming
+		return &v
+	}
+	if override && incoming != nil {
+		v := *incoming
+		return &v
+	}
+	v := current.Float64
+	return &v
+}
+
+func chooseStatus(current string, incoming EventStatus, override bool) EventStatus {
+	currentStatus := EventStatus(strings.TrimSpace(current))
+	incomingStatus := EventStatus(strings.TrimSpace(string(incoming)))
+
+	if currentStatus == "" || currentStatus == EventStatusUnknown {
+		if incomingStatus != "" {
+			return incomingStatus
+		}
+		return EventStatusUnknown
+	}
+
+	if override && incomingStatus != "" && incomingStatus != EventStatusUnknown {
+		return incomingStatus
+	}
+
+	return currentStatus
 }
 
 func isUniqueConstraintError(err error, target string) bool {

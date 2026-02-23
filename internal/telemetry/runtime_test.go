@@ -37,7 +37,7 @@ func TestAutoCollector_CollectAndFlush(t *testing.T) {
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    time.Date(2026, 2, 22, 12, 0, 0, 0, time.UTC),
 		ProviderID:    "openrouter",
-		AccountID:     "zen",
+		AccountID:     "opencode",
 		AgentName:     "opencode",
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-1",

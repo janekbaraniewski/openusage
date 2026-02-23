@@ -192,6 +192,8 @@ func printTelemetryUsage() {
 	fmt.Println("  openusage telemetry collect --opencode-events-file /tmp/opencode-events.jsonl")
 	fmt.Println("  openusage telemetry collect --opencode-db ~/.local/share/opencode/opencode.db")
 	fmt.Println("  openusage telemetry hook opencode < /tmp/opencode-hook-event.json")
+	fmt.Println("  openusage telemetry hook codex < /tmp/codex-notify-payload.json")
+	fmt.Println("  openusage telemetry hook claude_code < /tmp/claude-hook-payload.json")
 }
 
 func runTelemetryHook(args []string) error {
@@ -221,7 +223,7 @@ func runTelemetryHookSource(sourceName string, args []string) error {
 
 	dbPath := fs.String("db-path", defaultDBPath, "path to telemetry sqlite database")
 	spoolDir := fs.String("spool-dir", defaultSpoolDir, "path to telemetry spool directory")
-	accountID := fs.String("account-id", "zen", "logical account id to stamp on ingested opencode events")
+	accountID := fs.String("account-id", "", "optional logical account id override for ingested hook events")
 	spoolOnly := fs.Bool("spool-only", false, "append to spool but do not flush to sqlite")
 	verbose := fs.Bool("verbose", false, "print detailed ingest summary")
 
@@ -237,15 +239,18 @@ func runTelemetryHookSource(sourceName string, args []string) error {
 		return fmt.Errorf("stdin payload is empty")
 	}
 
+	opts := shared.TelemetryCollectOptions{
+		Paths: map[string]string{},
+	}
+	if strings.TrimSpace(*accountID) != "" {
+		opts.Paths["account_id"] = strings.TrimSpace(*accountID)
+	}
+
 	reqs, err := telemetry.ParseSourceHookPayload(
 		source,
 		payload,
-		shared.TelemetryCollectOptions{
-			Paths: map[string]string{
-				"account_id": *accountID,
-			},
-		},
-		*accountID,
+		opts,
+		strings.TrimSpace(*accountID),
 	)
 	if err != nil {
 		return fmt.Errorf("parse %s hook payload: %w", sourceName, err)

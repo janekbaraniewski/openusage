@@ -14,7 +14,7 @@ func mapProviderEvent(sourceSystem string, ev shared.TelemetryEvent, accountOver
 		MessageID:           ev.MessageID,
 		ToolCallID:          ev.ToolCallID,
 		ProviderID:          ev.ProviderID,
-		AccountID:           firstNonEmptyNonBlank(accountOverride, ev.AccountID),
+		AccountID:           firstNonEmptyNonBlank(accountOverride, ev.AccountID, ev.ProviderID, sourceSystem),
 		AgentName:           firstNonEmptyNonBlank(ev.AgentName, sourceSystem),
 		EventType:           mapProviderEventType(ev.EventType),
 		ModelRaw:            ev.ModelRaw,

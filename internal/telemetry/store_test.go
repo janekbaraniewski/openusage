@@ -131,7 +131,7 @@ func TestStoreIngest_DedupEnrichesMissingFields(t *testing.T) {
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    time.Date(2026, time.February, 22, 13, 0, 0, 0, time.UTC),
 		ProviderID:    "openrouter",
-		AccountID:     "zen",
+		AccountID:     "opencode",
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
@@ -152,7 +152,7 @@ func TestStoreIngest_DedupEnrichesMissingFields(t *testing.T) {
 		SourceChannel: SourceChannelJSONL,
 		OccurredAt:    time.Date(2026, time.February, 22, 13, 0, 1, 0, time.UTC),
 		ProviderID:    "openrouter",
-		AccountID:     "zen",
+		AccountID:     "opencode",
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
@@ -191,5 +191,149 @@ func TestStoreIngest_DedupEnrichesMissingFields(t *testing.T) {
 	}
 	if !totalTokens.Valid || totalTokens.Int64 != 160 {
 		t.Fatalf("total_tokens = %#v, want 160", totalTokens)
+	}
+}
+
+func TestStoreIngest_DedupHookOverridesLowerPriorityAttribution(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	firstIn := int64(120)
+	firstOut := int64(40)
+	firstTotal := int64(160)
+	firstReq := IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelSQLite,
+		OccurredAt:    time.Date(2026, time.February, 22, 13, 0, 0, 0, time.UTC),
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		EventType:     EventTypeMessageUsage,
+		ModelRaw:      "anthropic/claude-sonnet-4.5",
+		InputTokens:   &firstIn,
+		OutputTokens:  &firstOut,
+		TotalTokens:   &firstTotal,
+	}
+	if _, err := store.Ingest(context.Background(), firstReq); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+
+	secondIn := int64(100)
+	secondOut := int64(30)
+	secondTotal := int64(130)
+	secondReq := IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    time.Date(2026, time.February, 22, 13, 0, 1, 0, time.UTC),
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		EventType:     EventTypeMessageUsage,
+		ModelRaw:      "qwen/qwen3-coder-flash",
+		InputTokens:   &secondIn,
+		OutputTokens:  &secondOut,
+		TotalTokens:   &secondTotal,
+	}
+	second, err := store.Ingest(context.Background(), secondReq)
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if !second.Deduped {
+		t.Fatalf("second ingest should be deduped")
+	}
+
+	var (
+		modelRaw    sql.NullString
+		inputTokens sql.NullInt64
+		totalTokens sql.NullInt64
+	)
+	if err := db.QueryRow(
+		`SELECT model_raw, input_tokens, total_tokens FROM usage_events WHERE dedup_key = ?`,
+		BuildDedupKey(firstReq),
+	).Scan(&modelRaw, &inputTokens, &totalTokens); err != nil {
+		t.Fatalf("query canonical row: %v", err)
+	}
+	if !modelRaw.Valid || modelRaw.String != "qwen/qwen3-coder-flash" {
+		t.Fatalf("model_raw = %#v, want qwen/qwen3-coder-flash", modelRaw)
+	}
+	if !inputTokens.Valid || inputTokens.Int64 != 100 {
+		t.Fatalf("input_tokens = %#v, want 100", inputTokens)
+	}
+	if !totalTokens.Valid || totalTokens.Int64 != 130 {
+		t.Fatalf("total_tokens = %#v, want 130", totalTokens)
+	}
+}
+
+func TestStoreIngest_DedupStableIDIgnoresAccountProviderAgentDrift(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	in := int64(100)
+	out := int64(50)
+	total := int64(150)
+	firstReq := IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelSQLite,
+		OccurredAt:    time.Date(2026, time.February, 22, 13, 0, 0, 0, time.UTC),
+		ProviderID:    "openrouter",
+		AccountID:     "zen",
+		AgentName:     "build",
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		EventType:     EventTypeMessageUsage,
+		InputTokens:   &in,
+		OutputTokens:  &out,
+		TotalTokens:   &total,
+	}
+	first, err := store.Ingest(context.Background(), firstReq)
+	if err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	if first.Deduped {
+		t.Fatalf("first ingest unexpectedly deduped")
+	}
+
+	secondReq := firstReq
+	secondReq.SourceChannel = SourceChannelHook
+	secondReq.ProviderID = "anthropic"
+	secondReq.AccountID = "openrouter"
+	secondReq.AgentName = "opencode"
+	secondReq.ModelRaw = "qwen/qwen3-coder-flash"
+
+	second, err := store.Ingest(context.Background(), secondReq)
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if !second.Deduped {
+		t.Fatalf("second ingest should be deduped")
+	}
+	if second.EventID != first.EventID {
+		t.Fatalf("deduped event id = %s, want %s", second.EventID, first.EventID)
+	}
+
+	var canonicalCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_events`).Scan(&canonicalCount); err != nil {
+		t.Fatalf("count canonical rows: %v", err)
+	}
+	if canonicalCount != 1 {
+		t.Fatalf("canonical row count = %d, want 1", canonicalCount)
 	}
 }

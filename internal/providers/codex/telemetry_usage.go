@@ -40,13 +40,9 @@ type telemetryEventPayload struct {
 	MessageID string              `json:"message_id,omitempty"`
 }
 
-type telemetrySource struct{}
+func (p *Provider) System() string { return p.ID() }
 
-func NewTelemetrySource() shared.TelemetrySource { return telemetrySource{} }
-
-func (telemetrySource) System() string { return "codex" }
-
-func (telemetrySource) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
+func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	sessionsDir := shared.ExpandHome(opts.Path("sessions_dir", DefaultTelemetrySessionsDir()))
 	files := shared.CollectFilesByExt([]string{sessionsDir}, map[string]bool{".jsonl": true})
 	if len(files) == 0 {
@@ -67,8 +63,8 @@ func (telemetrySource) Collect(ctx context.Context, opts shared.TelemetryCollect
 	return out, nil
 }
 
-func (telemetrySource) ParseHookPayload(_ []byte, _ shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
-	return nil, shared.ErrHookUnsupported
+func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
+	return ParseTelemetryNotifyPayload(raw, opts)
 }
 
 // DefaultTelemetrySessionsDir returns the default Codex sessions directory.
@@ -189,4 +185,291 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 		return out, err
 	}
 	return out, nil
+}
+
+// ParseTelemetryNotifyPayload parses Codex notify hook payloads.
+func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var root map[string]any
+	if err := decoder.Decode(&root); err != nil {
+		return nil, fmt.Errorf("decode codex notify payload: %w", err)
+	}
+
+	occurredAt := time.Now().UTC()
+	if ts := codexFirstPathNumber(root,
+		[]string{"timestamp"},
+		[]string{"occurred_at"},
+		[]string{"time"},
+	); ts != nil {
+		occurredAt = shared.UnixAuto(int64(*ts))
+	} else if rawTs := codexFirstPathString(root, []string{"timestamp"}, []string{"occurred_at"}, []string{"time"}); rawTs != "" {
+		if parsed, ok := shared.ParseFlexibleTimestamp(rawTs); ok {
+			occurredAt = shared.UnixAuto(parsed)
+		}
+	}
+
+	sessionID := codexFirstPathString(root,
+		[]string{"session_id"},
+		[]string{"sessionID"},
+		[]string{"session", "id"},
+	)
+	turnID := codexFirstPathString(root,
+		[]string{"turn_id"},
+		[]string{"turnID"},
+		[]string{"request_id"},
+		[]string{"requestID"},
+	)
+	messageID := codexFirstPathString(root,
+		[]string{"message_id"},
+		[]string{"messageID"},
+		[]string{"last_assistant_message", "id"},
+	)
+	providerID := shared.FirstNonEmpty(
+		codexFirstPathString(root, []string{"provider_id"}, []string{"providerID"}, []string{"provider"}),
+		"openai",
+	)
+	modelRaw := codexFirstPathString(root,
+		[]string{"model"},
+		[]string{"model_id"},
+		[]string{"modelID"},
+		[]string{"last_assistant_message", "model"},
+	)
+	workspaceID := shared.SanitizeWorkspace(codexFirstPathString(root,
+		[]string{"cwd"},
+		[]string{"workspace_id"},
+		[]string{"workspaceID"},
+	))
+	accountID := shared.FirstNonEmpty(
+		strings.TrimSpace(opts.Path("account_id", "")),
+		codexFirstPathString(root, []string{"account_id"}, []string{"accountID"}),
+		"codex",
+	)
+
+	usage := codexExtractHookUsage(root)
+	if codexHasHookUsage(usage) {
+		return []shared.TelemetryEvent{{
+			SchemaVersion:    "codex_notify_v1",
+			Channel:          shared.TelemetryChannelHook,
+			OccurredAt:       occurredAt,
+			AccountID:        accountID,
+			WorkspaceID:      workspaceID,
+			SessionID:        sessionID,
+			TurnID:           turnID,
+			MessageID:        messageID,
+			ProviderID:       providerID,
+			AgentName:        "codex",
+			EventType:        shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:         modelRaw,
+			InputTokens:      usage.InputTokens,
+			OutputTokens:     usage.OutputTokens,
+			ReasoningTokens:  usage.ReasoningTokens,
+			CacheReadTokens:  usage.CacheReadTokens,
+			CacheWriteTokens: usage.CacheWriteTokens,
+			TotalTokens:      usage.TotalTokens,
+			CostUSD:          usage.CostUSD,
+			Requests:         shared.Int64Ptr(1),
+			Status:           shared.TelemetryStatusOK,
+			Payload:          root,
+		}}, nil
+	}
+
+	eventStatus := shared.TelemetryStatusOK
+	switch strings.ToLower(strings.TrimSpace(codexFirstPathString(root, []string{"status"}, []string{"result"}, []string{"outcome"}))) {
+	case "error", "failed", "failure":
+		eventStatus = shared.TelemetryStatusError
+	case "aborted", "canceled", "cancelled":
+		eventStatus = shared.TelemetryStatusAborted
+	}
+
+	return []shared.TelemetryEvent{{
+		SchemaVersion: "codex_notify_v1",
+		Channel:       shared.TelemetryChannelHook,
+		OccurredAt:    occurredAt,
+		AccountID:     accountID,
+		WorkspaceID:   workspaceID,
+		SessionID:     sessionID,
+		TurnID:        turnID,
+		MessageID:     messageID,
+		ProviderID:    providerID,
+		AgentName:     "codex",
+		EventType:     shared.TelemetryEventTypeTurnCompleted,
+		ModelRaw:      modelRaw,
+		Requests:      shared.Int64Ptr(1),
+		Status:        eventStatus,
+		Payload:       root,
+	}}, nil
+}
+
+type codexHookUsage struct {
+	InputTokens      *int64
+	OutputTokens     *int64
+	ReasoningTokens  *int64
+	CacheReadTokens  *int64
+	CacheWriteTokens *int64
+	TotalTokens      *int64
+	CostUSD          *float64
+}
+
+func codexExtractHookUsage(root map[string]any) codexHookUsage {
+	input := codexFirstPathNumber(root,
+		[]string{"usage", "input_tokens"},
+		[]string{"usage", "inputTokens"},
+		[]string{"info", "total_token_usage", "input_tokens"},
+		[]string{"last_assistant_message", "usage", "input_tokens"},
+	)
+	output := codexFirstPathNumber(root,
+		[]string{"usage", "output_tokens"},
+		[]string{"usage", "outputTokens"},
+		[]string{"info", "total_token_usage", "output_tokens"},
+		[]string{"last_assistant_message", "usage", "output_tokens"},
+	)
+	reasoning := codexFirstPathNumber(root,
+		[]string{"usage", "reasoning_tokens"},
+		[]string{"usage", "reasoning_output_tokens"},
+		[]string{"info", "total_token_usage", "reasoning_output_tokens"},
+		[]string{"last_assistant_message", "usage", "reasoning_tokens"},
+	)
+	cacheRead := codexFirstPathNumber(root,
+		[]string{"usage", "cache_read_tokens"},
+		[]string{"usage", "cached_input_tokens"},
+		[]string{"info", "total_token_usage", "cached_input_tokens"},
+		[]string{"last_assistant_message", "usage", "cached_input_tokens"},
+	)
+	cacheWrite := codexFirstPathNumber(root,
+		[]string{"usage", "cache_write_tokens"},
+		[]string{"last_assistant_message", "usage", "cache_write_tokens"},
+	)
+	total := codexFirstPathNumber(root,
+		[]string{"usage", "total_tokens"},
+		[]string{"usage", "totalTokens"},
+		[]string{"info", "total_token_usage", "total_tokens"},
+		[]string{"last_assistant_message", "usage", "total_tokens"},
+	)
+	cost := codexFirstPathNumber(root,
+		[]string{"usage", "cost_usd"},
+		[]string{"usage", "costUSD"},
+		[]string{"cost_usd"},
+		[]string{"costUSD"},
+	)
+
+	out := codexHookUsage{
+		InputTokens:      codexNumberToInt64Ptr(input),
+		OutputTokens:     codexNumberToInt64Ptr(output),
+		ReasoningTokens:  codexNumberToInt64Ptr(reasoning),
+		CacheReadTokens:  codexNumberToInt64Ptr(cacheRead),
+		CacheWriteTokens: codexNumberToInt64Ptr(cacheWrite),
+		TotalTokens:      codexNumberToInt64Ptr(total),
+		CostUSD:          codexNumberToFloat64Ptr(cost),
+	}
+	if out.TotalTokens == nil {
+		var combined int64
+		hasAny := false
+		for _, part := range []*int64{out.InputTokens, out.OutputTokens, out.ReasoningTokens, out.CacheReadTokens, out.CacheWriteTokens} {
+			if part != nil {
+				combined += *part
+				hasAny = true
+			}
+		}
+		if hasAny {
+			out.TotalTokens = shared.Int64Ptr(combined)
+		}
+	}
+	return out
+}
+
+func codexHasHookUsage(u codexHookUsage) bool {
+	for _, field := range []*int64{u.InputTokens, u.OutputTokens, u.ReasoningTokens, u.CacheReadTokens, u.CacheWriteTokens, u.TotalTokens} {
+		if field != nil && *field > 0 {
+			return true
+		}
+	}
+	return u.CostUSD != nil && *u.CostUSD > 0
+}
+
+func codexFirstPathString(root map[string]any, paths ...[]string) string {
+	for _, path := range paths {
+		if value, ok := codexPathValue(root, path...); ok {
+			switch v := value.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					return trimmed
+				}
+			case json.Number:
+				if trimmed := strings.TrimSpace(v.String()); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func codexFirstPathNumber(root map[string]any, paths ...[]string) *float64 {
+	for _, path := range paths {
+		if value, ok := codexPathValue(root, path...); ok {
+			if parsed, ok := codexNumberFromAny(value); ok {
+				return &parsed
+			}
+		}
+	}
+	return nil
+}
+
+func codexPathValue(root map[string]any, path ...string) (any, bool) {
+	var current any = root
+	for _, segment := range path {
+		node, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := node[segment]
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func codexNumberFromAny(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case json.Number:
+		parsed, err := v.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := json.Number(strings.TrimSpace(v)).Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func codexNumberToInt64Ptr(v *float64) *int64 {
+	if v == nil {
+		return nil
+	}
+	return shared.Int64Ptr(int64(*v))
+}
+
+func codexNumberToFloat64Ptr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	return shared.Float64Ptr(*v)
 }

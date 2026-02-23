@@ -1287,10 +1287,10 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 		Message: "$193.74 credits remaining",
 	}
 
-	// zen
-	snaps["zen"] = core.UsageSnapshot{
-		ProviderID: "zen",
-		AccountID:  "zen",
+	// opencode
+	snaps["opencode"] = core.UsageSnapshot{
+		ProviderID: "opencode",
+		AccountID:  "opencode",
 		Timestamp:  now,
 		Status:     core.StatusOK,
 		Metrics: map[string]core.Metric{
@@ -1388,8 +1388,8 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 			"billing_probe_model":      "gpt-5.1-codex-mini",
 			"billing_probe_request_id": "req_demo_paid_02",
 			"billing_probe_skipped":    "false",
-			"provider_docs":            "https://demo.example/docs/zen/",
-			"pricing_docs":             "https://demo.example/docs/zen/#pricing",
+			"provider_docs":            "https://demo.example/docs/opencode/",
+			"pricing_docs":             "https://demo.example/docs/opencode/#pricing",
 			"pricing_last_verified":    "2026-02-21",
 			"billing_model":            "prepaid_payg",
 			"billing_fee_policy":       "4.4% + $0.30 on card top-ups",

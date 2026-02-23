@@ -64,6 +64,46 @@ func TestBuildDedupKey_StableIDIgnoresModelDrift(t *testing.T) {
 	}
 }
 
+func TestBuildDedupKey_StableIDIgnoresProviderAccountAgentDrift(t *testing.T) {
+	one := IngestRequest{
+		SourceSystem: SourceSystem("opencode"),
+		OccurredAt:   time.Date(2026, time.February, 22, 13, 0, 0, 0, time.UTC),
+		SessionID:    "session-1",
+		MessageID:    "msg-1",
+		EventType:    EventTypeMessageUsage,
+		ProviderID:   "openrouter",
+		AccountID:    "zen",
+		AgentName:    "build",
+	}
+	two := one
+	two.ProviderID = "anthropic"
+	two.AccountID = "openrouter"
+	two.AgentName = "opencode"
+
+	if BuildDedupKey(one) != BuildDedupKey(two) {
+		t.Fatal("expected stable IDs to dominate dedup key despite provider/account/agent drift")
+	}
+}
+
+func TestBuildDedupKey_StableIDTrimsWhitespace(t *testing.T) {
+	one := IngestRequest{
+		SourceSystem: SourceSystem("opencode"),
+		SessionID:    "sess-1",
+		MessageID:    "msg-1",
+		EventType:    EventTypeMessageUsage,
+	}
+	two := IngestRequest{
+		SourceSystem: SourceSystem(" opencode "),
+		SessionID:    " sess-1 ",
+		MessageID:    " msg-1 ",
+		EventType:    EventType(" message_usage "),
+	}
+
+	if BuildDedupKey(one) != BuildDedupKey(two) {
+		t.Fatal("expected dedup key to ignore whitespace drift")
+	}
+}
+
 func TestBuildDedupKey_FallbackFingerprintIncludesTokenTuple(t *testing.T) {
 	now := time.Date(2026, time.February, 22, 13, 1, 0, 0, time.UTC)
 	inputA := int64(100)

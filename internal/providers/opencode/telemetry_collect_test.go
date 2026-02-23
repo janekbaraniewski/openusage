@@ -13,7 +13,7 @@ import (
 func TestParseTelemetryEventFile_ParsesMessageUpdatedAndToolEvent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
-	content := `{"type":"message.updated","properties":{"info":{"id":"msg-1","sessionID":"sess-1","role":"assistant","parentID":"turn-1","modelID":"gpt-5-codex","providerID":"zen","cost":0.012,"tokens":{"input":120,"output":40,"reasoning":5,"cache":{"read":10,"write":2}},"time":{"created":1771754400000,"completed":1771754405000},"path":{"cwd":"/tmp/work"}}}}
+	content := `{"type":"message.updated","properties":{"info":{"id":"msg-1","sessionID":"sess-1","role":"assistant","parentID":"turn-1","modelID":"gpt-5-codex","providerID":"opencode","cost":0.012,"tokens":{"input":120,"output":40,"reasoning":5,"cache":{"read":10,"write":2}},"time":{"created":1771754400000,"completed":1771754405000},"path":{"cwd":"/tmp/work"}}}}
 {"type":"tool.execute.after","payload":{"sessionID":"sess-1","messageID":"msg-1","toolCallID":"tool-1","toolName":"shell","timestamp":1771754406000}}
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

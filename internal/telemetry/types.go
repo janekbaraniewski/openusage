@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -121,6 +122,23 @@ func normalizeRequest(req IngestRequest, now time.Time) IngestRequest {
 		norm.OccurredAt = now
 	}
 	norm.OccurredAt = norm.OccurredAt.UTC()
+	norm.SourceSystem = SourceSystem(strings.TrimSpace(string(norm.SourceSystem)))
+	norm.SourceChannel = SourceChannel(strings.TrimSpace(string(norm.SourceChannel)))
+	norm.SourceSchemaVersion = strings.TrimSpace(norm.SourceSchemaVersion)
+	norm.WorkspaceID = strings.TrimSpace(norm.WorkspaceID)
+	norm.SessionID = strings.TrimSpace(norm.SessionID)
+	norm.TurnID = strings.TrimSpace(norm.TurnID)
+	norm.MessageID = strings.TrimSpace(norm.MessageID)
+	norm.ToolCallID = strings.TrimSpace(norm.ToolCallID)
+	norm.ProviderID = strings.ToLower(strings.TrimSpace(norm.ProviderID))
+	norm.AccountID = strings.TrimSpace(norm.AccountID)
+	norm.AgentName = strings.TrimSpace(norm.AgentName)
+	norm.EventType = EventType(strings.TrimSpace(string(norm.EventType)))
+	norm.ModelRaw = strings.TrimSpace(norm.ModelRaw)
+	norm.ModelCanonical = strings.TrimSpace(norm.ModelCanonical)
+	norm.ModelLineageID = strings.TrimSpace(norm.ModelLineageID)
+	norm.ToolName = strings.ToLower(strings.TrimSpace(norm.ToolName))
+	norm.Status = EventStatus(strings.TrimSpace(string(norm.Status)))
 
 	if norm.AgentName == "" {
 		norm.AgentName = string(norm.SourceSystem)

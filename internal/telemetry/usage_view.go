@@ -51,7 +51,7 @@ type telemetryDayPoint struct {
 	Tokens   float64
 }
 
-type telemetryOverlayAgg struct {
+type telemetryUsageAgg struct {
 	LastOccurred string
 	EventCount   int64
 	Scope        string
@@ -66,14 +66,23 @@ type telemetryOverlayAgg struct {
 	ClientTokens map[string][]core.TimePoint
 }
 
-type overlayFilter struct {
-	ProviderID string
-	AccountID  string
+type usageFilter struct {
+	ProviderIDs []string
+	AccountID   string
 }
 
-// ApplyProviderTelemetryOverlay merges deduplicated telemetry usage into snapshots.
+// ApplyCanonicalUsageView merges deduplicated canonical usage into snapshots.
 // Root quota/budget metrics remain untouched; analytics/distribution keys are refreshed from telemetry.
-func ApplyProviderTelemetryOverlay(ctx context.Context, dbPath string, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
+func ApplyCanonicalUsageView(ctx context.Context, dbPath string, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
+	return ApplyCanonicalUsageViewWithLinks(ctx, dbPath, snaps, nil)
+}
+
+func ApplyCanonicalUsageViewWithLinks(
+	ctx context.Context,
+	dbPath string,
+	snaps map[string]core.UsageSnapshot,
+	providerLinks map[string]string,
+) (map[string]core.UsageSnapshot, error) {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
 		var err error
@@ -88,20 +97,28 @@ func ApplyProviderTelemetryOverlay(ctx context.Context, dbPath string, snaps map
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return snaps, fmt.Errorf("open overlay db: %w", err)
+		return snaps, fmt.Errorf("open canonical usage db: %w", err)
 	}
 	defer db.Close()
+	if err := configureSQLiteConnection(db); err != nil {
+		return snaps, fmt.Errorf("configure canonical usage db: %w", err)
+	}
 
-	return applyProviderTelemetryOverlayWithDB(ctx, db, snaps)
+	return applyCanonicalUsageViewWithDB(ctx, db, snaps, normalizeProviderLinks(providerLinks))
 }
 
-func applyProviderTelemetryOverlayWithDB(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
+func applyCanonicalUsageViewWithDB(
+	ctx context.Context,
+	db *sql.DB,
+	snaps map[string]core.UsageSnapshot,
+	providerLinks map[string]string,
+) (map[string]core.UsageSnapshot, error) {
 	if db == nil {
 		return snaps, nil
 	}
 
 	out := make(map[string]core.UsageSnapshot, len(snaps))
-	cache := make(map[string]*telemetryOverlayAgg)
+	cache := make(map[string]*telemetryUsageAgg)
 
 	for accountID, snap := range snaps {
 		s := snap
@@ -111,11 +128,19 @@ func applyProviderTelemetryOverlayWithDB(ctx context.Context, db *sql.DB, snaps 
 			continue
 		}
 		accountScope := strings.TrimSpace(s.AccountID)
+		if accountScope == "" {
+			accountScope = strings.TrimSpace(accountID)
+		}
+		sourceProviders := telemetrySourceProvidersForTarget(providerID, providerLinks)
+		if len(sourceProviders) == 0 {
+			out[accountID] = s
+			continue
+		}
 
-		cacheKey := providerID + "|" + accountScope
+		cacheKey := strings.Join(sourceProviders, ",") + "|" + accountScope
 		agg, ok := cache[cacheKey]
 		if !ok {
-			loaded, loadErr := loadTelemetryOverlayForProvider(ctx, db, providerID, accountScope)
+			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, sourceProviders, accountScope)
 			if loadErr != nil {
 				return snaps, loadErr
 			}
@@ -127,14 +152,14 @@ func applyProviderTelemetryOverlayWithDB(ctx context.Context, db *sql.DB, snaps 
 			continue
 		}
 
-		applyOverlayToSnapshot(&s, agg)
+		applyUsageViewToSnapshot(&s, agg)
 		out[accountID] = s
 	}
 
 	return out, nil
 }
 
-func applyOverlayToSnapshot(snap *core.UsageSnapshot, agg *telemetryOverlayAgg) {
+func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) {
 	if snap == nil || agg == nil {
 		return
 	}
@@ -211,7 +236,8 @@ func applyOverlayToSnapshot(snap *core.UsageSnapshot, agg *telemetryOverlayAgg) 
 		snap.DailySeries["tokens_client_"+sanitizeMetricID(client)] = series
 	}
 
-	snap.SetAttribute("telemetry_overlay", "enabled")
+	snap.SetAttribute("telemetry_view", "canonical")
+	snap.SetAttribute("telemetry_source_of_truth", "canonical_usage_events")
 	snap.SetAttribute("telemetry_last_event_at", agg.LastOccurred)
 	if strings.TrimSpace(agg.Scope) != "" {
 		snap.SetAttribute("telemetry_scope", agg.Scope)
@@ -222,14 +248,21 @@ func applyOverlayToSnapshot(snap *core.UsageSnapshot, agg *telemetryOverlayAgg) 
 	snap.SetDiagnostic("telemetry_event_count", fmt.Sprintf("%d", agg.EventCount))
 }
 
-func loadTelemetryOverlayForProvider(ctx context.Context, db *sql.DB, providerID, accountID string) (*telemetryOverlayAgg, error) {
-	providerID = strings.TrimSpace(providerID)
+func loadUsageViewForProvider(ctx context.Context, db *sql.DB, providerID, accountID string) (*telemetryUsageAgg, error) {
+	return loadUsageViewForProviderWithSources(ctx, db, []string{providerID}, accountID)
+}
+
+func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string) (*telemetryUsageAgg, error) {
+	providerIDs = normalizeProviderIDs(providerIDs)
+	if len(providerIDs) == 0 {
+		return &telemetryUsageAgg{}, nil
+	}
 	accountID = strings.TrimSpace(accountID)
 
 	if accountID != "" {
-		scoped, err := loadTelemetryOverlayForFilter(ctx, db, overlayFilter{
-			ProviderID: providerID,
-			AccountID:  accountID,
+		scoped, err := loadUsageViewForFilter(ctx, db, usageFilter{
+			ProviderIDs: providerIDs,
+			AccountID:   accountID,
 		})
 		if err != nil {
 			return nil, err
@@ -241,8 +274,8 @@ func loadTelemetryOverlayForProvider(ctx context.Context, db *sql.DB, providerID
 		}
 	}
 
-	fallback, err := loadTelemetryOverlayForFilter(ctx, db, overlayFilter{
-		ProviderID: providerID,
+	fallback, err := loadUsageViewForFilter(ctx, db, usageFilter{
+		ProviderIDs: providerIDs,
 	})
 	if err != nil {
 		return nil, err
@@ -258,23 +291,23 @@ func loadTelemetryOverlayForProvider(ctx context.Context, db *sql.DB, providerID
 	return fallback, nil
 }
 
-func loadTelemetryOverlayForFilter(ctx context.Context, db *sql.DB, filter overlayFilter) (*telemetryOverlayAgg, error) {
-	agg := &telemetryOverlayAgg{
+func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter) (*telemetryUsageAgg, error) {
+	agg := &telemetryUsageAgg{
 		ModelDaily:   make(map[string][]core.TimePoint),
 		SourceDaily:  make(map[string][]core.TimePoint),
 		ClientDaily:  make(map[string][]core.TimePoint),
 		ClientTokens: make(map[string][]core.TimePoint),
 	}
 
-	where, whereArgs := usageWhereClause("", filter)
-	countQuery := fmt.Sprintf(`
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	countQuery := usageCTE + `
 		SELECT COALESCE(MAX(occurred_at), ''), COUNT(*)
-		FROM usage_events
-		WHERE %s
+		FROM deduped_usage
+		WHERE 1=1
 		  AND event_type IN ('message_usage', 'tool_usage')
-	`, where)
+	`
 	if err := db.QueryRowContext(ctx, countQuery, whereArgs...).Scan(&agg.LastOccurred, &agg.EventCount); err != nil {
-		return nil, fmt.Errorf("overlay count query: %w", err)
+		return nil, fmt.Errorf("canonical usage count query: %w", err)
 	}
 	if agg.EventCount == 0 {
 		return agg, nil
@@ -324,9 +357,9 @@ func loadTelemetryOverlayForFilter(ctx context.Context, db *sql.DB, filter overl
 	return agg, nil
 }
 
-func queryModelAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]telemetryModelAgg, error) {
-	where, whereArgs := usageWhereClause("", filter)
-	query := fmt.Sprintf(`
+func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryModelAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
 		SELECT
 			COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), 'unknown') AS model_key,
 			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
@@ -342,16 +375,16 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]tel
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
 			SUM(COALESCE(requests, 1)) AS requests,
 			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
-		FROM usage_events
-		WHERE %s
+		FROM deduped_usage
+		WHERE 1=1
 		  AND event_type = 'message_usage'
 		  AND status != 'error'
 		GROUP BY model_key
 		ORDER BY total_tokens DESC, requests DESC
-	`, where)
+	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay model query: %w", err)
+		return nil, fmt.Errorf("canonical usage model query: %w", err)
 	}
 	defer rows.Close()
 
@@ -376,35 +409,34 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]tel
 	return out, nil
 }
 
-func querySourceAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]telemetrySourceAgg, error) {
-	where, whereArgs := usageWhereClause("e", filter)
-	query := fmt.Sprintf(`
+func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetrySourceAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
 		SELECT
-			COALESCE(NULLIF(TRIM(r.source_system), ''), 'unknown') AS source_name,
-			SUM(COALESCE(e.requests, 1)) AS requests,
-			SUM(CASE WHEN date(e.occurred_at) = date('now') THEN COALESCE(e.requests, 1) ELSE 0 END) AS requests_today,
-			SUM(COALESCE(e.total_tokens,
-				COALESCE(e.input_tokens, 0) +
-				COALESCE(e.output_tokens, 0) +
-				COALESCE(e.reasoning_tokens, 0) +
-				COALESCE(e.cache_read_tokens, 0) +
-				COALESCE(e.cache_write_tokens, 0))) AS total_tokens,
-			SUM(COALESCE(e.input_tokens, 0)) AS input_tokens,
-			SUM(COALESCE(e.output_tokens, 0)) AS output_tokens,
-			SUM(COALESCE(e.cache_read_tokens, 0) + COALESCE(e.cache_write_tokens, 0)) AS cached_tokens,
-			SUM(COALESCE(e.reasoning_tokens, 0)) AS reasoning_tokens,
-			COUNT(DISTINCT COALESCE(NULLIF(TRIM(e.session_id), ''), 'unknown')) AS sessions
-		FROM usage_events e
-		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
-		WHERE %s
-		  AND e.event_type = 'message_usage'
-		  AND e.status != 'error'
+			COALESCE(NULLIF(TRIM(source_system), ''), 'unknown') AS source_name,
+			SUM(COALESCE(requests, 1)) AS requests,
+			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today,
+			SUM(COALESCE(total_tokens,
+				COALESCE(input_tokens, 0) +
+				COALESCE(output_tokens, 0) +
+				COALESCE(reasoning_tokens, 0) +
+				COALESCE(cache_read_tokens, 0) +
+				COALESCE(cache_write_tokens, 0))) AS total_tokens,
+			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+			SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+			SUM(COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)) AS cached_tokens,
+			SUM(COALESCE(reasoning_tokens, 0)) AS reasoning_tokens,
+			COUNT(DISTINCT COALESCE(NULLIF(TRIM(session_id), ''), 'unknown')) AS sessions
+		FROM deduped_usage
+		WHERE 1=1
+		  AND event_type = 'message_usage'
+		  AND status != 'error'
 		GROUP BY source_name
 		ORDER BY requests DESC
-	`, where)
+	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay source query: %w", err)
+		return nil, fmt.Errorf("canonical usage source query: %w", err)
 	}
 	defer rows.Close()
 
@@ -429,23 +461,23 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]te
 	return out, nil
 }
 
-func queryToolAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]telemetryToolAgg, error) {
-	where, whereArgs := usageWhereClause("", filter)
-	query := fmt.Sprintf(`
+func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryToolAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
 		SELECT
 			COALESCE(NULLIF(TRIM(LOWER(tool_name)), ''), 'unknown') AS tool_name,
 			SUM(COALESCE(requests, 1)) AS calls,
 			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS calls_today
-		FROM usage_events
-		WHERE %s
+		FROM deduped_usage
+		WHERE 1=1
 		  AND event_type = 'tool_usage'
 		  AND status != 'error'
 		GROUP BY tool_name
 		ORDER BY calls DESC
-	`, where)
+	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay tool query: %w", err)
+		return nil, fmt.Errorf("canonical usage tool query: %w", err)
 	}
 	defer rows.Close()
 
@@ -460,9 +492,9 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter overlayFilter) ([]tele
 	return out, nil
 }
 
-func queryDailyTotals(ctx context.Context, db *sql.DB, filter overlayFilter) ([]telemetryDayPoint, error) {
-	where, whereArgs := usageWhereClause("", filter)
-	query := fmt.Sprintf(`
+func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryDayPoint, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
 		SELECT
 			date(occurred_at) AS day,
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
@@ -473,17 +505,17 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter overlayFilter) ([]
 				COALESCE(reasoning_tokens, 0) +
 				COALESCE(cache_read_tokens, 0) +
 				COALESCE(cache_write_tokens, 0))) AS tokens
-		FROM usage_events
-		WHERE %s
+		FROM deduped_usage
+		WHERE 1=1
 		  AND event_type = 'message_usage'
 		  AND status != 'error'
 		  AND occurred_at >= datetime('now', '-30 day')
 		GROUP BY day
 		ORDER BY day ASC
-	`, where)
+	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay daily query: %w", err)
+		return nil, fmt.Errorf("canonical usage daily query: %w", err)
 	}
 	defer rows.Close()
 
@@ -498,43 +530,42 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter overlayFilter) ([]
 	return out, nil
 }
 
-func queryDailyByDimension(ctx context.Context, db *sql.DB, filter overlayFilter, dimension string) (map[string][]core.TimePoint, error) {
-	where, whereArgs := usageWhereClause("e", filter)
+func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, dimension string) (map[string][]core.TimePoint, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	var query string
 
 	switch dimension {
 	case "model":
-		query = fmt.Sprintf(`
-			SELECT date(e.occurred_at) AS day,
-			       COALESCE(NULLIF(TRIM(COALESCE(e.model_canonical, e.model_raw)), ''), 'unknown') AS dim_key,
-			       SUM(COALESCE(e.requests, 1)) AS value
-			FROM usage_events e
-			WHERE %s
-			  AND e.event_type = 'message_usage'
-			  AND e.status != 'error'
-			  AND e.occurred_at >= datetime('now', '-30 day')
+		query = usageCTE + `
+			SELECT date(occurred_at) AS day,
+			       COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), 'unknown') AS dim_key,
+			       SUM(COALESCE(requests, 1)) AS value
+			FROM deduped_usage
+			WHERE 1=1
+			  AND event_type = 'message_usage'
+			  AND status != 'error'
+			  AND occurred_at >= datetime('now', '-30 day')
 			GROUP BY day, dim_key
-		`, where)
+		`
 	case "source", "client":
-		query = fmt.Sprintf(`
-			SELECT date(e.occurred_at) AS day,
-			       COALESCE(NULLIF(TRIM(r.source_system), ''), 'unknown') AS dim_key,
-			       SUM(COALESCE(e.requests, 1)) AS value
-			FROM usage_events e
-			JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
-			WHERE %s
-			  AND e.event_type = 'message_usage'
-			  AND e.status != 'error'
-			  AND e.occurred_at >= datetime('now', '-30 day')
+		query = usageCTE + `
+			SELECT date(occurred_at) AS day,
+			       COALESCE(NULLIF(TRIM(source_system), ''), 'unknown') AS dim_key,
+			       SUM(COALESCE(requests, 1)) AS value
+			FROM deduped_usage
+			WHERE 1=1
+			  AND event_type = 'message_usage'
+			  AND status != 'error'
+			  AND occurred_at >= datetime('now', '-30 day')
 			GROUP BY day, dim_key
-		`, where)
+		`
 	default:
 		return map[string][]core.TimePoint{}, nil
 	}
 
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay daily dimension query (%s): %w", dimension, err)
+		return nil, fmt.Errorf("canonical usage daily dimension query (%s): %w", dimension, err)
 	}
 	defer rows.Close()
 
@@ -562,29 +593,28 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter overlayFilter
 	return out, nil
 }
 
-func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter overlayFilter) (map[string][]core.TimePoint, error) {
-	where, whereArgs := usageWhereClause("e", filter)
-	query := fmt.Sprintf(`
+func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter) (map[string][]core.TimePoint, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
 		SELECT
-			date(e.occurred_at) AS day,
-			COALESCE(NULLIF(TRIM(r.source_system), ''), 'unknown') AS source_name,
-			SUM(COALESCE(e.total_tokens,
-				COALESCE(e.input_tokens, 0) +
-				COALESCE(e.output_tokens, 0) +
-				COALESCE(e.reasoning_tokens, 0) +
-				COALESCE(e.cache_read_tokens, 0) +
-				COALESCE(e.cache_write_tokens, 0))) AS tokens
-		FROM usage_events e
-		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
-		WHERE %s
-		  AND e.event_type = 'message_usage'
-		  AND e.status != 'error'
-		  AND e.occurred_at >= datetime('now', '-30 day')
+			date(occurred_at) AS day,
+			COALESCE(NULLIF(TRIM(source_system), ''), 'unknown') AS source_name,
+			SUM(COALESCE(total_tokens,
+				COALESCE(input_tokens, 0) +
+				COALESCE(output_tokens, 0) +
+				COALESCE(reasoning_tokens, 0) +
+				COALESCE(cache_read_tokens, 0) +
+				COALESCE(cache_write_tokens, 0))) AS tokens
+		FROM deduped_usage
+		WHERE 1=1
+		  AND event_type = 'message_usage'
+		  AND status != 'error'
+		  AND occurred_at >= datetime('now', '-30 day')
 		GROUP BY day, source_name
-	`, where)
+	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("overlay daily client token query: %w", err)
+		return nil, fmt.Errorf("canonical usage daily client token query: %w", err)
 	}
 	defer rows.Close()
 
@@ -612,18 +642,103 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter overlayFilte
 	return out, nil
 }
 
-func usageWhereClause(alias string, filter overlayFilter) (string, []any) {
+func dedupedUsageCTE(filter usageFilter) (string, []any) {
+	where, args := usageWhereClause("e", filter)
+	cte := fmt.Sprintf(`
+		WITH scoped_usage AS (
+			SELECT
+				e.*,
+				COALESCE(r.source_system, '') AS source_system,
+				COALESCE(r.source_channel, '') AS source_channel
+			FROM usage_events e
+			JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+			WHERE %s
+		),
+		ranked_usage AS (
+			SELECT
+				scoped_usage.*,
+				CASE
+					WHEN COALESCE(NULLIF(TRIM(tool_call_id), ''), '') != '' THEN 'tool:' || LOWER(TRIM(tool_call_id))
+					WHEN COALESCE(NULLIF(TRIM(message_id), ''), '') != '' THEN 'message:' || LOWER(TRIM(message_id))
+					WHEN COALESCE(NULLIF(TRIM(turn_id), ''), '') != '' THEN 'turn:' || LOWER(TRIM(turn_id))
+					ELSE 'fallback:' || dedup_key
+				END AS logical_event_id,
+				CASE COALESCE(NULLIF(TRIM(source_channel), ''), '')
+					WHEN 'hook' THEN 4
+					WHEN 'sse' THEN 3
+					WHEN 'sqlite' THEN 2
+					WHEN 'jsonl' THEN 2
+					WHEN 'api' THEN 1
+					ELSE 0
+				END AS source_priority
+			FROM scoped_usage
+		),
+		deduped_usage AS (
+			SELECT *
+			FROM (
+				SELECT
+					ranked_usage.*,
+					ROW_NUMBER() OVER (
+						PARTITION BY
+							LOWER(TRIM(source_system)),
+							LOWER(TRIM(event_type)),
+							LOWER(TRIM(COALESCE(session_id, ''))),
+							logical_event_id
+						ORDER BY source_priority DESC, occurred_at DESC, event_id DESC
+					) AS rn
+				FROM ranked_usage
+			)
+			WHERE rn = 1
+		)
+		`, where)
+	return cte, args
+}
+
+func usageWhereClause(alias string, filter usageFilter) (string, []any) {
 	prefix := ""
 	if strings.TrimSpace(alias) != "" {
 		prefix = strings.TrimSpace(alias) + "."
 	}
-	where := prefix + "provider_id = ?"
-	args := []any{strings.TrimSpace(filter.ProviderID)}
+	providerIDs := normalizeProviderIDs(filter.ProviderIDs)
+	if len(providerIDs) == 0 {
+		return prefix + "provider_id = ''", nil
+	}
+	where := ""
+	args := make([]any, 0, len(providerIDs)+1)
+	if len(providerIDs) == 1 {
+		where = prefix + "provider_id = ?"
+		args = append(args, providerIDs[0])
+	} else {
+		placeholders := make([]string, 0, len(providerIDs))
+		for _, providerID := range providerIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, providerID)
+		}
+		where = prefix + "provider_id IN (" + strings.Join(placeholders, ",") + ")"
+	}
 	if strings.TrimSpace(filter.AccountID) != "" {
 		where += " AND COALESCE(" + prefix + "account_id, '') = ?"
 		args = append(args, strings.TrimSpace(filter.AccountID))
 	}
 	return where, args
+}
+
+func normalizeProviderIDs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, providerID := range in {
+		providerID = strings.ToLower(strings.TrimSpace(providerID))
+		if providerID == "" || seen[providerID] {
+			continue
+		}
+		seen[providerID] = true
+		out = append(out, providerID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float64) []core.TimePoint {

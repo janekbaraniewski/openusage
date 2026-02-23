@@ -44,3 +44,60 @@ func TestParseTelemetrySessionFile_CollectsTokenDeltas(t *testing.T) {
 		t.Fatalf("model_raw = %q, want gpt-5-codex", events[1].ModelRaw)
 	}
 }
+
+func TestParseTelemetryNotifyPayload_ParsesUsagePayload(t *testing.T) {
+	payload := []byte(`{
+		"type":"agent-turn-complete",
+		"timestamp":"2026-02-22T10:00:00Z",
+		"session_id":"sess-1",
+		"turn_id":"turn-1",
+		"message_id":"msg-1",
+		"model":"gpt-5-codex",
+		"provider":"openai",
+		"usage":{"input_tokens":120,"output_tokens":40,"reasoning_output_tokens":5,"cached_input_tokens":10,"total_tokens":175}
+	}`)
+
+	events, err := ParseTelemetryNotifyPayload(payload, shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("parse notify payload: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.EventType != shared.TelemetryEventTypeMessageUsage {
+		t.Fatalf("event_type = %q, want message_usage", ev.EventType)
+	}
+	if ev.ProviderID != "openai" {
+		t.Fatalf("provider_id = %q, want openai", ev.ProviderID)
+	}
+	if ev.ModelRaw != "gpt-5-codex" {
+		t.Fatalf("model_raw = %q, want gpt-5-codex", ev.ModelRaw)
+	}
+	if ev.TotalTokens == nil || *ev.TotalTokens != 175 {
+		t.Fatalf("total_tokens = %+v, want 175", ev.TotalTokens)
+	}
+}
+
+func TestParseTelemetryNotifyPayload_FallsBackToTurnCompleted(t *testing.T) {
+	payload := []byte(`{
+		"type":"agent-turn-complete",
+		"timestamp":"2026-02-22T10:00:00Z",
+		"session_id":"sess-1",
+		"turn_id":"turn-1",
+		"message_id":"msg-1",
+		"model":"gpt-5-codex"
+	}`)
+
+	events, err := ParseTelemetryNotifyPayload(payload, shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("parse notify payload: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].EventType != shared.TelemetryEventTypeTurnCompleted {
+		t.Fatalf("event_type = %q, want turn_completed", events[0].EventType)
+	}
+}
