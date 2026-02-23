@@ -890,6 +890,8 @@ func buildTileMetaLines(snap core.UsageSnapshot, innerW int) []string {
 		label, key string
 	}
 	order := []metaEntry{
+		{"Unmapped", "telemetry_unmapped_providers"},
+		{"Link", "telemetry_provider_link_hint"},
 		{"Account", "account_email"},
 		{"Key", "key_label"},
 		{"Key Name", "key_name"},
@@ -1093,12 +1095,48 @@ func collectActiveResetEntries(snap core.UsageSnapshot, widget core.DashboardWid
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
+		pi := resetSortPriority(entries[i].key)
+		pj := resetSortPriority(entries[j].key)
+		if pi != pj {
+			return pi < pj
+		}
 		if !entries[i].at.Equal(entries[j].at) {
 			return entries[i].at.Before(entries[j].at)
 		}
 		return entries[i].label < entries[j].label
 	})
 	return entries
+}
+
+func resetSortPriority(key string) int {
+	k := strings.TrimSpace(strings.TrimSuffix(key, "_reset"))
+	order := map[string]int{
+		"rate_limit_primary":               10,
+		"rate_limit_secondary":             11,
+		"rate_limit_code_review_primary":   12,
+		"rate_limit_code_review_secondary": 13,
+		"gh_core_rpm":                      20,
+		"gh_search_rpm":                    21,
+		"gh_graphql_rpm":                   22,
+		"usage_five_hour":                  30,
+		"usage_one_day":                    31,
+		"usage_seven_day":                  32,
+		"billing_block":                    40,
+		"billing_cycle_end":                41,
+		"quota_reset":                      42,
+		"limit_reset":                      43,
+		"key_expires":                      44,
+		"rpm":                              50,
+		"tpm":                              51,
+		"rpd":                              52,
+		"tpd":                              53,
+		"rpm_headers":                      54,
+		"tpm_headers":                      55,
+	}
+	if p, ok := order[k]; ok {
+		return p
+	}
+	return 999
 }
 
 func resetLabelForKey(snap core.UsageSnapshot, widget core.DashboardWidget, key string) string {
@@ -1975,8 +2013,15 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 		output   float64
 		requests float64
 	}
+	type providerFieldState struct {
+		cost     bool
+		input    bool
+		output   bool
+		requests bool
+	}
 	byProvider := make(map[string]*agg)
 	usedKeys := make(map[string]bool)
+	fieldState := make(map[string]*providerFieldState)
 
 	ensure := func(name string) *agg {
 		if _, ok := byProvider[name]; !ok {
@@ -1984,21 +2029,31 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 		}
 		return byProvider[name]
 	}
+	ensureFieldState := func(name string) *providerFieldState {
+		if _, ok := fieldState[name]; !ok {
+			fieldState[name] = &providerFieldState{}
+		}
+		return fieldState[name]
+	}
 
 	recordCost := func(name string, v float64, key string) {
 		ensure(name).cost += v
+		ensureFieldState(name).cost = true
 		usedKeys[key] = true
 	}
 	recordInput := func(name string, v float64, key string) {
 		ensure(name).input += v
+		ensureFieldState(name).input = true
 		usedKeys[key] = true
 	}
 	recordOutput := func(name string, v float64, key string) {
 		ensure(name).output += v
+		ensureFieldState(name).output = true
 		usedKeys[key] = true
 	}
 	recordRequests := func(name string, v float64, key string) {
 		ensure(name).requests += v
+		ensureFieldState(name).requests = true
 		usedKeys[key] = true
 	}
 
@@ -2009,6 +2064,15 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 		switch {
 		case strings.HasSuffix(key, "_cost_usd"):
 			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost_usd"), *met.Used, key)
+		case strings.HasSuffix(key, "_byok_cost"):
+			base := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
+			if base == "" {
+				continue
+			}
+			// BYOK cost is supplemental; only use it if no total cost exists.
+			if !ensureFieldState(base).cost {
+				recordCost(base, *met.Used, key)
+			}
 		case strings.HasSuffix(key, "_cost"):
 			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost"), *met.Used, key)
 		case strings.HasSuffix(key, "_input_tokens"):
@@ -2029,23 +2093,36 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 			if v, ok := parseTileNumeric(raw); ok {
 				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost")
 				baseKey = strings.TrimSuffix(baseKey, "_byok")
+				if baseKey == "" || ensureFieldState(baseKey).cost {
+					continue
+				}
 				recordCost(baseKey, v, key)
 			}
 		case strings.HasSuffix(key, "_input_tokens"), strings.HasSuffix(key, "_prompt_tokens"):
 			if v, ok := parseTileNumeric(raw); ok {
 				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens")
 				baseKey = strings.TrimSuffix(baseKey, "_prompt_tokens")
+				if baseKey == "" || ensureFieldState(baseKey).input {
+					continue
+				}
 				recordInput(baseKey, v, key)
 			}
 		case strings.HasSuffix(key, "_output_tokens"), strings.HasSuffix(key, "_completion_tokens"):
 			if v, ok := parseTileNumeric(raw); ok {
 				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_output_tokens")
 				baseKey = strings.TrimSuffix(baseKey, "_completion_tokens")
+				if baseKey == "" || ensureFieldState(baseKey).output {
+					continue
+				}
 				recordOutput(baseKey, v, key)
 			}
 		case strings.HasSuffix(key, "_requests"):
 			if v, ok := parseTileNumeric(raw); ok {
-				recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests"), v, key)
+				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests")
+				if baseKey == "" || ensureFieldState(baseKey).requests {
+					continue
+				}
+				recordRequests(baseKey, v, key)
 			}
 		}
 	}

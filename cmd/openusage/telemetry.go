@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +24,8 @@ func runTelemetryCLI(args []string) error {
 		return runTelemetryCollect(args[1:])
 	case "hook":
 		return runTelemetryHook(args[1:])
+	case "daemon":
+		return runTelemetryDaemon(args[1:])
 	case "help", "-h", "--help":
 		printTelemetryUsage()
 		return nil
@@ -36,11 +37,11 @@ func runTelemetryCLI(args []string) error {
 func runTelemetryCollect(args []string) error {
 	defaultDBPath, err := telemetry.DefaultDBPath()
 	if err != nil {
-		defaultDBPath = filepath.Join(".", "telemetry.db")
+		return fmt.Errorf("resolve telemetry db path: %w", err)
 	}
 	defaultSpoolDir, err := telemetry.DefaultSpoolDir()
 	if err != nil {
-		defaultSpoolDir = filepath.Join(".", "telemetry-spool")
+		return fmt.Errorf("resolve telemetry spool dir: %w", err)
 	}
 
 	fs := flag.NewFlagSet("telemetry collect", flag.ContinueOnError)
@@ -185,10 +186,12 @@ func printTelemetryUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  openusage telemetry collect [flags]")
 	fmt.Println("  openusage telemetry hook <source> [flags] < payload.json")
+	fmt.Println("  openusage telemetry daemon [flags]")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  openusage telemetry collect --verbose")
 	fmt.Println("  openusage telemetry collect --dry-run")
+	fmt.Println("  openusage telemetry daemon --verbose")
 	fmt.Println("  openusage telemetry collect --opencode-events-file /tmp/opencode-events.jsonl")
 	fmt.Println("  openusage telemetry collect --opencode-db ~/.local/share/opencode/opencode.db")
 	fmt.Println("  openusage telemetry hook opencode < /tmp/opencode-hook-event.json")
@@ -204,16 +207,12 @@ func runTelemetryHook(args []string) error {
 }
 
 func runTelemetryHookSource(sourceName string, args []string) error {
-	defaultDBPath, err := telemetry.DefaultDBPath()
+	defaultSocketPath, err := telemetry.DefaultSocketPath()
 	if err != nil {
-		defaultDBPath = filepath.Join(".", "telemetry.db")
-	}
-	defaultSpoolDir, err := telemetry.DefaultSpoolDir()
-	if err != nil {
-		defaultSpoolDir = filepath.Join(".", "telemetry-spool")
+		return fmt.Errorf("resolve telemetry daemon socket path: %w", err)
 	}
 
-	source, ok := providers.TelemetrySourceBySystem(sourceName)
+	_, ok := providers.TelemetrySourceBySystem(sourceName)
 	if !ok {
 		return fmt.Errorf("unknown hook source %q", sourceName)
 	}
@@ -221,10 +220,8 @@ func runTelemetryHookSource(sourceName string, args []string) error {
 	fs := flag.NewFlagSet("telemetry hook "+sourceName, flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 
-	dbPath := fs.String("db-path", defaultDBPath, "path to telemetry sqlite database")
-	spoolDir := fs.String("spool-dir", defaultSpoolDir, "path to telemetry spool directory")
+	socketPath := fs.String("socket-path", defaultSocketPath, "path to telemetry daemon unix socket")
 	accountID := fs.String("account-id", "", "optional logical account id override for ingested hook events")
-	spoolOnly := fs.Bool("spool-only", false, "append to spool but do not flush to sqlite")
 	verbose := fs.Bool("verbose", false, "print detailed ingest summary")
 
 	if err := fs.Parse(args); err != nil {
@@ -239,69 +236,23 @@ func runTelemetryHookSource(sourceName string, args []string) error {
 		return fmt.Errorf("stdin payload is empty")
 	}
 
-	opts := shared.TelemetryCollectOptions{
-		Paths: map[string]string{},
+	client := newTelemetryDaemonClient(strings.TrimSpace(*socketPath))
+	daemonCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	daemonResult, daemonErr := client.IngestHook(daemonCtx, sourceName, strings.TrimSpace(*accountID), payload)
+	cancel()
+	if daemonErr != nil {
+		return fmt.Errorf("send hook payload to telemetry daemon: %w", daemonErr)
 	}
-	if strings.TrimSpace(*accountID) != "" {
-		opts.Paths["account_id"] = strings.TrimSpace(*accountID)
-	}
-
-	reqs, err := telemetry.ParseSourceHookPayload(
-		source,
-		payload,
-		opts,
-		strings.TrimSpace(*accountID),
-	)
-	if err != nil {
-		return fmt.Errorf("parse %s hook payload: %w", sourceName, err)
-	}
-	if len(reqs) == 0 {
-		if *verbose {
-			fmt.Printf("telemetry hook %s: payload produced no usage events\n", sourceName)
-		}
-		return nil
-	}
-
-	spool := telemetry.NewSpool(*spoolDir)
-	var (
-		store    *telemetry.Store
-		pipeline *telemetry.Pipeline
-	)
-
-	if *spoolOnly {
-		pipeline = telemetry.NewPipeline(nil, spool)
-	} else {
-		store, err = telemetry.OpenStore(*dbPath)
-		if err != nil {
-			return fmt.Errorf("open telemetry store: %w", err)
-		}
-		defer store.Close()
-		pipeline = telemetry.NewPipeline(store, spool)
-	}
-
-	enqueued, err := pipeline.EnqueueRequests(reqs)
-	if err != nil {
-		return fmt.Errorf("enqueue hook payload events: %w", err)
-	}
-
-	if *spoolOnly {
-		if *verbose {
-			fmt.Printf("telemetry hook %s enqueued=%d (spool-only)\n", sourceName, enqueued)
-		}
-		return nil
-	}
-
-	flushResult, warnings := flushInBatches(context.Background(), pipeline, len(reqs)+8)
-	if *verbose || len(warnings) > 0 {
-		fmt.Printf("telemetry hook %s enqueued=%d processed=%d ingested=%d deduped=%d failed=%d\n",
+	if *verbose {
+		fmt.Printf("telemetry hook %s via daemon enqueued=%d processed=%d ingested=%d deduped=%d failed=%d\n",
 			sourceName,
-			enqueued,
-			flushResult.Processed,
-			flushResult.Ingested,
-			flushResult.Deduped,
-			flushResult.Failed,
+			daemonResult.Enqueued,
+			daemonResult.Processed,
+			daemonResult.Ingested,
+			daemonResult.Deduped,
+			daemonResult.Failed,
 		)
-		for _, warning := range warnings {
+		for _, warning := range daemonResult.Warnings {
 			fmt.Printf("warning: %s\n", warning)
 		}
 	}

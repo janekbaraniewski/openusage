@@ -25,3 +25,11 @@ func DefaultDBPath() (string, error) {
 	}
 	return filepath.Join(stateDir, "telemetry.db"), nil
 }
+
+func DefaultSocketPath() (string, error) {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "telemetry.sock"), nil
+}

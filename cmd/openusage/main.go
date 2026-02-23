@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/detect"
-	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
@@ -123,13 +124,6 @@ func main() {
 	}
 
 	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
-	engine := core.NewEngine(interval)
-	engine.SetModelNormalizationConfig(cfg.ModelNormalization)
-
-	for _, p := range providers.AllProviders() {
-		engine.RegisterProvider(p)
-	}
-	engine.SetAccounts(allAccounts)
 
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
@@ -138,42 +132,68 @@ func main() {
 		cfg.Dashboard,
 		allAccounts,
 	)
-	model.SetOnAddAccount(engine.AddAccount)
-	model.SetOnRefresh(func() {
-		go engine.RefreshAll(context.Background())
-	})
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	telemetryRuntime, telemetryErr := startAppTelemetryRuntime(ctx, interval, cfg.Telemetry.ProviderLinks)
-	if telemetryErr != nil {
-		log.Printf("Warning: telemetry runtime disabled: %v", telemetryErr)
+	socketPath, socketErr := telemetry.DefaultSocketPath()
+	if socketErr != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving telemetry daemon socket path: %v\n", socketErr)
+		os.Exit(1)
+	}
+	if value := strings.TrimSpace(os.Getenv("OPENUSAGE_TELEMETRY_SOCKET")); value != "" {
+		socketPath = value
 	}
 
-	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
-		if telemetryRuntime != nil {
-			telemetryRuntime.ingestProviderSnapshots(ctx, snaps)
-			snaps = telemetryRuntime.viewWithFallback(ctx, snaps)
+	daemonClient, daemonErr := ensureTelemetryDaemonRunning(ctx, socketPath, os.Getenv("OPENUSAGE_DEBUG") != "")
+	if daemonErr != nil {
+		log.Printf("Warning: telemetry daemon unavailable: %v", daemonErr)
+	}
+	viewRuntime := newDaemonViewRuntime(
+		daemonClient,
+		socketPath,
+		os.Getenv("OPENUSAGE_DEBUG") != "",
+		allAccounts,
+		cfg.Telemetry.ProviderLinks,
+	)
+	var program *tea.Program
+
+	model.SetOnAddAccount(func(acct core.AccountConfig) {
+		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {
+			return
 		}
-		p.Send(tui.SnapshotsMsg(snaps))
+		exists := false
+		for _, existing := range allAccounts {
+			if strings.EqualFold(strings.TrimSpace(existing.ID), strings.TrimSpace(acct.ID)) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			allAccounts = append(allAccounts, acct)
+		}
+		viewRuntime.setAccounts(allAccounts, cfg.Telemetry.ProviderLinks)
 	})
-	if telemetryRuntime != nil {
-		startTelemetryViewBroadcaster(ctx, engine, p, telemetryRuntime, interval)
-	}
-
-	go engine.Run(ctx)
+	model.SetOnRefresh(func() {
+		go func() {
+			snaps := viewRuntime.readWithFallback(ctx)
+			if len(snaps) > 0 && program != nil {
+				program.Send(tui.SnapshotsMsg(snaps))
+			}
+		}()
+	})
+	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	startDaemonViewBroadcaster(ctx, program, viewRuntime, interval)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 		cancel()
-		p.Quit()
+		program.Quit()
 	}()
 
-	if _, err := p.Run(); err != nil {
+	if _, err := program.Run(); err != nil {
 		log.SetOutput(os.Stderr)
 		log.Fatalf("TUI error: %v", err)
 	}

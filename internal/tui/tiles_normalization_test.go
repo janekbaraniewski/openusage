@@ -23,6 +23,15 @@ func clientByName(clients []clientMixEntry, name string) (clientMixEntry, bool) 
 	return clientMixEntry{}, false
 }
 
+func providerByName(providers []providerMixEntry, name string) (providerMixEntry, bool) {
+	for _, provider := range providers {
+		if provider.name == name {
+			return provider, true
+		}
+	}
+	return providerMixEntry{}, false
+}
+
 func TestCollectProviderClientMix_NormalizesSourceIntoClient(t *testing.T) {
 	snap := core.UsageSnapshot{
 		Metrics: map[string]core.Metric{
@@ -193,6 +202,76 @@ func TestCollectProviderClientMix_DoesNotDoubleCountRequestsTodayFallback(t *tes
 	}
 	if cli.requests != 367 {
 		t.Fatalf("cli_agents requests = %.0f, want 367", cli.requests)
+	}
+}
+
+func TestCollectProviderVendorMix_DoesNotDoubleCountMetricAndRawFallback(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"provider_alibaba_cost_usd":      {Used: float64Ptr(4.675), Unit: "USD"},
+			"provider_alibaba_input_tokens":  {Used: float64Ptr(1000), Unit: "tokens"},
+			"provider_alibaba_output_tokens": {Used: float64Ptr(500), Unit: "tokens"},
+			"provider_alibaba_requests":      {Used: float64Ptr(20), Unit: "requests"},
+		},
+		Raw: map[string]string{
+			"provider_alibaba_cost":              "$4.675000",
+			"provider_alibaba_prompt_tokens":     "1000",
+			"provider_alibaba_completion_tokens": "500",
+			"provider_alibaba_requests":          "20",
+		},
+	}
+
+	providers, _ := collectProviderVendorMix(snap)
+	alibaba, ok := providerByName(providers, "alibaba")
+	if !ok {
+		t.Fatalf("missing alibaba provider: %+v", providers)
+	}
+	if alibaba.cost != 4.675 {
+		t.Fatalf("alibaba cost = %.3f, want 4.675", alibaba.cost)
+	}
+	if alibaba.input != 1000 {
+		t.Fatalf("alibaba input = %.0f, want 1000", alibaba.input)
+	}
+	if alibaba.output != 500 {
+		t.Fatalf("alibaba output = %.0f, want 500", alibaba.output)
+	}
+	if alibaba.requests != 20 {
+		t.Fatalf("alibaba requests = %.0f, want 20", alibaba.requests)
+	}
+}
+
+func TestCollectProviderVendorMix_DoesNotDoubleCountByokWhenTotalPresent(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"provider_openai_cost_usd":  {Used: float64Ptr(1.2), Unit: "USD"},
+			"provider_openai_byok_cost": {Used: float64Ptr(0.8), Unit: "USD"},
+		},
+	}
+
+	providers, _ := collectProviderVendorMix(snap)
+	openai, ok := providerByName(providers, "openai")
+	if !ok {
+		t.Fatalf("missing openai provider: %+v", providers)
+	}
+	if openai.cost != 1.2 {
+		t.Fatalf("openai cost = %.2f, want 1.2", openai.cost)
+	}
+}
+
+func TestCollectProviderVendorMix_UsesByokAsFallbackWhenTotalMissing(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"provider_openai_byok_cost": {Used: float64Ptr(0.8), Unit: "USD"},
+		},
+	}
+
+	providers, _ := collectProviderVendorMix(snap)
+	openai, ok := providerByName(providers, "openai")
+	if !ok {
+		t.Fatalf("missing openai provider: %+v", providers)
+	}
+	if openai.cost != 0.8 {
+		t.Fatalf("openai cost = %.2f, want 0.8", openai.cost)
 	}
 }
 
@@ -462,5 +541,31 @@ func TestBuildGeminiOtherQuotaLines_ExcludesPrimaryAndUsesRemaining(t *testing.T
 	}
 	if !usedKeys["quota_model_gemini_2_0_flash_requests"] {
 		t.Fatal("expected flash quota metric in other quotas")
+	}
+}
+
+func TestCollectActiveResetEntries_UsesStablePriorityOrder(t *testing.T) {
+	now := time.Now()
+	snap := core.UsageSnapshot{
+		Resets: map[string]time.Time{
+			"gh_search_rpm":  now.Add(1 * time.Minute),
+			"gh_core_rpm":    now.Add(20 * time.Minute),
+			"gh_graphql_rpm": now.Add(30 * time.Minute),
+		},
+	}
+
+	entries := collectActiveResetEntries(snap, core.DefaultDashboardWidget())
+	if len(entries) < 3 {
+		t.Fatalf("entries len = %d, want >= 3", len(entries))
+	}
+
+	if entries[0].key != "gh_core_rpm" {
+		t.Fatalf("entries[0].key = %q, want gh_core_rpm", entries[0].key)
+	}
+	if entries[1].key != "gh_search_rpm" {
+		t.Fatalf("entries[1].key = %q, want gh_search_rpm", entries[1].key)
+	}
+	if entries[2].key != "gh_graphql_rpm" {
+		t.Fatalf("entries[2].key = %q, want gh_graphql_rpm", entries[2].key)
 	}
 }

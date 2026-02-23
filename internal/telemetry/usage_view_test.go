@@ -214,3 +214,83 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 		t.Fatalf("source_opencode_requests = %+v, want 1", req)
 	}
 }
+
+func TestApplyCanonicalUsageView_PreservesAuthoritativeModelAndDailyCost(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Date(2026, 2, 22, 12, 0, 0, 0, time.UTC)
+	_, err = store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		ModelRaw:      "qwen/qwen3-coder-flash",
+		InputTokens:   int64Ptr(120),
+		OutputTokens:  int64Ptr(40),
+		TotalTokens:   int64Ptr(160),
+		CostUSD:       float64Ptr(9.99),
+		Requests:      int64Ptr(1),
+	})
+	if err != nil {
+		t.Fatalf("ingest message event: %v", err)
+	}
+
+	rootModelCost := 2.50
+	rootDailyCost := 0.30
+	rootDailyReq := 7.0
+	rootDailyTokens := 1500.0
+
+	snaps := map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Metrics: map[string]core.Metric{
+				"model_qwen_qwen3_coder_flash_cost_usd": {Used: &rootModelCost, Unit: "USD", Window: "30d"},
+			},
+			DailySeries: map[string][]core.TimePoint{
+				"analytics_cost":     {{Date: "2026-02-22", Value: rootDailyCost}},
+				"analytics_requests": {{Date: "2026-02-22", Value: rootDailyReq}},
+				"analytics_tokens":   {{Date: "2026-02-22", Value: rootDailyTokens}},
+			},
+		},
+	}
+
+	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+
+	snap := merged["openrouter"]
+	modelCost := snap.Metrics["model_qwen_qwen3_coder_flash_cost_usd"]
+	if modelCost.Used == nil || *modelCost.Used != rootModelCost {
+		t.Fatalf("model cost overwritten: %+v", modelCost)
+	}
+	if got := seriesValueByDate(snap.DailySeries["analytics_cost"], "2026-02-22"); got != rootDailyCost {
+		t.Fatalf("analytics_cost overwritten: got %v, want %v", got, rootDailyCost)
+	}
+	if got := seriesValueByDate(snap.DailySeries["analytics_requests"], "2026-02-22"); got != rootDailyReq {
+		t.Fatalf("analytics_requests overwritten: got %v, want %v", got, rootDailyReq)
+	}
+	if got := seriesValueByDate(snap.DailySeries["analytics_tokens"], "2026-02-22"); got != rootDailyTokens {
+		t.Fatalf("analytics_tokens overwritten: got %v, want %v", got, rootDailyTokens)
+	}
+}
+
+func seriesValueByDate(points []core.TimePoint, date string) float64 {
+	for _, point := range points {
+		if point.Date == date {
+			return point.Value
+		}
+	}
+	return 0
+}

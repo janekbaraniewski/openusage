@@ -240,7 +240,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
-		m.hasData = true
+		if snapshotsReady(msg) {
+			m.hasData = true
+		}
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
 		return m, nil
@@ -669,6 +671,25 @@ func (m Model) mouseScrollStep() int {
 	return step
 }
 
+func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
+	if len(snaps) == 0 {
+		return false
+	}
+	for _, snap := range snaps {
+		if snap.Status != core.StatusUnknown {
+			return true
+		}
+		if len(snap.Metrics) > 0 ||
+			len(snap.Resets) > 0 ||
+			len(snap.DailySeries) > 0 ||
+			len(snap.ModelUsage) > 0 ||
+			strings.TrimSpace(snap.Message) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) View() string {
 	if m.width < 30 || m.height < 8 {
 		return lipgloss.NewStyle().
@@ -758,7 +779,7 @@ func (m Model) renderHeader(w int) string {
 	}
 
 	ids := m.filteredIDs()
-	okCount, warnCount, errCount := 0, 0, 0
+	okCount, warnCount, errCount, mappingCount := 0, 0, 0, 0
 	for _, id := range ids {
 		snap := m.snapshots[id]
 		switch snap.Status {
@@ -768,6 +789,9 @@ func (m Model) renderHeader(w int) string {
 			warnCount++
 		case core.StatusLimited, core.StatusError:
 			errCount++
+		}
+		if strings.TrimSpace(snap.Diagnostics["telemetry_unmapped_providers"]) != "" {
+			mappingCount++
 		}
 	}
 
@@ -783,6 +807,9 @@ func (m Model) renderHeader(w int) string {
 	if errCount > 0 {
 		dot := PulseChar("✗", "✕", m.animFrame)
 		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d%s", errCount, dot))
+	}
+	if mappingCount > 0 {
+		statusInfo += lipgloss.NewStyle().Foreground(colorPeach).Render(fmt.Sprintf(" %d!", mappingCount))
 	}
 
 	infoRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(info)
@@ -1329,7 +1356,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		return info
 	}
 
-	for key, m := range snap.Metrics {
+	for _, key := range fallbackDisplayMetricKeys(snap.Metrics) {
+		m := snap.Metrics[key]
 		if m.Used != nil {
 			info.tagEmoji = "⚡"
 			info.tagLabel = "Usage"
@@ -1351,8 +1379,39 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 
 	info.tagEmoji = "⚡"
 	info.tagLabel = "Usage"
-	info.summary = string(snap.Status)
+	if snap.Status == core.StatusUnknown {
+		info.summary = "Syncing telemetry..."
+	} else {
+		info.summary = string(snap.Status)
+	}
 	return info
+}
+
+func fallbackDisplayMetricKeys(metrics map[string]core.Metric) []string {
+	keys := sortedMetricKeys(metrics)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	filtered := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "client_") ||
+			strings.HasPrefix(key, "tool_") ||
+			strings.HasPrefix(key, "source_") ||
+			strings.HasPrefix(key, "usage_model_") ||
+			strings.HasPrefix(key, "usage_source_") ||
+			strings.HasPrefix(key, "usage_client_") ||
+			strings.HasPrefix(key, "tokens_client_") ||
+			strings.HasPrefix(key, "analytics_") {
+			continue
+		}
+		filtered = append(filtered, key)
+	}
+	if len(filtered) > 0 {
+		return filtered
+	}
+	return keys
 }
 
 // computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view

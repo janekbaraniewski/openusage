@@ -168,11 +168,18 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
 
+	hasAuthoritativeModelMetrics := snapshotHasMetricPrefix(*snap, "model_")
+	hasAuthoritativeDailyCost := len(snap.DailySeries["analytics_cost"]) > 0 || len(snap.DailySeries["cost"]) > 0
+	hasAuthoritativeDailyRequests := len(snap.DailySeries["analytics_requests"]) > 0 || len(snap.DailySeries["requests"]) > 0
+	hasAuthoritativeDailyTokens := len(snap.DailySeries["analytics_tokens"]) > 0
+
 	for key := range snap.Metrics {
-		if strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "source_") ||
+		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") {
+			delete(snap.Metrics, key)
+		}
+		if !hasAuthoritativeModelMetrics && strings.HasPrefix(key, "model_") {
 			delete(snap.Metrics, key)
 		}
 	}
@@ -180,23 +187,31 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		if strings.HasPrefix(key, "usage_model_") ||
 			strings.HasPrefix(key, "usage_source_") ||
 			strings.HasPrefix(key, "usage_client_") ||
-			strings.HasPrefix(key, "tokens_client_") ||
-			key == "analytics_cost" ||
-			key == "analytics_requests" ||
-			key == "analytics_tokens" {
+			strings.HasPrefix(key, "tokens_client_") {
+			delete(snap.DailySeries, key)
+		}
+		if !hasAuthoritativeDailyCost && key == "analytics_cost" {
+			delete(snap.DailySeries, key)
+		}
+		if !hasAuthoritativeDailyRequests && key == "analytics_requests" {
+			delete(snap.DailySeries, key)
+		}
+		if !hasAuthoritativeDailyTokens && key == "analytics_tokens" {
 			delete(snap.DailySeries, key)
 		}
 	}
 
-	for _, model := range agg.Models {
-		mk := sanitizeMetricID(model.Model)
-		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
-		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
-		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
+	if !hasAuthoritativeModelMetrics {
+		for _, model := range agg.Models {
+			mk := sanitizeMetricID(model.Model)
+			snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
+			snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
+			snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
+		}
 	}
 
 	for _, source := range agg.Sources {
@@ -219,12 +234,20 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
 	}
 
-	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
-	snap.DailySeries["analytics_requests"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Requests })
-	snap.DailySeries["analytics_tokens"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Tokens })
+	if !hasAuthoritativeDailyCost {
+		snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
+	}
+	if !hasAuthoritativeDailyRequests {
+		snap.DailySeries["analytics_requests"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Requests })
+	}
+	if !hasAuthoritativeDailyTokens {
+		snap.DailySeries["analytics_tokens"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Tokens })
+	}
 
-	for model, series := range agg.ModelDaily {
-		snap.DailySeries["usage_model_"+sanitizeMetricID(model)] = series
+	if !hasAuthoritativeModelMetrics {
+		for model, series := range agg.ModelDaily {
+			snap.DailySeries["usage_model_"+sanitizeMetricID(model)] = series
+		}
 	}
 	for source, series := range agg.SourceDaily {
 		snap.DailySeries["usage_source_"+sanitizeMetricID(source)] = series
@@ -246,6 +269,22 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		snap.SetAttribute("telemetry_scope_account_id", agg.AccountID)
 	}
 	snap.SetDiagnostic("telemetry_event_count", fmt.Sprintf("%d", agg.EventCount))
+}
+
+func snapshotHasMetricPrefix(snap core.UsageSnapshot, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || len(snap.Metrics) == 0 {
+		return false
+	}
+	for key, metric := range snap.Metrics {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if metric.Used != nil || metric.Limit != nil || metric.Remaining != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func loadUsageViewForProvider(ctx context.Context, db *sql.DB, providerID, accountID string) (*telemetryUsageAgg, error) {
@@ -670,7 +709,18 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 					WHEN 'jsonl' THEN 2
 					WHEN 'api' THEN 1
 					ELSE 0
-				END AS source_priority
+				END AS source_priority,
+				(
+					CASE WHEN COALESCE(total_tokens, 0) > 0 THEN 4 ELSE 0 END +
+					CASE WHEN COALESCE(cost_usd, 0) > 0 THEN 2 ELSE 0 END +
+					CASE WHEN COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), '') != '' THEN 1 ELSE 0 END +
+					CASE
+						WHEN COALESCE(NULLIF(TRIM(provider_id), ''), '') != ''
+							AND LOWER(TRIM(provider_id)) NOT IN ('unknown', 'opencode')
+						THEN 1
+						ELSE 0
+					END
+				) AS quality_score
 			FROM scoped_usage
 		),
 		deduped_usage AS (
@@ -684,7 +734,7 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 							LOWER(TRIM(event_type)),
 							LOWER(TRIM(COALESCE(session_id, ''))),
 							logical_event_id
-						ORDER BY source_priority DESC, occurred_at DESC, event_id DESC
+						ORDER BY source_priority DESC, quality_score DESC, occurred_at DESC, event_id DESC
 					) AS rn
 				FROM ranked_usage
 			)

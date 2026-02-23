@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -80,5 +81,54 @@ func TestComputeDisplayInfo_PreservesErrorStatusTag(t *testing.T) {
 	}
 	if got.tagEmoji != "⚠" {
 		t.Fatalf("tagEmoji = %q, want ⚠", got.tagEmoji)
+	}
+}
+
+func TestComputeDisplayInfo_FallbackSkipsDerivedMetrics(t *testing.T) {
+	derived := 999.0
+	coreRPM := 42.0
+	snap := core.UsageSnapshot{
+		ProviderID: "copilot",
+		Status:     core.StatusUnknown,
+		Metrics: map[string]core.Metric{
+			"model_gpt_5_tokens":  {Used: &derived, Unit: "tokens"},
+			"client_cli_requests": {Used: &derived, Unit: "requests"},
+			"gh_core_rpm":         {Used: &coreRPM, Unit: "rpm"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if !strings.Contains(strings.ToLower(got.summary), "core rpm") {
+		t.Fatalf("summary = %q, want core rpm fallback metric", got.summary)
+	}
+}
+
+func TestSnapshotsReady(t *testing.T) {
+	if snapshotsReady(nil) {
+		t.Fatal("snapshotsReady(nil) = true, want false")
+	}
+
+	notReady := map[string]core.UsageSnapshot{
+		"a": {
+			Status:      core.StatusUnknown,
+			Metrics:     map[string]core.Metric{},
+			Resets:      map[string]time.Time{},
+			DailySeries: map[string][]core.TimePoint{},
+		},
+	}
+	if snapshotsReady(notReady) {
+		t.Fatal("snapshotsReady(notReady) = true, want false")
+	}
+
+	ready := map[string]core.UsageSnapshot{
+		"a": {
+			Status: core.StatusUnknown,
+			Metrics: map[string]core.Metric{
+				"messages_today": {Used: float64Ptr(1), Unit: "messages"},
+			},
+		},
+	}
+	if !snapshotsReady(ready) {
+		t.Fatal("snapshotsReady(ready) = false, want true")
 	}
 }
