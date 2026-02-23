@@ -512,6 +512,7 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 		return
 	}
 	started := time.Now()
+	const backlogFlushLimit = 2000
 
 	type collectorBatch struct {
 		name string
@@ -522,6 +523,10 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 	warnings := make([]string, 0)
 	enqueued := 0
 	batches := make([]collectorBatch, 0, len(s.collectors))
+	directProcessed := 0
+	directIngested := 0
+	directDeduped := 0
+	directFailed := 0
 
 	// File/SQLite scans can be expensive; collect outside the pipeline lock so
 	// hook ingestion and read-model requests don't block on collector I/O.
@@ -538,27 +543,64 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 		batches = append(batches, collectorBatch{name: collector.Name(), reqs: reqs})
 	}
 
-	s.pipelineMu.Lock()
+	retryReqs := make([]telemetry.IngestRequest, 0)
 	for _, batch := range batches {
-		n, err := s.pipeline.EnqueueRequests(batch.reqs)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s enqueue: %v", batch.name, err))
-			continue
+		for _, req := range batch.reqs {
+			directProcessed++
+			result, err := s.store.Ingest(ctx, req)
+			if err != nil {
+				directFailed++
+				retryReqs = append(retryReqs, req)
+				continue
+			}
+			if result.Deduped {
+				directDeduped++
+			} else {
+				directIngested++
+			}
 		}
-		enqueued += n
 	}
-	flush, flushWarnings := flushInBatches(ctx, s.pipeline, 0)
-	s.pipelineMu.Unlock()
 
-	warnings = append(warnings, flushWarnings...)
+	flush := telemetry.FlushResult{}
+	if len(retryReqs) > 0 {
+		s.pipelineMu.Lock()
+		n, err := s.pipeline.EnqueueRequests(retryReqs)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("retry enqueue: %v", err))
+		} else {
+			enqueued += n
+		}
+		retryFlush, retryWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
+		s.pipelineMu.Unlock()
+		flush.Processed += retryFlush.Processed
+		flush.Ingested += retryFlush.Ingested
+		flush.Deduped += retryFlush.Deduped
+		flush.Failed += retryFlush.Failed
+		warnings = append(warnings, retryWarnings...)
+	} else {
+		// Always drain a bounded number of pending spool records so legacy backlog
+		// continues to recover without delaying fresh telemetry updates.
+		s.pipelineMu.Lock()
+		backlogFlush, backlogWarnings := flushInBatches(ctx, s.pipeline, backlogFlushLimit)
+		s.pipelineMu.Unlock()
+		flush.Processed += backlogFlush.Processed
+		flush.Ingested += backlogFlush.Ingested
+		flush.Deduped += backlogFlush.Deduped
+		flush.Failed += backlogFlush.Failed
+		warnings = append(warnings, backlogWarnings...)
+	}
 
 	durationMs := time.Since(started).Milliseconds()
-	if totalCollected > 0 || enqueued > 0 || len(warnings) > 0 {
+	if totalCollected > 0 || directProcessed > 0 || enqueued > 0 || flush.Processed > 0 || len(warnings) > 0 {
 		s.infof(
 			"collect_cycle",
-			"duration_ms=%d collected=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d warnings=%d",
+			"duration_ms=%d collected=%d direct_processed=%d direct_ingested=%d direct_deduped=%d direct_failed=%d enqueued=%d flush_processed=%d flush_ingested=%d flush_deduped=%d flush_failed=%d warnings=%d",
 			durationMs,
 			totalCollected,
+			directProcessed,
+			directIngested,
+			directDeduped,
+			directFailed,
 			enqueued,
 			flush.Processed,
 			flush.Ingested,

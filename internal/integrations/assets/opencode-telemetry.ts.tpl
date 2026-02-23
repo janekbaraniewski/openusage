@@ -16,6 +16,7 @@ type AnyRecord = Record<string, unknown>
 const encoder = new TextEncoder()
 const defaultOpenusageBin = "__OPENUSAGE_BIN_DEFAULT__"
 let lastIngestErrorSignature = ""
+const defaultIngestTimeoutMs = 1500
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) {
@@ -93,43 +94,31 @@ function normalizeModel(value: unknown): { providerID?: string; modelID?: string
   return out
 }
 
-function supportsTelemetryHook(binPath: string): boolean {
-  try {
-    const result = Bun.spawnSync([binPath, "telemetry", "hook", "--help"], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: process.env,
-    })
-    return result.exitCode === 0
-  } catch {
-    return false
+function resolveOpenusageBin(configValue: string | undefined): string {
+  const explicit = pickString(configValue, process.env.OPENUSAGE_BIN)
+  if (explicit !== "") {
+    return explicit
   }
+  const pinned = pickString(defaultOpenusageBin)
+  if (pinned !== "" && pinned !== "__OPENUSAGE_BIN_DEFAULT__") {
+    return pinned
+  }
+  return "openusage"
 }
 
-function resolveOpenusageBin(configValue: string | undefined): string {
-  const candidates = [
-    configValue?.trim(),
-    process.env.OPENUSAGE_BIN?.trim(),
-    defaultOpenusageBin,
-    "openusage",
-    "/opt/homebrew/bin/openusage",
-    "/usr/local/bin/openusage",
-    `${process.env.HOME || ""}/.local/bin/openusage`,
-  ]
-
-  const seen = new Set<string>()
-  for (const candidate of candidates) {
-    if (!candidate || seen.has(candidate)) {
-      continue
-    }
-    seen.add(candidate)
-    if (supportsTelemetryHook(candidate)) {
-      return candidate
-    }
+function resolveTimeoutMs(): number {
+  const raw = process.env.OPENUSAGE_TELEMETRY_TIMEOUT_MS
+  const parsed = raw ? Number.parseInt(raw, 10) : defaultIngestTimeoutMs
+  if (!Number.isFinite(parsed)) {
+    return defaultIngestTimeoutMs
   }
-
-  return pickString(configValue, process.env.OPENUSAGE_BIN, "openusage")
+  if (parsed < 200) {
+    return 200
+  }
+  if (parsed > 10000) {
+    return 10000
+  }
+  return parsed
 }
 
 function loadConfig(): RuntimeConfig {
@@ -294,12 +283,24 @@ async function sendPayload(cfg: RuntimeConfig, payload: unknown): Promise<void> 
     return
   }
 
-  const proc = Bun.spawn(buildArgs(cfg), {
-    stdin: "pipe",
-    stdout: "ignore",
-    stderr: "pipe",
-    env: process.env,
-  })
+  let proc: ReturnType<typeof Bun.spawn>
+  try {
+    proc = Bun.spawn(buildArgs(cfg), {
+      stdin: "pipe",
+      stdout: "ignore",
+      stderr: "pipe",
+      env: process.env,
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    const signature = `spawn:${detail}`
+    if (!cfg.verbose && signature === lastIngestErrorSignature) {
+      return
+    }
+    lastIngestErrorSignature = signature
+    console.error(`[openusage-telemetry] hook ingestion spawn failed: ${detail}`)
+    return
+  }
 
   try {
     const writer = proc.stdin.getWriter()
@@ -310,7 +311,21 @@ async function sendPayload(cfg: RuntimeConfig, payload: unknown): Promise<void> 
     return
   }
 
-  const exitCode = await proc.exited
+  const timeoutMs = resolveTimeoutMs()
+  const timeout = new Promise<number>((resolve) => {
+    setTimeout(() => resolve(-999), timeoutMs)
+  })
+  const exitCode = await Promise.race([proc.exited, timeout])
+  if (exitCode === -999) {
+    proc.kill()
+    const signature = `timeout:${timeoutMs}`
+    if (!cfg.verbose && signature === lastIngestErrorSignature) {
+      return
+    }
+    lastIngestErrorSignature = signature
+    console.error(`[openusage-telemetry] hook ingestion timed out after ${timeoutMs}ms`)
+    return
+  }
   if (exitCode === 0) {
     lastIngestErrorSignature = ""
     return
@@ -347,14 +362,14 @@ export const OpenUsageTelemetry: Plugin = async () => {
 
   return {
     async event(input) {
-      await enqueue({
+      enqueue({
         event: input.event,
       })
     },
 
     async "tool.execute.after"(input, output) {
       const normalized = normalizeToolPayload(input, output)
-      await enqueue({
+      enqueue({
         hook: "tool.execute.after",
         timestamp: Date.now(),
         input: normalized.input,
@@ -364,7 +379,7 @@ export const OpenUsageTelemetry: Plugin = async () => {
 
     async "chat.message"(input, output) {
       const normalized = normalizeChatPayload(input, output)
-      await enqueue({
+      enqueue({
         hook: "chat.message",
         timestamp: Date.now(),
         input: normalized.input,

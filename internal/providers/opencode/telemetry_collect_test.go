@@ -155,3 +155,102 @@ func TestCollectTelemetryFromSQLite(t *testing.T) {
 		t.Fatalf("tool status = %q, want %q", toolEvent.Status, shared.TelemetryStatusOK)
 	}
 }
+
+func TestCollectTelemetryFromSQLite_UsesStepFinishUsage(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "opencode.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	stmts := []string{
+		`CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL);`,
+		`CREATE TABLE message (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			time_created INTEGER NOT NULL,
+			time_updated INTEGER NOT NULL,
+			data TEXT NOT NULL
+		);`,
+		`CREATE TABLE part (
+			id TEXT PRIMARY KEY,
+			message_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			time_created INTEGER NOT NULL,
+			time_updated INTEGER NOT NULL,
+			data TEXT NOT NULL
+		);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec schema stmt: %v", err)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO session (id, directory) VALUES (?, ?)`, "sess-2", "/tmp/work-2"); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	// OpenCode v1.2 message rows do not contain token/cost usage anymore.
+	messageData := `{
+		"role":"assistant",
+		"time":{"created":1771850687552,"completed":1771850701618},
+		"parentID":"msg-parent-2",
+		"modelID":"nvidia/nemotron-nano-9b-v2",
+		"providerID":"openrouter",
+		"agent":"zbysiu",
+		"path":{"cwd":"/tmp/work-2"}
+	}`
+	if _, err := db.Exec(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`,
+		"msg-2", "sess-2", int64(1771850687552), int64(1771850701618), messageData,
+	); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	stepFinishData := `{
+		"type":"step-finish",
+		"reason":"stop",
+		"cost":0.00126272,
+		"tokens":{"total":28049,"input":26876,"output":1173,"reasoning":0,"cache":{"read":0,"write":0}}
+	}`
+	if _, err := db.Exec(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)`,
+		"part-step-2", "msg-2", "sess-2", int64(1771850701377), int64(1771850701377), stepFinishData,
+	); err != nil {
+		t.Fatalf("insert step-finish part: %v", err)
+	}
+
+	events, err := CollectTelemetryFromSQLite(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("collect sqlite: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.EventType != shared.TelemetryEventTypeMessageUsage {
+		t.Fatalf("event_type = %q, want %q", ev.EventType, shared.TelemetryEventTypeMessageUsage)
+	}
+	if ev.ProviderID != "openrouter" {
+		t.Fatalf("provider = %q, want openrouter", ev.ProviderID)
+	}
+	if ev.ModelRaw != "nvidia/nemotron-nano-9b-v2" {
+		t.Fatalf("model = %q, want nvidia/nemotron-nano-9b-v2", ev.ModelRaw)
+	}
+	if ev.TotalTokens == nil || *ev.TotalTokens != 28049 {
+		t.Fatalf("total_tokens = %+v, want 28049", ev.TotalTokens)
+	}
+	if ev.InputTokens == nil || *ev.InputTokens != 26876 {
+		t.Fatalf("input_tokens = %+v, want 26876", ev.InputTokens)
+	}
+	if ev.OutputTokens == nil || *ev.OutputTokens != 1173 {
+		t.Fatalf("output_tokens = %+v, want 1173", ev.OutputTokens)
+	}
+	if ev.CostUSD == nil || *ev.CostUSD != 0.00126272 {
+		t.Fatalf("cost_usd = %+v, want 0.00126272", ev.CostUSD)
+	}
+	if ev.Requests == nil || *ev.Requests != 1 {
+		t.Fatalf("requests = %+v, want 1", ev.Requests)
+	}
+}

@@ -341,11 +341,126 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 	}
 
 	partSummaryByMessage := make(map[string]partSummary)
-	if sqliteTableExists(ctx, db, "part") {
+	hasPartTable := sqliteTableExists(ctx, db, "part")
+	if hasPartTable {
 		partSummaryByMessage, _ = collectPartSummary(ctx, db)
 	}
 
 	var out []shared.TelemetryEvent
+	seenMessages := map[string]bool{}
+
+	if hasPartTable {
+		stepRows, err := db.QueryContext(ctx, `
+			SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data, COALESCE(m.data, '{}'), COALESCE(s.directory, '')
+			FROM part p
+			LEFT JOIN message m ON m.id = p.message_id
+			LEFT JOIN session s ON s.id = p.session_id
+			WHERE COALESCE(json_extract(p.data, '$.type'), '') = 'step-finish'
+			ORDER BY p.time_updated ASC
+		`)
+		if err == nil {
+			for stepRows.Next() {
+				if ctx.Err() != nil {
+					_ = stepRows.Close()
+					return out, ctx.Err()
+				}
+
+				var (
+					partID      string
+					messageIDDB string
+					sessionIDDB string
+					timeCreated int64
+					timeUpdated int64
+					partJSON    string
+					messageJSON string
+					sessionDir  string
+				)
+				if err := stepRows.Scan(&partID, &messageIDDB, &sessionIDDB, &timeCreated, &timeUpdated, &partJSON, &messageJSON, &sessionDir); err != nil {
+					continue
+				}
+
+				partPayload := decodeJSONMap([]byte(partJSON))
+				messagePayload := decodeJSONMap([]byte(messageJSON))
+
+				u := extractUsage(partPayload)
+				if !hasUsage(u) {
+					continue
+				}
+
+				messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDDB), firstPathString(messagePayload, []string{"id"}), firstPathString(messagePayload, []string{"messageID"}))
+				if messageID == "" || seenMessages[messageID] {
+					continue
+				}
+
+				sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDDB), firstPathString(messagePayload, []string{"sessionID"}))
+				turnID := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"parentID"}), firstPathString(messagePayload, []string{"turnID"}))
+				providerID := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"providerID"}), firstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
+				modelRaw := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"modelID"}), firstPathString(messagePayload, []string{"model", "modelID"}))
+
+				occurredAt := shared.UnixAuto(timeUpdated)
+				if timeCreated > 0 {
+					occurredAt = shared.UnixAuto(timeCreated)
+				}
+
+				eventStatus := mapMessageStatus(firstPathString(partPayload, []string{"reason"}))
+
+				contextSummary := map[string]any{}
+				if summary, ok := partSummaryByMessage[messageID]; ok {
+					partsByType := make(map[string]any, len(summary.PartsByType))
+					for partType, count := range summary.PartsByType {
+						partsByType[partType] = count
+					}
+					contextSummary = map[string]any{
+						"parts_total":   summary.PartsTotal,
+						"parts_by_type": partsByType,
+					}
+				}
+
+				out = append(out, shared.TelemetryEvent{
+					SchemaVersion:    telemetrySQLiteSchema,
+					Channel:          shared.TelemetryChannelSQLite,
+					OccurredAt:       occurredAt,
+					AccountID:        "",
+					WorkspaceID:      shared.SanitizeWorkspace(shared.FirstNonEmpty(firstPathString(messagePayload, []string{"path", "cwd"}), firstPathString(messagePayload, []string{"path", "root"}), strings.TrimSpace(sessionDir))),
+					SessionID:        sessionID,
+					TurnID:           turnID,
+					MessageID:        messageID,
+					ProviderID:       providerID,
+					AgentName:        shared.FirstNonEmpty(firstPathString(messagePayload, []string{"agent"}), "opencode"),
+					EventType:        shared.TelemetryEventTypeMessageUsage,
+					ModelRaw:         modelRaw,
+					InputTokens:      u.InputTokens,
+					OutputTokens:     u.OutputTokens,
+					ReasoningTokens:  u.ReasoningTokens,
+					CacheReadTokens:  u.CacheReadTokens,
+					CacheWriteTokens: u.CacheWriteTokens,
+					TotalTokens:      u.TotalTokens,
+					CostUSD:          u.CostUSD,
+					Requests:         shared.Int64Ptr(1),
+					Status:           eventStatus,
+					Payload: map[string]any{
+						"source": map[string]any{
+							"db_path": dbPath,
+							"table":   "part",
+							"type":    "step-finish",
+						},
+						"db": map[string]any{
+							"part_id":      strings.TrimSpace(partID),
+							"message_id":   strings.TrimSpace(messageIDDB),
+							"session_id":   strings.TrimSpace(sessionIDDB),
+							"time_created": timeCreated,
+							"time_updated": timeUpdated,
+						},
+						"message": messagePayload,
+						"part":    partPayload,
+						"context": contextSummary,
+					},
+				})
+				seenMessages[messageID] = true
+			}
+			_ = stepRows.Close()
+		}
+	}
 
 	messageRows, err := db.QueryContext(ctx, `
 		SELECT m.id, m.session_id, m.time_created, m.time_updated, m.data, COALESCE(s.directory, '')
@@ -379,14 +494,19 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			u := extractUsage(payload)
 			completedAt := ptrInt64FromFloat(firstPathNumber(payload, []string{"time", "completed"}))
 			createdAt := ptrInt64FromFloat(firstPathNumber(payload, []string{"time", "created"}))
-			if completedAt <= 0 && !hasUsage(u) {
+			if !hasUsage(u) && completedAt <= 0 {
 				continue
 			}
 
 			messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDRaw), firstPathString(payload, []string{"id"}), firstPathString(payload, []string{"messageID"}))
-			if messageID == "" {
+			if messageID == "" || seenMessages[messageID] {
 				continue
 			}
+
+			if !hasUsage(u) {
+				continue
+			}
+
 			providerID := shared.FirstNonEmpty(firstPathString(payload, []string{"providerID"}), firstPathString(payload, []string{"model", "providerID"}), "opencode")
 			modelRaw := shared.FirstNonEmpty(firstPathString(payload, []string{"modelID"}), firstPathString(payload, []string{"model", "modelID"}))
 			sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDRaw), firstPathString(payload, []string{"sessionID"}))
@@ -443,6 +563,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				CacheWriteTokens: u.CacheWriteTokens,
 				TotalTokens:      u.TotalTokens,
 				CostUSD:          u.CostUSD,
+				Requests:         shared.Int64Ptr(1),
 				Status:           eventStatus,
 				Payload: map[string]any{
 					"source": map[string]any{
@@ -459,11 +580,12 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 					"context": contextSummary,
 				},
 			})
+			seenMessages[messageID] = true
 		}
 		_ = messageRows.Close()
 	}
 
-	if !sqliteTableExists(ctx, db, "part") {
+	if !hasPartTable {
 		return out, nil
 	}
 
@@ -994,6 +1116,18 @@ func mapToolStatus(status string) (shared.TelemetryStatus, bool) {
 		return shared.TelemetryStatusUnknown, false
 	default:
 		return shared.TelemetryStatusUnknown, true
+	}
+}
+
+func mapMessageStatus(reason string) shared.TelemetryStatus {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	switch {
+	case strings.Contains(reason, "error"), strings.Contains(reason, "fail"):
+		return shared.TelemetryStatusError
+	case strings.Contains(reason, "abort"), strings.Contains(reason, "cancel"):
+		return shared.TelemetryStatusAborted
+	default:
+		return shared.TelemetryStatusOK
 	}
 }
 
