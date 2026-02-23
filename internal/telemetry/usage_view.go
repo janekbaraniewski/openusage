@@ -231,7 +231,10 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 
 	for _, source := range agg.Sources {
 		sk := sanitizeMetricID(source.Source)
-		snap.Metrics["source_"+sk+"_requests"] = core.Metric{Used: float64Ptr(source.Requests), Unit: "requests", Window: "all"}
+		// Only emit source_*_requests_today (used by TUI's today-fallback path).
+		// source_*_requests is intentionally omitted: client_*_requests covers the
+		// same data, and emitting both causes the TUI to double-count requests due
+		// to Go's random map iteration order.
 		snap.Metrics["source_"+sk+"_requests_today"] = core.Metric{Used: float64Ptr(source.Requests1d), Unit: "requests", Window: "1d"}
 
 		snap.Metrics["client_"+sk+"_total_tokens"] = core.Metric{Used: float64Ptr(source.Tokens), Unit: "tokens", Window: "all"}

@@ -9,7 +9,6 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.GaugePriority = []string{
 		"spend_limit", "plan_spend", "plan_percent_used",
 		"plan_auto_percent_used", "plan_api_percent_used",
-		"ai_code_percentage",
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{Label: "Credits", Keys: []string{"plan_spend", "spend_limit", "individual_spend", "billing_total_cost", "composer_cost", "today_cost"}, MaxSegments: 5},

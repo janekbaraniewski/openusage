@@ -85,8 +85,8 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 	if metric, ok := snap.Metrics["model_qwen_qwen3_coder_flash_input_tokens"]; !ok || metric.Used == nil || *metric.Used != 120 {
 		t.Fatalf("missing/invalid model input metric: %+v", metric)
 	}
-	if metric, ok := snap.Metrics["source_opencode_requests"]; !ok || metric.Used == nil || *metric.Used != 1 {
-		t.Fatalf("missing/invalid source requests metric: %+v", metric)
+	if metric, ok := snap.Metrics["client_opencode_requests"]; !ok || metric.Used == nil || *metric.Used != 1 {
+		t.Fatalf("missing/invalid client requests metric: %+v", metric)
 	}
 	if metric, ok := snap.Metrics["tool_shell"]; !ok || metric.Used == nil || *metric.Used != 1 {
 		t.Fatalf("missing/invalid tool metric: %+v", metric)
@@ -209,9 +209,9 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 	if inp.Used == nil || *inp.Used != 120 {
 		t.Fatalf("input_tokens = %+v, want 120 (legacy duplicate must be ignored)", inp)
 	}
-	req := snap.Metrics["source_opencode_requests"]
+	req := snap.Metrics["client_opencode_requests"]
 	if req.Used == nil || *req.Used != 1 {
-		t.Fatalf("source_opencode_requests = %+v, want 1", req)
+		t.Fatalf("client_opencode_requests = %+v, want 1", req)
 	}
 }
 
@@ -332,8 +332,8 @@ func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t 
 	}
 
 	snap := merged["cursor-ide"]
-	if _, ok := snap.Metrics["source_opencode_requests"]; ok {
-		t.Fatalf("unexpected provider-scope fallback metric source_opencode_requests in account-scoped cursor view")
+	if _, ok := snap.Metrics["client_opencode_requests"]; ok {
+		t.Fatalf("unexpected provider-scope fallback metric client_opencode_requests in account-scoped cursor view")
 	}
 	if got := snap.Attributes["telemetry_view"]; got != "" {
 		t.Fatalf("telemetry_view = %q, want empty (no account-scoped canonical usage)", got)
@@ -490,8 +490,8 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 	if _, ok := snap.Attributes["provider_legacy_cost"]; ok {
 		t.Fatal("stale provider_* attribute should be cleared")
 	}
-	if got := metricUsed(snap.Metrics["source_opencode_requests"]); got != 1 {
-		t.Fatalf("source_opencode_requests = %v, want 1 from canonical telemetry", got)
+	if got := metricUsed(snap.Metrics["client_opencode_requests"]); got != 1 {
+		t.Fatalf("client_opencode_requests = %v, want 1 from canonical telemetry", got)
 	}
 }
 

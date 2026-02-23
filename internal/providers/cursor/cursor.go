@@ -184,6 +184,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		stateDBPath = acct.BaseURL
 	}
 
+	// If the token was not persisted (json:"-"), try to extract it fresh
+	// from the Cursor state DB so daemon polls can access the API.
+	token := acct.Token
+	if token == "" && stateDBPath != "" {
+		token = extractTokenFromStateDB(stateDBPath)
+	}
+
 	// Run API calls concurrently with local DB reads so heavy local queries
 	// don't consume the context timeout needed by the API.
 	type apiResult struct {
@@ -191,7 +198,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		err  error
 	}
 	apiCh := make(chan apiResult, 1)
-	if acct.Token != "" {
+	if token != "" {
 		go func() {
 			apiSnap := core.UsageSnapshot{
 				AccountID:   acct.ID,
@@ -200,11 +207,22 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 				Raw:         make(map[string]string),
 				DailySeries: make(map[string][]core.TimePoint),
 			}
-			err := p.fetchFromAPI(ctx, acct.Token, &apiSnap)
+			err := p.fetchFromAPI(ctx, token, &apiSnap)
 			apiCh <- apiResult{snap: &apiSnap, err: err}
 		}()
 	} else {
 		apiCh <- apiResult{err: fmt.Errorf("no token")}
+	}
+
+	// Also resolve ExtraData from persisted fields if not present.
+	if acct.ExtraData == nil {
+		acct.ExtraData = make(map[string]string)
+	}
+	if acct.ExtraData["tracking_db"] == "" && trackingDBPath != "" {
+		acct.ExtraData["tracking_db"] = trackingDBPath
+	}
+	if acct.ExtraData["state_db"] == "" && stateDBPath != "" {
+		acct.ExtraData["state_db"] = stateDBPath
 	}
 
 	var hasLocalData bool
@@ -231,7 +249,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if ar.err == nil && ar.snap != nil {
 		mergeAPIIntoSnapshot(&snap, ar.snap)
 		hasAPIData = true
-	} else if ar.err != nil && acct.Token != "" {
+	} else if ar.err != nil && token != "" {
 		log.Printf("[cursor] API fetch failed, falling back to local data: %v", ar.err)
 		snap.Raw["api_error"] = ar.err.Error()
 	}
@@ -247,6 +265,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		p.applyCachedBillingMetrics(acct.ID, &snap)
 		p.buildLocalOnlyMessage(&snap)
 	}
+
+	// Final safety net: ensure credit gauges exist from local data when
+	// API didn't provide them (or API is completely unavailable).
+	p.ensureCreditGauges(acct.ID, &snap)
 
 	return snap, nil
 }
@@ -539,6 +561,15 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 
 	// Cache billing metrics so credit gauges survive temporary API failures.
 	p.storeBillingMetricsCache(snap.AccountID, snap)
+
+	// If none of the billing/aggregation endpoints yielded useful data,
+	// report an error so the caller knows API data is effectively absent.
+	_, hasPlanSpend := snap.Metrics["plan_spend"]
+	_, hasSpendLimit := snap.Metrics["spend_limit"]
+	_, hasBillingTotal := snap.Metrics["billing_total_cost"]
+	if !hasPlanSpend && !hasSpendLimit && !hasBillingTotal && !hasPeriodUsage && !aggApplied {
+		return fmt.Errorf("all billing API endpoints failed")
+	}
 
 	return nil
 }
@@ -856,6 +887,75 @@ func (p *Provider) applyCachedBillingMetrics(accountID string, snap *core.UsageS
 	for key, m := range cached.BillingMetrics {
 		if _, exists := snap.Metrics[key]; !exists {
 			snap.Metrics[key] = cloneMetric(m)
+		}
+	}
+}
+
+// ensureCreditGauges synthesizes credit metrics from local data when API
+// didn't provide them. This runs as a final step in Fetch() so the Credits
+// tag and gauge bars render regardless of API availability.
+func (p *Provider) ensureCreditGauges(accountID string, snap *core.UsageSnapshot) {
+	// Already have gauge-eligible credit metrics from API — nothing to do.
+	if _, ok := snap.Metrics["plan_spend"]; ok {
+		return
+	}
+	if _, ok := snap.Metrics["spend_limit"]; ok {
+		return
+	}
+
+	// Determine total cost from best available source.
+	var costUSD float64
+	if m, ok := snap.Metrics["billing_total_cost"]; ok && m.Used != nil && *m.Used > 0 {
+		costUSD = *m.Used
+	} else if m, ok := snap.Metrics["composer_cost"]; ok && m.Used != nil && *m.Used > 0 {
+		costUSD = *m.Used
+	}
+	if costUSD <= 0 {
+		return
+	}
+
+	// Always expose plan_total_spend_usd so the Credits tag renders in the
+	// TUI even without a limit (computeDisplayInfoRaw checks this key).
+	if _, ok := snap.Metrics["plan_total_spend_usd"]; !ok {
+		snap.Metrics["plan_total_spend_usd"] = core.Metric{
+			Used:   core.Float64Ptr(costUSD),
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+	}
+
+	// Try to find a limit so we can create a gauge bar.
+	var limitUSD float64
+
+	// 1) From plan_included_amount (GetPlanInfo may have succeeded).
+	if m, ok := snap.Metrics["plan_included_amount"]; ok && m.Used != nil && *m.Used > 0 {
+		limitUSD = *m.Used
+	}
+
+	// 2) From cached effective limit.
+	if limitUSD <= 0 {
+		p.mu.RLock()
+		if cached, ok := p.modelAggregationCache[accountID]; ok && cached.EffectiveLimitUSD > 0 {
+			limitUSD = cached.EffectiveLimitUSD
+		}
+		p.mu.RUnlock()
+	}
+
+	// 3) From plan_included_amount_cents in Raw (may have been set by API).
+	if limitUSD <= 0 {
+		if raw, ok := snap.Raw["plan_included_amount_cents"]; ok {
+			if cents, err := strconv.ParseFloat(raw, 64); err == nil && cents > 0 {
+				limitUSD = cents / 100.0
+			}
+		}
+	}
+
+	if limitUSD > 0 {
+		snap.Metrics["plan_spend"] = core.Metric{
+			Used:   core.Float64Ptr(costUSD),
+			Limit:  core.Float64Ptr(limitUSD),
+			Unit:   "USD",
+			Window: "billing-cycle",
 		}
 	}
 }
@@ -1605,6 +1705,24 @@ func mergeDailyPoints(a, b []core.TimePoint) []core.TimePoint {
 		}
 	}
 	return mapToSortedDailyPoints(byDay)
+}
+
+// extractTokenFromStateDB reads the Cursor access token directly from the
+// state.vscdb SQLite database. This is needed because the Token field has
+// json:"-" and is not persisted to the config file, so daemon polls that
+// load accounts from config would otherwise have no API token.
+func extractTokenFromStateDB(dbPath string) string {
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+
+	var token string
+	if db.QueryRow(`SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'`).Scan(&token) != nil {
+		return ""
+	}
+	return strings.TrimSpace(token)
 }
 
 func (p *Provider) readStateMetadata(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {

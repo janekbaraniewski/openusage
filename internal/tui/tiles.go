@@ -469,6 +469,16 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 	sort.Strings(keys)
 	keys = prioritizeMetricKeys(keys, widget.GaugePriority)
 
+	// When GaugePriority is set, treat it as an allowlist — only those
+	// metrics are eligible for gauge rendering.
+	var gaugeAllowSet map[string]bool
+	if len(widget.GaugePriority) > 0 {
+		gaugeAllowSet = make(map[string]bool, len(widget.GaugePriority))
+		for _, k := range widget.GaugePriority {
+			gaugeAllowSet[k] = true
+		}
+	}
+
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
 	if gaugeW < 6 {
@@ -481,6 +491,9 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 
 	var lines []string
 	for _, key := range keys {
+		if gaugeAllowSet != nil && !gaugeAllowSet[key] {
+			continue
+		}
 		met := snap.Metrics[key]
 		usedPct := metricUsedPercent(key, met)
 		if usedPct < 0 {

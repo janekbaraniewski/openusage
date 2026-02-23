@@ -500,6 +500,44 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 	}
 }
 
+func TestDefaultProviderLinks(t *testing.T) {
+	links := DefaultProviderLinks()
+	if got := links["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+}
+
+func TestNormalizeTelemetryConfig_MergesDefaults(t *testing.T) {
+	// Empty user config gets defaults
+	out := normalizeTelemetryConfig(TelemetryConfig{})
+	if got := out.ProviderLinks["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+
+	// User override wins
+	out = normalizeTelemetryConfig(TelemetryConfig{
+		ProviderLinks: map[string]string{
+			"anthropic": "my_custom_provider",
+		},
+	})
+	if got := out.ProviderLinks["anthropic"]; got != "my_custom_provider" {
+		t.Fatalf("user override anthropic = %q, want my_custom_provider", got)
+	}
+
+	// User can add additional links while keeping defaults
+	out = normalizeTelemetryConfig(TelemetryConfig{
+		ProviderLinks: map[string]string{
+			"openai": "codex",
+		},
+	})
+	if got := out.ProviderLinks["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+	if got := out.ProviderLinks["openai"]; got != "codex" {
+		t.Fatalf("user link openai = %q, want codex", got)
+	}
+}
+
 func TestLoadFrom_ModelNormalizationConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

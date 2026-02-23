@@ -1201,3 +1201,137 @@ func TestProvider_Fetch_NoPeriodUsage_AggregationCreatesGauge(t *testing.T) {
 		t.Fatalf("plan_spend.Limit = %v, want 20.0 (from IncludedAmountCents)", m.Limit)
 	}
 }
+
+// TestProvider_Fetch_LocalOnlyComposerCostCreatesCreditsTag verifies that
+// when the API is completely unavailable (no token) but local composer
+// sessions have cost data, ensureCreditGauges creates plan_total_spend_usd
+// so the Credits tag renders in the TUI.
+func TestProvider_Fetch_LocalOnlyComposerCostCreatesCreditsTag(t *testing.T) {
+	p := New()
+
+	// Set up a state DB with composer sessions that have cost data.
+	stateDir := t.TempDir()
+	stateDBPath := filepath.Join(stateDir, "state.vscdb")
+	sdb, err := sql.Open("sqlite3", stateDBPath)
+	if err != nil {
+		t.Fatalf("open state db: %v", err)
+	}
+	_, err = sdb.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)`)
+	if err != nil {
+		t.Fatalf("create ItemTable: %v", err)
+	}
+	_, err = sdb.Exec(`CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)`)
+	if err != nil {
+		t.Fatalf("create cursorDiskKV: %v", err)
+	}
+
+	// Insert composer session with cost data.
+	usage := map[string]composerModelUsage{
+		"claude-4-5-opus-high-thinking": {CostInCents: 15000, Amount: 20},
+	}
+	usageJSON, _ := json.Marshal(usage)
+	createdAt := time.Now().Add(-1 * time.Hour).UnixMilli()
+	sessionVal := fmt.Sprintf(`{"usageData":%s,"unifiedMode":"agent","createdAt":%d,"totalLinesAdded":100,"totalLinesRemoved":10}`, string(usageJSON), createdAt)
+	_, err = sdb.Exec(`INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)`, "composerData:session-1", sessionVal)
+	if err != nil {
+		t.Fatalf("insert composer session: %v", err)
+	}
+	sdb.Close()
+
+	// Fetch with no token — API is completely unavailable.
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID: "test-local-only",
+		ExtraData: map[string]string{
+			"state_db": stateDBPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	// composer_cost should exist from local state DB.
+	cm, ok := snap.Metrics["composer_cost"]
+	if !ok || cm.Used == nil || *cm.Used <= 0 {
+		t.Fatalf("composer_cost missing or zero, got: %+v", cm)
+	}
+
+	// plan_total_spend_usd should be synthesized by ensureCreditGauges.
+	ptsu, ok := snap.Metrics["plan_total_spend_usd"]
+	if !ok {
+		t.Fatal("plan_total_spend_usd missing — ensureCreditGauges should create it from composer_cost")
+	}
+	if ptsu.Used == nil || *ptsu.Used != *cm.Used {
+		t.Fatalf("plan_total_spend_usd.Used = %v, want %v (from composer_cost)", ptsu.Used, *cm.Used)
+	}
+
+	// Message should indicate API unavailable.
+	if snap.Message == "" {
+		t.Error("expected a local-only message, got empty")
+	}
+}
+
+// TestProvider_Fetch_LocalOnlyCachedLimitCreatesPlanSpendGauge verifies that
+// when the API previously provided a plan limit (cached), and later becomes
+// unavailable, ensureCreditGauges creates plan_spend with the cached limit
+// so the gauge bar renders.
+func TestProvider_Fetch_LocalOnlyCachedLimitCreatesPlanSpendGauge(t *testing.T) {
+	p := New()
+
+	// Pre-populate the cache with an effective limit from a previous API call.
+	p.mu.Lock()
+	p.modelAggregationCache["test-cached"] = cachedModelAggregation{
+		EffectiveLimitUSD: 500.0,
+	}
+	p.mu.Unlock()
+
+	// Set up a state DB with composer sessions that have cost data.
+	stateDir := t.TempDir()
+	stateDBPath := filepath.Join(stateDir, "state.vscdb")
+	sdb, err := sql.Open("sqlite3", stateDBPath)
+	if err != nil {
+		t.Fatalf("open state db: %v", err)
+	}
+	_, err = sdb.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)`)
+	if err != nil {
+		t.Fatalf("create ItemTable: %v", err)
+	}
+	_, err = sdb.Exec(`CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)`)
+	if err != nil {
+		t.Fatalf("create cursorDiskKV: %v", err)
+	}
+
+	usage := map[string]composerModelUsage{
+		"claude-4-5-opus": {CostInCents: 36470, Amount: 50},
+	}
+	usageJSON, _ := json.Marshal(usage)
+	createdAt := time.Now().Add(-2 * time.Hour).UnixMilli()
+	sessionVal := fmt.Sprintf(`{"usageData":%s,"unifiedMode":"agent","createdAt":%d,"totalLinesAdded":200,"totalLinesRemoved":20}`, string(usageJSON), createdAt)
+	_, err = sdb.Exec(`INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)`, "composerData:session-cached", sessionVal)
+	if err != nil {
+		t.Fatalf("insert composer session: %v", err)
+	}
+	sdb.Close()
+
+	// Fetch with no token.
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID: "test-cached",
+		ExtraData: map[string]string{
+			"state_db": stateDBPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	// plan_spend should be created with cached limit.
+	ps, ok := snap.Metrics["plan_spend"]
+	if !ok {
+		t.Fatal("plan_spend missing — ensureCreditGauges should create it from composer_cost + cached limit")
+	}
+	if ps.Used == nil || *ps.Used != 364.70 {
+		t.Fatalf("plan_spend.Used = %v, want 364.70", ps.Used)
+	}
+	if ps.Limit == nil || *ps.Limit != 500.0 {
+		t.Fatalf("plan_spend.Limit = %v, want 500.0 (from cached effective limit)", ps.Limit)
+	}
+}
