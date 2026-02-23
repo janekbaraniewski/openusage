@@ -11,7 +11,7 @@ func TestNormalizeUsageSnapshot_SplitsAttributesAndDiagnostics(t *testing.T) {
 		},
 	}
 
-	got := NormalizeUsageSnapshot(snap)
+	got := NormalizeUsageSnapshotWithConfig(snap, DefaultModelNormalizationConfig())
 
 	if got.Attributes["account_email"] != "dev@example.com" {
 		t.Fatalf("attribute account_email = %q", got.Attributes["account_email"])

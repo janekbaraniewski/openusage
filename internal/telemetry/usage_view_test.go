@@ -71,7 +71,7 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *tes
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t 
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t
 	}
 }
 
-func TestApplyCanonicalUsageView_PreservesNativeCostBreakdownWhenPresent(t *testing.T) {
+func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
@@ -462,28 +462,30 @@ func TestApplyCanonicalUsageView_PreservesNativeCostBreakdownWhenPresent(t *test
 		},
 	}
 
-	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
 	if err != nil {
 		t.Fatalf("apply canonical usage view: %v", err)
 	}
 	snap := merged["openrouter"]
-	if got := metricUsed(snap.Metrics["model_moonshot_cost_usd"]); got != modelA {
-		t.Fatalf("model_moonshot_cost_usd = %v, want %v", got, modelA)
+
+	// Telemetry always overwrites model/provider breakdown — native values are replaced
+	if got := metricUsed(snap.Metrics["model_qwen_qwen3_coder_flash_cost_usd"]); got != 0.012 {
+		t.Fatalf("model_qwen_qwen3_coder_flash_cost_usd = %v, want 0.012 from telemetry", got)
 	}
-	if got := metricUsed(snap.Metrics["model_qwen_cost_usd"]); got != modelB {
-		t.Fatalf("model_qwen_cost_usd = %v, want %v", got, modelB)
+	// Native-only model keys are cleared
+	if _, ok := snap.Metrics["model_moonshot_cost_usd"]; ok {
+		t.Fatal("model_moonshot_cost_usd should be cleared by telemetry overwrite")
 	}
-	if got := metricUsed(snap.Metrics["provider_alibaba_cost_usd"]); got != providerA {
-		t.Fatalf("provider_alibaba_cost_usd = %v, want %v", got, providerA)
+	// Native-only provider keys are cleared
+	if _, ok := snap.Metrics["provider_alibaba_cost_usd"]; ok {
+		t.Fatal("provider_alibaba_cost_usd should be cleared by telemetry overwrite")
 	}
-	if got := metricUsed(snap.Metrics["provider_deepinfra_cost_usd"]); got != providerB {
-		t.Fatalf("provider_deepinfra_cost_usd = %v, want %v", got, providerB)
+	if _, ok := snap.Metrics["provider_deepinfra_cost_usd"]; ok {
+		t.Fatal("provider_deepinfra_cost_usd should be cleared by telemetry overwrite")
 	}
-	if _, ok := snap.Metrics["provider_unattributed_cost_usd"]; ok {
-		t.Fatal("provider_unattributed_cost_usd should not be injected when native provider breakdown exists")
-	}
-	if _, ok := snap.Metrics["model_unattributed_cost_usd"]; ok {
-		t.Fatal("model_unattributed_cost_usd should not be injected when native model breakdown exists")
+	// Provider breakdown comes from telemetry
+	if got := metricUsed(snap.Metrics["provider_openrouter_cost_usd"]); got != 0.012 {
+		t.Fatalf("provider_openrouter_cost_usd = %v, want 0.012 from telemetry", got)
 	}
 	if _, ok := snap.Attributes["provider_legacy_cost"]; ok {
 		t.Fatal("stale provider_* attribute should be cleared")

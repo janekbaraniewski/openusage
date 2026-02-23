@@ -69,6 +69,13 @@ type Config struct {
 	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
 }
 
+// DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
+func DefaultProviderLinks() map[string]string {
+	return map[string]string{
+		"anthropic": "claude_code",
+	}
+}
+
 func DefaultConfig() Config {
 	return Config{
 		AutoDetect: true,
@@ -154,7 +161,7 @@ func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 
 func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
 	out := TelemetryConfig{
-		ProviderLinks: map[string]string{},
+		ProviderLinks: DefaultProviderLinks(),
 	}
 	for source, target := range in.ProviderLinks {
 		source = strings.ToLower(strings.TrimSpace(source))
@@ -162,6 +169,7 @@ func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
 		if source == "" || target == "" {
 			continue
 		}
+		// user overrides win
 		out.ProviderLinks[source] = target
 	}
 	return out

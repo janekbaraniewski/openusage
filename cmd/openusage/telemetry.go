@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
-func NewTelemetryCommand() *cobra.Command {
+func newTelemetryCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "telemetry",
 		Short: "Manage the telemetry daemon",
@@ -57,7 +58,7 @@ func newTelemetryHookCommand() *cobra.Command {
 				return fmt.Errorf("stdin payload is empty")
 			}
 
-			client := newTelemetryDaemonClient(strings.TrimSpace(socketPath))
+			client := daemon.NewClient(strings.TrimSpace(socketPath))
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
 
@@ -112,7 +113,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			"  openusage telemetry daemon status",
 			"  openusage telemetry daemon uninstall",
 		}, "\n"),
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfgFile, loadErr := config.Load()
 			if loadErr != nil {
 				cfgFile = config.DefaultConfig()
@@ -135,7 +136,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 				resolvedPoll = resolvedInterval
 			}
 
-			return runTelemetryDaemonServe(telemetryDaemonConfig{
+			return daemon.RunServer(daemon.Config{
 				DBPath:          strings.TrimSpace(dbPath),
 				SpoolDir:        strings.TrimSpace(spoolDir),
 				SocketPath:      strings.TrimSpace(socketPath),
@@ -171,7 +172,7 @@ func newDaemonInstallCommand() *cobra.Command {
 		Short: "Install the telemetry daemon as a system service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return runTelemetryDaemonInstall(strings.TrimSpace(socketPath))
+			return daemon.InstallService(strings.TrimSpace(socketPath))
 		},
 	}
 }
@@ -182,7 +183,7 @@ func newDaemonUninstallCommand() *cobra.Command {
 		Short: "Uninstall the telemetry daemon system service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return runTelemetryDaemonUninstall(strings.TrimSpace(socketPath))
+			return daemon.UninstallService(strings.TrimSpace(socketPath))
 		},
 	}
 }
@@ -193,7 +194,7 @@ func newDaemonStatusCommand() *cobra.Command {
 		Short: "Show telemetry daemon status",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return runTelemetryDaemonStatus(strings.TrimSpace(socketPath))
+			return daemon.ServiceStatus(strings.TrimSpace(socketPath))
 		},
 	}
 }

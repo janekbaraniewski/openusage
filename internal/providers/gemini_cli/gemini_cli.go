@@ -476,22 +476,6 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 	return tokenResp.AccessToken, nil
 }
 
-func loadCodeAssist(ctx context.Context, accessToken, existingProjectID string) (string, error) {
-	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
-	if err != nil {
-		return "", err
-	}
-	return resp.CloudAICompanionProject, nil
-}
-
-func loadCodeAssistWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string) (string, error) {
-	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, baseURL)
-	if err != nil {
-		return "", err
-	}
-	return resp.CloudAICompanionProject, nil
-}
-
 func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string) (*loadCodeAssistResponse, error) {
 	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
 }
@@ -540,10 +524,6 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	}
 
 	return &resp, "retrieveUserQuota", nil
-}
-
-func codeAssistPost(ctx context.Context, accessToken, method string, body interface{}) ([]byte, error) {
-	return codeAssistPostWithEndpoint(ctx, accessToken, method, body, codeAssistEndpoint)
 }
 
 func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string, body interface{}, baseURL string) ([]byte, error) {

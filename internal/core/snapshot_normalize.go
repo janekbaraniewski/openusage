@@ -2,10 +2,6 @@ package core
 
 import "strings"
 
-func NormalizeUsageSnapshot(s UsageSnapshot) UsageSnapshot {
-	return NormalizeUsageSnapshotWithConfig(s, DefaultModelNormalizationConfig())
-}
-
 func NormalizeUsageSnapshotWithConfig(s UsageSnapshot, modelCfg ModelNormalizationConfig) UsageSnapshot {
 	s.EnsureMaps()
 

@@ -25,10 +25,11 @@ func main() {
 
 	interval := 5 * time.Second
 	accounts := buildDemoAccounts()
-	engine := core.NewEngine(interval)
-	engine.SetAccounts(accounts)
-	for _, provider := range buildDemoProviders(providers.AllProviders()) {
-		engine.RegisterProvider(provider)
+	demoProviders := buildDemoProviders(providers.AllProviders())
+
+	providersByID := make(map[string]core.UsageProvider, len(demoProviders))
+	for _, p := range demoProviders {
+		providersByID[p.ID()] = p
 	}
 
 	model := tui.NewModel(
@@ -38,16 +39,48 @@ func main() {
 		config.DashboardConfig{},
 		accounts,
 	)
-	model.SetOnAddAccount(engine.AddAccount)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-
-	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
-		p.Send(tui.SnapshotsMsg(snaps))
-	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go engine.Run(ctx)
+
+	refreshAll := func() {
+		snaps := make(map[string]core.UsageSnapshot, len(accounts))
+		for _, acct := range accounts {
+			provider, ok := providersByID[acct.Provider]
+			if !ok {
+				continue
+			}
+			fetchCtx, fetchCancel := context.WithTimeout(ctx, 5*time.Second)
+			snap, err := provider.Fetch(fetchCtx, acct)
+			fetchCancel()
+			if err != nil {
+				snap = core.UsageSnapshot{
+					ProviderID: acct.Provider,
+					AccountID:  acct.ID,
+					Timestamp:  time.Now(),
+					Status:     core.StatusError,
+					Message:    err.Error(),
+				}
+			}
+			snaps[acct.ID] = snap
+		}
+		p.Send(tui.SnapshotsMsg(snaps))
+	}
+
+	go func() {
+		refreshAll()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				refreshAll()
+			}
+		}
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)

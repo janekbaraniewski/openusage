@@ -242,20 +242,13 @@ func (m Model) renderSplash(screenW, screenH int) string {
 	banner := ASCIIBanner(m.animFrame)
 	bannerLines := strings.Split(banner, "\n")
 
-	spinnerIdx := m.animFrame % len(SpinnerFrames)
-	spinner := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).
-		Render(SpinnerFrames[spinnerIdx])
-	subtitle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true).
-		Render(m.loadingSplashMessage())
-	statusLine := "  " + spinner + " " + subtitle
-
-	// Collect all lines: banner + blank + status
 	var lines []string
 	for _, bl := range bannerLines {
 		lines = append(lines, "  "+bl)
 	}
 	lines = append(lines, "")
-	lines = append(lines, statusLine)
+
+	lines = append(lines, m.splashStatusLines()...)
 
 	blockH := len(lines)
 	padTop := (screenH - blockH) / 2
@@ -263,7 +256,6 @@ func (m Model) renderSplash(screenW, screenH int) string {
 		padTop = 0
 	}
 
-	// Find widest line for horizontal centering
 	maxW := 0
 	for _, l := range lines {
 		if w := lipgloss.Width(l); w > maxW {
@@ -287,6 +279,72 @@ func (m Model) renderSplash(screenW, screenH int) string {
 		out.WriteString(line)
 	}
 	return out.String()
+}
+
+func (m Model) splashStatusLines() []string {
+	accent := lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
+	warn := lipgloss.NewStyle().Foreground(colorYellow)
+	errStyle := lipgloss.NewStyle().Foreground(colorRed)
+	hint := lipgloss.NewStyle().Foreground(colorGreen)
+
+	spinnerIdx := m.animFrame % len(SpinnerFrames)
+	spinner := accent.Render(SpinnerFrames[spinnerIdx])
+
+	switch m.daemonStatus {
+	case DaemonNotInstalled:
+		if m.daemonInstalling {
+			return []string{
+				"  " + spinner + " " + dim.Render("Installing daemon service..."),
+			}
+		}
+		return []string{
+			"  " + warn.Render("Daemon service is not installed."),
+			"",
+			"  " + hint.Render("Press Enter to install automatically"),
+			"  " + dim.Render("or run: openusage telemetry daemon install"),
+		}
+
+	case DaemonOutdated:
+		if m.daemonInstalling {
+			return []string{
+				"  " + spinner + " " + dim.Render("Upgrading daemon service..."),
+			}
+		}
+		msg := "Daemon is outdated."
+		if m.daemonMessage != "" {
+			msg = m.daemonMessage
+		}
+		return []string{
+			"  " + warn.Render(msg),
+			"",
+			"  " + hint.Render("Press Enter to upgrade"),
+		}
+
+	case DaemonError:
+		msg := "Could not connect to daemon."
+		if m.daemonMessage != "" {
+			msg = m.daemonMessage
+			if len(msg) > 60 {
+				msg = msg[:57] + "..."
+			}
+		}
+		return []string{
+			"  " + errStyle.Render(msg),
+			"",
+			"  " + dim.Render("Try: openusage telemetry daemon status"),
+		}
+
+	case DaemonStarting:
+		return []string{
+			"  " + spinner + " " + dim.Render("Starting daemon..."),
+		}
+
+	default:
+		return []string{
+			"  " + spinner + " " + dim.Render(m.loadingSplashMessage()),
+		}
+	}
 }
 
 func (m Model) loadingSplashMessage() string {

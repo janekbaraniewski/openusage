@@ -28,11 +28,11 @@ func main() {
 		Use:   "openusage",
 		Short: "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
 		Run: func(_ *cobra.Command, _ []string) {
-			RunDashboard(cfg)
+			runDashboard(cfg)
 		},
 	}
 
-	root.AddCommand(NewTelemetryCommand())
+	root.AddCommand(newTelemetryCommand())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

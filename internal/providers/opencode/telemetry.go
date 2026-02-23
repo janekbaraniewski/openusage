@@ -108,18 +108,6 @@ type usage struct {
 	CostUSD          *float64
 }
 
-func (u usage) toMap() map[string]any {
-	return map[string]any{
-		"input_tokens":       ptrInt64Value(u.InputTokens),
-		"output_tokens":      ptrInt64Value(u.OutputTokens),
-		"reasoning_tokens":   ptrInt64Value(u.ReasoningTokens),
-		"cache_read_tokens":  ptrInt64Value(u.CacheReadTokens),
-		"cache_write_tokens": ptrInt64Value(u.CacheWriteTokens),
-		"total_tokens":       ptrInt64Value(u.TotalTokens),
-		"cost_usd":           ptrFloat64Value(u.CostUSD),
-	}
-}
-
 type partSummary struct {
 	PartsTotal  int64
 	PartsByType map[string]int64
@@ -183,14 +171,6 @@ func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOpti
 	return events, nil
 }
 
-// DefaultTelemetryDBPath returns the default OpenCode SQLite location.
-func DefaultTelemetryDBPath() string {
-	home, _ := os.UserHomeDir()
-	if strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".local", "share", "opencode", "opencode.db")
-}
 
 // ParseTelemetryEventFile parses OpenCode event jsonl/ndjson files.
 func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
@@ -1437,13 +1417,6 @@ func floatNumberToFloat64Ptr(v *float64) *float64 {
 }
 
 func ptrInt64Value(v *int64) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
-func ptrFloat64Value(v *float64) any {
 	if v == nil {
 		return nil
 	}

@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
-func TestIsReleaseSemverVersion(t *testing.T) {
+func TestIsReleaseSemver(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  string
@@ -22,14 +22,14 @@ func TestIsReleaseSemverVersion(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isReleaseSemverVersion(tt.input); got != tt.wantOK {
-				t.Fatalf("isReleaseSemverVersion(%q) = %v, want %v", tt.input, got, tt.wantOK)
+			if got := IsReleaseSemver(tt.input); got != tt.wantOK {
+				t.Fatalf("IsReleaseSemver(%q) = %v, want %v", tt.input, got, tt.wantOK)
 			}
 		})
 	}
 }
 
-func TestDaemonHealthCurrent(t *testing.T) {
+func TestHealthCurrent(t *testing.T) {
 	origVersion := version.Version
 	t.Cleanup(func() {
 		version.Version = origVersion
@@ -37,33 +37,33 @@ func TestDaemonHealthCurrent(t *testing.T) {
 
 	t.Run("release requires exact daemon version", func(t *testing.T) {
 		version.Version = "v0.4.0"
-		health := daemonHealthResponse{DaemonVersion: "dev", APIVersion: telemetryDaemonAPIVersion}
-		if daemonHealthCurrent(health) {
-			t.Fatal("daemonHealthCurrent() = true, want false")
+		health := HealthResponse{DaemonVersion: "dev", APIVersion: APIVersion}
+		if HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = true, want false")
 		}
 	})
 
 	t.Run("release accepts exact daemon version", func(t *testing.T) {
 		version.Version = "v0.4.0"
-		health := daemonHealthResponse{DaemonVersion: "v0.4.0", APIVersion: telemetryDaemonAPIVersion}
-		if !daemonHealthCurrent(health) {
-			t.Fatal("daemonHealthCurrent() = false, want true")
+		health := HealthResponse{DaemonVersion: "v0.4.0", APIVersion: APIVersion}
+		if !HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = false, want true")
 		}
 	})
 
 	t.Run("local snapshot accepts running dev daemon", func(t *testing.T) {
 		version.Version = "v0.4.0-11-g0aa98a4-dirty"
-		health := daemonHealthResponse{DaemonVersion: "dev", APIVersion: telemetryDaemonAPIVersion}
-		if !daemonHealthCurrent(health) {
-			t.Fatal("daemonHealthCurrent() = false, want true")
+		health := HealthResponse{DaemonVersion: "dev", APIVersion: APIVersion}
+		if !HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = false, want true")
 		}
 	})
 
 	t.Run("api mismatch stays incompatible", func(t *testing.T) {
 		version.Version = "v0.4.0-11-g0aa98a4-dirty"
-		health := daemonHealthResponse{DaemonVersion: "dev", APIVersion: "v2"}
-		if daemonHealthCurrent(health) {
-			t.Fatal("daemonHealthCurrent() = true, want false")
+		health := HealthResponse{DaemonVersion: "dev", APIVersion: "v2"}
+		if HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = true, want false")
 		}
 	})
 }

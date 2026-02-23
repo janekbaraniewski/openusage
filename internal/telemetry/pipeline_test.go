@@ -67,14 +67,18 @@ func TestPipeline_EnqueueAndFlush(t *testing.T) {
 		t.Fatalf("deduped = %d, want 1", result.Deduped)
 	}
 
-	stats, err := store.Stats(context.Background())
-	if err != nil {
-		t.Fatalf("stats: %v", err)
+	var rawCount int64
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawCount); err != nil {
+		t.Fatalf("count raw events: %v", err)
 	}
-	if stats.RawEvents != 2 {
-		t.Fatalf("raw events = %d, want 2", stats.RawEvents)
+	if rawCount != 2 {
+		t.Fatalf("raw events = %d, want 2", rawCount)
 	}
-	if stats.CanonicalEvents != 1 {
-		t.Fatalf("canonical events = %d, want 1", stats.CanonicalEvents)
+	var canonicalCount int64
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM usage_events`).Scan(&canonicalCount); err != nil {
+		t.Fatalf("count canonical events: %v", err)
+	}
+	if canonicalCount != 1 {
+		t.Fatalf("canonical events = %d, want 1", canonicalCount)
 	}
 }

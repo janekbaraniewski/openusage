@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ func TestEnsureSocketPathAvailable_ActiveSocketReturnsError(t *testing.T) {
 	}
 	defer listener.Close()
 
-	err = ensureSocketPathAvailable(socketPath)
+	err = EnsureSocketPathAvailable(socketPath)
 	if err == nil {
 		t.Fatal("expected error for active daemon socket")
 	}
@@ -58,7 +58,7 @@ func TestEnsureSocketPathAvailable_RemovesStaleSocket(t *testing.T) {
 		t.Fatalf("stat socket before ensure: %v", statErr)
 	}
 
-	if err := ensureSocketPathAvailable(socketPath); err != nil {
+	if err := EnsureSocketPathAvailable(socketPath); err != nil {
 		t.Fatalf("ensure socket path available: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestEnsureSocketPathAvailable_RejectsRegularFile(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	err := ensureSocketPathAvailable(socketPath)
+	err := EnsureSocketPathAvailable(socketPath)
 	if err == nil {
 		t.Fatal("expected error for regular file at socket path")
 	}

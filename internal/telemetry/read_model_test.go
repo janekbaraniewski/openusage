@@ -74,7 +74,7 @@ func TestApplyCanonicalTelemetryView_HydratesRootAndUsage(t *testing.T) {
 			},
 		},
 	}
-	got, err := ApplyCanonicalTelemetryView(context.Background(), dbPath, base)
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
 	if err != nil {
 		t.Fatalf("apply canonical telemetry view: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestApplyCanonicalTelemetryView_UsesBaseWhenNoRootSnapshot(t *testing.T) {
 		},
 	}
 
-	got, err := ApplyCanonicalTelemetryView(context.Background(), dbPath, base)
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
 	if err != nil {
 		t.Fatalf("apply canonical telemetry view: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestApplyCanonicalTelemetryView_UsesLatestSnapshotOnlyForRoot(t *testing.T)
 			Metrics:    map[string]core.Metric{},
 		},
 	}
-	got, err := ApplyCanonicalTelemetryView(context.Background(), dbPath, base)
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
 	if err != nil {
 		t.Fatalf("apply canonical telemetry view: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestApplyCanonicalTelemetryView_FlagsUnmappedTelemetryProviders(t *testing.
 		},
 	}
 
-	got, err := ApplyCanonicalTelemetryView(context.Background(), dbPath, base)
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
 	if err != nil {
 		t.Fatalf("apply canonical telemetry view: %v", err)
 	}

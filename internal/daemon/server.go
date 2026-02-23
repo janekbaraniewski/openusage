@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"context"
@@ -13,15 +13,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/detect"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
@@ -29,19 +26,15 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
-const telemetryDaemonAPIVersion = "v1"
+const (
+	defaultCodexSessionsDir     = "~/.codex/sessions"
+	defaultClaudeProjectsDir    = "~/.claude/projects"
+	defaultClaudeProjectsAltDir = "~/.config/claude/projects"
+	defaultOpenCodeDBPath       = "~/.local/share/opencode/opencode.db"
+)
 
-type telemetryDaemonConfig struct {
-	DBPath          string
-	SpoolDir        string
-	SocketPath      string
-	CollectInterval time.Duration
-	PollInterval    time.Duration
-	Verbose         bool
-}
-
-type telemetryDaemonService struct {
-	cfg telemetryDaemonConfig
+type Service struct {
+	cfg Config
 
 	store        *telemetry.Store
 	pipeline     *telemetry.Pipeline
@@ -59,12 +52,7 @@ type telemetryDaemonService struct {
 	readModelInFlight map[string]bool
 }
 
-type cachedReadModelEntry struct {
-	snapshots map[string]core.UsageSnapshot
-	updatedAt time.Time
-}
-
-func runTelemetryDaemonServe(cfg telemetryDaemonConfig) error {
+func RunServer(cfg Config) error {
 	if !cfg.Verbose {
 		log.SetOutput(io.Discard)
 	}
@@ -72,7 +60,7 @@ func runTelemetryDaemonServe(cfg telemetryDaemonConfig) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	svc, err := startTelemetryDaemonService(ctx, cfg)
+	svc, err := startService(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -83,7 +71,7 @@ func runTelemetryDaemonServe(cfg telemetryDaemonConfig) error {
 	return nil
 }
 
-func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig) (*telemetryDaemonService, error) {
+func startService(ctx context.Context, cfg Config) (*Service, error) {
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		defaultDBPath, err := telemetry.DefaultDBPath()
 		if err != nil {
@@ -117,12 +105,12 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 		return nil, fmt.Errorf("open daemon telemetry store: %w", err)
 	}
 
-	svc := &telemetryDaemonService{
+	svc := &Service{
 		cfg:               cfg,
 		store:             store,
 		pipeline:          telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
 		quotaIngest:       telemetry.NewQuotaSnapshotIngestor(store),
-		collectors:        buildTelemetryCollectors(),
+		collectors:        buildCollectors(),
 		providerByID:      providersByID(),
 		lastLogAt:         map[string]time.Time{},
 		readModelCache:    map[string]cachedReadModelEntry{},
@@ -153,14 +141,16 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 	return svc, nil
 }
 
-func (s *telemetryDaemonService) Close() error {
+func (s *Service) Close() error {
 	if s == nil || s.store == nil {
 		return nil
 	}
 	return s.store.Close()
 }
 
-func (s *telemetryDaemonService) ingestRequest(ctx context.Context, req telemetry.IngestRequest) (telemetry.IngestResult, error) {
+// --- Ingest helpers ---
+
+func (s *Service) ingestRequest(ctx context.Context, req telemetry.IngestRequest) (telemetry.IngestResult, error) {
 	if s == nil || s.store == nil {
 		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
 	}
@@ -169,7 +159,7 @@ func (s *telemetryDaemonService) ingestRequest(ctx context.Context, req telemetr
 	return s.store.Ingest(ctx, req)
 }
 
-func (s *telemetryDaemonService) ingestQuotaSnapshots(ctx context.Context, snapshots map[string]core.UsageSnapshot) error {
+func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string]core.UsageSnapshot) error {
 	if s == nil || s.quotaIngest == nil {
 		return fmt.Errorf("quota ingestor unavailable")
 	}
@@ -178,28 +168,50 @@ func (s *telemetryDaemonService) ingestQuotaSnapshots(ctx context.Context, snaps
 	return s.quotaIngest.Ingest(ctx, snapshots)
 }
 
-func buildTelemetryCollectors() []telemetry.Collector {
-	collectors := make([]telemetry.Collector, 0)
-	for _, provider := range providers.AllProviders() {
-		source, ok := provider.(shared.TelemetrySource)
-		if !ok {
+func (s *Service) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {
+	var tally ingestTally
+	var retries []telemetry.IngestRequest
+	for _, req := range reqs {
+		tally.processed++
+		result, err := s.ingestRequest(ctx, req)
+		if err != nil {
+			tally.failed++
+			retries = append(retries, req)
 			continue
 		}
-		opts := defaultTelemetryOptionsForSource(source.System())
-		collectors = append(collectors, telemetry.NewSourceCollector(source, opts, ""))
+		if result.Deduped {
+			tally.deduped++
+		} else {
+			tally.ingested++
+		}
 	}
-	return collectors
+	return tally, retries
 }
 
-func providersByID() map[string]core.UsageProvider {
-	out := make(map[string]core.UsageProvider)
-	for _, provider := range providers.AllProviders() {
-		out[provider.ID()] = provider
+func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.IngestRequest, limit int) (telemetry.FlushResult, int, []string) {
+	var warnings []string
+	enqueued := 0
+
+	s.pipelineMu.Lock()
+	if len(retryReqs) > 0 {
+		n, err := s.pipeline.EnqueueRequests(retryReqs)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("retry enqueue: %v", err))
+		} else {
+			enqueued = n
+		}
 	}
-	return out
+	s.ingestMu.Lock()
+	flush, flushWarnings := FlushInBatches(ctx, s.pipeline, limit)
+	s.ingestMu.Unlock()
+	s.pipelineMu.Unlock()
+
+	return flush, enqueued, append(warnings, flushWarnings...)
 }
 
-func (s *telemetryDaemonService) infof(event, format string, args ...any) {
+// --- Logging ---
+
+func (s *Service) infof(event, format string, args ...any) {
 	if s == nil || !s.cfg.Verbose {
 		return
 	}
@@ -210,7 +222,7 @@ func (s *telemetryDaemonService) infof(event, format string, args ...any) {
 	log.Printf("daemon level=info event=%s "+format, append([]any{event}, args...)...)
 }
 
-func (s *telemetryDaemonService) warnf(event, format string, args ...any) {
+func (s *Service) warnf(event, format string, args ...any) {
 	if s == nil || !s.cfg.Verbose {
 		return
 	}
@@ -221,7 +233,7 @@ func (s *telemetryDaemonService) warnf(event, format string, args ...any) {
 	log.Printf("daemon level=warn event=%s "+format, append([]any{event}, args...)...)
 }
 
-func (s *telemetryDaemonService) shouldLog(key string, interval time.Duration) bool {
+func (s *Service) shouldLog(key string, interval time.Duration) bool {
 	if s == nil {
 		return false
 	}
@@ -237,61 +249,9 @@ func (s *telemetryDaemonService) shouldLog(key string, interval time.Duration) b
 	return true
 }
 
-func daemonReadModelRequestKey(req daemonReadModelRequest) string {
-	accounts := make([]daemonReadModelAccount, 0, len(req.Accounts))
-	seenAccounts := make(map[string]bool, len(req.Accounts))
-	for _, account := range req.Accounts {
-		accountID := strings.TrimSpace(account.AccountID)
-		providerID := strings.TrimSpace(account.ProviderID)
-		if accountID == "" || providerID == "" {
-			continue
-		}
-		key := accountID + "|" + providerID
-		if seenAccounts[key] {
-			continue
-		}
-		seenAccounts[key] = true
-		accounts = append(accounts, daemonReadModelAccount{
-			AccountID:  accountID,
-			ProviderID: providerID,
-		})
-	}
-	sort.Slice(accounts, func(i, j int) bool {
-		if accounts[i].AccountID != accounts[j].AccountID {
-			return accounts[i].AccountID < accounts[j].AccountID
-		}
-		return accounts[i].ProviderID < accounts[j].ProviderID
-	})
+// --- Read-model cache ---
 
-	linkKeys := make([]string, 0, len(req.ProviderLinks))
-	for source, target := range req.ProviderLinks {
-		source = strings.ToLower(strings.TrimSpace(source))
-		target = strings.ToLower(strings.TrimSpace(target))
-		if source == "" || target == "" {
-			continue
-		}
-		linkKeys = append(linkKeys, source+"="+target)
-	}
-	sort.Strings(linkKeys)
-
-	var b strings.Builder
-	b.Grow(128 + len(accounts)*32 + len(linkKeys)*24)
-	b.WriteString("accounts:")
-	for _, account := range accounts {
-		b.WriteString(account.AccountID)
-		b.WriteByte(':')
-		b.WriteString(account.ProviderID)
-		b.WriteByte(';')
-	}
-	b.WriteString("|links:")
-	for _, key := range linkKeys {
-		b.WriteString(key)
-		b.WriteByte(';')
-	}
-	return b.String()
-}
-
-func (s *telemetryDaemonService) readModelCacheGet(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
+func (s *Service) readModelCacheGet(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
 	if s == nil || strings.TrimSpace(cacheKey) == "" {
 		return nil, time.Time{}, false
 	}
@@ -304,7 +264,7 @@ func (s *telemetryDaemonService) readModelCacheGet(cacheKey string) (map[string]
 	return maps.Clone(entry.snapshots), entry.updatedAt, true
 }
 
-func (s *telemetryDaemonService) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot) {
+func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot) {
 	if s == nil || strings.TrimSpace(cacheKey) == "" || len(snapshots) == 0 {
 		return
 	}
@@ -316,7 +276,7 @@ func (s *telemetryDaemonService) readModelCacheSet(cacheKey string, snapshots ma
 	s.readModelMu.Unlock()
 }
 
-func (s *telemetryDaemonService) beginReadModelRefresh(cacheKey string) bool {
+func (s *Service) beginReadModelRefresh(cacheKey string) bool {
 	if s == nil || strings.TrimSpace(cacheKey) == "" {
 		return false
 	}
@@ -329,7 +289,7 @@ func (s *telemetryDaemonService) beginReadModelRefresh(cacheKey string) bool {
 	return true
 }
 
-func (s *telemetryDaemonService) endReadModelRefresh(cacheKey string) {
+func (s *Service) endReadModelRefresh(cacheKey string) {
 	if s == nil || strings.TrimSpace(cacheKey) == "" {
 		return
 	}
@@ -338,11 +298,11 @@ func (s *telemetryDaemonService) endReadModelRefresh(cacheKey string) {
 	s.readModelMu.Unlock()
 }
 
-func (s *telemetryDaemonService) computeReadModel(
+func (s *Service) computeReadModel(
 	ctx context.Context,
-	req daemonReadModelRequest,
+	req ReadModelRequest,
 ) (map[string]core.UsageSnapshot, error) {
-	templates := readModelTemplatesFromRequest(req, disabledAccountsFromConfig())
+	templates := ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	if len(templates) == 0 {
 		return map[string]core.UsageSnapshot{}, nil
 	}
@@ -351,10 +311,10 @@ func (s *telemetryDaemonService) computeReadModel(
 	})
 }
 
-func (s *telemetryDaemonService) refreshReadModelCacheAsync(
+func (s *Service) refreshReadModelCacheAsync(
 	parent context.Context,
 	cacheKey string,
-	req daemonReadModelRequest,
+	req ReadModelRequest,
 	timeout time.Duration,
 ) {
 	if !s.beginReadModelRefresh(cacheKey) {
@@ -375,30 +335,13 @@ func (s *telemetryDaemonService) refreshReadModelCacheAsync(
 	}()
 }
 
-func daemonReadModelRequestFromConfig() (daemonReadModelRequest, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return daemonReadModelRequest{}, err
-	}
-	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-	accounts = filterAccountsByDashboardConfig(accounts, cfg.Dashboard)
-	credResult := detect.Result{Accounts: accounts}
-	detect.ApplyCredentials(&credResult)
-	return buildReadModelRequest(credResult.Accounts, cfg.Telemetry.ProviderLinks), nil
-}
-
-func (s *telemetryDaemonService) runReadModelCacheLoop(ctx context.Context) {
+func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	if s == nil {
 		return
 	}
 
 	interval := s.cfg.PollInterval / 2
-	if interval < 5*time.Second {
-		interval = 5 * time.Second
-	}
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-	}
+	interval = max(5*time.Second, min(30*time.Second, interval))
 
 	s.infof("read_model_cache_loop_start", "interval=%s", interval)
 	s.refreshReadModelCacheFromConfig(ctx)
@@ -416,8 +359,8 @@ func (s *telemetryDaemonService) runReadModelCacheLoop(ctx context.Context) {
 	}
 }
 
-func (s *telemetryDaemonService) refreshReadModelCacheFromConfig(ctx context.Context) {
-	req, err := daemonReadModelRequestFromConfig()
+func (s *Service) refreshReadModelCacheFromConfig(ctx context.Context) {
+	req, err := BuildReadModelRequestFromConfig()
 	if err != nil {
 		if s.shouldLog("read_model_cache_config_error", 15*time.Second) {
 			s.warnf("read_model_cache_config_error", "error=%v", err)
@@ -427,11 +370,13 @@ func (s *telemetryDaemonService) refreshReadModelCacheFromConfig(ctx context.Con
 	if len(req.Accounts) == 0 {
 		return
 	}
-	cacheKey := daemonReadModelRequestKey(req)
+	cacheKey := ReadModelRequestKey(req)
 	s.refreshReadModelCacheAsync(ctx, cacheKey, req, 60*time.Second)
 }
 
-func (s *telemetryDaemonService) runCollectLoop(ctx context.Context) {
+// --- Collection loop ---
+
+func (s *Service) runCollectLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.CollectInterval)
 	defer ticker.Stop()
 
@@ -448,55 +393,7 @@ func (s *telemetryDaemonService) runCollectLoop(ctx context.Context) {
 	}
 }
 
-type ingestTally struct {
-	processed int
-	ingested  int
-	deduped   int
-	failed    int
-}
-
-func (s *telemetryDaemonService) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {
-	var tally ingestTally
-	var retries []telemetry.IngestRequest
-	for _, req := range reqs {
-		tally.processed++
-		result, err := s.ingestRequest(ctx, req)
-		if err != nil {
-			tally.failed++
-			retries = append(retries, req)
-			continue
-		}
-		if result.Deduped {
-			tally.deduped++
-		} else {
-			tally.ingested++
-		}
-	}
-	return tally, retries
-}
-
-func (s *telemetryDaemonService) flushBacklog(ctx context.Context, retryReqs []telemetry.IngestRequest, limit int) (telemetry.FlushResult, int, []string) {
-	var warnings []string
-	enqueued := 0
-
-	s.pipelineMu.Lock()
-	if len(retryReqs) > 0 {
-		n, err := s.pipeline.EnqueueRequests(retryReqs)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("retry enqueue: %v", err))
-		} else {
-			enqueued = n
-		}
-	}
-	s.ingestMu.Lock()
-	flush, flushWarnings := flushInBatches(ctx, s.pipeline, limit)
-	s.ingestMu.Unlock()
-	s.pipelineMu.Unlock()
-
-	return flush, enqueued, append(warnings, flushWarnings...)
-}
-
-func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
+func (s *Service) collectAndFlush(ctx context.Context) {
 	if s == nil {
 		return
 	}
@@ -542,7 +439,9 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 	}
 }
 
-func (s *telemetryDaemonService) runPollLoop(ctx context.Context) {
+// --- Poll loop ---
+
+func (s *Service) runPollLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -559,13 +458,13 @@ func (s *telemetryDaemonService) runPollLoop(ctx context.Context) {
 	}
 }
 
-func (s *telemetryDaemonService) pollProviders(ctx context.Context) {
+func (s *Service) pollProviders(ctx context.Context) {
 	if s == nil || s.quotaIngest == nil {
 		return
 	}
 	started := time.Now()
 
-	accounts, modelNorm, err := daemonAccountsAndNorm()
+	accounts, modelNorm, err := LoadAccountsAndNorm()
 	if err != nil {
 		if s.shouldLog("poll_config_warning", 20*time.Second) {
 			s.warnf("poll_config_warning", "error=%v", err)
@@ -669,79 +568,16 @@ func (s *telemetryDaemonService) pollProviders(ctx context.Context) {
 	}
 }
 
-func daemonAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfig, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, core.DefaultModelNormalizationConfig(), err
-	}
-	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-	accounts = filterAccountsByDashboardConfig(accounts, cfg.Dashboard)
-	credResult := detect.Result{Accounts: accounts}
-	detect.ApplyCredentials(&credResult)
-	accounts = credResult.Accounts
-	return accounts, core.NormalizeModelNormalizationConfig(cfg.ModelNormalization), nil
-}
+// --- HTTP server ---
 
-func filterAccountsByDashboardConfig(
-	accounts []core.AccountConfig,
-	dashboardCfg config.DashboardConfig,
-) []core.AccountConfig {
-	if len(accounts) == 0 {
-		return nil
-	}
-
-	enabledByAccountID := make(map[string]bool, len(dashboardCfg.Providers))
-	for _, pref := range dashboardCfg.Providers {
-		accountID := strings.TrimSpace(pref.AccountID)
-		if accountID == "" {
-			continue
-		}
-		enabledByAccountID[accountID] = pref.Enabled
-	}
-
-	filtered := make([]core.AccountConfig, 0, len(accounts))
-	for _, acct := range accounts {
-		accountID := strings.TrimSpace(acct.ID)
-		if accountID == "" {
-			continue
-		}
-		enabled, ok := enabledByAccountID[accountID]
-		if ok && !enabled {
-			continue
-		}
-		filtered = append(filtered, acct)
-	}
-	return filtered
-}
-
-func disabledAccountsFromDashboard(dashboardCfg config.DashboardConfig) map[string]bool {
-	disabled := make(map[string]bool, len(dashboardCfg.Providers))
-	for _, pref := range dashboardCfg.Providers {
-		accountID := strings.TrimSpace(pref.AccountID)
-		if accountID == "" || pref.Enabled {
-			continue
-		}
-		disabled[accountID] = true
-	}
-	return disabled
-}
-
-func disabledAccountsFromConfig() map[string]bool {
-	cfg, err := config.Load()
-	if err != nil {
-		return map[string]bool{}
-	}
-	return disabledAccountsFromDashboard(cfg.Dashboard)
-}
-
-func (s *telemetryDaemonService) startSocketServer(ctx context.Context) error {
+func (s *Service) startSocketServer(ctx context.Context) error {
 	if strings.TrimSpace(s.cfg.SocketPath) == "" {
 		return fmt.Errorf("telemetry daemon socket path is empty")
 	}
 	if err := os.MkdirAll(filepath.Dir(s.cfg.SocketPath), 0o755); err != nil {
 		return fmt.Errorf("create telemetry daemon socket dir: %w", err)
 	}
-	if err := ensureSocketPathAvailable(s.cfg.SocketPath); err != nil {
+	if err := EnsureSocketPathAvailable(s.cfg.SocketPath); err != nil {
 		return err
 	}
 
@@ -783,7 +619,7 @@ func (s *telemetryDaemonService) startSocketServer(ctx context.Context) error {
 	return nil
 }
 
-func ensureSocketPathAvailable(socketPath string) error {
+func EnsureSocketPathAvailable(socketPath string) error {
 	socketPath = strings.TrimSpace(socketPath)
 	if socketPath == "" {
 		return fmt.Errorf("socket path is empty")
@@ -797,7 +633,6 @@ func ensureSocketPathAvailable(socketPath string) error {
 		return fmt.Errorf("stat socket path %s: %w", socketPath, err)
 	}
 
-	// Existing non-socket files should never be deleted automatically.
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("socket path %s already exists and is not a socket", socketPath)
 	}
@@ -811,23 +646,22 @@ func ensureSocketPathAvailable(socketPath string) error {
 		return fmt.Errorf("telemetry daemon already running on socket %s", socketPath)
 	}
 
-	// Socket file exists but no server is accepting connections.
 	if err := os.Remove(socketPath); err != nil {
 		return fmt.Errorf("remove stale daemon socket %s: %w", socketPath, err)
 	}
 	return nil
 }
 
-func (s *telemetryDaemonService) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Service) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":              "ok",
 		"daemon_version":      strings.TrimSpace(version.Version),
-		"api_version":         telemetryDaemonAPIVersion,
+		"api_version":         APIVersion,
 		"integration_version": integrations.IntegrationVersion,
 	})
 }
 
-func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -863,7 +697,7 @@ func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if len(reqs) == 0 {
-		writeJSON(w, http.StatusOK, daemonHookResponse{Source: sourceName})
+		writeJSON(w, http.StatusOK, HookResponse{Source: sourceName})
 		return
 	}
 
@@ -873,7 +707,7 @@ func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Reque
 		warnings = append(warnings, fmt.Sprintf("%d ingest failures", tally.failed))
 	}
 
-	writeJSON(w, http.StatusOK, daemonHookResponse{
+	writeJSON(w, http.StatusOK, HookResponse{
 		Source:    sourceName,
 		Enqueued:  len(reqs),
 		Processed: tally.processed,
@@ -904,41 +738,43 @@ func (s *telemetryDaemonService) handleHook(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	var req daemonReadModelRequest
+	var req ReadModelRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("decode read-model request: %v", err))
 		return
 	}
 
 	if len(req.Accounts) == 0 {
-		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: map[string]core.UsageSnapshot{}})
-		return
+		configReq, configErr := BuildReadModelRequestFromConfig()
+		if configErr != nil || len(configReq.Accounts) == 0 {
+			writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: map[string]core.UsageSnapshot{}})
+			return
+		}
+		req = configReq
 	}
 
-	cacheKey := daemonReadModelRequestKey(req)
+	cacheKey := ReadModelRequestKey(req)
 	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey); ok {
-		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: cached})
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
 			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
 		}
 		return
 	}
 
-	// Cache miss: attempt one short synchronous compute from daemon-owned telemetry
-	// state. Keep this tight so first dashboard paint doesn't block on warm-up.
 	computeCtx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
 		s.readModelCacheSet(cacheKey, snapshots)
-		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 		return
 	}
 
@@ -946,11 +782,9 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
 	}
 
-	// If synchronous compute misses its deadline, keep request latency bounded:
-	// return empty templates immediately and continue refresh in background.
 	s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
-	snapshots = readModelTemplatesFromRequest(req, disabledAccountsFromConfig())
-	writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
+	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
+	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {
 		s.infof(
@@ -964,47 +798,106 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 	}
 }
 
-func readModelTemplatesFromRequest(
-	req daemonReadModelRequest,
-	disabledAccounts map[string]bool,
-) map[string]core.UsageSnapshot {
-	if disabledAccounts == nil {
-		disabledAccounts = map[string]bool{}
-	}
-	accounts := make([]daemonReadModelAccount, 0, len(req.Accounts))
-	seen := make(map[string]bool, len(req.Accounts))
-	for _, account := range req.Accounts {
-		accountID := strings.TrimSpace(account.AccountID)
-		providerID := strings.TrimSpace(account.ProviderID)
-		if disabledAccounts[accountID] {
-			continue
-		}
-		if accountID == "" || providerID == "" || seen[accountID] {
-			continue
-		}
-		seen[accountID] = true
-		accounts = append(accounts, daemonReadModelAccount{AccountID: accountID, ProviderID: providerID})
-	}
-	sort.Slice(accounts, func(i, j int) bool { return accounts[i].AccountID < accounts[j].AccountID })
+// --- Helpers ---
 
-	out := make(map[string]core.UsageSnapshot, len(accounts))
-	now := time.Now().UTC()
-	for _, account := range accounts {
-		out[account.AccountID] = core.UsageSnapshot{
-			ProviderID:  account.ProviderID,
-			AccountID:   account.AccountID,
-			Timestamp:   now,
-			Status:      core.StatusUnknown,
-			Message:     "",
-			Metrics:     map[string]core.Metric{},
-			Resets:      map[string]time.Time{},
-			Attributes:  map[string]string{},
-			Diagnostics: map[string]string{},
-			Raw:         map[string]string{},
-			DailySeries: map[string][]core.TimePoint{},
+func buildCollectors() []telemetry.Collector {
+	collectors := make([]telemetry.Collector, 0)
+	for _, provider := range providers.AllProviders() {
+		source, ok := provider.(shared.TelemetrySource)
+		if !ok {
+			continue
 		}
+		opts := defaultTelemetryOptionsForSource(source.System())
+		collectors = append(collectors, telemetry.NewSourceCollector(source, opts, ""))
+	}
+	return collectors
+}
+
+func providersByID() map[string]core.UsageProvider {
+	out := make(map[string]core.UsageProvider)
+	for _, provider := range providers.AllProviders() {
+		out[provider.ID()] = provider
 	}
 	return out
+}
+
+func defaultTelemetryOptionsForSource(sourceSystem string) shared.TelemetryCollectOptions {
+	return telemetryOptionsForSource(
+		sourceSystem,
+		defaultCodexSessionsDir,
+		defaultClaudeProjectsDir,
+		defaultClaudeProjectsAltDir,
+		nil,
+		"",
+		defaultOpenCodeDBPath,
+	)
+}
+
+func telemetryOptionsForSource(
+	sourceSystem string,
+	codexSessions string,
+	claudeProjects string,
+	claudeProjectsAlt string,
+	opencodeEventsDirs []string,
+	opencodeEventsFile string,
+	opencodeDB string,
+) shared.TelemetryCollectOptions {
+	opts := shared.TelemetryCollectOptions{
+		Paths:     map[string]string{},
+		PathLists: map[string][]string{},
+	}
+
+	switch sourceSystem {
+	case "codex":
+		opts.Paths["sessions_dir"] = codexSessions
+	case "claude_code":
+		opts.Paths["projects_dir"] = claudeProjects
+		opts.Paths["alt_projects_dir"] = claudeProjectsAlt
+	case "opencode":
+		opts.Paths["events_file"] = opencodeEventsFile
+		opts.Paths["db_path"] = opencodeDB
+		opts.PathLists["events_dirs"] = opencodeEventsDirs
+	}
+	return opts
+}
+
+func FlushInBatches(ctx context.Context, pipeline *telemetry.Pipeline, maxTotal int) (telemetry.FlushResult, []string) {
+	var (
+		accum    telemetry.FlushResult
+		warnings []string
+	)
+
+	remaining := maxTotal
+	for {
+		batchLimit := 10000
+		if maxTotal > 0 {
+			if remaining <= 0 {
+				break
+			}
+			if remaining < batchLimit {
+				batchLimit = remaining
+			}
+		}
+
+		batch, err := pipeline.Flush(ctx, batchLimit)
+		accum.Processed += batch.Processed
+		accum.Ingested += batch.Ingested
+		accum.Deduped += batch.Deduped
+		accum.Failed += batch.Failed
+
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+		if maxTotal > 0 {
+			remaining -= batch.Processed
+		}
+
+		if batch.Processed == 0 || (batch.Ingested == 0 && batch.Deduped == 0) {
+			break
+		}
+	}
+
+	return accum, warnings
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -1016,3 +909,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
+

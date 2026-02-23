@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"errors"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 const APIVersion = "v1"
+
+var errDaemonUnavailable = errors.New("telemetry daemon unavailable")
 
 type Config struct {
 	DBPath          string
@@ -61,3 +64,23 @@ type ingestTally struct {
 }
 
 type SnapshotHandler func(map[string]core.UsageSnapshot)
+
+type DaemonStatus int
+
+const (
+	DaemonStatusUnknown      DaemonStatus = iota
+	DaemonStatusConnecting                // attempting to reach daemon
+	DaemonStatusNotInstalled              // service not installed
+	DaemonStatusStarting                  // service installed, waiting for health
+	DaemonStatusRunning                   // healthy and current
+	DaemonStatusOutdated                  // healthy but wrong version
+	DaemonStatusError                     // unrecoverable error
+)
+
+type DaemonState struct {
+	Status      DaemonStatus
+	Message     string
+	InstallHint string
+}
+
+type StateHandler func(DaemonState)

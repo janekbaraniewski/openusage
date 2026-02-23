@@ -22,7 +22,7 @@ func TestNormalizeAnalyticsDailySeries_AliasesAndModelSeries(t *testing.T) {
 		},
 	}
 
-	got := NormalizeUsageSnapshot(snap)
+	got := NormalizeUsageSnapshotWithConfig(snap, DefaultModelNormalizationConfig())
 
 	if len(got.DailySeries["cost"]) == 0 {
 		t.Fatal("expected canonical cost series")
@@ -51,7 +51,7 @@ func TestNormalizeAnalyticsDailySeries_DoesNotInventDailyFromWindowTotals(t *tes
 		},
 	}
 
-	got := NormalizeUsageSnapshot(snap)
+	got := NormalizeUsageSnapshotWithConfig(snap, DefaultModelNormalizationConfig())
 
 	if len(got.DailySeries["cost"]) != 0 {
 		t.Fatalf("expected no synthesized cost points from window totals, got %d", len(got.DailySeries["cost"]))

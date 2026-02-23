@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,15 +12,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/detect"
-	"github.com/janekbaraniewski/openusage/internal/telemetry"
+	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 )
 
-func RunDashboard(cfg config.Config) {
+func runDashboard(cfg config.Config) {
 	tui.SetThemeByName(cfg.Theme)
 
-	allAccounts := resolveAccounts(&cfg)
+	cachedAccounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
 
 	model := tui.NewModel(
@@ -29,19 +27,20 @@ func RunDashboard(cfg config.Config) {
 		cfg.UI.CritThreshold,
 		cfg.Experimental.Analytics,
 		cfg.Dashboard,
-		allAccounts,
+		cachedAccounts,
+	)
+
+	socketPath := daemon.ResolveSocketPath()
+	verbose := os.Getenv("OPENUSAGE_DEBUG") != ""
+
+	viewRuntime := daemon.NewViewRuntime(
+		nil,
+		socketPath,
+		verbose,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	viewRuntime := newDaemonViewRuntime(
-		nil,
-		resolveSocketPath(),
-		os.Getenv("OPENUSAGE_DEBUG") != "",
-		allAccounts,
-		cfg.Telemetry.ProviderLinks,
-	)
 
 	var program *tea.Program
 
@@ -49,30 +48,38 @@ func RunDashboard(cfg config.Config) {
 		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {
 			return
 		}
-		exists := false
-		for _, existing := range allAccounts {
-			if strings.EqualFold(strings.TrimSpace(existing.ID), strings.TrimSpace(acct.ID)) {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			allAccounts = append(allAccounts, acct)
-		}
-		viewRuntime.setAccounts(allAccounts, cfg.Telemetry.ProviderLinks)
 	})
 
 	model.SetOnRefresh(func() {
 		go func() {
-			snaps := viewRuntime.readWithFallback(ctx)
+			snaps := viewRuntime.ReadWithFallback(ctx)
 			if len(snaps) > 0 && program != nil {
 				program.Send(tui.SnapshotsMsg(snaps))
 			}
 		}()
 	})
 
+	model.SetOnInstallDaemon(func() error {
+		if err := daemon.InstallService(strings.TrimSpace(socketPath)); err != nil {
+			return err
+		}
+		viewRuntime.ResetEnsureThrottle()
+		return nil
+	})
+
 	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	startDaemonViewBroadcaster(ctx, program, viewRuntime, interval)
+
+	daemon.StartBroadcaster(
+		ctx,
+		viewRuntime,
+		interval,
+		func(snaps map[string]core.UsageSnapshot) {
+			program.Send(tui.SnapshotsMsg(snaps))
+		},
+		func(state daemon.DaemonState) {
+			program.Send(mapDaemonState(state))
+		},
+	)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -88,51 +95,23 @@ func RunDashboard(cfg config.Config) {
 	}
 }
 
-func resolveAccounts(cfg *config.Config) []core.AccountConfig {
-	allAccounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-	if cfg.AutoDetect {
-		result := detect.AutoDetect()
-
-		manualIDs := make(map[string]bool, len(cfg.Accounts))
-		for _, acct := range cfg.Accounts {
-			manualIDs[acct.ID] = true
-		}
-		var autoDetected []core.AccountConfig
-		for _, acct := range result.Accounts {
-			if !manualIDs[acct.ID] {
-				autoDetected = append(autoDetected, acct)
-			}
-		}
-
-		cfg.AutoDetectedAccounts = autoDetected
-		if err := config.SaveAutoDetected(autoDetected); err != nil {
-			log.Printf("Warning: could not persist auto-detected accounts: %v", err)
-		}
-
-		allAccounts = core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-		if os.Getenv("OPENUSAGE_DEBUG") != "" {
-			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
-				fmt.Fprint(os.Stderr, result.Summary())
-				fmt.Fprintln(os.Stderr)
-			}
-		}
+func mapDaemonState(s daemon.DaemonState) tui.DaemonStatusMsg {
+	statusMap := map[daemon.DaemonStatus]tui.DaemonStatus{
+		daemon.DaemonStatusUnknown:      tui.DaemonConnecting,
+		daemon.DaemonStatusConnecting:   tui.DaemonConnecting,
+		daemon.DaemonStatusNotInstalled: tui.DaemonNotInstalled,
+		daemon.DaemonStatusStarting:     tui.DaemonStarting,
+		daemon.DaemonStatusRunning:      tui.DaemonRunning,
+		daemon.DaemonStatusOutdated:     tui.DaemonOutdated,
+		daemon.DaemonStatusError:        tui.DaemonError,
 	}
-
-	credResult := detect.Result{Accounts: allAccounts}
-	detect.ApplyCredentials(&credResult)
-	return credResult.Accounts
-}
-
-func resolveSocketPath() string {
-	if value := strings.TrimSpace(os.Getenv("OPENUSAGE_TELEMETRY_SOCKET")); value != "" {
-		return value
+	tuiStatus, ok := statusMap[s.Status]
+	if !ok {
+		tuiStatus = tui.DaemonError
 	}
-	socketPath, err := telemetry.DefaultSocketPath()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving telemetry daemon socket path: %v\n", err)
-		os.Exit(1)
+	return tui.DaemonStatusMsg{
+		Status:      tuiStatus,
+		Message:     s.Message,
+		InstallHint: s.InstallHint,
 	}
-	return socketPath
 }

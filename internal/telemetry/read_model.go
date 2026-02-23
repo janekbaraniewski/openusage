@@ -45,10 +45,6 @@ type ReadModelOptions struct {
 
 // ApplyCanonicalTelemetryView hydrates snapshots from canonical telemetry streams.
 // Root quota values come from limit_snapshot events, then canonical usage aggregates are applied.
-func ApplyCanonicalTelemetryView(ctx context.Context, dbPath string, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {
-	return ApplyCanonicalTelemetryViewWithOptions(ctx, dbPath, snaps, ReadModelOptions{})
-}
-
 func ApplyCanonicalTelemetryViewWithOptions(
 	ctx context.Context,
 	dbPath string,

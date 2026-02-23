@@ -189,10 +189,11 @@ func TestFetch_UsageAPI(t *testing.T) {
 		t.Error("token endpoint was not called")
 	}
 
-	projectID, err := loadCodeAssistWithEndpoint(ctx, accessToken, "", server.URL)
+	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, "", server.URL)
 	if err != nil {
 		t.Fatalf("loadCodeAssist() error: %v", err)
 	}
+	projectID := resp.CloudAICompanionProject
 	if projectID != "test-project-123" {
 		t.Errorf("projectID = %q, want test-project-123", projectID)
 	}

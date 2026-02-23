@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"bytes"
@@ -15,43 +15,12 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-type daemonReadModelAccount struct {
-	AccountID  string `json:"account_id"`
-	ProviderID string `json:"provider_id"`
-}
-
-type daemonReadModelRequest struct {
-	Accounts      []daemonReadModelAccount `json:"accounts"`
-	ProviderLinks map[string]string        `json:"provider_links"`
-}
-
-type daemonReadModelResponse struct {
-	Snapshots map[string]core.UsageSnapshot `json:"snapshots"`
-}
-
-type daemonHookResponse struct {
-	Source    string   `json:"source"`
-	Enqueued  int      `json:"enqueued"`
-	Processed int      `json:"processed"`
-	Ingested  int      `json:"ingested"`
-	Deduped   int      `json:"deduped"`
-	Failed    int      `json:"failed"`
-	Warnings  []string `json:"warnings,omitempty"`
-}
-
-type daemonHealthResponse struct {
-	Status             string `json:"status"`
-	DaemonVersion      string `json:"daemon_version,omitempty"`
-	APIVersion         string `json:"api_version,omitempty"`
-	IntegrationVersion string `json:"integration_version,omitempty"`
-}
-
-type telemetryDaemonClient struct {
-	socketPath string
+type Client struct {
+	SocketPath string
 	http       *http.Client
 }
 
-func newTelemetryDaemonClient(socketPath string) *telemetryDaemonClient {
+func NewClient(socketPath string) *Client {
 	dialer := &net.Dialer{Timeout: 2 * time.Second}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -60,8 +29,8 @@ func newTelemetryDaemonClient(socketPath string) *telemetryDaemonClient {
 		DisableCompression: true,
 		DisableKeepAlives:  true,
 	}
-	return &telemetryDaemonClient{
-		socketPath: socketPath,
+	return &Client{
+		SocketPath: socketPath,
 		http: &http.Client{
 			Transport: transport,
 			Timeout:   12 * time.Second,
@@ -69,34 +38,29 @@ func newTelemetryDaemonClient(socketPath string) *telemetryDaemonClient {
 	}
 }
 
-func (c *telemetryDaemonClient) Health(ctx context.Context) error {
-	_, err := c.HealthInfo(ctx)
-	return err
-}
-
-func (c *telemetryDaemonClient) HealthInfo(ctx context.Context) (daemonHealthResponse, error) {
-	if c == nil || strings.TrimSpace(c.socketPath) == "" {
-		return daemonHealthResponse{}, fmt.Errorf("daemon client is not configured")
+func (c *Client) HealthInfo(ctx context.Context) (HealthResponse, error) {
+	if c == nil || strings.TrimSpace(c.SocketPath) == "" {
+		return HealthResponse{}, fmt.Errorf("daemon client is not configured")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/healthz", nil)
 	if err != nil {
-		return daemonHealthResponse{}, err
+		return HealthResponse{}, err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return daemonHealthResponse{}, err
+		return HealthResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return daemonHealthResponse{}, fmt.Errorf("daemon health status: %s", resp.Status)
+		return HealthResponse{}, fmt.Errorf("daemon health status: %s", resp.Status)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if len(body) == 0 {
-		return daemonHealthResponse{Status: "ok"}, nil
+		return HealthResponse{Status: "ok"}, nil
 	}
-	var out daemonHealthResponse
+	var out HealthResponse
 	if err := json.Unmarshal(body, &out); err != nil {
-		return daemonHealthResponse{}, fmt.Errorf("decode daemon health response: %w", err)
+		return HealthResponse{}, fmt.Errorf("decode daemon health response: %w", err)
 	}
 	if strings.TrimSpace(out.Status) == "" {
 		out.Status = "ok"
@@ -104,9 +68,9 @@ func (c *telemetryDaemonClient) HealthInfo(ctx context.Context) (daemonHealthRes
 	return out, nil
 }
 
-func (c *telemetryDaemonClient) ReadModel(
+func (c *Client) ReadModel(
 	ctx context.Context,
-	request daemonReadModelRequest,
+	request ReadModelRequest,
 ) (map[string]core.UsageSnapshot, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -134,7 +98,7 @@ func (c *telemetryDaemonClient) ReadModel(
 		return nil, fmt.Errorf("daemon read-model failed: %s", strings.TrimSpace(string(body)))
 	}
 
-	var out daemonReadModelResponse
+	var out ReadModelResponse
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("decode daemon read-model response: %w", err)
 	}
@@ -144,12 +108,12 @@ func (c *telemetryDaemonClient) ReadModel(
 	return out.Snapshots, nil
 }
 
-func (c *telemetryDaemonClient) IngestHook(
+func (c *Client) IngestHook(
 	ctx context.Context,
 	source string,
 	accountID string,
 	payload []byte,
-) (daemonHookResponse, error) {
+) (HookResponse, error) {
 	endpoint := "http://unix/v1/hook/" + url.PathEscape(strings.TrimSpace(source))
 	if strings.TrimSpace(accountID) != "" {
 		endpoint += "?account_id=" + url.QueryEscape(strings.TrimSpace(accountID))
@@ -157,24 +121,24 @@ func (c *telemetryDaemonClient) IngestHook(
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return daemonHookResponse{}, err
+		return HookResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return daemonHookResponse{}, err
+		return HookResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return daemonHookResponse{}, fmt.Errorf("daemon hook ingest failed: %s", strings.TrimSpace(string(body)))
+		return HookResponse{}, fmt.Errorf("daemon hook ingest failed: %s", strings.TrimSpace(string(body)))
 	}
 
-	var out daemonHookResponse
+	var out HookResponse
 	if err := json.Unmarshal(body, &out); err != nil {
-		return daemonHookResponse{}, fmt.Errorf("decode daemon hook response: %w", err)
+		return HookResponse{}, fmt.Errorf("decode daemon hook response: %w", err)
 	}
 	return out, nil
 }

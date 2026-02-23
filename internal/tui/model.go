@@ -51,6 +51,27 @@ const (
 
 type SnapshotsMsg map[string]core.UsageSnapshot
 
+type DaemonStatus string
+
+const (
+	DaemonConnecting    DaemonStatus = "connecting"
+	DaemonNotInstalled  DaemonStatus = "not_installed"
+	DaemonStarting      DaemonStatus = "starting"
+	DaemonRunning       DaemonStatus = "running"
+	DaemonOutdated      DaemonStatus = "outdated"
+	DaemonError         DaemonStatus = "error"
+)
+
+type DaemonStatusMsg struct {
+	Status      DaemonStatus
+	Message     string
+	InstallHint string
+}
+
+type daemonInstallResultMsg struct {
+	err error
+}
+
 type Model struct {
 	snapshots map[string]core.UsageSnapshot
 	sortedIDs []string
@@ -82,6 +103,10 @@ type Model struct {
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
+	daemonStatus     DaemonStatus
+	daemonMessage    string
+	daemonInstalling bool
+
 	providerOrder       []string
 	providerEnabled     map[string]bool
 	accountProviders    map[string]string
@@ -97,10 +122,9 @@ type Model struct {
 	apiKeyEditAccountID string
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 
-	// onAddAccount is called when a new provider account is added from the API Keys tab.
-	// Set from main.go to wire into the engine.
-	onAddAccount func(core.AccountConfig)
-	onRefresh    func()
+	onAddAccount    func(core.AccountConfig)
+	onRefresh       func()
+	onInstallDaemon func() error
 }
 
 func NewModel(
@@ -117,10 +141,15 @@ func NewModel(
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
+		daemonStatus:          DaemonConnecting,
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
 	return model
+}
+
+func (m *Model) SetOnInstallDaemon(fn func() error) {
+	m.onInstallDaemon = fn
 }
 
 // SetOnAddAccount sets a callback invoked when a new provider account is added via the API Keys tab.
@@ -258,11 +287,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case DaemonStatusMsg:
+		m.daemonStatus = msg.Status
+		m.daemonMessage = msg.Message
+		if msg.Status == DaemonRunning {
+			m.daemonInstalling = false
+		}
+		return m, nil
+
+	case daemonInstallResultMsg:
+		m.daemonInstalling = false
+		if msg.err != nil {
+			m.daemonStatus = DaemonError
+			m.daemonMessage = msg.err.Error()
+		}
+		return m, nil
+
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
 		if len(msg) > 0 || snapshotsReady(msg) {
 			m.hasData = true
+			m.daemonStatus = DaemonRunning
 		}
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
@@ -351,9 +397,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if !m.hasData {
+			return m.handleSplashKey(msg)
+		}
 		return m.handleKey(msg)
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+	}
+	return m, nil
+}
+
+func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		if (m.daemonStatus == DaemonNotInstalled || m.daemonStatus == DaemonOutdated) && !m.daemonInstalling {
+			m.daemonInstalling = true
+			m.daemonMessage = "Installing daemon service..."
+			return m, m.installDaemonCmd()
+		}
 	}
 	return m, nil
 }
@@ -740,6 +803,16 @@ func (m Model) View() string {
 		return m.renderSettingsModalOverlay()
 	}
 	return view
+}
+
+func (m Model) installDaemonCmd() tea.Cmd {
+	fn := m.onInstallDaemon
+	return func() tea.Msg {
+		if fn == nil {
+			return daemonInstallResultMsg{err: fmt.Errorf("install callback not configured")}
+		}
+		return daemonInstallResultMsg{err: fn()}
+	}
 }
 
 func (m Model) renderDashboard() string {

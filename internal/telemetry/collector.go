@@ -10,11 +10,6 @@ type Collector interface {
 	Collect(ctx context.Context) ([]IngestRequest, error)
 }
 
-func int64Ptr(v int64) *int64 {
-	vv := v
-	return &vv
-}
-
 func float64Ptr(v float64) *float64 {
 	vv := v
 	return &vv
