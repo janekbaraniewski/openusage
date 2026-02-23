@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -181,8 +183,8 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 		Message:     strings.TrimSpace(envelope.Snapshot.Message),
 		Metrics:     make(map[string]core.Metric, len(envelope.Snapshot.Metrics)),
 		Resets:      make(map[string]time.Time, len(envelope.Snapshot.Resets)),
-		Attributes:  mapClone(envelope.Snapshot.Attributes),
-		Diagnostics: mapClone(envelope.Snapshot.Diagnostics),
+		Attributes:  maps.Clone(envelope.Snapshot.Attributes),
+		Diagnostics: maps.Clone(envelope.Snapshot.Diagnostics),
 	}
 
 	for key, metric := range envelope.Snapshot.Metrics {
@@ -224,10 +226,10 @@ func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) co
 		merged.Message = strings.TrimSpace(root.Message)
 	}
 
-	merged.Metrics = cloneMetricMap(root.Metrics)
-	merged.Resets = cloneTimeMap(root.Resets)
-	merged.Attributes = mapClone(root.Attributes)
-	merged.Diagnostics = mapClone(root.Diagnostics)
+	merged.Metrics = maps.Clone(root.Metrics)
+	merged.Resets = maps.Clone(root.Resets)
+	merged.Attributes = maps.Clone(root.Attributes)
+	merged.Diagnostics = maps.Clone(root.Diagnostics)
 	if merged.Raw == nil {
 		merged.Raw = map[string]string{}
 	}
@@ -334,48 +336,5 @@ func mapCoreStatus(raw string) core.Status {
 }
 
 func parseFlexibleTime(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, fmt.Errorf("empty time")
-	}
-	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-		return ts.UTC(), nil
-	}
-	if ts, err := time.Parse(time.RFC3339, raw); err == nil {
-		return ts.UTC(), nil
-	}
-	return time.Time{}, fmt.Errorf("unsupported time format")
-}
-
-func mapClone(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneMetricMap(in map[string]core.Metric) map[string]core.Metric {
-	if len(in) == 0 {
-		return map[string]core.Metric{}
-	}
-	out := make(map[string]core.Metric, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneTimeMap(in map[string]time.Time) map[string]time.Time {
-	if len(in) == 0 {
-		return map[string]time.Time{}
-	}
-	out := make(map[string]time.Time, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return shared.ParseTimestampString(raw)
 }

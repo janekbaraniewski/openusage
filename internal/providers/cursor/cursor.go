@@ -19,6 +19,8 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 var cursorAPIBase = "https://api2.cursor.sh"
@@ -303,7 +305,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	snap.Raw["billing_cycle_start"] = formatTimestamp(periodUsage.BillingCycleStart)
 	snap.Raw["billing_cycle_end"] = formatTimestamp(periodUsage.BillingCycleEnd)
 
-	if t := parseTimestamp(periodUsage.BillingCycleEnd); !t.IsZero() {
+	if t := shared.FlexParseTime(periodUsage.BillingCycleEnd); !t.IsZero() {
 		snap.Resets["billing_cycle_end"] = t
 	}
 
@@ -959,10 +961,7 @@ func mapToSortedDailyPoints(byDay map[string]float64) []core.TimePoint {
 	if len(byDay) == 0 {
 		return nil
 	}
-	days := make([]string, 0, len(byDay))
-	for day := range byDay {
-		days = append(days, day)
-	}
+	days := lo.Keys(byDay)
 	sort.Strings(days)
 
 	points := make([]core.TimePoint, 0, len(days))
@@ -1125,32 +1124,8 @@ func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *c
 	}
 }
 
-func parseTimestamp(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-	if ms, err := strconv.ParseInt(s, 10, 64); err == nil {
-		if ms > 1e12 { // epoch millis
-			return time.Unix(ms/1000, (ms%1000)*1e6)
-		}
-		return time.Unix(ms, 0) // epoch secs
-	}
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z",
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
 func formatTimestamp(s string) string {
-	t := parseTimestamp(s)
+	t := shared.FlexParseTime(s)
 	if t.IsZero() {
 		return s // return as-is if we can't parse
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 type UIConfig struct {
@@ -143,19 +144,12 @@ func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 	if len(in) == 0 {
 		return nil
 	}
-
-	seen := make(map[string]bool, len(in))
-	out := make([]core.AccountConfig, 0, len(in))
-	for _, acct := range in {
+	normalized := lo.Map(in, func(acct core.AccountConfig, _ int) core.AccountConfig {
 		acct.ID = normalizeAccountID(acct.ID)
-		if acct.ID == "" || seen[acct.ID] {
-			continue
-		}
-		seen[acct.ID] = true
-		out = append(out, acct)
-	}
-
-	return out
+		return acct
+	})
+	filtered := lo.Filter(normalized, func(acct core.AccountConfig, _ int) bool { return acct.ID != "" })
+	return lo.UniqBy(filtered, func(acct core.AccountConfig) string { return acct.ID })
 }
 
 func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
@@ -177,21 +171,14 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 	if len(in) == 0 {
 		return nil
 	}
-
-	seen := make(map[string]bool, len(in))
-	out := make([]DashboardProviderConfig, 0, len(in))
-	for _, entry := range in {
-		id := normalizeAccountID(entry.AccountID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, DashboardProviderConfig{
-			AccountID: id,
+	normalized := lo.Map(in, func(entry DashboardProviderConfig, _ int) DashboardProviderConfig {
+		return DashboardProviderConfig{
+			AccountID: normalizeAccountID(entry.AccountID),
 			Enabled:   entry.Enabled,
-		})
-	}
-	return out
+		}
+	})
+	filtered := lo.Filter(normalized, func(entry DashboardProviderConfig, _ int) bool { return entry.AccountID != "" })
+	return lo.UniqBy(filtered, func(entry DashboardProviderConfig) string { return entry.AccountID })
 }
 
 // saveMu guards read-modify-write cycles on the config file.

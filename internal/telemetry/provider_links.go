@@ -3,6 +3,8 @@ package telemetry
 import (
 	"sort"
 	"strings"
+
+	"github.com/samber/lo"
 )
 
 func normalizeProviderLinks(in map[string]string) map[string]string {
@@ -37,10 +39,7 @@ func telemetrySourceProvidersForTarget(targetProvider string, links map[string]s
 		}
 	}
 
-	out := make([]string, 0, len(set))
-	for provider := range set {
-		out = append(out, provider)
-	}
+	out := lo.Keys(set)
 	sort.Strings(out)
 	return out
 }

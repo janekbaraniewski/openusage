@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -353,14 +354,11 @@ WantedBy=default.target
 }
 
 func xmlEscape(in string) string {
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&apos;",
-	)
-	return replacer.Replace(in)
+	var b strings.Builder
+	if err := xml.EscapeText(&b, []byte(in)); err != nil {
+		return in
+	}
+	return b.String()
 }
 
 func runTelemetryDaemonInstall(socketPath string) error {

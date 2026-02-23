@@ -25,6 +25,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 const (
@@ -1917,10 +1918,7 @@ func mapToSortedTimePoints(values map[string]float64) []core.TimePoint {
 	if len(values) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(values)
 	sort.Strings(keys)
 	series := make([]core.TimePoint, 0, len(keys))
 	for _, key := range keys {
@@ -2261,22 +2259,11 @@ func normalizeLookupKey(s string) string {
 }
 
 func parseAnyTime(raw string) (time.Time, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	t, err := shared.ParseTimestampString(raw)
+	if err != nil {
 		return time.Time{}, false
 	}
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, raw); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
+	return t, true
 }
 
 type versionResponse struct {

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 func normalizeAnalyticsDailySeries(s *UsageSnapshot) {
@@ -156,10 +158,7 @@ func normalizeSeriesPoints(points []TimePoint) []TimePoint {
 		}
 		agg[date] += p.Value
 	}
-	keys := make([]string, 0, len(agg))
-	for k := range agg {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(agg)
 	sort.Strings(keys)
 	out := make([]TimePoint, 0, len(keys))
 	for _, k := range keys {

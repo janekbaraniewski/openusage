@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -300,7 +301,7 @@ func (s *telemetryDaemonService) readModelCacheGet(cacheKey string) (map[string]
 	if !ok || len(entry.snapshots) == 0 {
 		return nil, time.Time{}, false
 	}
-	return cloneSnapshotsMap(entry.snapshots), entry.updatedAt, true
+	return maps.Clone(entry.snapshots), entry.updatedAt, true
 }
 
 func (s *telemetryDaemonService) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot) {
@@ -309,7 +310,7 @@ func (s *telemetryDaemonService) readModelCacheSet(cacheKey string, snapshots ma
 	}
 	s.readModelMu.Lock()
 	s.readModelCache[cacheKey] = cachedReadModelEntry{
-		snapshots: cloneSnapshotsMap(snapshots),
+		snapshots: maps.Clone(snapshots),
 		updatedAt: time.Now().UTC(),
 	}
 	s.readModelMu.Unlock()

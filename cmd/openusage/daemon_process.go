@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
@@ -122,25 +124,16 @@ func daemonHealthAPICompatible(health daemonHealthResponse) bool {
 }
 
 func isReleaseSemverVersion(value string) bool {
-	value = strings.TrimSpace(value)
-	if !strings.HasPrefix(value, "v") {
+	v := strings.TrimSpace(value)
+	if !semver.IsValid(v) {
 		return false
 	}
-	parts := strings.Split(strings.TrimPrefix(value, "v"), ".")
-	if len(parts) != 3 {
+	// Reject pre-release and build metadata (e.g. "v0.4.0-dirty").
+	if semver.Prerelease(v) != "" || semver.Build(v) != "" {
 		return false
 	}
-	for _, part := range parts {
-		if part == "" {
-			return false
-		}
-		for _, ch := range part {
-			if ch < '0' || ch > '9' {
-				return false
-			}
-		}
-	}
-	return true
+	// Require exact MAJOR.MINOR.PATCH (reject shorthand like "v0.4").
+	return v == semver.Canonical(v)
 }
 
 func waitForTelemetryDaemonHealth(ctx context.Context, client *telemetryDaemonClient, timeout time.Duration) error {

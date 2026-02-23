@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 const (
@@ -147,10 +148,7 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 	data.snapshots = snapshots
 	lowerFilter := strings.ToLower(filter)
 
-	keys := make([]string, 0, len(snapshots))
-	for k := range snapshots {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(snapshots)
 	sort.Strings(keys)
 
 	for _, k := range keys {
@@ -2083,10 +2081,7 @@ func aggregateSeriesByDate(series []BrailleSeries) []core.TimePoint {
 	if len(byDate) == 0 {
 		return nil
 	}
-	dates := make([]string, 0, len(byDate))
-	for d := range byDate {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(byDate)
 	sort.Strings(dates)
 	out := make([]core.TimePoint, 0, len(dates))
 	for _, d := range dates {
@@ -2203,10 +2198,7 @@ func buildProviderModelTokenDistributionSeries(data costData, limit int) []Brail
 	var cands []candidate
 
 	for _, g := range data.timeSeries {
-		keys := make([]string, 0, len(g.series))
-		for key := range g.series {
-			keys = append(keys, key)
-		}
+		keys := lo.Keys(g.series)
 		sort.Strings(keys)
 		tokenKeys := make([]string, 0, len(keys))
 		usageKeys := make([]string, 0, len(keys))
@@ -2274,10 +2266,7 @@ func selectBestProviderCostWeightSeries(series map[string][]core.TimePoint) []co
 			return pts
 		}
 	}
-	keys := make([]string, 0, len(series))
-	for key := range series {
-		keys = append(keys, key)
-	}
+	keys := lo.Keys(series)
 	sort.Strings(keys)
 	for _, key := range keys {
 		if strings.HasPrefix(key, "tokens_") || strings.HasPrefix(key, "usage_model_") || strings.HasPrefix(key, "usage_client_") {
@@ -2305,10 +2294,7 @@ func selectBestProviderActivitySeries(series map[string][]core.TimePoint) []core
 	}
 
 	sumByDate := make(map[string]float64)
-	keys := make([]string, 0, len(series))
-	for key := range series {
-		keys = append(keys, key)
-	}
+	keys := lo.Keys(series)
 	sort.Strings(keys)
 	for _, key := range keys {
 		if strings.HasPrefix(key, "tokens_") || strings.HasPrefix(key, "usage_model_") || strings.HasPrefix(key, "usage_client_") {
@@ -2322,10 +2308,7 @@ func selectBestProviderActivitySeries(series map[string][]core.TimePoint) []core
 	if len(sumByDate) == 0 {
 		return nil
 	}
-	dates := make([]string, 0, len(sumByDate))
-	for d := range sumByDate {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(sumByDate)
 	sort.Strings(dates)
 	out := make([]core.TimePoint, 0, len(dates))
 	for _, d := range dates {
@@ -2341,10 +2324,7 @@ func buildProviderModelSeries(data costData, limit int) []BrailleSeries {
 	}
 	var cands []candidate
 	for _, g := range data.timeSeries {
-		keys := make([]string, 0, len(g.series))
-		for key := range g.series {
-			keys = append(keys, key)
-		}
+		keys := lo.Keys(g.series)
 		sort.Strings(keys)
 		for _, key := range keys {
 			pts := g.series[key]
@@ -2393,10 +2373,7 @@ func buildProviderModelSeriesFallback(data costData, limit int) []BrailleSeries 
 	}
 	var cands []candidate
 	for _, g := range data.timeSeries {
-		keys := make([]string, 0, len(g.series))
-		for key := range g.series {
-			keys = append(keys, key)
-		}
+		keys := lo.Keys(g.series)
 		sort.Strings(keys)
 		for _, key := range keys {
 			pts := g.series[key]
@@ -2436,10 +2413,7 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	dateSet := make(map[string]bool)
 
 	for _, g := range data.timeSeries {
-		keys := make([]string, 0, len(g.series))
-		for key := range g.series {
-			keys = append(keys, key)
-		}
+		keys := lo.Keys(g.series)
 		sort.Strings(keys)
 		for _, key := range keys {
 			pts := g.series[key]
@@ -2475,10 +2449,7 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 		rows = rows[:maxRows]
 	}
 
-	dates := make([]string, 0, len(dateSet))
-	for d := range dateSet {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(dateSet)
 	sort.Strings(dates)
 	dates = clipDatesToRecent(dates, lastDays)
 
@@ -2721,10 +2692,7 @@ func computeAnalyticsSummary(data costData) analyticsSummary {
 }
 
 func mapToSortedPoints(m map[string]float64) []core.TimePoint {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(m)
 	sort.Strings(keys)
 
 	out := make([]core.TimePoint, 0, len(keys))
@@ -3219,10 +3187,7 @@ func truncStr(s string, maxLen int) string {
 }
 
 func sortedMetricKeys(m map[string]core.Metric) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(m)
 	sort.Strings(keys)
 	return keys
 }

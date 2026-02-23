@@ -19,6 +19,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/samber/lo"
 )
 
 const (
@@ -736,10 +737,7 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 		return result
 	}
 
-	keys := make([]string, 0, len(aggregates))
-	for key := range aggregates {
-		keys = append(keys, key)
-	}
+	keys := lo.Keys(aggregates)
 	sort.Strings(keys)
 
 	modelWorst := make(map[string]float64)
@@ -1327,11 +1325,7 @@ func findGeminiSessionFiles(tmpDir string) ([]string, error) {
 		return files[i].modTime.After(files[j].modTime)
 	})
 
-	out := make([]string, 0, len(files))
-	for _, file := range files {
-		out = append(out, file.path)
-	}
-	return out, nil
+	return lo.Map(files, func(f item, _ int) string { return f.path }), nil
 }
 
 func readGeminiChatFile(path string) (*geminiChatFile, error) {
@@ -1737,10 +1731,7 @@ func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
 	if len(byDate) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(byDate))
-	for date := range byDate {
-		keys = append(keys, date)
-	}
+	keys := lo.Keys(byDate)
 	sort.Strings(keys)
 
 	points := make([]core.TimePoint, 0, len(keys))
@@ -1761,10 +1752,7 @@ func latestSeriesValue(values map[string]float64) (string, float64) {
 	if len(values) == 0 {
 		return "", 0
 	}
-	dates := make([]string, 0, len(values))
-	for date := range values {
-		dates = append(dates, date)
-	}
+	dates := lo.Keys(values)
 	sort.Strings(dates)
 	last := dates[len(dates)-1]
 	return last, values[last]

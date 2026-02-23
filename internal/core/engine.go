@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"sync"
 	"time"
 )
@@ -79,11 +80,7 @@ func (e *Engine) OnUpdate(fn func(map[string]UsageSnapshot)) {
 func (e *Engine) Snapshots() map[string]UsageSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	out := make(map[string]UsageSnapshot, len(e.snapshots))
-	for k, v := range e.snapshots {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(e.snapshots)
 }
 
 func (e *Engine) RefreshAll(ctx context.Context) {
@@ -160,10 +157,7 @@ func (e *Engine) RefreshAll(ctx context.Context) {
 
 	e.mu.RLock()
 	fn := e.onUpdate
-	snaps := make(map[string]UsageSnapshot, len(e.snapshots))
-	for k, v := range e.snapshots {
-		snaps[k] = v
-	}
+	snaps := maps.Clone(e.snapshots)
 	e.mu.RUnlock()
 
 	if fn != nil {

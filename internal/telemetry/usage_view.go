@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -899,26 +900,18 @@ func normalizeProviderIDs(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	seen := make(map[string]bool, len(in))
-	out := make([]string, 0, len(in))
-	for _, providerID := range in {
-		providerID = strings.ToLower(strings.TrimSpace(providerID))
-		if providerID == "" || seen[providerID] {
-			continue
-		}
-		seen[providerID] = true
-		out = append(out, providerID)
-	}
-	sort.Strings(out)
-	return out
+	normalized := lo.Map(in, func(s string, _ int) string {
+		return strings.ToLower(strings.TrimSpace(s))
+	})
+	result := lo.Uniq(lo.Compact(normalized))
+	sort.Strings(result)
+	return result
 }
 
 func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float64) []core.TimePoint {
-	out := make([]core.TimePoint, 0, len(in))
-	for _, row := range in {
-		out = append(out, core.TimePoint{Date: row.Day, Value: pick(row)})
-	}
-	return out
+	return lo.Map(in, func(row telemetryDayPoint, _ int) core.TimePoint {
+		return core.TimePoint{Date: row.Day, Value: pick(row)}
+	})
 }
 
 func usageCostWindowsUTC(daily []telemetryDayPoint, now time.Time) (today float64, week float64, month float64) {
@@ -965,10 +958,7 @@ func usageAuthoritativeCost(snap core.UsageSnapshot) float64 {
 }
 
 func sortedSeriesFromByDay(byDay map[string]float64) []core.TimePoint {
-	days := make([]string, 0, len(byDay))
-	for day := range byDay {
-		days = append(days, day)
-	}
+	days := lo.Keys(byDay)
 	sort.Strings(days)
 
 	out := make([]core.TimePoint, 0, len(days))

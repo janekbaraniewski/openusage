@@ -18,6 +18,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/samber/lo"
 )
 
 const (
@@ -1083,10 +1084,7 @@ func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
 		return nil
 	}
 
-	keys := make([]string, 0, len(byDate))
-	for date := range byDate {
-		keys = append(keys, date)
-	}
+	keys := lo.Keys(byDate)
 	sort.Strings(keys)
 
 	points := make([]core.TimePoint, 0, len(keys))
@@ -1215,10 +1213,7 @@ func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSn
 		return
 	}
 
-	dates := make([]string, 0, len(dayCounts))
-	for d := range dayCounts {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(dayCounts)
 	sort.Strings(dates)
 
 	for _, d := range dates {

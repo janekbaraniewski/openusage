@@ -12,6 +12,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 type DetectedTool struct {
@@ -89,10 +90,8 @@ func fileExists(path string) bool {
 }
 
 func addAccount(result *Result, acct core.AccountConfig) {
-	for _, existing := range result.Accounts {
-		if existing.ID == acct.ID {
-			return
-		}
+	if lo.ContainsBy(result.Accounts, func(existing core.AccountConfig) bool { return existing.ID == acct.ID }) {
+		return
 	}
 	result.Accounts = append(result.Accounts, acct)
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
@@ -93,12 +92,4 @@ func flushInBatches(ctx context.Context, pipeline *telemetry.Pipeline, maxTotal 
 	}
 
 	return accum, warnings
-}
-
-func cloneSnapshotsMap(in map[string]core.UsageSnapshot) map[string]core.UsageSnapshot {
-	out := make(map[string]core.UsageSnapshot, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
 }

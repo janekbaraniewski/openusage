@@ -6,8 +6,10 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.33
+	github.com/samber/lo v1.52.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.48.0
+	golang.org/x/mod v0.33.0
 )
 
 require (

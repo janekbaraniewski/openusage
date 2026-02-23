@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 const (
@@ -118,13 +119,7 @@ func (m Model) renderTiles(w, h int) string {
 	var rowHeights []int
 	gap := strings.Repeat("\n", tileGapV)
 
-	for i := 0; i < len(tiles); i += cols {
-		end := i + cols
-		if end > len(tiles) {
-			end = len(tiles)
-		}
-		rowTiles := tiles[i:end]
-
+	for _, rowTiles := range lo.Chunk(tiles, cols) {
 		for len(rowTiles) < cols {
 			rowTiles = append(rowTiles, []string{strings.Repeat(" ", tileW+tileBorderH)})
 		}
@@ -470,10 +465,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		return nil
 	}
 
-	keys := make([]string, 0, len(snap.Metrics))
-	for k := range snap.Metrics {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(snap.Metrics)
 	sort.Strings(keys)
 	keys = prioritizeMetricKeys(keys, widget.GaugePriority)
 
@@ -640,10 +632,7 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 	}
 
 	if spec.match != nil && len(segments) < maxSegments {
-		keys := make([]string, 0, len(metrics))
-		for key := range metrics {
-			keys = append(keys, key)
-		}
+		keys := lo.Keys(metrics)
 		sort.Strings(keys)
 		for _, key := range keys {
 			if len(segments) >= maxSegments {
@@ -808,10 +797,7 @@ func (m Model) buildTileMetricLines(snap core.UsageSnapshot, widget core.Dashboa
 		return nil
 	}
 
-	keys := make([]string, 0, len(snap.Metrics))
-	for k := range snap.Metrics {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(snap.Metrics)
 	sort.Strings(keys)
 
 	maxLabel := innerW/2 - 1
@@ -2969,10 +2955,7 @@ func sortedSeriesFromByDay(pointsByDay map[string]float64) []core.TimePoint {
 	if len(pointsByDay) == 0 {
 		return nil
 	}
-	days := make([]string, 0, len(pointsByDay))
-	for day := range pointsByDay {
-		days = append(days, day)
-	}
+	days := lo.Keys(pointsByDay)
 	sort.Strings(days)
 
 	points := make([]core.TimePoint, 0, len(days))

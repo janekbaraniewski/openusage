@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 type TelemetryEventType string
@@ -121,14 +123,18 @@ func FirstNonEmpty(values ...string) string {
 	return ""
 }
 
+var timestampLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.000Z",
+	"2006-01-02T15:04:05Z",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
 func ParseTimestampString(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-	}
-	for _, layout := range layouts {
+	for _, layout := range timestampLayouts {
 		if ts, err := time.Parse(layout, value); err == nil {
 			return ts.UTC(), nil
 		}
@@ -137,6 +143,14 @@ func ParseTimestampString(value string) (time.Time, error) {
 		return UnixAuto(n), nil
 	}
 	return time.Time{}, strconv.ErrSyntax
+}
+
+func FlexParseTime(value string) time.Time {
+	t, err := ParseTimestampString(strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 func UnixAuto(ts int64) time.Time {
@@ -223,16 +237,8 @@ func CollectFilesByExt(roots []string, exts map[string]bool) []string {
 }
 
 func uniqueStrings(in []string) []string {
-	seen := make(map[string]bool, len(in))
-	out := make([]string, 0, len(in))
-	for _, item := range in {
-		item = strings.TrimSpace(item)
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		out = append(out, item)
-	}
-	sort.Strings(out)
-	return out
+	trimmed := lo.Map(in, func(s string, _ int) string { return strings.TrimSpace(s) })
+	result := lo.Uniq(lo.Compact(trimmed))
+	sort.Strings(result)
+	return result
 }

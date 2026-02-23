@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/samber/lo"
+)
 
 type Status string
 
@@ -74,18 +78,9 @@ func NewAuthSnapshot(providerID, accountID, message string) UsageSnapshot {
 }
 
 func MergeAccounts(manual, autoDetected []AccountConfig) []AccountConfig {
-	seen := make(map[string]bool, len(manual))
-	result := make([]AccountConfig, 0, len(manual)+len(autoDetected))
-	for _, acct := range manual {
-		seen[acct.ID] = true
-		result = append(result, acct)
-	}
-	for _, acct := range autoDetected {
-		if !seen[acct.ID] {
-			result = append(result, acct)
-		}
-	}
-	return result
+	return lo.UniqBy(append(manual, autoDetected...), func(acct AccountConfig) string {
+		return acct.ID
+	})
 }
 
 func (s *UsageSnapshot) EnsureMaps() {

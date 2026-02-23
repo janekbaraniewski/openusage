@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/samber/lo"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -1428,21 +1429,16 @@ func fallbackDisplayMetricKeys(metrics map[string]core.Metric) []string {
 		return nil
 	}
 
-	filtered := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "client_") ||
-			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "source_") ||
-			strings.HasPrefix(key, "usage_model_") ||
-			strings.HasPrefix(key, "usage_source_") ||
-			strings.HasPrefix(key, "usage_client_") ||
-			strings.HasPrefix(key, "tokens_client_") ||
-			strings.HasPrefix(key, "analytics_") {
-			continue
-		}
-		filtered = append(filtered, key)
+	excludePrefixes := []string{
+		"model_", "client_", "tool_", "source_",
+		"usage_model_", "usage_source_", "usage_client_",
+		"tokens_client_", "analytics_",
 	}
+	filtered := lo.Filter(keys, func(key string, _ int) bool {
+		return !lo.SomeBy(excludePrefixes, func(prefix string) bool {
+			return strings.HasPrefix(key, prefix)
+		})
+	})
 	if len(filtered) > 0 {
 		return filtered
 	}
@@ -1662,10 +1658,7 @@ func (m *Model) ensureSnapshotProvidersKnown() {
 	if len(m.snapshots) == 0 {
 		return
 	}
-	keys := make([]string, 0, len(m.snapshots))
-	for id := range m.snapshots {
-		keys = append(keys, id)
-	}
+	keys := lo.Keys(m.snapshots)
 	sort.Strings(keys)
 
 	for _, id := range keys {
@@ -1716,10 +1709,7 @@ func (m Model) telemetryUnmappedProviders() []string {
 		}
 	}
 
-	out := make([]string, 0, len(seen))
-	for providerID := range seen {
-		out = append(out, providerID)
-	}
+	out := lo.Keys(seen)
 	sort.Strings(out)
 	return out
 }
@@ -1734,10 +1724,7 @@ func (m Model) telemetryProviderLinkHints() []string {
 		seen[hint] = true
 	}
 
-	out := make([]string, 0, len(seen))
-	for hint := range seen {
-		out = append(out, hint)
-	}
+	out := lo.Keys(seen)
 	sort.Strings(out)
 	return out
 }
@@ -1760,10 +1747,7 @@ func (m Model) configuredProviderIDs() []string {
 		seen[providerID] = true
 	}
 
-	out := make([]string, 0, len(seen))
-	for providerID := range seen {
-		out = append(out, providerID)
-	}
+	out := lo.Keys(seen)
 	sort.Strings(out)
 	return out
 }
@@ -1818,13 +1802,9 @@ func (m *Model) rebuildSortedIDs() {
 		seen[id] = true
 	}
 
-	var extra []string
-	for id := range m.snapshots {
-		if seen[id] || !m.isProviderEnabled(id) {
-			continue
-		}
-		extra = append(extra, id)
-	}
+	extra := lo.Filter(lo.Keys(m.snapshots), func(id string, _ int) bool {
+		return !seen[id] && m.isProviderEnabled(id)
+	})
 	sort.Strings(extra)
 
 	m.sortedIDs = append(ordered, extra...)
@@ -1841,16 +1821,12 @@ func (m Model) filteredIDs() []string {
 		return m.sortedIDs
 	}
 	lower := strings.ToLower(m.filter)
-	var out []string
-	for _, id := range m.sortedIDs {
+	return lo.Filter(m.sortedIDs, func(id string, _ int) bool {
 		snap := m.snapshots[id]
-		if strings.Contains(strings.ToLower(id), lower) ||
+		return strings.Contains(strings.ToLower(id), lower) ||
 			strings.Contains(strings.ToLower(snap.ProviderID), lower) ||
-			strings.Contains(strings.ToLower(string(snap.Status)), lower) {
-			out = append(out, id)
-		}
-	}
-	return out
+			strings.Contains(strings.ToLower(string(snap.Status)), lower)
+	})
 }
 
 func padToSize(content string, w, h int) string {

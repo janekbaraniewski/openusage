@@ -212,7 +212,11 @@ func startDaemonViewBroadcaster(
 	rt *daemonViewRuntime,
 	refreshInterval time.Duration,
 ) {
-	interval := clampDuration(refreshInterval/3, 1*time.Second, 5*time.Second)
+	interval := refreshInterval / 3
+	if interval <= 0 {
+		interval = 4 * time.Second
+	}
+	interval = max(1*time.Second, min(5*time.Second, interval))
 
 	go func() {
 		if warmUp(ctx, program, rt) {
@@ -260,19 +264,6 @@ func warmUp(ctx context.Context, program *tea.Program, rt *daemonViewRuntime) (c
 		}
 	}
 	return false
-}
-
-func clampDuration(d, min, max time.Duration) time.Duration {
-	if d <= 0 {
-		return (min + max) / 2
-	}
-	if d < min {
-		return min
-	}
-	if d > max {
-		return max
-	}
-	return d
 }
 
 func snapshotsHaveUsableData(snaps map[string]core.UsageSnapshot) bool {

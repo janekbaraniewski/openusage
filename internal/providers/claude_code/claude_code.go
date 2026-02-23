@@ -15,6 +15,8 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 type Provider struct {
@@ -1216,10 +1218,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
-	dates := make([]string, 0, len(dailyTokenTotals))
-	for d := range dailyTokenTotals {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(dailyTokenTotals)
 	sort.Strings(dates)
 
 	if len(snap.DailySeries["messages"]) == 0 && len(dates) > 0 {
@@ -1468,10 +1467,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Raw["jsonl_today_web_search_requests"] = fmt.Sprintf("%d", todayWebSearch)
 		snap.Raw["jsonl_today_web_fetch_requests"] = fmt.Sprintf("%d", todayWebFetch)
 
-		models := make([]string, 0, len(todayModels))
-		for m := range todayModels {
-			models = append(models, m)
-		}
+		models := lo.Keys(todayModels)
 		sort.Strings(models)
 		snap.Raw["jsonl_today_models"] = strings.Join(models, ", ")
 	}
@@ -1523,10 +1519,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Raw["block_start"] = currentBlockStart.Format(time.RFC3339)
 		snap.Raw["block_end"] = currentBlockEnd.Format(time.RFC3339)
 
-		blockModelList := make([]string, 0, len(blockModels))
-		for m := range blockModels {
-			blockModelList = append(blockModelList, m)
-		}
+		blockModelList := lo.Keys(blockModels)
 		sort.Strings(blockModelList)
 		snap.Raw["block_models"] = strings.Join(blockModelList, ", ")
 
@@ -1611,33 +1604,15 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 }
 
 func parseJSONLTimestamp(raw string) (time.Time, bool) {
-	if raw == "" {
+	t, err := shared.ParseTimestampString(raw)
+	if err != nil {
 		return time.Time{}, false
 	}
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05.000Z",
-	}
-	for _, layout := range layouts {
-		if ts, err := time.Parse(layout, raw); err == nil {
-			return ts, true
-		}
-	}
-	return time.Time{}, false
+	return t, true
 }
 
 func dedupeStringSlice(items []string) []string {
-	seen := make(map[string]bool, len(items))
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		out = append(out, item)
-	}
-	return out
+	return lo.Uniq(lo.Compact(items))
 }
 
 func summarizeCountMap(values map[string]int, limit int) string {

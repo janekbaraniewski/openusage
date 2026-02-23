@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 const providerSnapshotSchemaVersion = "provider_snapshot_v1"
@@ -39,10 +40,7 @@ func BuildLimitSnapshotRequests(snaps map[string]core.UsageSnapshot) []IngestReq
 		return nil
 	}
 
-	accountIDs := make([]string, 0, len(snaps))
-	for accountID := range snaps {
-		accountIDs = append(accountIDs, accountID)
-	}
+	accountIDs := lo.Keys(snaps)
 	sort.Strings(accountIDs)
 
 	out := make([]IngestRequest, 0, len(accountIDs))
