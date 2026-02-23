@@ -537,9 +537,22 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 
 func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProviderAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	// Extract the vendor prefix from model_raw (e.g. "qwen" from "qwen/qwen3-coder-flash")
+	// when the model ID contains a "/". This provides upstream hosting provider
+	// distribution for aggregator platforms like OpenRouter, where provider_id is
+	// just "openrouter" for all events but the model ID encodes the actual vendor.
 	query := usageCTE + `
 		SELECT
-			COALESCE(NULLIF(TRIM(provider_id), ''), 'unknown') AS provider_name,
+			COALESCE(
+				NULLIF(TRIM(
+					CASE
+						WHEN INSTR(model_raw, '/') > 0
+						THEN LOWER(SUBSTR(model_raw, 1, INSTR(model_raw, '/') - 1))
+						ELSE ''
+					END
+				), ''),
+				COALESCE(NULLIF(TRIM(provider_id), ''), 'unknown')
+			) AS provider_name,
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
 			SUM(COALESCE(requests, 1)) AS requests,
 			SUM(COALESCE(input_tokens, 0)) AS input_tokens,

@@ -9,7 +9,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers"
 )
 
-func TestBuildDemoSnapshots_IncludesAllProviders(t *testing.T) {
+func TestBuildDemoSnapshots_IncludesAllDemoProviders(t *testing.T) {
 	snaps := buildDemoSnapshots()
 	if len(snaps) == 0 {
 		t.Fatal("buildDemoSnapshots returned no snapshots")
@@ -38,10 +38,14 @@ func TestBuildDemoSnapshots_IncludesAllProviders(t *testing.T) {
 		byProvider[snap.ProviderID] = accountID
 	}
 
-	for _, provider := range providers.AllProviders() {
-		if _, ok := byProvider[provider.ID()]; !ok {
-			t.Fatalf("missing demo snapshot for provider %q", provider.ID())
+	for providerID := range demoProviderIDs {
+		if _, ok := byProvider[providerID]; !ok {
+			t.Fatalf("missing demo snapshot for provider %q", providerID)
 		}
+	}
+
+	if len(snaps) != len(demoProviderIDs) {
+		t.Fatalf("expected %d snapshots, got %d", len(demoProviderIDs), len(snaps))
 	}
 }
 
@@ -49,9 +53,8 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 	snaps := buildDemoSnapshots()
 
 	type expectation struct {
-		hasModelBurnData   bool
-		hasClientMixData   bool
-		hasPricingShowcase bool
+		hasModelBurnData bool
+		hasClientMixData bool
 	}
 
 	want := map[string]expectation{
@@ -60,7 +63,6 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 		"copilot":     {hasModelBurnData: true, hasClientMixData: true},
 		"gemini_cli":  {hasModelBurnData: true, hasClientMixData: true},
 		"openrouter":  {hasModelBurnData: true},
-		"opencode":    {hasModelBurnData: true, hasPricingShowcase: true},
 	}
 
 	for providerID, exp := range want {
@@ -74,15 +76,10 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 		if exp.hasClientMixData && !hasClientMixMetrics(snap) {
 			t.Fatalf("provider %q missing client mix metrics", providerID)
 		}
-		if exp.hasPricingShowcase {
-			if _, ok := snap.Metrics["pricing_input_min_paid_per_1m"]; !ok {
-				t.Fatalf("provider %q missing pricing_input_min_paid_per_1m", providerID)
-			}
-		}
 	}
 }
 
-func TestBuildDemoAccounts_IncludesAllProviders(t *testing.T) {
+func TestBuildDemoAccounts_IncludesAllDemoProviders(t *testing.T) {
 	accounts := buildDemoAccounts()
 	if len(accounts) == 0 {
 		t.Fatal("buildDemoAccounts returned no accounts")
@@ -102,10 +99,14 @@ func TestBuildDemoAccounts_IncludesAllProviders(t *testing.T) {
 		byProvider[account.Provider] = account
 	}
 
-	for _, provider := range providers.AllProviders() {
-		if _, ok := byProvider[provider.ID()]; !ok {
-			t.Fatalf("missing account for provider %q", provider.ID())
+	for providerID := range demoProviderIDs {
+		if _, ok := byProvider[providerID]; !ok {
+			t.Fatalf("missing account for provider %q", providerID)
 		}
+	}
+
+	if len(accounts) != len(demoProviderIDs) {
+		t.Fatalf("expected %d accounts, got %d", len(demoProviderIDs), len(accounts))
 	}
 }
 
@@ -151,113 +152,11 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 	type providerExpect struct {
 		metrics []string
 		raw     []string
-		meta    []string
 		resets  []string
 		series  []string
 	}
 
 	expectations := map[string]providerExpect{
-		"openai": {
-			metrics: []string{
-				"rpm",
-				"tpm",
-			},
-			raw: []string{
-				"x-ratelimit-limit-requests",
-				"x-ratelimit-limit-tokens",
-			},
-			resets: []string{
-				"rpm",
-				"tpm",
-			},
-		},
-		"anthropic": {
-			metrics: []string{
-				"rpm",
-				"tpm",
-			},
-			raw: []string{
-				"anthropic-ratelimit-requests-limit",
-				"anthropic-ratelimit-tokens-limit",
-			},
-			resets: []string{
-				"rpm",
-				"tpm",
-			},
-		},
-		"alibaba_cloud": {
-			metrics: []string{
-				"available_balance",
-				"tokens_used",
-				"model_qwen_max_used",
-			},
-			meta: []string{
-				"billing_cycle_start",
-				"billing_cycle_end",
-			},
-		},
-		"groq": {
-			metrics: []string{
-				"rpm",
-				"tpm",
-				"rpd",
-				"tpd",
-			},
-			resets: []string{
-				"rpm",
-				"rpd",
-			},
-		},
-		"mistral": {
-			metrics: []string{
-				"monthly_budget",
-				"monthly_spend",
-				"monthly_input_tokens",
-			},
-			raw: []string{
-				"plan",
-				"monthly_cost",
-			},
-		},
-		"deepseek": {
-			metrics: []string{
-				"total_balance",
-				"granted_balance",
-				"topped_up_balance",
-				"rpm",
-				"tpm",
-			},
-			raw: []string{
-				"currency",
-				"account_available",
-			},
-		},
-		"xai": {
-			metrics: []string{
-				"credits",
-				"rpm",
-				"tpm",
-			},
-			raw: []string{
-				"api_key_name",
-				"team_id",
-			},
-		},
-		"gemini_api": {
-			metrics: []string{
-				"available_models",
-				"input_token_limit",
-				"output_token_limit",
-				"rpm",
-			},
-			raw: []string{
-				"models_sample",
-				"total_models",
-			},
-			resets: []string{
-				"rpm",
-			},
-		},
 		"gemini_cli": {
 			metrics: []string{
 				"quota",
@@ -291,15 +190,15 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		},
 		"claude_code": {
 			metrics: []string{
-				"tool_read_calls",
-				"client_demo_alpha_total_tokens",
+				"tool_bash_calls",
+				"client_skynet_labs_total_tokens",
 			},
 			raw: []string{
 				"block_start",
 				"block_end",
 			},
 			series: []string{
-				"tokens_client_demo_alpha",
+				"tokens_client_skynet_labs",
 			},
 		},
 		"codex": {
@@ -313,36 +212,25 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		},
 		"openrouter": {
 			metrics: []string{
-				"provider_novita_input_tokens",
 				"analytics_7d_tokens",
-				"model_novita_moonshotai_kimi-k2_input_tokens",
+				"model_qwen_qwen3-coder-flash_cost_usd",
 			},
 			series: []string{
 				"analytics_tokens",
 			},
 		},
-		"ollama": {
+		"copilot": {
 			metrics: []string{
-				"usage_five_hour",
-				"models_total",
-				"requests_today",
-				"tool_read_file",
-				"model_llama3_1_8b_requests",
-			},
-			meta: []string{
-				"account_email",
-				"billing_cycle_start",
-				"billing_cycle_end",
-				"block_start",
-				"block_end",
+				"gh_core_rpm",
+				"gh_graphql_rpm",
+				"model_claude_haiku_4_5_input_tokens",
+				"client_skynet_labs_total_tokens",
 			},
 			resets: []string{
-				"usage_five_hour",
-				"usage_one_day",
+				"gh_core_rpm_reset",
 			},
 			series: []string{
-				"usage_model_llama3_1_8b",
-				"usage_source_local",
+				"tokens_client_skynet_labs",
 			},
 		},
 	}
@@ -361,11 +249,6 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		for _, key := range exp.raw {
 			if _, ok := snap.Raw[key]; !ok {
 				t.Fatalf("provider %q missing raw %q", providerID, key)
-			}
-		}
-		for _, key := range exp.meta {
-			if _, ok := snap.MetaValue(key); !ok {
-				t.Fatalf("provider %q missing metadata %q", providerID, key)
 			}
 		}
 		for _, key := range exp.resets {

@@ -468,7 +468,7 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 	}
 	snap := merged["openrouter"]
 
-	// Telemetry always overwrites model/provider breakdown — native values are replaced
+	// Telemetry always overwrites model breakdown — native values are replaced
 	if got := metricUsed(snap.Metrics["model_qwen_qwen3_coder_flash_cost_usd"]); got != 0.012 {
 		t.Fatalf("model_qwen_qwen3_coder_flash_cost_usd = %v, want 0.012 from telemetry", got)
 	}
@@ -476,16 +476,22 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 	if _, ok := snap.Metrics["model_moonshot_cost_usd"]; ok {
 		t.Fatal("model_moonshot_cost_usd should be cleared by telemetry overwrite")
 	}
-	// Native-only provider keys are cleared
+	// Native provider_* metrics are cleared and replaced by telemetry-derived
+	// vendor breakdown extracted from model_raw prefixes (e.g. "qwen" from
+	// "qwen/qwen3-coder-flash")
 	if _, ok := snap.Metrics["provider_alibaba_cost_usd"]; ok {
 		t.Fatal("provider_alibaba_cost_usd should be cleared by telemetry overwrite")
 	}
 	if _, ok := snap.Metrics["provider_deepinfra_cost_usd"]; ok {
 		t.Fatal("provider_deepinfra_cost_usd should be cleared by telemetry overwrite")
 	}
-	// Provider breakdown comes from telemetry
-	if got := metricUsed(snap.Metrics["provider_openrouter_cost_usd"]); got != 0.012 {
-		t.Fatalf("provider_openrouter_cost_usd = %v, want 0.012 from telemetry", got)
+	// Provider breakdown now derived from model_raw vendor prefix ("qwen/..." -> "qwen")
+	if got := metricUsed(snap.Metrics["provider_qwen_cost_usd"]); got != 0.012 {
+		t.Fatalf("provider_qwen_cost_usd = %v, want 0.012 from telemetry vendor extraction", got)
+	}
+	// The old provider_id grouping ("openrouter") should not appear
+	if _, ok := snap.Metrics["provider_openrouter_cost_usd"]; ok {
+		t.Fatal("provider_openrouter_cost_usd should not exist — vendor prefix should be used instead")
 	}
 	if _, ok := snap.Attributes["provider_legacy_cost"]; ok {
 		t.Fatal("stale provider_* attribute should be cleared")
