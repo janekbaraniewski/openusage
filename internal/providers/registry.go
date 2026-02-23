@@ -44,24 +44,16 @@ func AllProviders() []core.UsageProvider {
 	}
 }
 
-// AllTelemetrySources derives telemetry-capable providers from the primary provider registry.
-func AllTelemetrySources() []shared.TelemetrySource {
-	providers := AllProviders()
-	out := make([]shared.TelemetrySource, 0, len(providers))
-	for _, provider := range providers {
-		if source, ok := provider.(shared.TelemetrySource); ok {
-			out = append(out, source)
-		}
-	}
-	return out
-}
-
 func TelemetrySourceBySystem(system string) (shared.TelemetrySource, bool) {
 	target := strings.TrimSpace(system)
 	if target == "" {
 		return nil, false
 	}
-	for _, source := range AllTelemetrySources() {
+	for _, provider := range AllProviders() {
+		source, ok := provider.(shared.TelemetrySource)
+		if !ok {
+			continue
+		}
 		if strings.EqualFold(source.System(), target) {
 			return source, true
 		}

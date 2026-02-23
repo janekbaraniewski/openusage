@@ -152,11 +152,6 @@ func main() {
 		allAccounts,
 		cfg.Telemetry.ProviderLinks,
 	)
-	initialReq := daemonReadModelRequestFromAccounts(allAccounts, cfg.Telemetry.ProviderLinks)
-	initialSnapshots := seedSnapshotsForAccounts(initialReq.Accounts, "Connecting to telemetry daemon...")
-	if len(initialSnapshots) > 0 {
-		model.SetInitialSnapshots(initialSnapshots)
-	}
 	var program *tea.Program
 
 	model.SetOnAddAccount(func(acct core.AccountConfig) {

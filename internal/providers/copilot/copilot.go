@@ -381,48 +381,12 @@ func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.
 		}
 	}
 
-	if !p.applyUsageSnapshotMetrics(cu.UsageSnapshots, snap) {
-		p.applyLegacyUsageMetrics(cu, snap)
-	}
+	p.applyUsageSnapshotMetrics(cu.UsageSnapshots, snap)
 
 	for _, candidate := range []string{cu.UsageResetDateUTC, cu.UsageResetDate, cu.LimitedUserResetDate} {
 		if t := parseCopilotTime(candidate); !t.IsZero() {
 			snap.Resets["quota_reset"] = t
 			break
-		}
-	}
-}
-
-func (p *Provider) applyLegacyUsageMetrics(cu *copilotInternalUser, snap *core.UsageSnapshot) {
-	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Chat != nil {
-		limit := float64(*cu.MonthlyUsage.Chat)
-		remaining := float64(0)
-		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Chat != nil {
-			remaining = float64(*cu.LimitedUserUsage.Chat)
-		}
-		used := limit - remaining
-		snap.Metrics["chat_quota"] = core.Metric{
-			Limit:     &limit,
-			Remaining: &remaining,
-			Used:      &used,
-			Unit:      "messages",
-			Window:    "month",
-		}
-	}
-
-	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Completions != nil {
-		limit := float64(*cu.MonthlyUsage.Completions)
-		remaining := float64(0)
-		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Completions != nil {
-			remaining = float64(*cu.LimitedUserUsage.Completions)
-		}
-		used := limit - remaining
-		snap.Metrics["completions_quota"] = core.Metric{
-			Limit:     &limit,
-			Remaining: &remaining,
-			Used:      &used,
-			Unit:      "completions",
-			Window:    "month",
 		}
 	}
 }

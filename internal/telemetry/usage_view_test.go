@@ -409,6 +409,97 @@ func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t
 	}
 }
 
+func TestApplyCanonicalUsageView_PreservesNativeCostBreakdownWhenPresent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Date(2026, 2, 23, 10, 0, 0, 0, time.UTC)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		ModelRaw:      "qwen/qwen3-coder-flash",
+		InputTokens:   int64Ptr(120),
+		OutputTokens:  int64Ptr(40),
+		TotalTokens:   int64Ptr(160),
+		CostUSD:       float64Ptr(0.012),
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest message event: %v", err)
+	}
+
+	modelA := 3.21
+	modelB := 1.11
+	providerA := 2.22
+	providerB := 0.55
+	snaps := map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Metrics: map[string]core.Metric{
+				"model_moonshot_cost_usd":       {Used: &modelA, Unit: "USD"},
+				"model_qwen_cost_usd":           {Used: &modelB, Unit: "USD"},
+				"provider_alibaba_cost_usd":     {Used: &providerA, Unit: "USD"},
+				"provider_deepinfra_cost_usd":   {Used: &providerB, Unit: "USD"},
+				"source_opencode_requests":      {Used: float64Ptr(999), Unit: "requests"},
+				"credit_balance":                {Used: float64Ptr(8.28), Unit: "USD"},
+				"model_qwen_input_tokens":       {Used: float64Ptr(777), Unit: "tokens"},
+				"provider_alibaba_input_tokens": {Used: float64Ptr(888), Unit: "tokens"},
+			},
+			Attributes: map[string]string{
+				"provider_legacy_cost": "999",
+			},
+		},
+	}
+
+	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["openrouter"]
+	if got := metricUsed(snap.Metrics["model_moonshot_cost_usd"]); got != modelA {
+		t.Fatalf("model_moonshot_cost_usd = %v, want %v", got, modelA)
+	}
+	if got := metricUsed(snap.Metrics["model_qwen_cost_usd"]); got != modelB {
+		t.Fatalf("model_qwen_cost_usd = %v, want %v", got, modelB)
+	}
+	if got := metricUsed(snap.Metrics["provider_alibaba_cost_usd"]); got != providerA {
+		t.Fatalf("provider_alibaba_cost_usd = %v, want %v", got, providerA)
+	}
+	if got := metricUsed(snap.Metrics["provider_deepinfra_cost_usd"]); got != providerB {
+		t.Fatalf("provider_deepinfra_cost_usd = %v, want %v", got, providerB)
+	}
+	if _, ok := snap.Metrics["provider_unattributed_cost_usd"]; ok {
+		t.Fatal("provider_unattributed_cost_usd should not be injected when native provider breakdown exists")
+	}
+	if _, ok := snap.Metrics["model_unattributed_cost_usd"]; ok {
+		t.Fatal("model_unattributed_cost_usd should not be injected when native model breakdown exists")
+	}
+	if _, ok := snap.Attributes["provider_legacy_cost"]; ok {
+		t.Fatal("stale provider_* attribute should be cleared")
+	}
+	if got := metricUsed(snap.Metrics["source_opencode_requests"]); got != 1 {
+		t.Fatalf("source_opencode_requests = %v, want 1 from canonical telemetry", got)
+	}
+}
+
+func metricUsed(m core.Metric) float64 {
+	if m.Used == nil {
+		return 0
+	}
+	return *m.Used
+}
+
 func seriesValueByDate(points []core.TimePoint, date string) float64 {
 	for _, point := range points {
 		if point.Date == date {

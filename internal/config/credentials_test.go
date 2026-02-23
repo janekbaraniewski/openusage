@@ -141,7 +141,7 @@ func TestSaveCredential_OverwritesExisting(t *testing.T) {
 	}
 }
 
-func TestLoadCredentialsFrom_NormalizesLegacyAutoIDs(t *testing.T) {
+func TestLoadCredentialsFrom_PreservesAccountIDs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	content := `{
   "keys": {
@@ -160,21 +160,24 @@ func TestLoadCredentialsFrom_NormalizesLegacyAutoIDs(t *testing.T) {
 		t.Fatalf("LoadCredentialsFrom error: %v", err)
 	}
 
-	if len(creds.Keys) != 3 {
-		t.Fatalf("keys count = %d, want 3", len(creds.Keys))
+	if len(creds.Keys) != 4 {
+		t.Fatalf("keys count = %d, want 4", len(creds.Keys))
+	}
+	if creds.Keys["openai-auto"] != "sk-old" {
+		t.Errorf("openai-auto key = %q, want sk-old", creds.Keys["openai-auto"])
 	}
 	if creds.Keys["openai"] != "sk-new" {
 		t.Errorf("openai key = %q, want sk-new", creds.Keys["openai"])
 	}
-	if creds.Keys["gemini-api"] != "g1" {
-		t.Errorf("gemini-api key = %q, want g1", creds.Keys["gemini-api"])
+	if creds.Keys["gemini-api-auto"] != "g1" {
+		t.Errorf("gemini-api-auto key = %q, want g1", creds.Keys["gemini-api-auto"])
 	}
-	if creds.Keys["copilot"] != "c1" {
-		t.Errorf("copilot key = %q, want c1", creds.Keys["copilot"])
+	if creds.Keys["copilot-auto"] != "c1" {
+		t.Errorf("copilot-auto key = %q, want c1", creds.Keys["copilot-auto"])
 	}
 }
 
-func TestDeleteCredentialFrom_WithLegacyAccountID(t *testing.T) {
+func TestDeleteCredentialFrom_RequiresExactAccountID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 
 	if err := SaveCredentialTo(path, "openai-auto", "sk-test-key"); err != nil {
@@ -188,7 +191,10 @@ func TestDeleteCredentialFrom_WithLegacyAccountID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCredentialsFrom error: %v", err)
 	}
-	if len(creds.Keys) != 0 {
-		t.Fatalf("keys count = %d, want 0", len(creds.Keys))
+	if len(creds.Keys) != 1 {
+		t.Fatalf("keys count = %d, want 1", len(creds.Keys))
+	}
+	if got := creds.Keys["openai-auto"]; got != "sk-test-key" {
+		t.Fatalf("openai-auto key = %q, want preserved", got)
 	}
 }

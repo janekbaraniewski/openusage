@@ -132,21 +132,6 @@ func (m *Model) SetOnRefresh(fn func()) {
 	m.onRefresh = fn
 }
 
-// SetInitialSnapshots seeds the dashboard with already-available snapshots so
-// first paint can render real data without an intermediate syncing state.
-func (m *Model) SetInitialSnapshots(snaps map[string]core.UsageSnapshot) {
-	if m == nil || len(snaps) == 0 {
-		return
-	}
-	m.snapshots = snaps
-	m.refreshing = false
-	if snapshotsReady(snaps) {
-		m.hasData = true
-	}
-	m.ensureSnapshotProvidersKnown()
-	m.rebuildSortedIDs()
-}
-
 type themePersistedMsg struct {
 	err error
 }
@@ -275,7 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
-		if snapshotsReady(msg) {
+		if len(msg) > 0 || snapshotsReady(msg) {
 			m.hasData = true
 		}
 		m.ensureSnapshotProvidersKnown()

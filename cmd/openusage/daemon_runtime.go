@@ -26,8 +26,7 @@ type daemonViewRuntime struct {
 	requestMu sync.RWMutex
 	request   daemonReadModelRequest
 
-	readModelMu         sync.RWMutex
-	lastReadModelGood   map[string]core.UsageSnapshot
+	readModelMu         sync.Mutex
 	lastReadModelErrLog time.Time
 }
 
@@ -43,7 +42,6 @@ func newDaemonViewRuntime(
 		socketPath:          strings.TrimSpace(socketPath),
 		verbose:             verbose,
 		request:             daemonReadModelRequestFromAccounts(accounts, providerLinks),
-		lastReadModelGood:   map[string]core.UsageSnapshot{},
 		lastReadModelErrLog: time.Time{},
 	}
 }
@@ -200,54 +198,10 @@ func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]cor
 		if shouldLog {
 			log.Printf("daemon read-model error: %v", err)
 		}
-
-		r.readModelMu.RLock()
-		if len(r.lastReadModelGood) > 0 {
-			cached := cloneSnapshotsMap(r.lastReadModelGood)
-			r.readModelMu.RUnlock()
-			return cached
-		}
-		r.readModelMu.RUnlock()
-
-		// Return seeded snapshots with a progress/error hint so splash can render
-		// an actionable status while the daemon recovers.
-		return seedSnapshotsForAccounts(request.Accounts, syncStatusMessage(err))
+		return map[string]core.UsageSnapshot{}
 	}
 
-	r.readModelMu.RLock()
-	snaps = stabilizeReadModelSnapshots(snaps, r.lastReadModelGood)
-	r.readModelMu.RUnlock()
-
-	r.readModelMu.Lock()
-	r.lastReadModelGood = cloneSnapshotsMap(snaps)
-	r.readModelMu.Unlock()
 	return snaps
-}
-
-func syncStatusMessage(err error) string {
-	if err == nil {
-		return "Connecting to telemetry daemon..."
-	}
-	msg := strings.TrimSpace(err.Error())
-	if msg == "" {
-		return "Connecting to telemetry daemon..."
-	}
-	if idx := strings.Index(msg, "\n"); idx > 0 {
-		msg = strings.TrimSpace(msg[:idx])
-	}
-	lower := strings.ToLower(msg)
-	switch {
-	case strings.Contains(lower, "not installed"):
-		return "Telemetry daemon not installed. Run: openusage telemetry daemon install"
-	case strings.Contains(lower, "declined"):
-		return "Telemetry daemon installation declined."
-	case strings.Contains(lower, "out of date"), strings.Contains(lower, "upgrade"):
-		return "Upgrading telemetry daemon..."
-	case strings.Contains(lower, "did not become ready"), strings.Contains(lower, "unavailable"):
-		return "Waiting for telemetry daemon..."
-	default:
-		return "Connecting to telemetry daemon..."
-	}
 }
 
 func startDaemonViewBroadcaster(

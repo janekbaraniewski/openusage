@@ -24,6 +24,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/detect"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
@@ -249,7 +250,11 @@ func (s *telemetryDaemonService) ingestQuotaSnapshots(ctx context.Context, snaps
 
 func buildTelemetryCollectors() []telemetry.Collector {
 	collectors := make([]telemetry.Collector, 0)
-	for _, source := range providers.AllTelemetrySources() {
+	for _, provider := range providers.AllProviders() {
+		source, ok := provider.(shared.TelemetrySource)
+		if !ok {
+			continue
+		}
 		opts := defaultTelemetryOptionsForSource(source.System())
 		collectors = append(collectors, telemetry.NewSourceCollector(source, opts, ""))
 	}
@@ -586,7 +591,7 @@ func (s *telemetryDaemonService) collectAndFlush(ctx context.Context) {
 		flush.Failed += retryFlush.Failed
 		warnings = append(warnings, retryWarnings...)
 	} else {
-		// Always drain a bounded number of pending spool records so legacy backlog
+		// Always drain a bounded number of pending spool records so backlog
 		// continues to recover without delaying fresh telemetry updates.
 		s.pipelineMu.Lock()
 		s.ingestMu.Lock()
@@ -1044,10 +1049,25 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Dashboard reads must be lightweight and non-blocking. On cache miss, return
-	// seeded placeholders immediately and refresh cache asynchronously.
+	// Cache miss: attempt one short synchronous compute from daemon-owned telemetry
+	// state. Keep this tight so first dashboard paint doesn't block on warm-up.
+	computeCtx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+	snapshots, err := s.computeReadModel(computeCtx, req)
+	cancel()
+	if err == nil && len(snapshots) > 0 {
+		s.readModelCacheSet(cacheKey, snapshots)
+		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
+		return
+	}
+
+	if err != nil && s.shouldLog("read_model_cache_miss_compute_error", 8*time.Second) {
+		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
+	}
+
+	// If synchronous compute misses its deadline, keep request latency bounded:
+	// return empty templates immediately and continue refresh in background.
 	s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
-	snapshots := seedSnapshotsForAccounts(req.Accounts, "Preparing telemetry cache...")
+	snapshots = readModelTemplatesFromRequest(req, disabledAccountsFromConfig())
 	writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {

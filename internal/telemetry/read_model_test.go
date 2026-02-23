@@ -132,7 +132,7 @@ func TestApplyCanonicalTelemetryView_UsesBaseWhenNoRootSnapshot(t *testing.T) {
 	}
 }
 
-func TestApplyCanonicalTelemetryView_CarriesForwardLatestUsageProgressMetrics(t *testing.T) {
+func TestApplyCanonicalTelemetryView_UsesLatestSnapshotOnlyForRoot(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
@@ -200,12 +200,11 @@ func TestApplyCanonicalTelemetryView_CarriesForwardLatestUsageProgressMetrics(t 
 	if metric := snap.Metrics["total_ai_requests"]; metric.Used == nil || *metric.Used != 59800 {
 		t.Fatalf("total_ai_requests missing from latest snapshot: %+v", metric)
 	}
-	spendLimit := snap.Metrics["spend_limit"]
-	if spendLimit.Limit == nil || *spendLimit.Limit != 3600 || spendLimit.Used == nil || *spendLimit.Used != 407 {
-		t.Fatalf("spend_limit not carried forward from previous snapshot: %+v", spendLimit)
+	if _, ok := snap.Metrics["spend_limit"]; ok {
+		t.Fatalf("spend_limit should not be carried forward from older snapshots")
 	}
-	if gotAttr := snap.Attributes["telemetry_root_usage_fallback"]; gotAttr != "stale_limit_snapshot" {
-		t.Fatalf("telemetry_root_usage_fallback = %q, want stale_limit_snapshot", gotAttr)
+	if gotAttr := snap.Attributes["telemetry_root_usage_fallback"]; gotAttr != "" {
+		t.Fatalf("telemetry_root_usage_fallback = %q, want empty", gotAttr)
 	}
 }
 

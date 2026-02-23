@@ -1,11 +1,11 @@
 package main
 
 import (
-	"strings"
-	"time"
+	"context"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
 const (
@@ -27,65 +27,78 @@ func defaultTelemetryOptionsForSource(sourceSystem string) shared.TelemetryColle
 	)
 }
 
+func telemetryOptionsForSource(
+	sourceSystem string,
+	codexSessions string,
+	claudeProjects string,
+	claudeProjectsAlt string,
+	opencodeEventsDirs []string,
+	opencodeEventsFile string,
+	opencodeDB string,
+) shared.TelemetryCollectOptions {
+	opts := shared.TelemetryCollectOptions{
+		Paths:     map[string]string{},
+		PathLists: map[string][]string{},
+	}
+
+	switch sourceSystem {
+	case "codex":
+		opts.Paths["sessions_dir"] = codexSessions
+	case "claude_code":
+		opts.Paths["projects_dir"] = claudeProjects
+		opts.Paths["alt_projects_dir"] = claudeProjectsAlt
+	case "opencode":
+		opts.Paths["events_file"] = opencodeEventsFile
+		opts.Paths["db_path"] = opencodeDB
+		opts.PathLists["events_dirs"] = opencodeEventsDirs
+	}
+	return opts
+}
+
+func flushInBatches(ctx context.Context, pipeline *telemetry.Pipeline, maxTotal int) (telemetry.FlushResult, []string) {
+	var (
+		accum    telemetry.FlushResult
+		warnings []string
+	)
+
+	remaining := maxTotal
+	for {
+		batchLimit := 10000
+		if maxTotal > 0 {
+			if remaining <= 0 {
+				break
+			}
+			if remaining < batchLimit {
+				batchLimit = remaining
+			}
+		}
+
+		batch, err := pipeline.Flush(ctx, batchLimit)
+		accum.Processed += batch.Processed
+		accum.Ingested += batch.Ingested
+		accum.Deduped += batch.Deduped
+		accum.Failed += batch.Failed
+
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+		if maxTotal > 0 {
+			remaining -= batch.Processed
+		}
+
+		// Stop when there is nothing left to process or no forward progress can be made.
+		if batch.Processed == 0 || (batch.Ingested == 0 && batch.Deduped == 0) {
+			break
+		}
+	}
+
+	return accum, warnings
+}
+
 func cloneSnapshotsMap(in map[string]core.UsageSnapshot) map[string]core.UsageSnapshot {
 	out := make(map[string]core.UsageSnapshot, len(in))
 	for key, value := range in {
 		out[key] = value
-	}
-	return out
-}
-
-func stabilizeReadModelSnapshots(
-	current map[string]core.UsageSnapshot,
-	previous map[string]core.UsageSnapshot,
-) map[string]core.UsageSnapshot {
-	if len(current) == 0 || len(previous) == 0 {
-		return current
-	}
-	out := cloneSnapshotsMap(current)
-	for accountID, snap := range out {
-		prev, ok := previous[accountID]
-		if !ok {
-			continue
-		}
-		if isDegradedReadModelSnapshot(snap) && !isDegradedReadModelSnapshot(prev) {
-			out[accountID] = prev
-		}
-	}
-	return out
-}
-
-func isDegradedReadModelSnapshot(snap core.UsageSnapshot) bool {
-	return snap.Status == core.StatusUnknown &&
-		len(snap.Metrics) == 0 &&
-		len(snap.Resets) == 0 &&
-		len(snap.DailySeries) == 0 &&
-		len(snap.ModelUsage) == 0 &&
-		strings.TrimSpace(snap.Message) == ""
-}
-
-func seedSnapshotsForAccounts(accounts []daemonReadModelAccount, message string) map[string]core.UsageSnapshot {
-	out := make(map[string]core.UsageSnapshot, len(accounts))
-	now := time.Now().UTC()
-	for _, account := range accounts {
-		accountID := strings.TrimSpace(account.AccountID)
-		providerID := strings.TrimSpace(account.ProviderID)
-		if accountID == "" || providerID == "" {
-			continue
-		}
-		out[accountID] = core.UsageSnapshot{
-			ProviderID:  providerID,
-			AccountID:   accountID,
-			Timestamp:   now,
-			Status:      core.StatusUnknown,
-			Message:     strings.TrimSpace(message),
-			Metrics:     map[string]core.Metric{},
-			Resets:      map[string]time.Time{},
-			Attributes:  map[string]string{},
-			Diagnostics: map[string]string{},
-			Raw:         map[string]string{},
-			DailySeries: map[string][]core.TimePoint{},
-		}
 	}
 	return out
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -363,44 +362,6 @@ func xmlEscape(in string) string {
 		"'", "&apos;",
 	)
 	return replacer.Replace(in)
-}
-
-func isInteractiveTerminal() bool {
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (stat.Mode() & os.ModeCharDevice) != 0
-}
-
-func promptInstallDaemonService(manager daemonServiceManager) (bool, error) {
-	if !isInteractiveTerminal() {
-		return false, fmt.Errorf("telemetry daemon service is not installed; run `%s`", manager.installHint())
-	}
-	serviceKind := "managed service"
-	if manager.kind == "darwin" {
-		serviceKind = "launchd user service"
-	} else if manager.kind == "linux" {
-		serviceKind = "systemd user service"
-	}
-
-	fmt.Fprintf(os.Stdout, "\nOpenUsage needs a background telemetry daemon.\n")
-	fmt.Fprintf(os.Stdout, "Install %s now? [Y/n]: ", serviceKind)
-
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "eof") {
-		return false, err
-	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	switch answer {
-	case "", "y", "yes":
-		return true, nil
-	case "n", "no":
-		return false, nil
-	default:
-		return false, nil
-	}
 }
 
 func runTelemetryDaemonInstall(args []string) error {

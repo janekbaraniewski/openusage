@@ -178,13 +178,15 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
+	preserveModelBreakdown := snapshotHasCostBreakdownMetrics(*snap, "model_")
+	preserveProviderBreakdown := snapshotHasCostBreakdownMetrics(*snap, "provider_")
 
 	for key := range snap.Metrics {
 		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "provider_") {
+			(!preserveModelBreakdown && strings.HasPrefix(key, "model_")) ||
+			(!preserveProviderBreakdown && strings.HasPrefix(key, "provider_")) {
 			delete(snap.Metrics, key)
 		}
 	}
@@ -233,37 +235,41 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		}
 	}
 
-	modelCostTotal := 0.0
-	for _, model := range agg.Models {
-		mk := sanitizeMetricID(model.Model)
-		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
-		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
-		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
-		modelCostTotal += model.CostUSD
-	}
-	if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
-		uk := "model_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
-		snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+	if !preserveModelBreakdown {
+		modelCostTotal := 0.0
+		for _, model := range agg.Models {
+			mk := sanitizeMetricID(model.Model)
+			snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: "all"}
+			snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
+			snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
+			snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
+			modelCostTotal += model.CostUSD
+		}
+		if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+			uk := "model_unattributed"
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+			snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+		}
 	}
 
-	providerCostTotal := 0.0
-	for _, provider := range agg.Providers {
-		pk := sanitizeMetricID(provider.Provider)
-		snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: "all"}
-		snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: "all"}
-		snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: "all"}
-		snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: "all"}
-		providerCostTotal += provider.CostUSD
-	}
-	if delta := authoritativeCost - providerCostTotal; authoritativeCost > 0 && delta > 0.000001 {
-		uk := "provider_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
-		snap.SetDiagnostic("telemetry_unattributed_provider_cost_usd", fmt.Sprintf("%.6f", delta))
+	if !preserveProviderBreakdown {
+		providerCostTotal := 0.0
+		for _, provider := range agg.Providers {
+			pk := sanitizeMetricID(provider.Provider)
+			snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: "all"}
+			snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: "all"}
+			snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: "all"}
+			snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: "all"}
+			providerCostTotal += provider.CostUSD
+		}
+		if delta := authoritativeCost - providerCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+			uk := "provider_unattributed"
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+			snap.SetDiagnostic("telemetry_unattributed_provider_cost_usd", fmt.Sprintf("%.6f", delta))
+		}
 	}
 
 	for _, source := range agg.Sources {
@@ -337,6 +343,30 @@ func snapshotHasMetricPrefix(snap core.UsageSnapshot, prefix string) bool {
 			continue
 		}
 		if metric.Used != nil || metric.Limit != nil || metric.Remaining != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func snapshotHasCostBreakdownMetrics(snap core.UsageSnapshot, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || len(snap.Metrics) == 0 {
+		return false
+	}
+	costCount := 0
+	for key, metric := range snap.Metrics {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if !(strings.HasSuffix(key, "_cost_usd") || strings.HasSuffix(key, "_cost")) {
+			continue
+		}
+		if metric.Used == nil || *metric.Used <= 0 {
+			continue
+		}
+		costCount++
+		if costCount >= 2 {
 			return true
 		}
 	}

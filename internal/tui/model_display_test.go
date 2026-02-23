@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -140,5 +141,31 @@ func TestSnapshotsReady(t *testing.T) {
 	}
 	if !snapshotsReady(ready) {
 		t.Fatal("snapshotsReady(ready) = false, want true")
+	}
+}
+
+func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil)
+	if m.hasData {
+		t.Fatal("expected hasData=false on fresh model")
+	}
+
+	snaps := SnapshotsMsg{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Status:     core.StatusUnknown,
+			Message:    "daemon warming up",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+
+	updated, _ := m.Update(snaps)
+	got, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want tui.Model", updated)
+	}
+	if !got.hasData {
+		t.Fatal("expected hasData=true after first snapshots frame")
 	}
 }

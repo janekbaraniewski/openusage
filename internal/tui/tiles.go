@@ -22,6 +22,8 @@ const (
 	tileBorderH             = 2 // left + right border chars
 	tileMaxColumns          = 3
 	tileMinMultiColumnWidth = 62
+	tableLabelMaxLenWide    = 26
+	tableLabelMaxLenNarrow  = 24
 )
 
 func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight int) {
@@ -80,6 +82,13 @@ func (m Model) tileCols() int {
 	}
 	cols, _, _ := m.tileGrid(m.width, contentH, n)
 	return cols
+}
+
+func tableLabelMaxLen(innerW int) int {
+	if innerW < 60 {
+		return tableLabelMaxLenNarrow
+	}
+	return tableLabelMaxLenWide
 }
 
 func (m Model) renderTiles(w, h int) string {
@@ -1629,10 +1638,7 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 		pct := value / total * 100
 		label := prettifyModelName(model.name)
 		colorDot := lipgloss.NewStyle().Foreground(colorForModel(modelColors, model.name)).Render("■")
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
+		maxLabelLen := tableLabelMaxLen(innerW)
 		if len(label) > maxLabelLen {
 			label = label[:maxLabelLen-1] + "…"
 		}
@@ -1833,22 +1839,6 @@ func collectProviderModelMix(snap core.UsageSnapshot) ([]modelMixEntry, map[stri
 		}
 	}
 
-	for key, raw := range snapshotMetaEntries(snap) {
-		if usedKeys[key] {
-			continue
-		}
-		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens") {
-			if v, ok := parseTileNumeric(raw); ok {
-				recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens"), v, key)
-			}
-		}
-		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens") {
-			if v, ok := parseTileNumeric(raw); ok {
-				recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens"), v, key)
-			}
-		}
-	}
-
 	for key, points := range snap.DailySeries {
 		const prefix = "usage_model_"
 		if !strings.HasPrefix(key, prefix) || len(points) == 0 {
@@ -1971,10 +1961,7 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		label := prettifyModelName(provider.name)
 		colorDot := lipgloss.NewStyle().Foreground(providerColors[provider.name]).Render("■")
 
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
+		maxLabelLen := tableLabelMaxLen(innerW)
 		if len(label) > maxLabelLen {
 			label = label[:maxLabelLen-1] + "…"
 		}
@@ -2058,6 +2045,7 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 		usedKeys[key] = true
 	}
 
+	// Pass 1: primary metrics (including non-BYOK cost) so BYOK fallback logic is order-independent.
 	for key, met := range snap.Metrics {
 		if met.Used == nil || !strings.HasPrefix(key, "provider_") {
 			continue
@@ -2065,16 +2053,7 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 		switch {
 		case strings.HasSuffix(key, "_cost_usd"):
 			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost_usd"), *met.Used, key)
-		case strings.HasSuffix(key, "_byok_cost"):
-			base := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
-			if base == "" {
-				continue
-			}
-			// BYOK cost is supplemental; only use it if no total cost exists.
-			if !ensureFieldState(base).cost {
-				recordCost(base, *met.Used, key)
-			}
-		case strings.HasSuffix(key, "_cost"):
+		case strings.HasSuffix(key, "_cost") && !strings.HasSuffix(key, "_byok_cost"):
 			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost"), *met.Used, key)
 		case strings.HasSuffix(key, "_input_tokens"):
 			recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens"), *met.Used, key)
@@ -2084,16 +2063,28 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 			recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests"), *met.Used, key)
 		}
 	}
+	// Pass 2: BYOK cost only when primary provider cost is absent.
+	for key, met := range snap.Metrics {
+		if met.Used == nil || !strings.HasPrefix(key, "provider_") || !strings.HasSuffix(key, "_byok_cost") {
+			continue
+		}
+		base := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
+		if base == "" || ensureFieldState(base).cost {
+			continue
+		}
+		recordCost(base, *met.Used, key)
+	}
 
-	for key, raw := range snapshotMetaEntries(snap) {
+	meta := snapshotMetaEntries(snap)
+	// Pass 3: raw fallback for primary cost fields (excluding BYOK), tokens, requests.
+	for key, raw := range meta {
 		if usedKeys[key] || !strings.HasPrefix(key, "provider_") {
 			continue
 		}
 		switch {
-		case strings.HasSuffix(key, "_cost"), strings.HasSuffix(key, "_byok_cost"):
+		case strings.HasSuffix(key, "_cost") && !strings.HasSuffix(key, "_byok_cost"):
 			if v, ok := parseTileNumeric(raw); ok {
 				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost")
-				baseKey = strings.TrimSuffix(baseKey, "_byok")
 				if baseKey == "" || ensureFieldState(baseKey).cost {
 					continue
 				}
@@ -2125,6 +2116,19 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 				}
 				recordRequests(baseKey, v, key)
 			}
+		}
+	}
+	// Pass 4: raw fallback for BYOK cost only when no primary cost exists.
+	for key, raw := range meta {
+		if usedKeys[key] || !strings.HasPrefix(key, "provider_") || !strings.HasSuffix(key, "_byok_cost") {
+			continue
+		}
+		if v, ok := parseTileNumeric(raw); ok {
+			baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
+			if baseKey == "" || ensureFieldState(baseKey).cost {
+				continue
+			}
+			recordCost(baseKey, v, key)
 		}
 	}
 
@@ -2292,10 +2296,7 @@ func buildProviderSourceCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		sourceColor := colorForSource(sourceColors, source.name)
 		colorDot := lipgloss.NewStyle().Foreground(sourceColor).Render("■")
 
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
+		maxLabelLen := tableLabelMaxLen(innerW)
 		if len(label) > maxLabelLen {
 			label = label[:maxLabelLen-1] + "…"
 		}
@@ -2645,10 +2646,7 @@ func buildProviderClientCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		clientColor := colorForClient(clientColors, client.name)
 		colorDot := lipgloss.NewStyle().Foreground(clientColor).Render("■")
 
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
+		maxLabelLen := tableLabelMaxLen(innerW)
 		if len(label) > maxLabelLen {
 			label = label[:maxLabelLen-1] + "…"
 		}
@@ -3420,10 +3418,7 @@ func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expa
 		toolColor := colorForTool(toolColors, tool.name)
 		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
 
-		maxLabelLen := 16
-		if innerW < 60 {
-			maxLabelLen = 14
-		}
+		maxLabelLen := tableLabelMaxLen(innerW)
 		if len(label) > maxLabelLen {
 			label = label[:maxLabelLen-1] + "…"
 		}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -56,28 +55,6 @@ func TestReadModelTemplatesFromRequest_SeedsAccounts(t *testing.T) {
 	}
 	if got := templates["cursor-ide"]; got.ProviderID != "cursor" || got.AccountID != "cursor-ide" {
 		t.Fatalf("cursor template = %+v, want cursor/cursor-ide", got)
-	}
-}
-
-func TestSyncStatusMessage(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want string
-	}{
-		{name: "nil", err: nil, want: "Connecting to telemetry daemon..."},
-		{name: "not installed", err: fmt.Errorf("telemetry daemon service is not installed"), want: "Telemetry daemon not installed. Run: openusage telemetry daemon install"},
-		{name: "upgrade", err: fmt.Errorf("telemetry daemon is out of date"), want: "Upgrading telemetry daemon..."},
-		{name: "unavailable", err: fmt.Errorf("telemetry daemon unavailable"), want: "Waiting for telemetry daemon..."},
-		{name: "generic", err: fmt.Errorf("something else"), want: "Connecting to telemetry daemon..."},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			if got := syncStatusMessage(tt.err); got != tt.want {
-				t.Fatalf("syncStatusMessage(%v) = %q, want %q", tt.err, got, tt.want)
-			}
-		})
 	}
 }
 

@@ -68,20 +68,6 @@ type Config struct {
 	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
 }
 
-var legacyAccountIDAliases = map[string]string{
-	"openai-auto":        "openai",
-	"anthropic-auto":     "anthropic",
-	"openrouter-auto":    "openrouter",
-	"groq-auto":          "groq",
-	"mistral-auto":       "mistral",
-	"deepseek-auto":      "deepseek",
-	"xai-auto":           "xai",
-	"gemini-api-auto":    "gemini-api",
-	"gemini-google-auto": "gemini-google",
-	"copilot-auto":       "copilot",
-	"gemini-cli-auto":    "gemini-cli",
-}
-
 func DefaultConfig() Config {
 	return Config{
 		AutoDetect: true,
@@ -150,11 +136,7 @@ func LoadFrom(path string) (Config, error) {
 }
 
 func normalizeAccountID(id string) string {
-	trimmed := strings.TrimSpace(id)
-	if canonical, ok := legacyAccountIDAliases[trimmed]; ok {
-		return canonical
-	}
-	return trimmed
+	return strings.TrimSpace(id)
 }
 
 func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {

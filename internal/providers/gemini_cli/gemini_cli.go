@@ -529,13 +529,6 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	}
 
 	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL)
-	if err != nil && shouldTryLegacyQuotaMethod(err) {
-		legacyResp, legacyErr := retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, baseURL)
-		if legacyErr != nil {
-			return nil, "", fmt.Errorf("retrieveUserQuota: %w; retrieveUserUsage: %w", err, legacyErr)
-		}
-		return legacyResp, "retrieveUserUsage", nil
-	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -546,29 +539,6 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	}
 
 	return &resp, "retrieveUserQuota", nil
-}
-
-// retrieveUserUsage remains as a compatibility fallback for older endpoints.
-func retrieveUserUsage(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, error) {
-	return retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
-}
-
-func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, error) {
-	reqBody := retrieveUserQuotaRequest{
-		Project: projectID,
-	}
-
-	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserUsage", reqBody, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp retrieveUserQuotaResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("parse retrieveUserUsage response: %w", err)
-	}
-
-	return &resp, nil
 }
 
 func codeAssistPost(ctx context.Context, accessToken, method string, body interface{}) ([]byte, error) {
@@ -707,14 +677,6 @@ func applyLoadCodeAssistMetadata(snap *core.UsageSnapshot, resp *loadCodeAssistR
 			snap.Raw["ineligible_reasons"] = strings.Join(reasons, " | ")
 		}
 	}
-}
-
-func shouldTryLegacyQuotaMethod(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "http 404") || strings.Contains(msg, "not found")
 }
 
 func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggregationResult {

@@ -17,13 +17,12 @@ func TestAllProviders_ContainsOpenCode(t *testing.T) {
 }
 
 func TestAllTelemetrySources_DerivedFromProviderRegistry(t *testing.T) {
-	sources := AllTelemetrySources()
-	if len(sources) < 3 {
-		t.Fatalf("telemetry sources = %d, want at least 3", len(sources))
-	}
-
 	found := map[string]bool{}
-	for _, source := range sources {
+	for _, provider := range AllProviders() {
+		source, ok := provider.(interface{ System() string })
+		if !ok {
+			continue
+		}
 		found[source.System()] = true
 	}
 
