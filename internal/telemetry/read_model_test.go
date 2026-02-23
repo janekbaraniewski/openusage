@@ -132,6 +132,83 @@ func TestApplyCanonicalTelemetryView_UsesBaseWhenNoRootSnapshot(t *testing.T) {
 	}
 }
 
+func TestApplyCanonicalTelemetryView_CarriesForwardLatestUsageProgressMetrics(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	quotaIngestor := NewQuotaSnapshotIngestor(store)
+
+	olderLimit := 3600.0
+	olderUsed := 407.0
+	olderRemaining := olderLimit - olderUsed
+	older := map[string]core.UsageSnapshot{
+		"cursor-ide": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-ide",
+			Timestamp:  time.Date(2026, 2, 23, 8, 50, 0, 0, time.UTC),
+			Status:     core.StatusOK,
+			Metrics: map[string]core.Metric{
+				"spend_limit": {
+					Limit:     &olderLimit,
+					Used:      &olderUsed,
+					Remaining: &olderRemaining,
+					Unit:      "USD",
+					Window:    "billing-cycle",
+				},
+			},
+		},
+	}
+	if err := quotaIngestor.Ingest(context.Background(), older); err != nil {
+		t.Fatalf("ingest older quota snapshot: %v", err)
+	}
+
+	totalReq := 59800.0
+	latest := map[string]core.UsageSnapshot{
+		"cursor-ide": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-ide",
+			Timestamp:  time.Date(2026, 2, 23, 8, 57, 0, 0, time.UTC),
+			Status:     core.StatusOK,
+			Message:    "Local Cursor IDE usage tracking (API unavailable)",
+			Metrics: map[string]core.Metric{
+				"total_ai_requests": {Used: &totalReq, Unit: "requests", Window: "all"},
+			},
+		},
+	}
+	if err := quotaIngestor.Ingest(context.Background(), latest); err != nil {
+		t.Fatalf("ingest latest quota snapshot: %v", err)
+	}
+
+	base := map[string]core.UsageSnapshot{
+		"cursor-ide": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-ide",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	got, err := ApplyCanonicalTelemetryView(context.Background(), dbPath, base)
+	if err != nil {
+		t.Fatalf("apply canonical telemetry view: %v", err)
+	}
+
+	snap := got["cursor-ide"]
+	if metric := snap.Metrics["total_ai_requests"]; metric.Used == nil || *metric.Used != 59800 {
+		t.Fatalf("total_ai_requests missing from latest snapshot: %+v", metric)
+	}
+	spendLimit := snap.Metrics["spend_limit"]
+	if spendLimit.Limit == nil || *spendLimit.Limit != 3600 || spendLimit.Used == nil || *spendLimit.Used != 407 {
+		t.Fatalf("spend_limit not carried forward from previous snapshot: %+v", spendLimit)
+	}
+	if gotAttr := snap.Attributes["telemetry_root_usage_fallback"]; gotAttr != "stale_limit_snapshot" {
+		t.Fatalf("telemetry_root_usage_fallback = %q, want stale_limit_snapshot", gotAttr)
+	}
+}
+
 func TestApplyCanonicalTelemetryView_FlagsUnmappedTelemetryProviders(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
@@ -192,7 +269,7 @@ func TestApplyCanonicalTelemetryView_UsesProviderLinksForCanonicalUsage(t *testi
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    time.Date(2026, 2, 22, 15, 20, 0, 0, time.UTC),
 		ProviderID:    "anthropic",
-		AccountID:     "anthropic",
+		AccountID:     "claude-code",
 		AgentName:     "opencode",
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-link-1",

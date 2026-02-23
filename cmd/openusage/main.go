@@ -145,9 +145,10 @@ func main() {
 		socketPath = value
 	}
 
-	daemonClient, daemonErr := ensureTelemetryDaemonRunning(ctx, socketPath, os.Getenv("OPENUSAGE_DEBUG") != "")
+	daemonClient, daemonErr := ensureTelemetryDaemonRunningInteractive(ctx, socketPath, os.Getenv("OPENUSAGE_DEBUG") != "")
 	if daemonErr != nil {
-		log.Printf("Warning: telemetry daemon unavailable: %v", daemonErr)
+		fmt.Fprintf(os.Stderr, "Telemetry daemon is unavailable: %v\n", daemonErr)
+		os.Exit(1)
 	}
 	viewRuntime := newDaemonViewRuntime(
 		daemonClient,

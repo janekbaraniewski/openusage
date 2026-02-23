@@ -306,11 +306,12 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 		if err != nil {
 			return nil, err
 		}
-		if scoped != nil && scoped.EventCount > 0 {
-			scoped.Scope = "account"
-			scoped.AccountID = accountID
-			return scoped, nil
+		if scoped == nil {
+			scoped = &telemetryUsageAgg{}
 		}
+		scoped.Scope = "account"
+		scoped.AccountID = accountID
+		return scoped, nil
 	}
 
 	fallback, err := loadUsageViewForFilter(ctx, db, usageFilter{
@@ -319,14 +320,10 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 	if err != nil {
 		return nil, err
 	}
-	if fallback != nil && fallback.EventCount > 0 {
-		if accountID != "" {
-			fallback.Scope = "provider_fallback"
-			fallback.AccountID = accountID
-		} else {
-			fallback.Scope = "provider"
-		}
+	if fallback == nil {
+		fallback = &telemetryUsageAgg{}
 	}
+	fallback.Scope = "provider"
 	return fallback, nil
 }
 
@@ -692,6 +689,7 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 			FROM usage_events e
 			JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
 			WHERE %s
+			  AND e.event_type IN ('message_usage', 'tool_usage')
 		),
 		ranked_usage AS (
 			SELECT
@@ -767,7 +765,7 @@ func usageWhereClause(alias string, filter usageFilter) (string, []any) {
 		where = prefix + "provider_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
 	if strings.TrimSpace(filter.AccountID) != "" {
-		where += " AND COALESCE(" + prefix + "account_id, '') = ?"
+		where += " AND " + prefix + "account_id = ?"
 		args = append(args, strings.TrimSpace(filter.AccountID))
 	}
 	return where, args

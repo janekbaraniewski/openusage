@@ -26,7 +26,7 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt,
 		ProviderID:    "openrouter",
-		AccountID:     "opencode",
+		AccountID:     "openrouter",
 		AgentName:     "opencode",
 		EventType:     EventTypeMessageUsage,
 		SessionID:     "sess-1",
@@ -47,7 +47,7 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt.Add(1 * time.Second),
 		ProviderID:    "openrouter",
-		AccountID:     "opencode",
+		AccountID:     "openrouter",
 		AgentName:     "opencode",
 		EventType:     EventTypeToolUsage,
 		SessionID:     "sess-1",
@@ -283,6 +283,63 @@ func TestApplyCanonicalUsageView_PreservesAuthoritativeModelAndDailyCost(t *test
 	}
 	if got := seriesValueByDate(snap.DailySeries["analytics_tokens"], "2026-02-22"); got != rootDailyTokens {
 		t.Fatalf("analytics_tokens overwritten: got %v, want %v", got, rootDailyTokens)
+	}
+}
+
+func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Date(2026, 2, 23, 7, 30, 0, 0, time.UTC)
+	input := int64(77)
+	total := int64(77)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "cursor",
+		AccountID:     "cursor",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-a",
+		MessageID:     "msg-a",
+		ModelRaw:      "claude-4.6-opus-high-thinking",
+		InputTokens:   &input,
+		TotalTokens:   &total,
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest usage event: %v", err)
+	}
+
+	localReq := 10.0
+	snaps := map[string]core.UsageSnapshot{
+		"cursor-ide": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-ide",
+			Metrics: map[string]core.Metric{
+				"total_ai_requests": {Used: &localReq, Unit: "requests", Window: "all"},
+			},
+		},
+	}
+
+	merged, err := ApplyCanonicalUsageView(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+
+	snap := merged["cursor-ide"]
+	if _, ok := snap.Metrics["source_opencode_requests"]; ok {
+		t.Fatalf("unexpected provider-scope fallback metric source_opencode_requests in account-scoped cursor view")
+	}
+	if got := snap.Attributes["telemetry_view"]; got != "" {
+		t.Fatalf("telemetry_view = %q, want empty (no account-scoped canonical usage)", got)
+	}
+	if metric := snap.Metrics["total_ai_requests"]; metric.Used == nil || *metric.Used != 10 {
+		t.Fatalf("total_ai_requests changed unexpectedly: %+v", metric)
 	}
 }
 

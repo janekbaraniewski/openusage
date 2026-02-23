@@ -47,9 +47,34 @@ type telemetryDaemonService struct {
 	pipelineMu sync.Mutex
 	logMu      sync.Mutex
 	lastLogAt  map[string]time.Time
+
+	readModelMu       sync.RWMutex
+	readModelCache    map[string]cachedReadModelEntry
+	readModelInFlight map[string]bool
+}
+
+type cachedReadModelEntry struct {
+	snapshots map[string]core.UsageSnapshot
+	updatedAt time.Time
 }
 
 func runTelemetryDaemon(args []string) error {
+	if len(args) > 0 && !strings.HasPrefix(strings.TrimSpace(args[0]), "-") {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "install":
+			return runTelemetryDaemonInstall(args[1:])
+		case "uninstall":
+			return runTelemetryDaemonUninstall(args[1:])
+		case "status":
+			return runTelemetryDaemonStatus(args[1:])
+		default:
+			return fmt.Errorf("unknown daemon subcommand %q", args[0])
+		}
+	}
+	return runTelemetryDaemonServe(args)
+}
+
+func runTelemetryDaemonServe(args []string) error {
 	cfgFile, loadErr := config.Load()
 	if loadErr != nil {
 		cfgFile = config.DefaultConfig()
@@ -164,6 +189,8 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 		collectors:   buildTelemetryCollectors(),
 		providerByID: providersByID(),
 		lastLogAt:    map[string]time.Time{},
+		readModelCache: map[string]cachedReadModelEntry{},
+		readModelInFlight: map[string]bool{},
 	}
 
 	svc.infof(
@@ -178,10 +205,19 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 		len(svc.providerByID),
 	)
 
-	if compactCtx, cancel := context.WithTimeout(ctx, 15*time.Second); cancel != nil {
+	if err := svc.startSocketServer(ctx); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+
+	// Run compaction in background so daemon health is available immediately.
+	go func() {
+		compactCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
 		result, compactErr := svc.store.CompactUsage(compactCtx)
 		if compactErr != nil {
 			svc.warnf("compaction_failed", "error=%v", compactErr)
+			return
 		}
 		svc.infof(
 			"compaction_done",
@@ -189,16 +225,11 @@ func startTelemetryDaemonService(ctx context.Context, cfg telemetryDaemonConfig)
 			result.DuplicateEventsRemoved,
 			result.OrphanRawEventsRemoved,
 		)
-		cancel()
-	}
-
-	if err := svc.startSocketServer(ctx); err != nil {
-		_ = store.Close()
-		return nil, err
-	}
+	}()
 
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
+	go svc.runReadModelCacheLoop(ctx)
 
 	return svc, nil
 }
@@ -263,6 +294,200 @@ func (s *telemetryDaemonService) shouldLog(key string, interval time.Duration) b
 	}
 	s.lastLogAt[key] = now
 	return true
+}
+
+func daemonReadModelRequestKey(req daemonReadModelRequest) string {
+	accounts := make([]daemonReadModelAccount, 0, len(req.Accounts))
+	seenAccounts := make(map[string]bool, len(req.Accounts))
+	for _, account := range req.Accounts {
+		accountID := strings.TrimSpace(account.AccountID)
+		providerID := strings.TrimSpace(account.ProviderID)
+		if accountID == "" || providerID == "" {
+			continue
+		}
+		key := accountID + "|" + providerID
+		if seenAccounts[key] {
+			continue
+		}
+		seenAccounts[key] = true
+		accounts = append(accounts, daemonReadModelAccount{
+			AccountID:  accountID,
+			ProviderID: providerID,
+		})
+	}
+	sort.Slice(accounts, func(i, j int) bool {
+		if accounts[i].AccountID != accounts[j].AccountID {
+			return accounts[i].AccountID < accounts[j].AccountID
+		}
+		return accounts[i].ProviderID < accounts[j].ProviderID
+	})
+
+	linkKeys := make([]string, 0, len(req.ProviderLinks))
+	for source, target := range req.ProviderLinks {
+		source = strings.ToLower(strings.TrimSpace(source))
+		target = strings.ToLower(strings.TrimSpace(target))
+		if source == "" || target == "" {
+			continue
+		}
+		linkKeys = append(linkKeys, source+"="+target)
+	}
+	sort.Strings(linkKeys)
+
+	var b strings.Builder
+	b.Grow(128 + len(accounts)*32 + len(linkKeys)*24)
+	b.WriteString("accounts:")
+	for _, account := range accounts {
+		b.WriteString(account.AccountID)
+		b.WriteByte(':')
+		b.WriteString(account.ProviderID)
+		b.WriteByte(';')
+	}
+	b.WriteString("|links:")
+	for _, key := range linkKeys {
+		b.WriteString(key)
+		b.WriteByte(';')
+	}
+	return b.String()
+}
+
+func (s *telemetryDaemonService) readModelCacheGet(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
+	if s == nil || strings.TrimSpace(cacheKey) == "" {
+		return nil, time.Time{}, false
+	}
+	s.readModelMu.RLock()
+	entry, ok := s.readModelCache[cacheKey]
+	s.readModelMu.RUnlock()
+	if !ok || len(entry.snapshots) == 0 {
+		return nil, time.Time{}, false
+	}
+	return cloneSnapshotsMap(entry.snapshots), entry.updatedAt, true
+}
+
+func (s *telemetryDaemonService) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot) {
+	if s == nil || strings.TrimSpace(cacheKey) == "" || len(snapshots) == 0 {
+		return
+	}
+	s.readModelMu.Lock()
+	s.readModelCache[cacheKey] = cachedReadModelEntry{
+		snapshots: cloneSnapshotsMap(snapshots),
+		updatedAt: time.Now().UTC(),
+	}
+	s.readModelMu.Unlock()
+}
+
+func (s *telemetryDaemonService) beginReadModelRefresh(cacheKey string) bool {
+	if s == nil || strings.TrimSpace(cacheKey) == "" {
+		return false
+	}
+	s.readModelMu.Lock()
+	defer s.readModelMu.Unlock()
+	if s.readModelInFlight[cacheKey] {
+		return false
+	}
+	s.readModelInFlight[cacheKey] = true
+	return true
+}
+
+func (s *telemetryDaemonService) endReadModelRefresh(cacheKey string) {
+	if s == nil || strings.TrimSpace(cacheKey) == "" {
+		return
+	}
+	s.readModelMu.Lock()
+	delete(s.readModelInFlight, cacheKey)
+	s.readModelMu.Unlock()
+}
+
+func (s *telemetryDaemonService) computeReadModel(
+	ctx context.Context,
+	req daemonReadModelRequest,
+) (map[string]core.UsageSnapshot, error) {
+	templates := readModelTemplatesFromRequest(req, disabledAccountsFromConfig())
+	if len(templates) == 0 {
+		return map[string]core.UsageSnapshot{}, nil
+	}
+	return telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
+		ProviderLinks: req.ProviderLinks,
+	})
+}
+
+func (s *telemetryDaemonService) refreshReadModelCacheAsync(
+	parent context.Context,
+	cacheKey string,
+	req daemonReadModelRequest,
+	timeout time.Duration,
+) {
+	if !s.beginReadModelRefresh(cacheKey) {
+		return
+	}
+	go func() {
+		defer s.endReadModelRefresh(cacheKey)
+		refreshCtx, cancel := context.WithTimeout(parent, timeout)
+		defer cancel()
+		snapshots, err := s.computeReadModel(refreshCtx, req)
+		if err != nil {
+			if s.shouldLog("read_model_cache_refresh_error", 8*time.Second) {
+				s.warnf("read_model_cache_refresh_error", "error=%v", err)
+			}
+			return
+		}
+		s.readModelCacheSet(cacheKey, snapshots)
+	}()
+}
+
+func daemonReadModelRequestFromConfig() (daemonReadModelRequest, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return daemonReadModelRequest{}, err
+	}
+	accounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
+	accounts = filterAccountsByDashboardConfig(accounts, cfg.Dashboard)
+	credResult := detect.Result{Accounts: accounts}
+	detect.ApplyCredentials(&credResult)
+	return daemonReadModelRequestFromAccounts(credResult.Accounts, cfg.Telemetry.ProviderLinks), nil
+}
+
+func (s *telemetryDaemonService) runReadModelCacheLoop(ctx context.Context) {
+	if s == nil {
+		return
+	}
+
+	interval := s.cfg.PollInterval / 2
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	if interval > 30*time.Second {
+		interval = 30 * time.Second
+	}
+
+	s.infof("read_model_cache_loop_start", "interval=%s", interval)
+	s.refreshReadModelCacheFromConfig(ctx)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.infof("read_model_cache_loop_stop", "reason=context_done")
+			return
+		case <-ticker.C:
+			s.refreshReadModelCacheFromConfig(ctx)
+		}
+	}
+}
+
+func (s *telemetryDaemonService) refreshReadModelCacheFromConfig(ctx context.Context) {
+	req, err := daemonReadModelRequestFromConfig()
+	if err != nil {
+		if s.shouldLog("read_model_cache_config_error", 15*time.Second) {
+			s.warnf("read_model_cache_config_error", "error=%v", err)
+		}
+		return
+	}
+	if len(req.Accounts) == 0 {
+		return
+	}
+	cacheKey := daemonReadModelRequestKey(req)
+	s.refreshReadModelCacheAsync(ctx, cacheKey, req, 12*time.Second)
 }
 
 func (s *telemetryDaemonService) runCollectLoop(ctx context.Context) {
@@ -748,18 +973,29 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 		return
 	}
 
-	templates := readModelTemplatesFromRequest(req, disabledAccountsFromConfig())
-	if len(templates) == 0 {
+	if len(req.Accounts) == 0 {
 		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: map[string]core.UsageSnapshot{}})
+		return
+	}
+
+	cacheKey := daemonReadModelRequestKey(req)
+	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey); ok {
+		writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: cached})
+		if time.Since(cachedAt) > 2*time.Second {
+			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 8*time.Second)
+		}
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 6500*time.Millisecond)
 	defer cancel()
-	snapshots, err := telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
-		ProviderLinks: req.ProviderLinks,
-	})
+	snapshots, err := s.computeReadModel(ctx, req)
 	if err != nil {
+		// Try one more time from cache if a concurrent refresh finished meanwhile.
+		if cached, _, ok := s.readModelCacheGet(cacheKey); ok {
+			writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: cached})
+			return
+		}
 		if s.shouldLog("read_model_error", 5*time.Second) {
 			s.warnf(
 				"read_model_failed",
@@ -772,6 +1008,8 @@ func (s *telemetryDaemonService) handleReadModel(w http.ResponseWriter, r *http.
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("read-model apply failed: %v", err))
 		return
 	}
+
+	s.readModelCacheSet(cacheKey, snapshots)
 	writeJSON(w, http.StatusOK, daemonReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {
@@ -817,7 +1055,7 @@ func readModelTemplatesFromRequest(
 			AccountID:   account.AccountID,
 			Timestamp:   now,
 			Status:      core.StatusUnknown,
-			Message:     "Syncing telemetry daemon...",
+			Message:     "",
 			Metrics:     map[string]core.Metric{},
 			Resets:      map[string]time.Time{},
 			Attributes:  map[string]string{},

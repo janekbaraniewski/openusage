@@ -48,8 +48,8 @@ func TestReadModelTemplatesFromRequest_SeedsAccounts(t *testing.T) {
 	if len(templates) != 2 {
 		t.Fatalf("templates len = %d, want 2", len(templates))
 	}
-	if got := templates["openrouter"]; got.Status != core.StatusUnknown || got.Message == "" {
-		t.Fatalf("openrouter template = %+v, want UNKNOWN with sync message", got)
+	if got := templates["openrouter"]; got.Status != core.StatusUnknown || got.Message != "" {
+		t.Fatalf("openrouter template = %+v, want UNKNOWN with empty message", got)
 	}
 	if got := templates["cursor-ide"]; got.ProviderID != "cursor" || got.AccountID != "cursor-ide" {
 		t.Fatalf("cursor template = %+v, want cursor/cursor-ide", got)

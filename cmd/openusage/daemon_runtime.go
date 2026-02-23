@@ -209,22 +209,20 @@ func (r *daemonViewRuntime) readWithFallback(ctx context.Context) map[string]cor
 		}
 		r.readModelMu.RUnlock()
 
-		// Return seeded placeholders while daemon catches up.
+		// Return seeded empty snapshots; UI keeps splash state until real data arrives.
 		seed := map[string]core.UsageSnapshot{}
 		now := time.Now().UTC()
 		for _, account := range request.Accounts {
 			seed[account.AccountID] = core.UsageSnapshot{
-				ProviderID: account.ProviderID,
-				AccountID:  account.AccountID,
-				Timestamp:  now,
-				Status:     core.StatusUnknown,
-				Message:    "Syncing telemetry daemon...",
-				Metrics:    map[string]core.Metric{},
-				Resets:     map[string]time.Time{},
-				Attributes: map[string]string{},
-				Diagnostics: map[string]string{
-					"daemon_sync": "waiting",
-				},
+				ProviderID:  account.ProviderID,
+				AccountID:   account.AccountID,
+				Timestamp:   now,
+				Status:      core.StatusUnknown,
+				Message:     "",
+				Metrics:     map[string]core.Metric{},
+				Resets:      map[string]time.Time{},
+				Attributes:  map[string]string{},
+				Diagnostics: map[string]string{},
 				Raw:         map[string]string{},
 				DailySeries: map[string][]core.TimePoint{},
 			}

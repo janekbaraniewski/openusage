@@ -102,6 +102,8 @@ func (s *Store) Init(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_occurred_at ON usage_events(occurred_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_window ON usage_events(provider_id, account_id, occurred_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_account_type_occurred ON usage_events(provider_id, account_id, event_type, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_events_type_provider ON usage_events(event_type, provider_id);`,
 		`CREATE TABLE IF NOT EXISTS usage_reconciliation_windows (
 			recon_id TEXT PRIMARY KEY,
 			provider_id TEXT NOT NULL,

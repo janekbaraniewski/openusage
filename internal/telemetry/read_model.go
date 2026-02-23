@@ -123,6 +123,51 @@ func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[s
 }
 
 func loadLatestLimitSnapshot(ctx context.Context, db *sql.DB, providerID, accountID string) (*core.UsageSnapshot, error) {
+	payload, occurredAt, found, err := queryLatestLimitSnapshotPayload(ctx, db, providerID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	latestDecoded, ok := decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt)
+	if !ok {
+		return nil, nil
+	}
+	latest := &latestDecoded
+
+	// Fast path: for most providers (and healthy snapshots), latest row already contains
+	// usage-progress gauges; no extra scan needed.
+	if !strings.EqualFold(strings.TrimSpace(providerID), "cursor") || limitSnapshotHasUsageProgress(*latest) {
+		latest.SetAttribute("telemetry_root", "limit_snapshot")
+		return latest, nil
+	}
+
+	fallbackPayload, fallbackOccurredAt, fallbackFound, fallbackErr := queryLatestLimitSnapshotUsageFallbackPayload(ctx, db, providerID, accountID)
+	if fallbackErr != nil {
+		return nil, fallbackErr
+	}
+	if fallbackFound {
+		if fallbackDecoded, ok := decodeStoredLimitSnapshot(providerID, accountID, fallbackPayload, fallbackOccurredAt); ok {
+			if limitSnapshotHasUsageProgress(fallbackDecoded) {
+				carryForwardUsageProgress(latest, fallbackDecoded)
+				latest.SetAttribute("telemetry_root_usage_fallback", "stale_limit_snapshot")
+				if !fallbackDecoded.Timestamp.IsZero() {
+					latest.SetAttribute("telemetry_root_usage_fallback_at", fallbackDecoded.Timestamp.Format(time.RFC3339))
+				}
+			}
+		}
+	}
+
+	latest.SetAttribute("telemetry_root", "limit_snapshot")
+	return latest, nil
+}
+
+func queryLatestLimitSnapshotPayload(
+	ctx context.Context,
+	db *sql.DB,
+	providerID, accountID string,
+) (string, string, bool, error) {
 	var (
 		payload    string
 		occurredAt string
@@ -133,21 +178,58 @@ func loadLatestLimitSnapshot(ctx context.Context, db *sql.DB, providerID, accoun
 		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
 		WHERE e.event_type = 'limit_snapshot'
 		  AND e.provider_id = ?
-		  AND COALESCE(e.account_id, '') = ?
+		  AND e.account_id = ?
 		  AND r.source_system = ?
 		ORDER BY e.occurred_at DESC
 		LIMIT 1
 	`, providerID, accountID, string(SourceSystemPoller)).Scan(&payload, &occurredAt)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return "", "", false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("load latest limit snapshot (%s/%s): %w", providerID, accountID, err)
+		return "", "", false, fmt.Errorf("load latest limit snapshot (%s/%s): %w", providerID, accountID, err)
 	}
+	return payload, occurredAt, true, nil
+}
 
+func queryLatestLimitSnapshotUsageFallbackPayload(
+	ctx context.Context,
+	db *sql.DB,
+	providerID, accountID string,
+) (string, string, bool, error) {
+	var (
+		payload    string
+		occurredAt string
+	)
+	err := db.QueryRowContext(ctx, `
+		SELECT r.source_payload, e.occurred_at
+		FROM usage_events e
+		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+		WHERE e.event_type = 'limit_snapshot'
+		  AND e.provider_id = ?
+		  AND e.account_id = ?
+		  AND r.source_system = ?
+		  AND (
+			r.source_payload LIKE '%"spend_limit"%' OR
+			r.source_payload LIKE '%"plan_spend"%' OR
+			r.source_payload LIKE '%"plan_percent_used"%'
+		  )
+		ORDER BY e.occurred_at DESC
+		LIMIT 1
+	`, providerID, accountID, string(SourceSystemPoller)).Scan(&payload, &occurredAt)
+	if err == sql.ErrNoRows {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("load fallback usage-progress limit snapshot (%s/%s): %w", providerID, accountID, err)
+	}
+	return payload, occurredAt, true, nil
+}
+
+func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string) (core.UsageSnapshot, bool) {
 	var envelope storedLimitEnvelope
 	if unmarshalErr := json.Unmarshal([]byte(payload), &envelope); unmarshalErr != nil {
-		return nil, nil
+		return core.UsageSnapshot{}, false
 	}
 
 	s := core.UsageSnapshot{
@@ -183,8 +265,78 @@ func loadLatestLimitSnapshot(ctx context.Context, db *sql.DB, providerID, accoun
 	} else {
 		s.Timestamp = time.Now().UTC()
 	}
-	s.SetAttribute("telemetry_root", "limit_snapshot")
-	return &s, nil
+	return s, true
+}
+
+func carryForwardUsageProgress(dst *core.UsageSnapshot, src core.UsageSnapshot) {
+	if dst == nil {
+		return
+	}
+	dst.EnsureMaps()
+	for key, metric := range src.Metrics {
+		if !isUsageProgressMetricKey(key) || !metricHasAnyValue(metric) {
+			continue
+		}
+		if existing, ok := dst.Metrics[key]; ok && metricHasAnyValue(existing) {
+			continue
+		}
+		dst.Metrics[key] = metric
+	}
+	for key, resetAt := range src.Resets {
+		if _, ok := dst.Resets[key]; ok {
+			continue
+		}
+		if resetAt.IsZero() {
+			continue
+		}
+		dst.Resets[key] = resetAt
+	}
+}
+
+func limitSnapshotHasUsageProgress(snap core.UsageSnapshot) bool {
+	for key, metric := range snap.Metrics {
+		if !isUsageProgressMetricKey(key) {
+			continue
+		}
+		if metricHasAnyValue(metric) {
+			return true
+		}
+	}
+	return false
+}
+
+func isUsageProgressMetricKey(key string) bool {
+	key = strings.TrimSpace(strings.ToLower(key))
+	if key == "" {
+		return false
+	}
+	switch key {
+	case
+		"spend_limit",
+		"plan_spend",
+		"plan_percent_used",
+		"plan_auto_percent_used",
+		"plan_api_percent_used",
+		"plan_total_spend_usd",
+		"plan_limit_usd",
+		"credit_balance",
+		"credits",
+		"monthly_budget",
+		"monthly_spend",
+		"usage_five_hour",
+		"usage_seven_day",
+		"chat_quota",
+		"completions_quota":
+		return true
+	}
+	if strings.HasPrefix(key, "rate_limit_") || strings.HasPrefix(key, "quota_") {
+		return true
+	}
+	return false
+}
+
+func metricHasAnyValue(metric core.Metric) bool {
+	return metric.Used != nil || metric.Limit != nil || metric.Remaining != nil
 }
 
 func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) core.UsageSnapshot {
@@ -239,7 +391,8 @@ func annotateUnmappedTelemetryProviders(
 	rows, err := db.QueryContext(ctx, `
 		SELECT provider_id
 		FROM usage_events
-		WHERE COALESCE(TRIM(provider_id), '') != ''
+		WHERE provider_id IS NOT NULL
+		  AND provider_id != ''
 		  AND event_type IN ('message_usage', 'tool_usage')
 		GROUP BY provider_id
 		ORDER BY provider_id ASC
