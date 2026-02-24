@@ -74,9 +74,63 @@ func cursorAppSupportDir() string {
 func findBinary(name string) string {
 	path, err := exec.LookPath(name)
 	if err != nil {
+		for _, dir := range candidateBinaryDirs() {
+			candidate := filepath.Join(dir, name)
+			if runtime.GOOS == "windows" && filepath.Ext(candidate) == "" {
+				candidate += ".exe"
+			}
+			if isExecutableFile(candidate) {
+				return candidate
+			}
+		}
 		return ""
 	}
 	return path
+}
+
+func candidateBinaryDirs() []string {
+	var dirs []string
+
+	if custom := strings.TrimSpace(os.Getenv("OPENUSAGE_DETECT_BIN_DIRS")); custom != "" {
+		parts := strings.Split(custom, string(os.PathListSeparator))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				dirs = append(dirs, part)
+			}
+		}
+	}
+
+	if pathEnv := strings.TrimSpace(os.Getenv("PATH")); pathEnv != "" {
+		for _, part := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				dirs = append(dirs, part)
+			}
+		}
+	}
+
+	home := homeDir()
+	if home != "" {
+		dirs = append(dirs,
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+		)
+	}
+
+	dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+	return lo.Uniq(dirs)
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func dirExists(path string) bool {

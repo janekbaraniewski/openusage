@@ -239,16 +239,20 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 }
 
 func (m Model) renderSplash(screenW, screenH int) string {
-	banner := ASCIIBanner(m.animFrame)
-	bannerLines := strings.Split(banner, "\n")
-
 	var lines []string
-	for _, bl := range bannerLines {
-		lines = append(lines, "  "+bl)
+	if m.useBrandedSplashLoader() {
+		for _, line := range m.brandedLoaderLines(0, "", m.loadingSplashMessage()) {
+			lines = append(lines, "  "+line)
+		}
+	} else {
+		banner := ASCIIBanner(m.animFrame)
+		bannerLines := strings.Split(banner, "\n")
+		for _, bl := range bannerLines {
+			lines = append(lines, "  "+bl)
+		}
+		lines = append(lines, "")
+		lines = append(lines, m.splashStatusLines()...)
 	}
-	lines = append(lines, "")
-
-	lines = append(lines, m.splashStatusLines()...)
 
 	blockH := len(lines)
 	padTop := (screenH - blockH) / 2
@@ -341,8 +345,16 @@ func (m Model) splashStatusLines() []string {
 		}
 
 	default:
+		loader := m.brandedLoaderLines(0, "", m.loadingSplashMessage())
+		subtitle := ""
+		if len(loader) > 0 {
+			subtitle = loader[len(loader)-1]
+		}
+		if subtitle == "" {
+			subtitle = spinner + " " + dim.Render(m.loadingSplashMessage())
+		}
 		return []string{
-			"  " + spinner + " " + dim.Render(m.loadingSplashMessage()),
+			"  " + subtitle,
 		}
 	}
 }
@@ -366,6 +378,48 @@ func (m Model) loadingSplashMessage() string {
 		}
 	}
 	return "Connecting to telemetry daemon..."
+}
+
+func (m Model) useBrandedSplashLoader() bool {
+	switch m.daemonStatus {
+	case DaemonNotInstalled, DaemonOutdated, DaemonError, DaemonStarting:
+		return false
+	default:
+		return true
+	}
+}
+
+func (m Model) resolveLoadingMessage(message, fallback string) string {
+	msg := strings.TrimSpace(message)
+	if msg != "" && !strings.EqualFold(msg, "connected") {
+		return msg
+	}
+	fb := strings.TrimSpace(fallback)
+	if fb != "" {
+		return fb
+	}
+	return "Connecting to telemetry daemon..."
+}
+
+func (m Model) brandedLoaderLines(maxWidth int, message, fallback string) []string {
+	msg := m.resolveLoadingMessage(message, fallback)
+	if maxWidth > 4 && lipgloss.Width(msg) > maxWidth-4 {
+		msg = truncateToWidth(msg, maxWidth-4)
+	}
+
+	spinner := lipgloss.NewStyle().
+		Foreground(colorAccent).
+		Bold(true).
+		Render(SpinnerFrames[m.animFrame%len(SpinnerFrames)])
+	sub := lipgloss.NewStyle().
+		Foreground(colorSubtext).
+		Italic(true).
+		Render(spinner + " " + msg)
+
+	lines := strings.Split(ASCIIBanner(m.animFrame), "\n")
+	lines = append(lines, "")
+	lines = append(lines, sub)
+	return lines
 }
 
 func padRight(s string, width int) string {
