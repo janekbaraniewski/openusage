@@ -71,6 +71,10 @@ demo: deps ## Build and run the demo with dummy data (for screenshots)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)-demo ./cmd/demo
 	$(BIN_DIR)/$(APP_NAME)-demo
 
+.PHONY: sync-tools
+sync-tools: ## Regenerate all AI tool config files from canonical template
+	@./scripts/sync-tool-configs.sh
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	@rm -rf $(BIN_DIR) dist coverage.out

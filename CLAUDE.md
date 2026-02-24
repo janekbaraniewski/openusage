@@ -17,6 +17,7 @@ make fmt            # go fmt ./...
 make vet            # go vet ./...
 make run            # go run cmd/openusage/main.go
 make demo           # build and run demo with dummy data (for screenshots)
+make sync-tools     # regenerate all AI tool configs from canonical template
 
 # Run a single test
 go test ./internal/providers/openai/ -run TestFetch -v
@@ -128,6 +129,12 @@ Use these directly when you need a specific phase, or let `/develop-feature` cha
 | `/iterate-feature <name>` | [SKILL.md](docs/skills/iterate-feature/SKILL.md) | Triage and fix issues from validation or PR review |
 | `/finalize-feature <name>` | [SKILL.md](docs/skills/finalize-feature/SKILL.md) | Create branch, commit, open PR with summary |
 | `/add-new-provider <name>` | [add-new-provider.md](docs/skills/add-new-provider.md) | Add a new AI provider (specialized 7-phase process) |
+
+### Meta / Tooling
+
+| Command | Skill | Purpose |
+|---------|-------|---------|
+| `/dev-workflow-improvements` | [SKILL.md](docs/skills/dev-workflow-improvements/SKILL.md) | Audit dev workflow, sync tool configs, validate skill completeness |
 
 ### Lifecycle Flow
 

@@ -685,3 +685,106 @@ func TestLoadFrom_ModelNormalizationConfig(t *testing.T) {
 		t.Fatalf("overrides len = %d, want 1", len(cfg.ModelNormalization.Overrides))
 	}
 }
+
+func TestSaveIntegrationStateTo_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	// Start with a config that has a theme set
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save an integration state
+	state := IntegrationState{
+		Installed:   true,
+		Version:     "1.2.3",
+		InstalledAt: "2025-06-01T12:00:00Z",
+	}
+	if err := SaveIntegrationStateTo(path, "claude-code-hooks", state); err != nil {
+		t.Fatalf("SaveIntegrationStateTo error: %v", err)
+	}
+
+	// Load and verify
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Theme should be preserved
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+
+	// Integration state should be present
+	if loaded.Integrations == nil {
+		t.Fatal("expected integrations map to be non-nil")
+	}
+	got, ok := loaded.Integrations["claude-code-hooks"]
+	if !ok {
+		t.Fatal("expected 'claude-code-hooks' key in integrations")
+	}
+	if !got.Installed {
+		t.Error("expected installed=true")
+	}
+	if got.Version != "1.2.3" {
+		t.Errorf("version = %q, want '1.2.3'", got.Version)
+	}
+	if got.InstalledAt != "2025-06-01T12:00:00Z" {
+		t.Errorf("installed_at = %q, want '2025-06-01T12:00:00Z'", got.InstalledAt)
+	}
+	if got.Declined {
+		t.Error("expected declined=false")
+	}
+
+	// Save a second integration and verify both exist
+	declined := IntegrationState{Declined: true}
+	if err := SaveIntegrationStateTo(path, "cursor-rules", declined); err != nil {
+		t.Fatalf("SaveIntegrationStateTo (second) error: %v", err)
+	}
+
+	loaded, err = LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Integrations) != 2 {
+		t.Fatalf("integrations count = %d, want 2", len(loaded.Integrations))
+	}
+	if !loaded.Integrations["cursor-rules"].Declined {
+		t.Error("expected cursor-rules declined=true")
+	}
+	// First integration should still be there
+	if !loaded.Integrations["claude-code-hooks"].Installed {
+		t.Error("expected claude-code-hooks still installed=true")
+	}
+}
+
+func TestLoadFrom_MissingIntegrationsIsNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	// Config without integrations key at all
+	content := `{
+  "theme": "Dracula",
+  "auto_detect": true,
+  "accounts": []
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Integrations != nil {
+		t.Errorf("expected nil integrations map for config without integrations key, got %v", cfg.Integrations)
+	}
+
+	// Verify other fields still load correctly
+	if cfg.Theme != "Dracula" {
+		t.Errorf("theme = %q, want 'Dracula'", cfg.Theme)
+	}
+}
