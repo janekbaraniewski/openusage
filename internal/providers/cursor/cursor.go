@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 var cursorAPIBase = "https://api2.cursor.sh"
@@ -26,13 +29,15 @@ var cursorAPIBase = "https://api2.cursor.sh"
 type Provider struct {
 	providerbase.Base
 	mu                    sync.RWMutex
-	modelAggregationCache map[string]cachedModelAggregation // account ID -> latest model aggregation
+	modelAggregationCache map[string]cachedModelAggregation
 }
 
 type cachedModelAggregation struct {
 	BillingCycleStart string
 	BillingCycleEnd   string
 	Aggregations      []modelAggregation
+	EffectiveLimitUSD float64                // cached plan/included limit for gauge fallback
+	BillingMetrics    map[string]core.Metric // cached billing metrics for local-only fallback
 }
 
 func New() *Provider {
@@ -41,7 +46,7 @@ func New() *Provider {
 			ID: "cursor",
 			Info: core.ProviderInfo{
 				Name:         "Cursor IDE",
-				Capabilities: []string{"dashboard_api", "billing", "spend_tracking", "model_aggregation", "local_tracking"},
+				Capabilities: []string{"dashboard_api", "billing", "spend_tracking", "model_aggregation", "local_tracking", "composer_sessions", "ai_code_scoring"},
 				DocURL:       "https://www.cursor.com/",
 			},
 			Auth: core.ProviderAuthSpec{
@@ -96,11 +101,6 @@ type planInfoResp struct {
 	} `json:"planInfo"`
 }
 
-type billingCycleResp struct {
-	StartDateEpochMillis string `json:"startDateEpochMillis"`
-	EndDateEpochMillis   string `json:"endDateEpochMillis"`
-}
-
 type hardLimitResp struct {
 	NoUsageBasedAllowed bool `json:"noUsageBasedAllowed"`
 }
@@ -116,7 +116,12 @@ type modelAggregation struct {
 }
 
 type aggregatedUsageResp struct {
-	Aggregations []modelAggregation `json:"aggregations"`
+	Aggregations          []modelAggregation `json:"aggregations"`
+	TotalInputTokens      string             `json:"totalInputTokens"`
+	TotalOutputTokens     string             `json:"totalOutputTokens"`
+	TotalCacheWriteTokens string             `json:"totalCacheWriteTokens"`
+	TotalCacheReadTokens  string             `json:"totalCacheReadTokens"`
+	TotalCostCents        float64            `json:"totalCostCents"`
 }
 
 type stripeProfileResp struct {
@@ -139,6 +144,11 @@ type dailyStats struct {
 	TabAcceptedLines       int    `json:"tabAcceptedLines"`
 	ComposerSuggestedLines int    `json:"composerSuggestedLines"`
 	ComposerAcceptedLines  int    `json:"composerAcceptedLines"`
+}
+
+type composerModelUsage struct {
+	CostInCents float64 `json:"costInCents"`
+	Amount      int     `json:"amount"`
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
@@ -174,6 +184,47 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		stateDBPath = acct.BaseURL
 	}
 
+	// If the token was not persisted (json:"-"), try to extract it fresh
+	// from the Cursor state DB so daemon polls can access the API.
+	token := acct.Token
+	if token == "" && stateDBPath != "" {
+		token = extractTokenFromStateDB(stateDBPath)
+	}
+
+	// Run API calls concurrently with local DB reads so heavy local queries
+	// don't consume the context timeout needed by the API.
+	type apiResult struct {
+		snap *core.UsageSnapshot
+		err  error
+	}
+	apiCh := make(chan apiResult, 1)
+	if token != "" {
+		go func() {
+			apiSnap := core.UsageSnapshot{
+				AccountID:   acct.ID,
+				Metrics:     make(map[string]core.Metric),
+				Resets:      make(map[string]time.Time),
+				Raw:         make(map[string]string),
+				DailySeries: make(map[string][]core.TimePoint),
+			}
+			err := p.fetchFromAPI(ctx, token, &apiSnap)
+			apiCh <- apiResult{snap: &apiSnap, err: err}
+		}()
+	} else {
+		apiCh <- apiResult{err: fmt.Errorf("no token")}
+	}
+
+	// Also resolve ExtraData from persisted fields if not present.
+	if acct.ExtraData == nil {
+		acct.ExtraData = make(map[string]string)
+	}
+	if acct.ExtraData["tracking_db"] == "" && trackingDBPath != "" {
+		acct.ExtraData["tracking_db"] = trackingDBPath
+	}
+	if acct.ExtraData["state_db"] == "" && stateDBPath != "" {
+		acct.ExtraData["state_db"] = stateDBPath
+	}
+
 	var hasLocalData bool
 	if trackingDBPath != "" {
 		if err := p.readTrackingDB(ctx, trackingDBPath, &snap); err != nil {
@@ -183,7 +234,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			hasLocalData = true
 		}
 	}
-
 	if stateDBPath != "" {
 		if err := p.readStateDB(ctx, stateDBPath, &snap); err != nil {
 			log.Printf("[cursor] state DB error: %v", err)
@@ -193,15 +243,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
+	// Collect API results.
+	ar := <-apiCh
 	hasAPIData := false
-	if acct.Token != "" {
-		apiErr := p.fetchFromAPI(ctx, acct.Token, &snap)
-		if apiErr == nil {
-			hasAPIData = true
-		} else {
-			log.Printf("[cursor] API fetch failed, falling back to local data: %v", apiErr)
-			snap.Raw["api_error"] = apiErr.Error()
-		}
+	if ar.err == nil && ar.snap != nil {
+		mergeAPIIntoSnapshot(&snap, ar.snap)
+		hasAPIData = true
+	} else if ar.err != nil && token != "" {
+		log.Printf("[cursor] API fetch failed, falling back to local data: %v", ar.err)
+		snap.Raw["api_error"] = ar.err.Error()
 	}
 
 	if !hasAPIData && !hasLocalData {
@@ -212,136 +262,189 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	if !hasAPIData {
 		p.applyCachedModelAggregations(acct.ID, "", "", &snap)
-		snap.Message = "Local Cursor IDE usage tracking (API unavailable)"
+		p.applyCachedBillingMetrics(acct.ID, &snap)
+		p.buildLocalOnlyMessage(&snap)
 	}
+
+	// Final safety net: ensure credit gauges exist from local data when
+	// API didn't provide them (or API is completely unavailable).
+	p.ensureCreditGauges(acct.ID, &snap)
 
 	return snap, nil
 }
 
+func mergeAPIIntoSnapshot(dst, src *core.UsageSnapshot) {
+	for k, v := range src.Metrics {
+		dst.Metrics[k] = v
+	}
+	for k, v := range src.Resets {
+		dst.Resets[k] = v
+	}
+	for k, v := range src.Raw {
+		dst.Raw[k] = v
+	}
+	for k, v := range src.DailySeries {
+		dst.DailySeries[k] = v
+	}
+	dst.ModelUsage = append(dst.ModelUsage, src.ModelUsage...)
+	if src.Status != "" {
+		dst.Status = src.Status
+	}
+	if src.Message != "" {
+		dst.Message = src.Message
+	}
+}
+
+func (p *Provider) buildLocalOnlyMessage(snap *core.UsageSnapshot) {
+	var parts []string
+
+	if m, ok := snap.Metrics["composer_cost"]; ok && m.Used != nil && *m.Used > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f session cost", *m.Used))
+	}
+	if m, ok := snap.Metrics["total_ai_requests"]; ok && m.Used != nil && *m.Used > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f requests", *m.Used))
+	}
+	if m, ok := snap.Metrics["composer_sessions"]; ok && m.Used != nil && *m.Used > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f sessions", *m.Used))
+	}
+
+	if len(parts) > 0 {
+		snap.Message = strings.Join(parts, " · ") + " (API unavailable)"
+	} else {
+		snap.Message = "Local Cursor IDE usage tracking (API unavailable)"
+	}
+}
+
 func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.UsageSnapshot) error {
-	var periodUsage currentPeriodUsageResp
+	// All API endpoints are called independently so a single endpoint failure
+	// doesn't lose data from the others.
+	var (
+		hasPeriodUsage                  bool
+		periodUsage                     currentPeriodUsageResp
+		pu                              planUsage
+		su                              spendLimitUsage
+		totalSpendDollars, limitDollars float64
+	)
 	if err := p.callDashboardAPI(ctx, token, "GetCurrentPeriodUsage", &periodUsage); err != nil {
-		return fmt.Errorf("GetCurrentPeriodUsage: %w", err)
-	}
-
-	pu := periodUsage.PlanUsage
-	totalSpendDollars := pu.TotalSpend / 100.0
-	includedDollars := pu.IncludedSpend / 100.0
-	limitDollars := pu.Limit / 100.0
-	bonusDollars := pu.BonusSpend / 100.0
-
-	snap.Metrics["plan_spend"] = core.Metric{
-		Used:   &totalSpendDollars,
-		Limit:  &limitDollars,
-		Unit:   "USD",
-		Window: "billing-cycle",
-	}
-	snap.Metrics["plan_included"] = core.Metric{
-		Used:   &includedDollars,
-		Unit:   "USD",
-		Window: "billing-cycle",
-	}
-	snap.Metrics["plan_bonus"] = core.Metric{
-		Used:   &bonusDollars,
-		Unit:   "USD",
-		Window: "billing-cycle",
-	}
-
-	totalPctUsed := pu.TotalPercentUsed
-	totalPctRemaining := 100.0 - totalPctUsed
-	hundredPct := 100.0
-	snap.Metrics["plan_percent_used"] = core.Metric{
-		Used:      &totalPctUsed,
-		Remaining: &totalPctRemaining,
-		Limit:     &hundredPct,
-		Unit:      "%",
-		Window:    "billing-cycle",
-	}
-	autoPctUsed := pu.AutoPercentUsed
-	autoPctRemaining := 100.0 - autoPctUsed
-	snap.Metrics["plan_auto_percent_used"] = core.Metric{
-		Used:      &autoPctUsed,
-		Remaining: &autoPctRemaining,
-		Limit:     &hundredPct,
-		Unit:      "%",
-		Window:    "billing-cycle",
-	}
-	apiPctUsed := pu.APIPercentUsed
-	apiPctRemaining := 100.0 - apiPctUsed
-	snap.Metrics["plan_api_percent_used"] = core.Metric{
-		Used:      &apiPctUsed,
-		Remaining: &apiPctRemaining,
-		Limit:     &hundredPct,
-		Unit:      "%",
-		Window:    "billing-cycle",
-	}
-
-	su := periodUsage.SpendLimitUsage
-	if su.PooledLimit > 0 {
-		pooledLimitDollars := su.PooledLimit / 100.0
-		pooledUsedDollars := su.PooledUsed / 100.0
-		pooledRemainingDollars := su.PooledRemaining / 100.0
-		individualDollars := su.IndividualUsed / 100.0
-
-		snap.Metrics["spend_limit"] = core.Metric{
-			Limit:     &pooledLimitDollars,
-			Used:      &pooledUsedDollars,
-			Remaining: &pooledRemainingDollars,
-			Unit:      "USD",
-			Window:    "billing-cycle",
-		}
-		snap.Metrics["individual_spend"] = core.Metric{
-			Used:   &individualDollars,
-			Unit:   "USD",
-			Window: "billing-cycle",
-		}
-		snap.Raw["spend_limit_type"] = su.LimitType
-	}
-
-	snap.Raw["display_message"] = periodUsage.DisplayMessage
-	snap.Raw["display_threshold"] = strconv.FormatFloat(periodUsage.DisplayThreshold, 'f', -1, 64)
-	snap.Raw["billing_cycle_start"] = formatTimestamp(periodUsage.BillingCycleStart)
-	snap.Raw["billing_cycle_end"] = formatTimestamp(periodUsage.BillingCycleEnd)
-
-	if t := parseTimestamp(periodUsage.BillingCycleEnd); !t.IsZero() {
-		snap.Resets["billing_cycle_end"] = t
-	}
-
-	if su.PooledLimit > 0 && su.PooledRemaining > 0 {
-		spendPctUsed := (su.PooledUsed / su.PooledLimit) * 100
-		if spendPctUsed >= 100 {
-			snap.Status = core.StatusLimited
-		} else if spendPctUsed >= 80 {
-			snap.Status = core.StatusNearLimit
-		} else {
-			snap.Status = core.StatusOK
-		}
-	} else if pu.TotalPercentUsed >= 100 {
-		snap.Status = core.StatusLimited
-	} else if pu.TotalPercentUsed >= 80 {
-		snap.Status = core.StatusNearLimit
+		log.Printf("[cursor] GetCurrentPeriodUsage failed (continuing with other endpoints): %v", err)
+		snap.Raw["period_usage_error"] = err.Error()
 	} else {
-		snap.Status = core.StatusOK
-	}
+		hasPeriodUsage = true
+		pu = periodUsage.PlanUsage
+		su = periodUsage.SpendLimitUsage
+		totalSpendDollars = pu.TotalSpend / 100.0
+		includedDollars := pu.IncludedSpend / 100.0
+		limitDollars = pu.Limit / 100.0
+		bonusDollars := pu.BonusSpend / 100.0
 
-	snap.Metrics["plan_total_spend_usd"] = core.Metric{
-		Used:   &totalSpendDollars,
-		Limit:  &limitDollars,
-		Unit:   "USD",
-		Window: "billing-cycle",
-	}
-	if su.PooledLimit > 0 {
-		pooledLimitDollars := su.PooledLimit / 100.0
-		snap.Metrics["plan_limit_usd"] = core.Metric{
-			Limit:  &pooledLimitDollars,
-			Unit:   "USD",
-			Window: "billing-cycle",
-		}
-	} else {
-		snap.Metrics["plan_limit_usd"] = core.Metric{
+		snap.Metrics["plan_spend"] = core.Metric{
+			Used:   &totalSpendDollars,
 			Limit:  &limitDollars,
 			Unit:   "USD",
 			Window: "billing-cycle",
+		}
+		snap.Metrics["plan_included"] = core.Metric{
+			Used:   &includedDollars,
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+		snap.Metrics["plan_bonus"] = core.Metric{
+			Used:   &bonusDollars,
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+
+		totalPctUsed := pu.TotalPercentUsed
+		totalPctRemaining := 100.0 - totalPctUsed
+		hundredPct := 100.0
+		snap.Metrics["plan_percent_used"] = core.Metric{
+			Used:      &totalPctUsed,
+			Remaining: &totalPctRemaining,
+			Limit:     &hundredPct,
+			Unit:      "%",
+			Window:    "billing-cycle",
+		}
+		autoPctUsed := pu.AutoPercentUsed
+		autoPctRemaining := 100.0 - autoPctUsed
+		snap.Metrics["plan_auto_percent_used"] = core.Metric{
+			Used:      &autoPctUsed,
+			Remaining: &autoPctRemaining,
+			Limit:     &hundredPct,
+			Unit:      "%",
+			Window:    "billing-cycle",
+		}
+		apiPctUsed := pu.APIPercentUsed
+		apiPctRemaining := 100.0 - apiPctUsed
+		snap.Metrics["plan_api_percent_used"] = core.Metric{
+			Used:      &apiPctUsed,
+			Remaining: &apiPctRemaining,
+			Limit:     &hundredPct,
+			Unit:      "%",
+			Window:    "billing-cycle",
+		}
+
+		if su.PooledLimit > 0 {
+			pooledLimitDollars := su.PooledLimit / 100.0
+			pooledUsedDollars := su.PooledUsed / 100.0
+			pooledRemainingDollars := su.PooledRemaining / 100.0
+			individualDollars := su.IndividualUsed / 100.0
+
+			snap.Metrics["spend_limit"] = core.Metric{
+				Limit:     &pooledLimitDollars,
+				Used:      &pooledUsedDollars,
+				Remaining: &pooledRemainingDollars,
+				Unit:      "USD",
+				Window:    "billing-cycle",
+			}
+			snap.Metrics["individual_spend"] = core.Metric{
+				Used:   &individualDollars,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
+			snap.Raw["spend_limit_type"] = su.LimitType
+		}
+
+		snap.Raw["display_message"] = periodUsage.DisplayMessage
+		snap.Raw["display_threshold"] = strconv.FormatFloat(periodUsage.DisplayThreshold, 'f', -1, 64)
+		snap.Raw["billing_cycle_start"] = formatTimestamp(periodUsage.BillingCycleStart)
+		snap.Raw["billing_cycle_end"] = formatTimestamp(periodUsage.BillingCycleEnd)
+
+		if t := shared.FlexParseTime(periodUsage.BillingCycleEnd); !t.IsZero() {
+			snap.Resets["billing_cycle_end"] = t
+		}
+
+		if su.PooledLimit > 0 && su.PooledRemaining > 0 {
+			spendPctUsed := (su.PooledUsed / su.PooledLimit) * 100
+			if spendPctUsed >= 100 {
+				snap.Status = core.StatusLimited
+			} else if spendPctUsed >= 80 {
+				snap.Status = core.StatusNearLimit
+			}
+		} else if pu.TotalPercentUsed >= 100 {
+			snap.Status = core.StatusLimited
+		} else if pu.TotalPercentUsed >= 80 {
+			snap.Status = core.StatusNearLimit
+		}
+
+		snap.Metrics["plan_total_spend_usd"] = core.Metric{
+			Used:   &totalSpendDollars,
+			Limit:  &limitDollars,
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+		if su.PooledLimit > 0 {
+			pooledLimitDollars := su.PooledLimit / 100.0
+			snap.Metrics["plan_limit_usd"] = core.Metric{
+				Limit:  &pooledLimitDollars,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
+		} else {
+			snap.Metrics["plan_limit_usd"] = core.Metric{
+				Limit:  &limitDollars,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
 		}
 	}
 
@@ -358,7 +461,25 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 				Unit:   "USD",
 				Window: "billing-cycle",
 			}
+
+			if hasPeriodUsage && limitDollars <= 0 && su.PooledLimit <= 0 {
+				effectiveLimit := planIncludedAmountUSD
+				snap.Metrics["plan_spend"] = core.Metric{
+					Used:   &totalSpendDollars,
+					Limit:  &effectiveLimit,
+					Unit:   "USD",
+					Window: "billing-cycle",
+				}
+			}
 		}
+	}
+
+	effectivePlanLimitUSD := limitDollars
+	if effectivePlanLimitUSD <= 0 && su.PooledLimit > 0 {
+		effectivePlanLimitUSD = su.PooledLimit / 100.0
+	}
+	if effectivePlanLimitUSD <= 0 && planInfo.PlanInfo.IncludedAmountCents > 0 {
+		effectivePlanLimitUSD = planInfo.PlanInfo.IncludedAmountCents / 100.0
 	}
 
 	var aggUsage aggregatedUsageResp
@@ -367,14 +488,34 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	if aggErr == nil {
 		aggApplied = applyModelAggregations(snap, aggUsage.Aggregations)
 		if aggApplied {
-			p.storeModelAggregationCache(snap.AccountID, snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"], aggUsage.Aggregations)
+			p.storeModelAggregationCache(snap.AccountID, snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"], aggUsage.Aggregations, effectivePlanLimitUSD)
 		}
+		applyAggregationTotals(snap, &aggUsage)
 	}
 	if !aggApplied && p.applyCachedModelAggregations(snap.AccountID, snap.Raw["billing_cycle_start"], snap.Raw["billing_cycle_end"], snap) {
 		if aggErr != nil {
 			log.Printf("[cursor] using cached model aggregation after API error: %v", aggErr)
 		} else {
 			log.Printf("[cursor] using cached model aggregation after empty API aggregation response")
+		}
+	}
+
+	// If GetCurrentPeriodUsage failed but aggregation succeeded, build a
+	// plan_spend gauge from billing_total_cost so credits are visible.
+	if !hasPeriodUsage {
+		p.applyCachedBillingMetrics(snap.AccountID, snap)
+		if _, ok := snap.Metrics["plan_spend"]; !ok {
+			if m, ok := snap.Metrics["billing_total_cost"]; ok && m.Used != nil && *m.Used > 0 {
+				costUSD := *m.Used
+				if effectivePlanLimitUSD > 0 {
+					snap.Metrics["plan_spend"] = core.Metric{
+						Used:   &costUSD,
+						Limit:  core.Float64Ptr(effectivePlanLimitUSD),
+						Unit:   "USD",
+						Window: "billing-cycle",
+					}
+				}
+			}
 		}
 	}
 
@@ -414,8 +555,20 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	} else if limitDollars > 0 {
 		snap.Message = fmt.Sprintf("%s — $%.2f / $%.0f plan spend",
 			planName, totalSpendDollars, limitDollars)
-	} else {
+	} else if planName != "" {
 		snap.Message = fmt.Sprintf("%s — %s", planName, periodUsage.DisplayMessage)
+	}
+
+	// Cache billing metrics so credit gauges survive temporary API failures.
+	p.storeBillingMetricsCache(snap.AccountID, snap)
+
+	// If none of the billing/aggregation endpoints yielded useful data,
+	// report an error so the caller knows API data is effectively absent.
+	_, hasPlanSpend := snap.Metrics["plan_spend"]
+	_, hasSpendLimit := snap.Metrics["spend_limit"]
+	_, hasBillingTotal := snap.Metrics["billing_total_cost"]
+	if !hasPlanSpend && !hasSpendLimit && !hasBillingTotal && !hasPeriodUsage && !aggApplied {
+		return fmt.Errorf("all billing API endpoints failed")
 	}
 
 	return nil
@@ -586,6 +739,29 @@ func applyModelAggregations(snap *core.UsageSnapshot, aggregations []modelAggreg
 	return applied
 }
 
+func applyAggregationTotals(snap *core.UsageSnapshot, agg *aggregatedUsageResp) {
+	if agg.TotalCostCents > 0 {
+		totalCostUSD := agg.TotalCostCents / 100.0
+		snap.Metrics["billing_total_cost"] = core.Metric{
+			Used:   &totalCostUSD,
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+	}
+	if v, ok := parseModelTokenCount(agg.TotalInputTokens); ok {
+		snap.Metrics["billing_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "billing-cycle"}
+	}
+	if v, ok := parseModelTokenCount(agg.TotalOutputTokens); ok {
+		snap.Metrics["billing_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "billing-cycle"}
+	}
+	if cwv, cwOK := parseModelTokenCount(agg.TotalCacheWriteTokens); cwOK {
+		if crv, crOK := parseModelTokenCount(agg.TotalCacheReadTokens); crOK {
+			total := cwv + crv
+			snap.Metrics["billing_cached_tokens"] = core.Metric{Used: &total, Unit: "tokens", Window: "billing-cycle"}
+		}
+	}
+}
+
 func parseModelTokenCount(raw string) (float64, bool) {
 	cleaned := strings.TrimSpace(raw)
 	if cleaned == "" {
@@ -600,7 +776,7 @@ func parseModelTokenCount(raw string) (float64, bool) {
 	return v, true
 }
 
-func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, billingCycleEnd string, aggregations []modelAggregation) {
+func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, billingCycleEnd string, aggregations []modelAggregation, effectiveLimitUSD float64) {
 	if accountID == "" || len(aggregations) == 0 {
 		return
 	}
@@ -612,11 +788,17 @@ func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, bill
 	if p.modelAggregationCache == nil {
 		p.modelAggregationCache = make(map[string]cachedModelAggregation)
 	}
-	p.modelAggregationCache[accountID] = cachedModelAggregation{
+	entry := cachedModelAggregation{
 		BillingCycleStart: billingCycleStart,
 		BillingCycleEnd:   billingCycleEnd,
 		Aggregations:      copied,
+		EffectiveLimitUSD: effectiveLimitUSD,
 	}
+	// Preserve billing metrics from a previous storeBillingMetricsCache call.
+	if prev, ok := p.modelAggregationCache[accountID]; ok && len(prev.BillingMetrics) > 0 {
+		entry.BillingMetrics = prev.BillingMetrics
+	}
+	p.modelAggregationCache[accountID] = entry
 }
 
 func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, billingCycleEnd string, snap *core.UsageSnapshot) bool {
@@ -641,6 +823,141 @@ func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, bi
 	copied := make([]modelAggregation, len(cached.Aggregations))
 	copy(copied, cached.Aggregations)
 	return applyModelAggregations(snap, copied)
+}
+
+// billingMetricKeys lists the metric keys cached for local-only fallback.
+var billingMetricKeys = []string{
+	"plan_spend", "plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used",
+	"spend_limit", "individual_spend", "plan_included", "plan_bonus",
+	"plan_total_spend_usd", "plan_limit_usd",
+}
+
+func cloneMetric(m core.Metric) core.Metric {
+	out := core.Metric{Unit: m.Unit, Window: m.Window}
+	if m.Limit != nil {
+		out.Limit = core.Float64Ptr(*m.Limit)
+	}
+	if m.Remaining != nil {
+		out.Remaining = core.Float64Ptr(*m.Remaining)
+	}
+	if m.Used != nil {
+		out.Used = core.Float64Ptr(*m.Used)
+	}
+	return out
+}
+
+// storeBillingMetricsCache snapshots the current billing metrics so they can
+// be restored when the API is temporarily unavailable.
+func (p *Provider) storeBillingMetricsCache(accountID string, snap *core.UsageSnapshot) {
+	if accountID == "" {
+		return
+	}
+	cached := make(map[string]core.Metric, len(billingMetricKeys))
+	for _, key := range billingMetricKeys {
+		if m, ok := snap.Metrics[key]; ok {
+			cached[key] = cloneMetric(m)
+		}
+	}
+	if len(cached) == 0 {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.modelAggregationCache == nil {
+		p.modelAggregationCache = make(map[string]cachedModelAggregation)
+	}
+	entry := p.modelAggregationCache[accountID]
+	entry.BillingMetrics = cached
+	p.modelAggregationCache[accountID] = entry
+}
+
+// applyCachedBillingMetrics restores billing metrics from cache into the
+// snapshot so that credit gauges render when the API is temporarily down.
+func (p *Provider) applyCachedBillingMetrics(accountID string, snap *core.UsageSnapshot) {
+	if accountID == "" {
+		return
+	}
+	p.mu.RLock()
+	cached, ok := p.modelAggregationCache[accountID]
+	p.mu.RUnlock()
+	if !ok || len(cached.BillingMetrics) == 0 {
+		return
+	}
+	for key, m := range cached.BillingMetrics {
+		if _, exists := snap.Metrics[key]; !exists {
+			snap.Metrics[key] = cloneMetric(m)
+		}
+	}
+}
+
+// ensureCreditGauges synthesizes credit metrics from local data when API
+// didn't provide them. This runs as a final step in Fetch() so the Credits
+// tag and gauge bars render regardless of API availability.
+func (p *Provider) ensureCreditGauges(accountID string, snap *core.UsageSnapshot) {
+	// Already have gauge-eligible credit metrics from API — nothing to do.
+	if _, ok := snap.Metrics["plan_spend"]; ok {
+		return
+	}
+	if _, ok := snap.Metrics["spend_limit"]; ok {
+		return
+	}
+
+	// Determine total cost from best available source.
+	var costUSD float64
+	if m, ok := snap.Metrics["billing_total_cost"]; ok && m.Used != nil && *m.Used > 0 {
+		costUSD = *m.Used
+	} else if m, ok := snap.Metrics["composer_cost"]; ok && m.Used != nil && *m.Used > 0 {
+		costUSD = *m.Used
+	}
+	if costUSD <= 0 {
+		return
+	}
+
+	// Always expose plan_total_spend_usd so the Credits tag renders in the
+	// TUI even without a limit (computeDisplayInfoRaw checks this key).
+	if _, ok := snap.Metrics["plan_total_spend_usd"]; !ok {
+		snap.Metrics["plan_total_spend_usd"] = core.Metric{
+			Used:   core.Float64Ptr(costUSD),
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+	}
+
+	// Try to find a limit so we can create a gauge bar.
+	var limitUSD float64
+
+	// 1) From plan_included_amount (GetPlanInfo may have succeeded).
+	if m, ok := snap.Metrics["plan_included_amount"]; ok && m.Used != nil && *m.Used > 0 {
+		limitUSD = *m.Used
+	}
+
+	// 2) From cached effective limit.
+	if limitUSD <= 0 {
+		p.mu.RLock()
+		if cached, ok := p.modelAggregationCache[accountID]; ok && cached.EffectiveLimitUSD > 0 {
+			limitUSD = cached.EffectiveLimitUSD
+		}
+		p.mu.RUnlock()
+	}
+
+	// 3) From plan_included_amount_cents in Raw (may have been set by API).
+	if limitUSD <= 0 {
+		if raw, ok := snap.Raw["plan_included_amount_cents"]; ok {
+			if cents, err := strconv.ParseFloat(raw, 64); err == nil && cents > 0 {
+				limitUSD = cents / 100.0
+			}
+		}
+	}
+
+	if limitUSD > 0 {
+		snap.Metrics["plan_spend"] = core.Metric{
+			Used:   core.Float64Ptr(costUSD),
+			Limit:  core.Float64Ptr(limitUSD),
+			Unit:   "USD",
+			Window: "billing-cycle",
+		}
+	}
 }
 
 func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core.UsageSnapshot) error {
@@ -683,8 +1000,89 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 	p.readTrackingSourceBreakdown(ctx, db, snap, todayStart, timeExpr)
 	p.readTrackingDailyRequests(ctx, db, snap, timeExpr)
 	p.readTrackingModelBreakdown(ctx, db, snap, todayStart, timeExpr)
+	p.readScoredCommits(ctx, db, snap)
 
 	return nil
+}
+
+func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
+	var totalCommits int
+	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scored_commits WHERE linesAdded IS NOT NULL AND linesAdded > 0`).Scan(&totalCommits) != nil || totalCommits == 0 {
+		return
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT v2AiPercentage, linesAdded, linesDeleted,
+		       tabLinesAdded, tabLinesDeleted,
+		       composerLinesAdded, composerLinesDeleted,
+		       humanLinesAdded, humanLinesDeleted
+		FROM scored_commits
+		WHERE linesAdded IS NOT NULL AND linesAdded > 0
+		ORDER BY scoredAt DESC
+		LIMIT 50`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var (
+		sumAIPct      float64
+		countWithPct  int
+		totalTabAdd   int
+		totalCompAdd  int
+		totalHumanAdd int
+	)
+
+	for rows.Next() {
+		var pctStr sql.NullString
+		var linesAdded, linesDeleted sql.NullInt64
+		var tabAdd, tabDel, compAdd, compDel, humanAdd, humanDel sql.NullInt64
+		if rows.Scan(&pctStr, &linesAdded, &linesDeleted, &tabAdd, &tabDel, &compAdd, &compDel, &humanAdd, &humanDel) != nil {
+			continue
+		}
+		if pctStr.Valid && pctStr.String != "" {
+			if v, err := strconv.ParseFloat(pctStr.String, 64); err == nil {
+				sumAIPct += v
+				countWithPct++
+			}
+		}
+		if tabAdd.Valid {
+			totalTabAdd += int(tabAdd.Int64)
+		}
+		if compAdd.Valid {
+			totalCompAdd += int(compAdd.Int64)
+		}
+		if humanAdd.Valid {
+			totalHumanAdd += int(humanAdd.Int64)
+		}
+	}
+
+	tc := float64(totalCommits)
+	snap.Metrics["scored_commits"] = core.Metric{Used: &tc, Unit: "commits", Window: "all-time"}
+	snap.Raw["scored_commits_total"] = strconv.Itoa(totalCommits)
+
+	if countWithPct > 0 {
+		avgPct := sumAIPct / float64(countWithPct)
+		avgPct = math.Round(avgPct*10) / 10
+		hundred := 100.0
+		remaining := hundred - avgPct
+		snap.Metrics["ai_code_percentage"] = core.Metric{
+			Used:      &avgPct,
+			Remaining: &remaining,
+			Limit:     &hundred,
+			Unit:      "%",
+			Window:    "recent-commits",
+		}
+		snap.Raw["ai_code_pct_avg"] = fmt.Sprintf("%.1f%%", avgPct)
+		snap.Raw["ai_code_pct_sample"] = strconv.Itoa(countWithPct)
+	}
+
+	totalCodeLines := totalTabAdd + totalCompAdd + totalHumanAdd
+	if totalCodeLines > 0 {
+		snap.Raw["commit_tab_lines"] = strconv.Itoa(totalTabAdd)
+		snap.Raw["commit_composer_lines"] = strconv.Itoa(totalCompAdd)
+		snap.Raw["commit_human_lines"] = strconv.Itoa(totalHumanAdd)
+	}
 }
 
 func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) string {
@@ -756,6 +1154,14 @@ func (p *Provider) readTrackingSourceBreakdown(ctx context.Context, db *sql.DB, 
 		snap.Metrics["source_"+sourceKey+"_requests"] = core.Metric{
 			Used:   &value,
 			Unit:   "requests",
+			Window: "all-time",
+		}
+
+		// Emit tool-level metrics so the Tool Usage composition section renders.
+		toolValue := value
+		snap.Metrics["tool_"+sourceKey] = core.Metric{
+			Used:   &toolValue,
+			Unit:   "calls",
 			Window: "all-time",
 		}
 
@@ -959,10 +1365,7 @@ func mapToSortedDailyPoints(byDay map[string]float64) []core.TimePoint {
 	if len(byDay) == 0 {
 		return nil
 	}
-	days := make([]string, 0, len(byDay))
-	for day := range byDay {
-		days = append(days, day)
-	}
+	days := lo.Keys(byDay)
 	sort.Strings(days)
 
 	points := make([]core.TimePoint, 0, len(days))
@@ -1030,27 +1433,40 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 	}
 	defer db.Close()
 
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("state DB not accessible: %w", err)
+	}
+
+	p.readDailyStatsToday(ctx, db, snap)
+	p.readDailyStatsSeries(ctx, db, snap)
+	p.readComposerSessions(ctx, db, snap)
+	p.readStateMetadata(ctx, db, snap)
+
+	return nil
+}
+
+func (p *Provider) readDailyStatsToday(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
 	today := time.Now().Format("2006-01-02")
 	key := fmt.Sprintf("aiCodeTracking.dailyStats.v1.5.%s", today)
 
 	var value string
-	err = db.QueryRowContext(ctx, `SELECT value FROM ItemTable WHERE key = ?`, key).Scan(&value)
+	err := db.QueryRowContext(ctx, `SELECT value FROM ItemTable WHERE key = ?`, key).Scan(&value)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 			key = fmt.Sprintf("aiCodeTracking.dailyStats.v1.5.%s", yesterday)
 			err = db.QueryRowContext(ctx, `SELECT value FROM ItemTable WHERE key = ?`, key).Scan(&value)
 			if err != nil {
-				return nil
+				return
 			}
 		} else {
-			return fmt.Errorf("querying daily stats: %w", err)
+			return
 		}
 	}
 
 	var stats dailyStats
-	if err := json.Unmarshal([]byte(value), &stats); err != nil {
-		return fmt.Errorf("parsing daily stats: %w", err)
+	if json.Unmarshal([]byte(value), &stats) != nil {
+		return
 	}
 
 	if stats.TabSuggestedLines > 0 {
@@ -1059,24 +1475,279 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 		snap.Metrics["tab_suggested_lines"] = core.Metric{Used: &suggested, Unit: "lines", Window: "1d"}
 		snap.Metrics["tab_accepted_lines"] = core.Metric{Used: &accepted, Unit: "lines", Window: "1d"}
 	}
-
 	if stats.ComposerSuggestedLines > 0 {
 		suggested := float64(stats.ComposerSuggestedLines)
 		accepted := float64(stats.ComposerAcceptedLines)
 		snap.Metrics["composer_suggested_lines"] = core.Metric{Used: &suggested, Unit: "lines", Window: "1d"}
 		snap.Metrics["composer_accepted_lines"] = core.Metric{Used: &accepted, Unit: "lines", Window: "1d"}
 	}
+}
 
-	p.readDailyStatsSeries(ctx, db, snap)
+func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT json_extract(value, '$.usageData'),
+		       json_extract(value, '$.unifiedMode'),
+		       json_extract(value, '$.createdAt'),
+		       json_extract(value, '$.totalLinesAdded'),
+		       json_extract(value, '$.totalLinesRemoved')
+		FROM cursorDiskKV
+		WHERE key LIKE 'composerData:%'
+		  AND json_extract(value, '$.usageData') IS NOT NULL
+		  AND json_extract(value, '$.usageData') != '{}'`)
+	if err != nil {
+		log.Printf("[cursor] composerData query error: %v", err)
+		return
+	}
+	defer rows.Close()
 
+	var (
+		totalCostCents    float64
+		totalRequests     int
+		totalSessions     int
+		totalLinesAdded   int
+		totalLinesRemoved int
+		modelCosts        = make(map[string]float64)
+		modelRequests     = make(map[string]int)
+		modeSessions      = make(map[string]int)
+		dailyCost         = make(map[string]float64)
+		dailyRequests     = make(map[string]float64)
+		todayCostCents    float64
+		todayRequests     int
+	)
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	for rows.Next() {
+		var usageJSON sql.NullString
+		var mode sql.NullString
+		var createdAt sql.NullInt64
+		var linesAdded sql.NullInt64
+		var linesRemoved sql.NullInt64
+		if rows.Scan(&usageJSON, &mode, &createdAt, &linesAdded, &linesRemoved) != nil {
+			continue
+		}
+		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
+			continue
+		}
+
+		var usage map[string]composerModelUsage
+		if json.Unmarshal([]byte(usageJSON.String), &usage) != nil {
+			continue
+		}
+
+		totalSessions++
+		if mode.Valid && mode.String != "" {
+			modeSessions[mode.String]++
+		}
+		if linesAdded.Valid {
+			totalLinesAdded += int(linesAdded.Int64)
+		}
+		if linesRemoved.Valid {
+			totalLinesRemoved += int(linesRemoved.Int64)
+		}
+
+		var sessionDay string
+		if createdAt.Valid && createdAt.Int64 > 0 {
+			t := time.UnixMilli(createdAt.Int64)
+			sessionDay = t.In(now.Location()).Format("2006-01-02")
+		}
+
+		for model, mu := range usage {
+			totalCostCents += mu.CostInCents
+			totalRequests += mu.Amount
+			modelCosts[model] += mu.CostInCents
+			modelRequests[model] += mu.Amount
+
+			if sessionDay != "" {
+				dailyCost[sessionDay] += mu.CostInCents
+				dailyRequests[sessionDay] += float64(mu.Amount)
+			}
+			if createdAt.Valid && time.UnixMilli(createdAt.Int64).After(todayStart) {
+				todayCostCents += mu.CostInCents
+				todayRequests += mu.Amount
+			}
+		}
+	}
+
+	if totalSessions == 0 {
+		return
+	}
+
+	totalCostUSD := totalCostCents / 100.0
+	snap.Metrics["composer_cost"] = core.Metric{
+		Used:   &totalCostUSD,
+		Unit:   "USD",
+		Window: "all-time",
+	}
+
+	if todayCostCents > 0 {
+		todayCostUSD := todayCostCents / 100.0
+		snap.Metrics["today_cost"] = core.Metric{
+			Used:   &todayCostUSD,
+			Unit:   "USD",
+			Window: "1d",
+		}
+	}
+	if todayRequests > 0 {
+		tr := float64(todayRequests)
+		snap.Metrics["today_composer_requests"] = core.Metric{
+			Used:   &tr,
+			Unit:   "requests",
+			Window: "1d",
+		}
+	}
+
+	sessions := float64(totalSessions)
+	snap.Metrics["composer_sessions"] = core.Metric{
+		Used:   &sessions,
+		Unit:   "sessions",
+		Window: "all-time",
+	}
+	reqs := float64(totalRequests)
+	snap.Metrics["composer_requests"] = core.Metric{
+		Used:   &reqs,
+		Unit:   "requests",
+		Window: "all-time",
+	}
+
+	if totalLinesAdded > 0 {
+		la := float64(totalLinesAdded)
+		snap.Metrics["composer_lines_added"] = core.Metric{Used: &la, Unit: "lines", Window: "all-time"}
+	}
+	if totalLinesRemoved > 0 {
+		lr := float64(totalLinesRemoved)
+		snap.Metrics["composer_lines_removed"] = core.Metric{Used: &lr, Unit: "lines", Window: "all-time"}
+	}
+
+	for model, costCents := range modelCosts {
+		costUSD := costCents / 100.0
+		modelKey := sanitizeCursorMetricName(model)
+		snap.Metrics["model_"+modelKey+"_cost"] = core.Metric{
+			Used:   &costUSD,
+			Unit:   "USD",
+			Window: "all-time",
+		}
+		if reqs, ok := modelRequests[model]; ok {
+			r := float64(reqs)
+			if existing, exists := snap.Metrics["model_"+modelKey+"_requests"]; exists && existing.Used != nil {
+				combined := *existing.Used + r
+				snap.Metrics["model_"+modelKey+"_requests"] = core.Metric{
+					Used:   &combined,
+					Unit:   "requests",
+					Window: "all-time",
+				}
+			} else {
+				snap.Metrics["model_"+modelKey+"_requests"] = core.Metric{
+					Used:   &r,
+					Unit:   "requests",
+					Window: "all-time",
+				}
+			}
+		}
+
+		rec := core.ModelUsageRecord{
+			RawModelID: model,
+			RawSource:  "composer",
+			Window:     "all-time",
+			CostUSD:    core.Float64Ptr(costUSD),
+		}
+		if r, ok := modelRequests[model]; ok {
+			rec.Requests = core.Float64Ptr(float64(r))
+		}
+		core.AppendModelUsageRecord(snap, rec)
+	}
+
+	for mode, count := range modeSessions {
+		v := float64(count)
+		modeKey := sanitizeCursorMetricName(mode)
+		snap.Metrics["mode_"+modeKey+"_sessions"] = core.Metric{
+			Used:   &v,
+			Unit:   "sessions",
+			Window: "all-time",
+		}
+	}
+
+	snap.Raw["composer_total_cost"] = fmt.Sprintf("$%.2f", totalCostUSD)
+	snap.Raw["composer_total_sessions"] = strconv.Itoa(totalSessions)
+	snap.Raw["composer_total_requests"] = strconv.Itoa(totalRequests)
+	if totalLinesAdded > 0 {
+		snap.Raw["composer_lines_added"] = strconv.Itoa(totalLinesAdded)
+		snap.Raw["composer_lines_removed"] = strconv.Itoa(totalLinesRemoved)
+	}
+
+	if len(dailyCost) > 1 {
+		points := make([]core.TimePoint, 0, len(dailyCost))
+		for day, cents := range dailyCost {
+			points = append(points, core.TimePoint{Date: day, Value: cents / 100.0})
+		}
+		sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
+		snap.DailySeries["analytics_cost"] = points
+	}
+	if len(dailyRequests) > 1 {
+		points := mapToSortedDailyPoints(dailyRequests)
+		if existing, ok := snap.DailySeries["analytics_requests"]; ok && len(existing) > 0 {
+			snap.DailySeries["analytics_requests"] = mergeDailyPoints(existing, points)
+		} else {
+			snap.DailySeries["composer_requests_daily"] = points
+		}
+	}
+}
+
+func mergeDailyPoints(a, b []core.TimePoint) []core.TimePoint {
+	byDay := make(map[string]float64)
+	for _, p := range a {
+		byDay[p.Date] += p.Value
+	}
+	for _, p := range b {
+		if byDay[p.Date] < p.Value {
+			byDay[p.Date] = p.Value
+		}
+	}
+	return mapToSortedDailyPoints(byDay)
+}
+
+// extractTokenFromStateDB reads the Cursor access token directly from the
+// state.vscdb SQLite database. This is needed because the Token field has
+// json:"-" and is not persisted to the config file, so daemon polls that
+// load accounts from config would otherwise have no API token.
+func extractTokenFromStateDB(dbPath string) string {
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+
+	var token string
+	if db.QueryRow(`SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'`).Scan(&token) != nil {
+		return ""
+	}
+	return strings.TrimSpace(token)
+}
+
+func (p *Provider) readStateMetadata(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
 	var email string
-	err = db.QueryRowContext(ctx,
-		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/cachedEmail'`).Scan(&email)
-	if err == nil && email != "" {
+	if db.QueryRowContext(ctx,
+		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/cachedEmail'`).Scan(&email) == nil && email != "" {
 		snap.Raw["account_email"] = email
 	}
 
-	return nil
+	var promptCount string
+	if db.QueryRowContext(ctx,
+		`SELECT value FROM ItemTable WHERE key = 'freeBestOfN.promptCount'`).Scan(&promptCount) == nil && promptCount != "" {
+		if v, err := strconv.ParseFloat(promptCount, 64); err == nil && v > 0 {
+			snap.Metrics["total_prompts"] = core.Metric{Used: &v, Unit: "prompts", Window: "all-time"}
+			snap.Raw["total_prompts"] = promptCount
+		}
+	}
+
+	var membership string
+	if db.QueryRowContext(ctx,
+		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/stripeMembershipType'`).Scan(&membership) == nil && membership != "" {
+		if snap.Raw["membership_type"] == "" {
+			snap.Raw["membership_type"] = membership
+		}
+	}
 }
 
 func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
@@ -1125,32 +1796,8 @@ func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *c
 	}
 }
 
-func parseTimestamp(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-	if ms, err := strconv.ParseInt(s, 10, 64); err == nil {
-		if ms > 1e12 { // epoch millis
-			return time.Unix(ms/1000, (ms%1000)*1e6)
-		}
-		return time.Unix(ms, 0) // epoch secs
-	}
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z",
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
 func formatTimestamp(s string) string {
-	t := parseTimestamp(s)
+	t := shared.FlexParseTime(s)
 	if t.IsZero() {
 		return s // return as-is if we can't parse
 	}

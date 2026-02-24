@@ -347,20 +347,20 @@ func TestLoadFrom_AutoDetectedAccountsPersist(t *testing.T) {
 	}
 }
 
-func TestLoadFrom_NormalizesLegacyAutoAccountIDs(t *testing.T) {
+func TestLoadFrom_DoesNotRewriteAccountIDs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
 	content := `{
   "accounts": [
     {"id": "openai-auto", "provider": "openai"},
-    {"id": "openai", "provider": "openai"},
+    {"id": "openai-auto", "provider": "openai"},
     {"id": "copilot-auto", "provider": "copilot"}
   ],
   "auto_detected_accounts": [
     {"id": "gemini-cli-auto", "provider": "gemini_cli"},
     {"id": "gemini-api-auto", "provider": "gemini_api"},
-    {"id": "gemini-google-auto", "provider": "gemini_api"}
+    {"id": "gemini-api-auto", "provider": "gemini_api"}
   ],
   "dashboard": {
     "providers": [
@@ -382,37 +382,34 @@ func TestLoadFrom_NormalizesLegacyAutoAccountIDs(t *testing.T) {
 	if len(cfg.Accounts) != 2 {
 		t.Fatalf("accounts count = %d, want 2", len(cfg.Accounts))
 	}
-	if cfg.Accounts[0].ID != "openai" {
-		t.Errorf("first account ID = %q, want openai", cfg.Accounts[0].ID)
+	if cfg.Accounts[0].ID != "openai-auto" {
+		t.Errorf("first account ID = %q, want openai-auto", cfg.Accounts[0].ID)
 	}
-	if cfg.Accounts[1].ID != "copilot" {
-		t.Errorf("second account ID = %q, want copilot", cfg.Accounts[1].ID)
+	if cfg.Accounts[1].ID != "copilot-auto" {
+		t.Errorf("second account ID = %q, want copilot-auto", cfg.Accounts[1].ID)
 	}
 
-	if len(cfg.AutoDetectedAccounts) != 3 {
-		t.Fatalf("auto_detected_accounts count = %d, want 3", len(cfg.AutoDetectedAccounts))
+	if len(cfg.AutoDetectedAccounts) != 2 {
+		t.Fatalf("auto_detected_accounts count = %d, want 2", len(cfg.AutoDetectedAccounts))
 	}
-	if cfg.AutoDetectedAccounts[0].ID != "gemini-cli" {
-		t.Errorf("auto account 0 ID = %q, want gemini-cli", cfg.AutoDetectedAccounts[0].ID)
+	if cfg.AutoDetectedAccounts[0].ID != "gemini-cli-auto" {
+		t.Errorf("auto account 0 ID = %q, want gemini-cli-auto", cfg.AutoDetectedAccounts[0].ID)
 	}
-	if cfg.AutoDetectedAccounts[1].ID != "gemini-api" {
-		t.Errorf("auto account 1 ID = %q, want gemini-api", cfg.AutoDetectedAccounts[1].ID)
-	}
-	if cfg.AutoDetectedAccounts[2].ID != "gemini-google" {
-		t.Errorf("auto account 2 ID = %q, want gemini-google", cfg.AutoDetectedAccounts[2].ID)
+	if cfg.AutoDetectedAccounts[1].ID != "gemini-api-auto" {
+		t.Errorf("auto account 1 ID = %q, want gemini-api-auto", cfg.AutoDetectedAccounts[1].ID)
 	}
 
 	if len(cfg.Dashboard.Providers) != 3 {
 		t.Fatalf("dashboard.providers count = %d, want 3", len(cfg.Dashboard.Providers))
 	}
-	if cfg.Dashboard.Providers[0].AccountID != "openai" {
-		t.Errorf("dashboard provider 0 = %q, want openai", cfg.Dashboard.Providers[0].AccountID)
+	if cfg.Dashboard.Providers[0].AccountID != "openai-auto" {
+		t.Errorf("dashboard provider 0 = %q, want openai-auto", cfg.Dashboard.Providers[0].AccountID)
 	}
-	if cfg.Dashboard.Providers[1].AccountID != "copilot" {
-		t.Errorf("dashboard provider 1 = %q, want copilot", cfg.Dashboard.Providers[1].AccountID)
+	if cfg.Dashboard.Providers[1].AccountID != "copilot-auto" {
+		t.Errorf("dashboard provider 1 = %q, want copilot-auto", cfg.Dashboard.Providers[1].AccountID)
 	}
-	if cfg.Dashboard.Providers[2].AccountID != "gemini-cli" {
-		t.Errorf("dashboard provider 2 = %q, want gemini-cli", cfg.Dashboard.Providers[2].AccountID)
+	if cfg.Dashboard.Providers[2].AccountID != "gemini-cli-auto" {
+		t.Errorf("dashboard provider 2 = %q, want gemini-cli-auto", cfg.Dashboard.Providers[2].AccountID)
 	}
 }
 
@@ -500,6 +497,44 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 	}
 	if loaded.Dashboard.Providers[1].Enabled {
 		t.Error("expected anthropic-work enabled=false")
+	}
+}
+
+func TestDefaultProviderLinks(t *testing.T) {
+	links := DefaultProviderLinks()
+	if got := links["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+}
+
+func TestNormalizeTelemetryConfig_MergesDefaults(t *testing.T) {
+	// Empty user config gets defaults
+	out := normalizeTelemetryConfig(TelemetryConfig{})
+	if got := out.ProviderLinks["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+
+	// User override wins
+	out = normalizeTelemetryConfig(TelemetryConfig{
+		ProviderLinks: map[string]string{
+			"anthropic": "my_custom_provider",
+		},
+	})
+	if got := out.ProviderLinks["anthropic"]; got != "my_custom_provider" {
+		t.Fatalf("user override anthropic = %q, want my_custom_provider", got)
+	}
+
+	// User can add additional links while keeping defaults
+	out = normalizeTelemetryConfig(TelemetryConfig{
+		ProviderLinks: map[string]string{
+			"openai": "codex",
+		},
+	})
+	if got := out.ProviderLinks["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	}
+	if got := out.ProviderLinks["openai"]; got != "codex" {
+		t.Fatalf("user link openai = %q, want codex", got)
 	}
 }
 

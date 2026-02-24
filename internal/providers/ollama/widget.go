@@ -9,7 +9,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.ColorRole = core.DashboardColorRoleAuto
 	cfg.ShowClientComposition = true
 	cfg.ShowToolComposition = true
-	cfg.GaugePriority = []string{"usage_five_hour", "usage_one_day", "requests_today", "messages_today", "models_total", "loaded_models"}
+	cfg.GaugePriority = []string{"usage_five_hour", "usage_weekly", "usage_one_day", "requests_today", "messages_today", "models_total", "loaded_models"}
 
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{
@@ -24,7 +24,7 @@ func dashboardWidget() core.DashboardWidget {
 		},
 		{
 			Label:       "Usage",
-			Keys:        []string{"usage_five_hour", "usage_one_day", "requests_5h", "requests_1d"},
+			Keys:        []string{"usage_five_hour", "usage_weekly", "usage_one_day", "requests_5h", "requests_1d"},
 			MaxSegments: 4,
 		},
 		{
@@ -54,6 +54,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["loaded_vram_bytes"] = "Loaded VRAM"
 	cfg.MetricLabelOverrides["model_storage_bytes"] = "Local Storage"
 	cfg.MetricLabelOverrides["usage_five_hour"] = "Usage 5h"
+	cfg.MetricLabelOverrides["usage_weekly"] = "Usage Weekly"
 	cfg.MetricLabelOverrides["usage_one_day"] = "Usage 1d"
 	cfg.MetricLabelOverrides["requests_5h"] = "5h Requests"
 	cfg.MetricLabelOverrides["messages_5h"] = "5h Messages"
@@ -77,6 +78,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["avg_latency_ms_1d"] = "Avg Latency (1d)"
 
 	cfg.CompactMetricLabelOverrides["usage_five_hour"] = "5h"
+	cfg.CompactMetricLabelOverrides["usage_weekly"] = "week"
 	cfg.CompactMetricLabelOverrides["usage_one_day"] = "1d"
 	cfg.CompactMetricLabelOverrides["models_total"] = "all"
 	cfg.CompactMetricLabelOverrides["models_local"] = "local"

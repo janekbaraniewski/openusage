@@ -42,7 +42,7 @@ func TestDetectEnvKeys_FindsZenKeys(t *testing.T) {
 
 	found := false
 	for _, acct := range result.Accounts {
-		if acct.Provider == "zen" && acct.APIKeyEnv == "ZEN_API_KEY" && acct.ID == "zen" {
+		if acct.Provider == "opencode" && acct.APIKeyEnv == "ZEN_API_KEY" && acct.ID == "opencode" {
 			found = true
 			break
 		}
@@ -61,7 +61,7 @@ func TestDetectEnvKeys_FindsOpenCodeKey(t *testing.T) {
 
 	found := false
 	for _, acct := range result.Accounts {
-		if acct.Provider == "zen" && acct.APIKeyEnv == "OPENCODE_API_KEY" && acct.ID == "zen" {
+		if acct.Provider == "opencode" && acct.APIKeyEnv == "OPENCODE_API_KEY" && acct.ID == "opencode" {
 			found = true
 			break
 		}

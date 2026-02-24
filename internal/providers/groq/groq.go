@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const defaultBaseURL = "https://api.groq.com/openai/v1"
@@ -40,28 +40,16 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	apiKey := acct.ResolveAPIKey()
-	if apiKey == "" {
-		return core.UsageSnapshot{
-			ProviderID: p.ID(),
-			AccountID:  acct.ID,
-			Timestamp:  time.Now(),
-			Status:     core.StatusAuth,
-			Message:    fmt.Sprintf("env var %s not set", acct.APIKeyEnv),
-		}, nil
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	if authSnap != nil {
+		return *authSnap, nil
 	}
 
-	baseURL := acct.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
-	url := baseURL + "/models"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	baseURL := shared.ResolveBaseURL(acct, defaultBaseURL)
+	req, err := shared.CreateStandardRequest(ctx, baseURL, "/models", apiKey, nil)
 	if err != nil {
-		return core.UsageSnapshot{}, fmt.Errorf("groq: creating request: %w", err)
+		return core.UsageSnapshot{}, fmt.Errorf("groq: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -69,32 +57,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	defer resp.Body.Close()
 
-	snap := core.UsageSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  acct.ID,
-		Timestamp:  time.Now(),
-		Metrics:    make(map[string]core.Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        parsers.RedactHeaders(resp.Header),
-	}
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
-		return snap, nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
-		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-			snap.Raw["retry_after"] = retryAfter
-		}
-	}
-
-	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpm", "requests", "1m",
-		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	parsers.ApplyRateLimitGroup(resp.Header, &snap, "tpm", "tokens", "1m",
-		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
+	snap, _ := shared.ProcessStandardResponse(resp, acct, p.ID())
+	shared.ApplyStandardRateLimits(resp, &snap)
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpd", "requests", "1d",
 		"x-ratelimit-limit-requests-day", "x-ratelimit-remaining-requests-day", "x-ratelimit-reset-requests-day")
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "tpd", "tokens", "1d",

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,8 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 const (
@@ -31,6 +34,8 @@ const (
 )
 
 var nonAlnumRe = regexp.MustCompile(`[^a-z0-9]+`)
+var settingsUsageRe = regexp.MustCompile(`(?is)(Session usage|Weekly usage)\s*</span>\s*<span[^>]*>\s*([0-9]+(?:\.[0-9]+)?)%\s*used\s*</span>`)
+var settingsResetRe = regexp.MustCompile(`(?is)(Session usage|Weekly usage).*?data-time="([^"]+)"`)
 
 type Provider struct {
 	providerbase.Base
@@ -62,24 +67,18 @@ func New() *Provider {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	snap := core.UsageSnapshot{
-		ProviderID:  p.ID(),
-		AccountID:   acct.ID,
-		Timestamp:   time.Now(),
-		Metrics:     make(map[string]core.Metric),
-		Resets:      make(map[string]time.Time),
-		Raw:         make(map[string]string),
-		DailySeries: make(map[string][]core.TimePoint),
+	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
+	cloudOnly := strings.EqualFold(acct.Auth, string(core.ProviderAuthTypeAPIKey))
+	if cloudOnly && authSnap != nil {
+		return *authSnap, nil
 	}
 
-	cloudOnly := strings.EqualFold(acct.Auth, string(core.ProviderAuthTypeAPIKey))
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
+	snap.DailySeries = make(map[string][]core.TimePoint)
 	hasData := false
 
 	if !cloudOnly {
-		localBaseURL := acct.BaseURL
-		if localBaseURL == "" {
-			localBaseURL = defaultLocalBaseURL
-		}
+		localBaseURL := shared.ResolveBaseURL(acct, defaultLocalBaseURL)
 
 		localOK, err := p.fetchLocalAPI(ctx, localBaseURL, &snap)
 		if err != nil {
@@ -104,7 +103,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	apiKey := acct.ResolveAPIKey()
 	if apiKey != "" {
 		cloudHasData, authFailed, limited, err := p.fetchCloudAPI(ctx, acct, apiKey, &snap)
 		if err != nil {
@@ -131,10 +129,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			}
 			snap.SetDiagnostic("cloud_auth_failed", "check OLLAMA_API_KEY")
 		}
-	} else if cloudOnly {
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("env var %s not set", acct.APIKeyEnv)
-		return snap, nil
 	}
 
 	finalizeUsageWindows(&snap)
@@ -370,10 +364,11 @@ func (p *Provider) fetchLocalPS(ctx context.Context, baseURL string, snap *core.
 	if len(resp.Models) > 0 {
 		loadedNames := make([]string, 0, len(resp.Models))
 		for _, m := range resp.Models {
-			if m.Name == "" {
+			name := normalizeModelName(m.Name)
+			if name == "" {
 				continue
 			}
-			loadedNames = append(loadedNames, m.Name)
+			loadedNames = append(loadedNames, name)
 		}
 		if len(loadedNames) > 0 {
 			snap.Raw["loaded_models"] = strings.Join(loadedNames, ", ")
@@ -582,7 +577,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 					metrics.errors4xx5h++
 				}
 				switch event.Path {
-				case "/api/chat", "/v1/chat/completions", "/v1/responses":
+				case "/api/chat", "/v1/chat/completions", "/v1/responses", "/v1/messages":
 					metrics.chatRequests5h++
 				case "/api/generate", "/v1/completions":
 					metrics.generateRequests5h++
@@ -600,7 +595,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 					metrics.errors4xx1d++
 				}
 				switch event.Path {
-				case "/api/chat", "/v1/chat/completions", "/v1/responses":
+				case "/api/chat", "/v1/chat/completions", "/v1/responses", "/v1/messages":
 					metrics.chatRequests1d++
 				case "/api/generate", "/v1/completions":
 					metrics.generateRequests1d++
@@ -617,7 +612,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 					metrics.errors4xxToday++
 				}
 				switch event.Path {
-				case "/api/chat", "/v1/chat/completions", "/v1/responses":
+				case "/api/chat", "/v1/chat/completions", "/v1/responses", "/v1/messages":
 					metrics.chatRequestsToday++
 				case "/api/generate", "/v1/completions":
 					metrics.generateRequestsToday++
@@ -693,7 +688,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	cloudBaseURL := resolveCloudBaseURL(acct)
 
 	var me map[string]any
-	status, headers, reqErr := doJSONRequest(ctx, http.MethodPost, cloudBaseURL+"/api/me", apiKey, &me)
+	status, headers, reqErr := doJSONRequest(ctx, http.MethodPost, cloudEndpointURL(cloudBaseURL, "/api/me"), apiKey, &me)
 	if reqErr != nil {
 		return false, false, false, fmt.Errorf("ollama: cloud account request failed: %w", reqErr)
 	}
@@ -719,7 +714,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	}
 
 	var tags tagsResponse
-	tagsStatus, _, tagsErr := doJSONRequest(ctx, http.MethodGet, cloudBaseURL+"/api/tags", apiKey, &tags)
+	tagsStatus, _, tagsErr := doJSONRequest(ctx, http.MethodGet, cloudEndpointURL(cloudBaseURL, "/api/tags"), apiKey, &tags)
 	if tagsErr != nil {
 		if !hasData {
 			return hasData, authFailed, limited, fmt.Errorf("ollama: cloud tags request failed: %w", tagsErr)
@@ -738,6 +733,14 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 		limited = true
 	default:
 		snap.SetDiagnostic("cloud_tags_status", fmt.Sprintf("HTTP %d", tagsStatus))
+	}
+
+	if _, ok := snap.Metrics["usage_five_hour"]; !ok {
+		if parsed, parseErr := fetchCloudUsageFromSettingsPage(ctx, cloudBaseURL, apiKey, acct, snap); parseErr != nil {
+			snap.SetDiagnostic("cloud_usage_settings_error", parseErr.Error())
+		} else if parsed {
+			hasData = true
+		}
 	}
 
 	return hasData, authFailed, limited, nil
@@ -814,8 +817,17 @@ func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot) 
 		"weekly_usage", "weeklyusage", "usage_1d", "usageoneday", "one_day_usage", "daily_usage", "dailyusage",
 	}
 	if metric, resetAt, ok := findUsageWindow(payload, dayKeys, "1d"); ok {
+		snap.Metrics["usage_weekly"] = core.Metric{
+			Limit:     metric.Limit,
+			Remaining: metric.Remaining,
+			Used:      metric.Used,
+			Unit:      metric.Unit,
+			Window:    "1w",
+		}
+		// Backward-compatible alias for existing widgets/config.
 		snap.Metrics["usage_one_day"] = metric
 		if !resetAt.IsZero() {
+			snap.Resets["usage_weekly"] = resetAt
 			snap.Resets["usage_one_day"] = resetAt
 		}
 		found = true
@@ -944,15 +956,35 @@ func currentFiveHourBlock(now time.Time) (time.Time, time.Time) {
 }
 
 func resolveCloudBaseURL(acct core.AccountConfig) string {
+	normalize := func(raw string) string {
+		raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
+		if raw == "" {
+			return ""
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return raw
+		}
+		switch strings.TrimSpace(strings.ToLower(u.Path)) {
+		case "", "/":
+			u.Path = ""
+		case "/api", "/api/v1":
+			u.Path = ""
+		}
+		u.RawQuery = ""
+		u.Fragment = ""
+		return strings.TrimRight(u.String(), "/")
+	}
+
 	if acct.ExtraData != nil {
 		if v := strings.TrimSpace(acct.ExtraData["cloud_base_url"]); v != "" {
-			return strings.TrimRight(v, "/")
+			return normalize(v)
 		}
 	}
 	if strings.HasPrefix(strings.ToLower(acct.BaseURL), "https://") && strings.Contains(strings.ToLower(acct.BaseURL), "ollama.com") {
-		return strings.TrimRight(acct.BaseURL, "/")
+		return normalize(acct.BaseURL)
 	}
-	return defaultCloudBaseURL
+	return normalize(defaultCloudBaseURL)
 }
 
 func resolveDesktopDBPath(acct core.AccountConfig) string {
@@ -1119,12 +1151,12 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 
 	var top []string
 	for rows.Next() {
-		var model string
+		var rawModel string
 		var count float64
-		if err := rows.Scan(&model, &count); err != nil {
+		if err := rows.Scan(&rawModel, &count); err != nil {
 			return err
 		}
-		model = strings.TrimSpace(model)
+		model := normalizeModelName(rawModel)
 		if model == "" {
 			continue
 		}
@@ -1161,12 +1193,12 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 	if err == nil {
 		defer todayRows.Close()
 		for todayRows.Next() {
-			var model string
+			var rawModel string
 			var count float64
-			if err := todayRows.Scan(&model, &count); err != nil {
+			if err := todayRows.Scan(&rawModel, &count); err != nil {
 				return err
 			}
-			model = strings.TrimSpace(model)
+			model := normalizeModelName(rawModel)
 			if model == "" {
 				continue
 			}
@@ -1200,12 +1232,12 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 	perModelDaily := make(map[string]map[string]float64)
 	for perDayRows.Next() {
 		var date string
-		var model string
+		var rawModel string
 		var count float64
-		if err := perDayRows.Scan(&date, &model, &count); err != nil {
+		if err := perDayRows.Scan(&date, &rawModel, &count); err != nil {
 			return err
 		}
-		model = strings.TrimSpace(model)
+		model := normalizeModelName(rawModel)
 		date = strings.TrimSpace(date)
 		if model == "" || date == "" {
 			continue
@@ -1344,6 +1376,7 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 		}
 
 		model := strings.TrimSpace(modelName.String)
+		model = normalizeModelName(model)
 		if model == "" {
 			continue
 		}
@@ -1520,11 +1553,12 @@ func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 
 	allTimeBySource := make(map[string]float64)
 	for allTimeRows.Next() {
-		var model string
+		var rawModel string
 		var count float64
-		if err := allTimeRows.Scan(&model, &count); err != nil {
+		if err := allTimeRows.Scan(&rawModel, &count); err != nil {
 			return err
 		}
+		model := normalizeModelName(rawModel)
 		source := sourceFromModelName(model)
 		allTimeBySource[source] += count
 	}
@@ -1549,11 +1583,12 @@ func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 		defer todayRows.Close()
 		todayBySource := make(map[string]float64)
 		for todayRows.Next() {
-			var model string
+			var rawModel string
 			var count float64
-			if err := todayRows.Scan(&model, &count); err != nil {
+			if err := todayRows.Scan(&rawModel, &count); err != nil {
 				return err
 			}
+			model := normalizeModelName(rawModel)
 			source := sourceFromModelName(model)
 			todayBySource[source] += count
 		}
@@ -1582,15 +1617,16 @@ func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 	perSourceDaily := make(map[string]map[string]float64)
 	for perDayRows.Next() {
 		var day string
-		var model string
+		var rawModel string
 		var count float64
-		if err := perDayRows.Scan(&day, &model, &count); err != nil {
+		if err := perDayRows.Scan(&day, &rawModel, &count); err != nil {
 			return err
 		}
 		day = strings.TrimSpace(day)
 		if day == "" {
 			continue
 		}
+		model := normalizeModelName(rawModel)
 		source := sourceFromModelName(model)
 		sourceKey := sanitizeMetricPart(source)
 		if perSourceDaily[sourceKey] == nil {
@@ -1695,7 +1731,7 @@ func populateToolUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSn
 }
 
 func sourceFromModelName(model string) string {
-	normalized := strings.ToLower(strings.TrimSpace(model))
+	normalized := normalizeModelName(model)
 	if normalized == "" {
 		return "unknown"
 	}
@@ -1837,7 +1873,7 @@ func parseGINLogLine(line string) (ginLogEvent, bool) {
 func isInferencePath(path string) bool {
 	switch path {
 	case "/api/chat", "/api/generate", "/api/embed", "/api/embeddings",
-		"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings":
+		"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings", "/v1/messages":
 		return true
 	default:
 		return false
@@ -1882,10 +1918,7 @@ func mapToSortedTimePoints(values map[string]float64) []core.TimePoint {
 	if len(values) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(values)
 	sort.Strings(keys)
 	series := make([]core.TimePoint, 0, len(keys))
 	for _, key := range keys {
@@ -1902,6 +1935,141 @@ func sanitizeMetricPart(input string) string {
 		return "unknown"
 	}
 	return s
+}
+
+func normalizeModelName(input string) string {
+	s := strings.TrimSpace(strings.ToLower(input))
+	if s == "" {
+		return ""
+	}
+	s = strings.Trim(strings.TrimPrefix(s, "models/"), "/")
+	if strings.HasPrefix(s, "ollama.com/") {
+		s = strings.TrimPrefix(s, "ollama.com/")
+	}
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimSpace(strings.TrimSuffix(s, ":latest"))
+	return s
+}
+
+func cloudEndpointURL(base, path string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		base = defaultCloudBaseURL
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path
+}
+
+func resolveCloudSessionCookie(acct core.AccountConfig) string {
+	if acct.ExtraData != nil {
+		for _, key := range []string{"cloud_session_cookie", "session_cookie", "cookie"} {
+			if v := strings.TrimSpace(acct.ExtraData[key]); v != "" {
+				return v
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("OLLAMA_SESSION_COOKIE")); v != "" {
+		return v
+	}
+	return ""
+}
+
+func fetchCloudUsageFromSettingsPage(ctx context.Context, cloudBaseURL, apiKey string, acct core.AccountConfig, snap *core.UsageSnapshot) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cloudEndpointURL(cloudBaseURL, "/settings"), nil)
+	if err != nil {
+		return false, fmt.Errorf("ollama: creating settings request: %w", err)
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	if cookie := resolveCloudSessionCookie(acct); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("ollama: cloud settings request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("ollama: cloud settings endpoint returned HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("ollama: reading cloud settings response: %w", err)
+	}
+
+	pcts := make(map[string]float64)
+	for _, m := range settingsUsageRe.FindAllStringSubmatch(string(body), -1) {
+		if len(m) < 3 {
+			continue
+		}
+		label := strings.ToLower(strings.TrimSpace(m[1]))
+		v, convErr := strconv.ParseFloat(strings.TrimSpace(m[2]), 64)
+		if convErr != nil {
+			continue
+		}
+		pcts[label] = v
+	}
+
+	resets := make(map[string]time.Time)
+	for _, m := range settingsResetRe.FindAllStringSubmatch(string(body), -1) {
+		if len(m) < 3 {
+			continue
+		}
+		label := strings.ToLower(strings.TrimSpace(m[1]))
+		t, ok := parseAnyTime(strings.TrimSpace(m[2]))
+		if !ok {
+			continue
+		}
+		resets[label] = t
+	}
+
+	found := false
+	if v, ok := pcts["session usage"]; ok {
+		snap.Metrics["usage_five_hour"] = core.Metric{
+			Used:   core.Float64Ptr(v),
+			Unit:   "%",
+			Window: "5h",
+		}
+		if t, ok := resets["session usage"]; ok {
+			snap.Resets["usage_five_hour"] = t
+			snap.SetAttribute("block_end", t.Format(time.RFC3339))
+			snap.SetAttribute("block_start", t.Add(-5*time.Hour).Format(time.RFC3339))
+		}
+		found = true
+	}
+	if v, ok := pcts["weekly usage"]; ok {
+		weekly := core.Metric{
+			Used:   core.Float64Ptr(v),
+			Unit:   "%",
+			Window: "1w",
+		}
+		snap.Metrics["usage_weekly"] = weekly
+		// Backward-compatible alias for existing widgets/config.
+		snap.Metrics["usage_one_day"] = core.Metric{
+			Used:   core.Float64Ptr(v),
+			Unit:   "%",
+			Window: "1d",
+		}
+		if t, ok := resets["weekly usage"]; ok {
+			snap.Resets["usage_weekly"] = t
+			snap.Resets["usage_one_day"] = t
+		}
+		found = true
+	}
+
+	return found, nil
 }
 
 func setValueMetric(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
@@ -1924,9 +2092,9 @@ func summarizeModels(models []tagModel, limit int) string {
 	}
 	out := make([]string, 0, limit)
 	for i := 0; i < len(models) && i < limit; i++ {
-		name := strings.TrimSpace(models[i].Name)
+		name := normalizeModelName(models[i].Name)
 		if name == "" {
-			name = strings.TrimSpace(models[i].Model)
+			name = normalizeModelName(models[i].Model)
 		}
 		if name == "" {
 			continue
@@ -2091,22 +2259,11 @@ func normalizeLookupKey(s string) string {
 }
 
 func parseAnyTime(raw string) (time.Time, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	t, err := shared.ParseTimestampString(raw)
+	if err != nil {
 		return time.Time{}, false
 	}
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, raw); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
+	return t, true
 }
 
 type versionResponse struct {

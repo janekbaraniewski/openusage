@@ -15,6 +15,8 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/samber/lo"
 )
 
 const (
@@ -381,48 +383,12 @@ func (p *Provider) applyCopilotInternalUser(cu *copilotInternalUser, snap *core.
 		}
 	}
 
-	if !p.applyUsageSnapshotMetrics(cu.UsageSnapshots, snap) {
-		p.applyLegacyUsageMetrics(cu, snap)
-	}
+	p.applyUsageSnapshotMetrics(cu.UsageSnapshots, snap)
 
 	for _, candidate := range []string{cu.UsageResetDateUTC, cu.UsageResetDate, cu.LimitedUserResetDate} {
 		if t := parseCopilotTime(candidate); !t.IsZero() {
 			snap.Resets["quota_reset"] = t
 			break
-		}
-	}
-}
-
-func (p *Provider) applyLegacyUsageMetrics(cu *copilotInternalUser, snap *core.UsageSnapshot) {
-	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Chat != nil {
-		limit := float64(*cu.MonthlyUsage.Chat)
-		remaining := float64(0)
-		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Chat != nil {
-			remaining = float64(*cu.LimitedUserUsage.Chat)
-		}
-		used := limit - remaining
-		snap.Metrics["chat_quota"] = core.Metric{
-			Limit:     &limit,
-			Remaining: &remaining,
-			Used:      &used,
-			Unit:      "messages",
-			Window:    "month",
-		}
-	}
-
-	if cu.MonthlyUsage != nil && cu.MonthlyUsage.Completions != nil {
-		limit := float64(*cu.MonthlyUsage.Completions)
-		remaining := float64(0)
-		if cu.LimitedUserUsage != nil && cu.LimitedUserUsage.Completions != nil {
-			remaining = float64(*cu.LimitedUserUsage.Completions)
-		}
-		used := limit - remaining
-		snap.Metrics["completions_quota"] = core.Metric{
-			Limit:     &limit,
-			Remaining: &remaining,
-			Used:      &used,
-			Unit:      "completions",
-			Window:    "month",
 		}
 	}
 }
@@ -1463,10 +1429,7 @@ func latestSeriesValue(m map[string]float64) (string, float64) {
 	if len(m) == 0 {
 		return "", 0
 	}
-	dates := make([]string, 0, len(m))
-	for d := range m {
-		dates = append(dates, d)
-	}
+	dates := lo.Keys(m)
 	sort.Strings(dates)
 	last := dates[len(dates)-1]
 	return last, m[last]
@@ -1528,19 +1491,10 @@ func topModelNames(tokenMap map[string]float64, messageMap map[string]int, limit
 		return rows[i].tokens > rows[j].tokens
 	})
 
-	if limit <= 0 || len(rows) <= limit {
-		out := make([]string, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, r.model)
-		}
-		return out
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
 	}
-
-	out := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		out = append(out, rows[i].model)
-	}
-	return out
+	return lo.Map(rows, func(r row, _ int) string { return r.model })
 }
 
 func topCopilotClientNames(tokenMap map[string]float64, sessionMap, messageMap map[string]int, limit int) []string {
@@ -1596,19 +1550,10 @@ func topCopilotClientNames(tokenMap map[string]float64, sessionMap, messageMap m
 		return rows[i].tokens > rows[j].tokens
 	})
 
-	if limit <= 0 || len(rows) <= limit {
-		out := make([]string, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, r.client)
-		}
-		return out
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
 	}
-
-	out := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		out = append(out, rows[i].client)
-	}
-	return out
+	return lo.Map(rows, func(r row, _ int) string { return r.client })
 }
 
 func normalizeCopilotClient(repo, cwd string) string {
@@ -1674,42 +1619,11 @@ func parseDayFromTimestamp(ts string) string {
 }
 
 func flexParseTime(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02T15:04:05Z",
-		"2006-01-02T15:04:05.999Z",
-		"2006-01-02",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
+	return shared.FlexParseTime(s)
 }
 
 func parseCopilotTime(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-
-	if t := flexParseTime(s); !t.IsZero() {
-		return t
-	}
-
-	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-		switch {
-		case n > 1_000_000_000_000:
-			return time.UnixMilli(n)
-		case n > 1_000_000_000:
-			return time.Unix(n, 0)
-		}
-	}
-	return time.Time{}
+	return shared.FlexParseTime(s)
 }
 
 func extractModelFromInfoMsg(msg string) string {

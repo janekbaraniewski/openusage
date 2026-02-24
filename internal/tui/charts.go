@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 type chartItem struct {
@@ -324,6 +325,34 @@ type BrailleSeries struct {
 	Points []core.TimePoint
 }
 
+type TimeChartMode int
+
+const (
+	TimeChartLine TimeChartMode = iota
+	TimeChartStacked
+	TimeChartBars
+)
+
+type TimeChartSpec struct {
+	Title      string
+	Mode       TimeChartMode
+	Series     []BrailleSeries
+	Height     int
+	MaxSeries  int
+	WindowDays int
+	YFmt       func(float64) string
+}
+
+type HeatmapSpec struct {
+	Title     string
+	Rows      []string
+	Cols      []string
+	Values    [][]float64 // [row][col]
+	MaxCols   int
+	RowColors []lipgloss.Color
+	RowScale  bool
+}
+
 var brailleDots = [4][2]rune{
 	{0x01, 0x08}, // top
 	{0x02, 0x10},
@@ -370,8 +399,6 @@ func (c *brailleCanvas) drawLine(x0, y0, x1, y1, seriesIdx int) {
 		px := int(math.Round(x))
 		py := int(math.Round(y))
 		c.set(px, py, seriesIdx)
-		c.set(px, py-1, seriesIdx)
-		c.set(px, py+1, seriesIdx)
 		x += xInc
 		y += yInc
 	}
@@ -472,10 +499,7 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 		}
 	}
 
-	allDates := make([]string, 0, len(dateSet))
-	for d := range dateSet {
-		allDates = append(allDates, d)
-	}
+	allDates := lo.Keys(dateSet)
 	sort.Strings(allDates)
 
 	startIdx, endIdx := 0, len(allDates)-1
@@ -508,7 +532,7 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 	}
 	maxY *= 1.1
 
-	yAxisW := 8
+	yAxisW := estimateYAxisWidth(maxY, yFmt)
 	plotW := w - yAxisW - 4
 	if plotW < 20 {
 		plotW = 20
@@ -555,10 +579,6 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 		}
 	}
 
-	if len(series) == 1 {
-		canvas.fillBelow(0)
-	}
-
 	colors := make([]lipgloss.Color, len(series))
 	for i, s := range series {
 		colors[i] = s.Color
@@ -598,7 +618,7 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 		axisStyle.Render("└"),
 		axisStyle.Render(strings.Repeat("─", plotW))))
 
-	numLabels := 5
+	numLabels := clampInt(plotW/22, 3, 6)
 	if len(allDates) < numLabels {
 		numLabels = len(allDates)
 	}
@@ -631,17 +651,781 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 	}
 	sb.WriteString(fmt.Sprintf("  %*s  %s\n", yAxisW-2, "", dimStyle.Render(string(dateLine))))
 
-	markers := []string{"●", "◆", "■", "▲", "★"}
-	sb.WriteString("  ")
-	for i, s := range series {
-		if i > 0 {
-			sb.WriteString("   ")
-		}
-		mk := markers[i%len(markers)]
-		sb.WriteString(lipgloss.NewStyle().Foreground(s.Color).Render(mk))
-		sb.WriteString(" " + dimStyle.Render(s.Label))
-	}
-	sb.WriteString("\n")
+	sb.WriteString(renderWrappedLegend(series, w))
 
 	return sb.String()
+}
+
+func RenderTimeChart(spec TimeChartSpec, w int) string {
+	if len(spec.Series) == 0 {
+		return ""
+	}
+	h := spec.Height
+	if h <= 0 {
+		h = 10
+	}
+	yFmt := spec.YFmt
+	if yFmt == nil {
+		yFmt = formatChartValue
+	}
+
+	series := make([]BrailleSeries, len(spec.Series))
+	copy(series, spec.Series)
+	if spec.WindowDays > 0 {
+		series = cropSeriesToRecentDays(series, spec.WindowDays)
+	}
+	if spec.MaxSeries > 0 && len(series) > spec.MaxSeries {
+		sort.Slice(series, func(i, j int) bool {
+			li := seriesVolume(series[i])
+			lj := seriesVolume(series[j])
+			if li == lj {
+				return series[i].Label < series[j].Label
+			}
+			return li > lj
+		})
+		series = series[:spec.MaxSeries]
+	}
+
+	switch spec.Mode {
+	case TimeChartStacked:
+		return renderStackedTimeChart(spec.Title, series, w, h, yFmt)
+	case TimeChartBars:
+		return renderBarTimeChart(spec.Title, series, w, h, yFmt)
+	default:
+		return RenderBrailleChart(spec.Title, series, w, h, yFmt)
+	}
+}
+
+func seriesVolume(s BrailleSeries) float64 {
+	total := 0.0
+	for _, p := range s.Points {
+		total += p.Value
+	}
+	return total
+}
+
+func cropSeriesToRecentDays(series []BrailleSeries, days int) []BrailleSeries {
+	if days <= 0 || len(series) == 0 {
+		return series
+	}
+	var maxDate time.Time
+	found := false
+	for _, s := range series {
+		for _, p := range s.Points {
+			t, err := time.Parse("2006-01-02", p.Date)
+			if err != nil {
+				continue
+			}
+			if !found || t.After(maxDate) {
+				maxDate = t
+				found = true
+			}
+		}
+	}
+	if !found {
+		return series
+	}
+	cutoff := maxDate.AddDate(0, 0, -(days - 1))
+	out := make([]BrailleSeries, 0, len(series))
+	for _, s := range series {
+		pts := make([]core.TimePoint, 0, len(s.Points))
+		for _, p := range s.Points {
+			t, err := time.Parse("2006-01-02", p.Date)
+			if err != nil {
+				continue
+			}
+			if t.Before(cutoff) || t.After(maxDate) {
+				continue
+			}
+			pts = append(pts, p)
+		}
+		if len(pts) == 0 {
+			continue
+		}
+		s.Points = pts
+		out = append(out, s)
+	}
+	return out
+}
+
+func renderStackedTimeChart(title string, series []BrailleSeries, w, h int, yFmt func(float64) string) string {
+	if len(series) == 0 {
+		return ""
+	}
+	dates, values := alignSeriesByDate(series, true)
+	if len(dates) == 0 {
+		return ""
+	}
+	dates, values = trimAlignedDateSpan(dates, values, 1)
+	if len(dates) == 0 {
+		return ""
+	}
+	if h < 6 {
+		h = 6
+	}
+
+	plotW := w - 12 - 4
+	if plotW < 20 {
+		plotW = 20
+	}
+	labels, binnedValues := binSeriesValues(dates, values, plotW)
+	if len(labels) == 0 {
+		return ""
+	}
+	totals := make([]float64, len(labels))
+	maxTotal := 0.0
+	for i := range labels {
+		sum := 0.0
+		for si := range series {
+			sum += binnedValues[si][i]
+		}
+		totals[i] = sum
+		if sum > maxTotal {
+			maxTotal = sum
+		}
+	}
+	if maxTotal <= 0 {
+		return ""
+	}
+	yAxisW := estimateYAxisWidth(maxTotal, yFmt)
+	plotW = w - yAxisW - 4
+	if plotW < 20 {
+		plotW = 20
+	}
+	labels, binnedValues = binSeriesValues(dates, values, plotW)
+	if len(labels) == 0 {
+		return ""
+	}
+	colStarts, colEnds := layoutColumns(plotW, len(labels))
+	totals = make([]float64, len(labels))
+	maxTotal = 0.0
+	for i := range labels {
+		sum := 0.0
+		for si := range series {
+			sum += binnedValues[si][i]
+		}
+		totals[i] = sum
+		if sum > maxTotal {
+			maxTotal = sum
+		}
+	}
+	if maxTotal <= 0 {
+		return ""
+	}
+
+	axisStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	sb.WriteString("  " + sectionStyle.Render(title) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+
+	numTicks := 5
+	tickRows := make(map[int]float64, numTicks)
+	for t := 0; t < numTicks; t++ {
+		row := t * (h - 1) / (numTicks - 1)
+		val := maxTotal * float64(numTicks-1-t) / float64(numTicks-1)
+		tickRows[row] = val
+	}
+
+	for row := 0; row < h; row++ {
+		label := ""
+		if val, ok := tickRows[row]; ok {
+			label = yFmt(val)
+		}
+		sb.WriteString(fmt.Sprintf("  %*s %s", yAxisW-2, dimStyle.Render(label), axisStyle.Render("┤")))
+		threshold := maxTotal * float64(h-1-row) / float64(h-1)
+		for di := range labels {
+			cum := 0.0
+			cell := " "
+			for si := range series {
+				next := cum + binnedValues[si][di]
+				if threshold <= next && totals[di] >= threshold && binnedValues[si][di] > 0 {
+					cell = lipgloss.NewStyle().Foreground(series[si].Color).Render("█")
+					break
+				}
+				cum = next
+			}
+			for x := colStarts[di]; x < colEnds[di]; x++ {
+				sb.WriteString(cell)
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("  %*s %s%s\n", yAxisW-2, "", axisStyle.Render("└"), axisStyle.Render(strings.Repeat("─", plotW))))
+
+	numLabels := clampInt(plotW/22, 3, 6)
+	if len(labels) < numLabels {
+		numLabels = len(labels)
+	}
+	dateLine := make([]byte, plotW)
+	for i := range dateLine {
+		dateLine[i] = ' '
+	}
+	for i := 0; i < numLabels; i++ {
+		di := 0
+		if numLabels > 1 {
+			di = i * (len(labels) - 1) / (numLabels - 1)
+		}
+		label := formatDateLabel(labels[di])
+		x := (colStarts[di] + colEnds[di] - 1) / 2
+		start := x - len(label)/2
+		if start < 0 {
+			start = 0
+		}
+		if start+len(label) > plotW {
+			start = plotW - len(label)
+		}
+		for j := 0; j < len(label) && start+j < plotW; j++ {
+			dateLine[start+j] = label[j]
+		}
+	}
+	sb.WriteString(fmt.Sprintf("  %*s  %s\n", yAxisW-2, "", dimStyle.Render(string(dateLine))))
+
+	sb.WriteString(renderWrappedLegend(series, w))
+	return sb.String()
+}
+
+func renderBarTimeChart(title string, series []BrailleSeries, w, h int, yFmt func(float64) string) string {
+	if len(series) == 0 {
+		return ""
+	}
+	// For bar mode we visualize the first series.
+	base := series[0]
+	dates, values := alignSeriesByDate([]BrailleSeries{base}, true)
+	if len(dates) == 0 || len(values) == 0 || len(values[0]) == 0 {
+		return ""
+	}
+	dates, values = trimAlignedDateSpan(dates, values, 1)
+	if len(dates) == 0 || len(values) == 0 || len(values[0]) == 0 {
+		return ""
+	}
+	if h < 6 {
+		h = 6
+	}
+	plotW := w - 12 - 4
+	if plotW < 20 {
+		plotW = 20
+	}
+	labels, binnedValues := binSeriesValues(dates, values, plotW)
+	if len(labels) == 0 || len(binnedValues) == 0 || len(binnedValues[0]) == 0 {
+		return ""
+	}
+	vals := binnedValues[0]
+	maxY := 0.0
+	for _, v := range vals {
+		if v > maxY {
+			maxY = v
+		}
+	}
+	if maxY <= 0 {
+		return ""
+	}
+	yAxisW := estimateYAxisWidth(maxY, yFmt)
+	plotW = w - yAxisW - 4
+	if plotW < 20 {
+		plotW = 20
+	}
+	labels, binnedValues = binSeriesValues(dates, values, plotW)
+	if len(labels) == 0 || len(binnedValues) == 0 || len(binnedValues[0]) == 0 {
+		return ""
+	}
+	vals = binnedValues[0]
+	colStarts, colEnds := layoutColumns(plotW, len(labels))
+	maxY = 0.0
+	for _, v := range vals {
+		if v > maxY {
+			maxY = v
+		}
+	}
+	if maxY <= 0 {
+		return ""
+	}
+
+	axisStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	barStyle := lipgloss.NewStyle().Foreground(base.Color)
+
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	sb.WriteString("  " + sectionStyle.Render(title) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+
+	numTicks := 5
+	tickRows := make(map[int]float64, numTicks)
+	for t := 0; t < numTicks; t++ {
+		row := t * (h - 1) / (numTicks - 1)
+		val := maxY * float64(numTicks-1-t) / float64(numTicks-1)
+		tickRows[row] = val
+	}
+
+	for row := 0; row < h; row++ {
+		label := ""
+		if val, ok := tickRows[row]; ok {
+			label = yFmt(val)
+		}
+		sb.WriteString(fmt.Sprintf("  %*s %s", yAxisW-2, dimStyle.Render(label), axisStyle.Render("┤")))
+		threshold := maxY * float64(h-1-row) / float64(h-1)
+		for di := range labels {
+			v := vals[di]
+			if v >= threshold && v > 0 {
+				for x := colStarts[di]; x < colEnds[di]; x++ {
+					sb.WriteString(barStyle.Render("█"))
+				}
+			} else {
+				for x := colStarts[di]; x < colEnds[di]; x++ {
+					sb.WriteString(" ")
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("  %*s %s%s\n", yAxisW-2, "", axisStyle.Render("└"), axisStyle.Render(strings.Repeat("─", plotW))))
+
+	numLabels := clampInt(plotW/22, 3, 6)
+	if len(labels) < numLabels {
+		numLabels = len(labels)
+	}
+	dateLine := make([]byte, plotW)
+	for i := range dateLine {
+		dateLine[i] = ' '
+	}
+	for i := 0; i < numLabels; i++ {
+		di := 0
+		if numLabels > 1 {
+			di = i * (len(labels) - 1) / (numLabels - 1)
+		}
+		label := formatDateLabel(labels[di])
+		x := (colStarts[di] + colEnds[di] - 1) / 2
+		start := x - len(label)/2
+		if start < 0 {
+			start = 0
+		}
+		if start+len(label) > plotW {
+			start = plotW - len(label)
+		}
+		for j := 0; j < len(label) && start+j < plotW; j++ {
+			dateLine[start+j] = label[j]
+		}
+	}
+	sb.WriteString(fmt.Sprintf("  %*s  %s\n", yAxisW-2, "", dimStyle.Render(string(dateLine))))
+	sb.WriteString("  " + barStyle.Render("■") + " " + dimStyle.Render(base.Label) + "\n")
+	return sb.String()
+}
+
+func estimateYAxisWidth(maxY float64, yFmt func(float64) string) int {
+	if yFmt == nil {
+		yFmt = formatChartValue
+	}
+	cands := []float64{0, maxY * 0.25, maxY * 0.5, maxY * 0.75, maxY}
+	maxW := 0
+	for _, v := range cands {
+		w := lipgloss.Width(yFmt(v))
+		if w > maxW {
+			maxW = w
+		}
+	}
+	axisW := maxW + 3
+	if axisW < 8 {
+		axisW = 8
+	}
+	if axisW > 12 {
+		axisW = 12
+	}
+	return axisW
+}
+
+func renderWrappedLegend(series []BrailleSeries, w int) string {
+	if len(series) == 0 {
+		return ""
+	}
+	markers := []string{"●", "◆", "■", "▲", "★"}
+	parts := make([]string, 0, len(series))
+	for i, s := range series {
+		m := markers[i%len(markers)]
+		part := lipgloss.NewStyle().Foreground(s.Color).Render(m) + " " + dimStyle.Render(truncStr(s.Label, 26))
+		parts = append(parts, part)
+	}
+
+	maxW := w - 4
+	if maxW < 20 {
+		maxW = 20
+	}
+	lines := []string{"  "}
+	lineW := 2
+	for _, p := range parts {
+		pw := lipgloss.Width(p)
+		addSep := 0
+		if lineW > 2 {
+			addSep = 3
+		}
+		if lineW+addSep+pw > maxW {
+			lines = append(lines, "  "+p)
+			lineW = 2 + pw
+			continue
+		}
+		if addSep > 0 {
+			lines[len(lines)-1] += "   "
+			lineW += 3
+		}
+		lines[len(lines)-1] += p
+		lineW += pw
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func alignSeriesByDate(series []BrailleSeries, continuous bool) ([]string, [][]float64) {
+	dateSet := make(map[string]bool)
+	for _, s := range series {
+		for _, p := range s.Points {
+			dateSet[p.Date] = true
+		}
+	}
+	dates := lo.Keys(dateSet)
+	sort.Strings(dates)
+	if len(dates) == 0 {
+		return nil, nil
+	}
+	if continuous {
+		dates = fillContinuousDates(dates)
+	}
+	dateIdx := make(map[string]int, len(dates))
+	for i, d := range dates {
+		dateIdx[d] = i
+	}
+	values := make([][]float64, len(series))
+	for si, s := range series {
+		row := make([]float64, len(dates))
+		for _, p := range s.Points {
+			if di, ok := dateIdx[p.Date]; ok {
+				row[di] = p.Value
+			}
+		}
+		values[si] = row
+	}
+	return dates, values
+}
+
+func fillContinuousDates(sortedDates []string) []string {
+	if len(sortedDates) == 0 {
+		return nil
+	}
+	start, errStart := time.Parse("2006-01-02", sortedDates[0])
+	end, errEnd := time.Parse("2006-01-02", sortedDates[len(sortedDates)-1])
+	if errStart != nil || errEnd != nil || end.Before(start) {
+		return sortedDates
+	}
+	days := int(end.Sub(start).Hours()/24) + 1
+	if days <= 0 || days > 370 {
+		return sortedDates
+	}
+	out := make([]string, 0, days)
+	for d := 0; d < days; d++ {
+		out = append(out, start.AddDate(0, 0, d).Format("2006-01-02"))
+	}
+	return out
+}
+
+func trimAlignedDateSpan(dates []string, values [][]float64, pad int) ([]string, [][]float64) {
+	if len(dates) == 0 || len(values) == 0 {
+		return dates, values
+	}
+	start := -1
+	end := -1
+	for di := range dates {
+		sum := 0.0
+		for si := range values {
+			if di < len(values[si]) {
+				sum += values[si][di]
+			}
+		}
+		if sum > 0 {
+			if start == -1 {
+				start = di
+			}
+			end = di
+		}
+	}
+	if start == -1 || end == -1 {
+		return dates, values
+	}
+	if pad > 0 {
+		start -= pad
+		end += pad
+		if start < 0 {
+			start = 0
+		}
+		if end >= len(dates) {
+			end = len(dates) - 1
+		}
+	}
+	newDates := append([]string(nil), dates[start:end+1]...)
+	newValues := make([][]float64, len(values))
+	for si := range values {
+		if start >= len(values[si]) {
+			newValues[si] = nil
+			continue
+		}
+		localEnd := end
+		if localEnd >= len(values[si]) {
+			localEnd = len(values[si]) - 1
+		}
+		newValues[si] = append([]float64(nil), values[si][start:localEnd+1]...)
+	}
+	return newDates, newValues
+}
+
+func binSeriesValues(dates []string, values [][]float64, targetCols int) ([]string, [][]float64) {
+	if len(dates) == 0 || len(values) == 0 || targetCols <= 0 {
+		return nil, nil
+	}
+	cols := len(dates)
+	if cols > targetCols {
+		cols = targetCols
+	}
+	if cols <= 0 {
+		return nil, nil
+	}
+
+	labels := make([]string, cols)
+	binned := make([][]float64, len(values))
+	for si := range binned {
+		binned[si] = make([]float64, cols)
+	}
+
+	for col := 0; col < cols; col++ {
+		start := col * len(dates) / cols
+		end := (col + 1) * len(dates) / cols
+		if end <= start {
+			end = start + 1
+		}
+		if end > len(dates) {
+			end = len(dates)
+		}
+		mid := start + (end-start)/2
+		if mid >= len(dates) {
+			mid = len(dates) - 1
+		}
+		labels[col] = dates[mid]
+
+		span := float64(end - start)
+		if span <= 0 {
+			span = 1
+		}
+		for si := range values {
+			sum := 0.0
+			row := values[si]
+			for di := start; di < end && di < len(row); di++ {
+				sum += row[di]
+			}
+			binned[si][col] = sum / span
+		}
+	}
+
+	return labels, binned
+}
+
+func layoutColumns(plotW, cols int) ([]int, []int) {
+	if plotW <= 0 || cols <= 0 {
+		return nil, nil
+	}
+	starts := make([]int, cols)
+	ends := make([]int, cols)
+
+	// For sparse timelines, keep narrow bars to avoid giant stretched blocks.
+	if cols < plotW/2 {
+		prev := -1
+		for i := 0; i < cols; i++ {
+			x := 0
+			if cols == 1 {
+				x = plotW / 2
+			} else {
+				x = int(math.Round(float64(i) / float64(cols-1) * float64(plotW-1)))
+			}
+			if x <= prev {
+				x = prev + 1
+			}
+			if x >= plotW {
+				x = plotW - 1
+			}
+			starts[i] = x
+			ends[i] = x + 1
+			prev = x
+		}
+		return starts, ends
+	}
+
+	for i := 0; i < cols; i++ {
+		s := int(math.Floor(float64(i) * float64(plotW) / float64(cols)))
+		e := int(math.Floor(float64(i+1) * float64(plotW) / float64(cols)))
+		if e <= s {
+			e = s + 1
+		}
+		if e > plotW {
+			e = plotW
+		}
+		starts[i] = s
+		ends[i] = e
+	}
+	return starts, ends
+}
+
+func RenderHeatmap(spec HeatmapSpec, w int) string {
+	if len(spec.Rows) == 0 || len(spec.Cols) == 0 || len(spec.Values) == 0 {
+		return ""
+	}
+	cols := make([]string, len(spec.Cols))
+	copy(cols, spec.Cols)
+	values := make([][]float64, len(spec.Values))
+	for i := range spec.Values {
+		values[i] = make([]float64, len(spec.Values[i]))
+		copy(values[i], spec.Values[i])
+	}
+
+	rowLabelW := clampInt(w/5, 16, 28)
+	maxCols := spec.MaxCols
+	if maxCols <= 0 {
+		maxCols = clampInt(w-rowLabelW-8, 20, 80)
+	}
+	if len(cols) > maxCols {
+		step := float64(len(cols)) / float64(maxCols)
+		newCols := make([]string, 0, maxCols)
+		newVals := make([][]float64, len(values))
+		for i := range newVals {
+			newVals[i] = make([]float64, 0, maxCols)
+		}
+		for c := 0; c < maxCols; c++ {
+			idx := int(float64(c) * step)
+			if idx >= len(cols) {
+				idx = len(cols) - 1
+			}
+			newCols = append(newCols, cols[idx])
+			for r := range values {
+				v := 0.0
+				if idx < len(values[r]) {
+					v = values[r][idx]
+				}
+				newVals[r] = append(newVals[r], v)
+			}
+		}
+		cols = newCols
+		values = newVals
+	}
+
+	globalMax := 0.0
+	rowMax := make([]float64, len(values))
+	for r := range values {
+		for c := range values[r] {
+			v := values[r][c]
+			if v > rowMax[r] {
+				rowMax[r] = v
+			}
+			if v > globalMax {
+				globalMax = v
+			}
+		}
+	}
+	if globalMax <= 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	sb.WriteString("  " + sectionStyle.Render(spec.Title) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+
+	for r := range spec.Rows {
+		labelColor := colorDim
+		if r < len(spec.RowColors) && spec.RowColors[r] != "" {
+			labelColor = spec.RowColors[r]
+		}
+		sb.WriteString("  ")
+		sb.WriteString(lipgloss.NewStyle().Foreground(labelColor).Render(padRight(truncStr(spec.Rows[r], rowLabelW), rowLabelW)))
+		sb.WriteString(" ")
+		for c := range cols {
+			v := 0.0
+			if r < len(values) && c < len(values[r]) {
+				v = values[r][c]
+			}
+			scale := globalMax
+			if spec.RowScale && rowMax[r] > 0 {
+				scale = rowMax[r]
+			}
+			intensity := 0.0
+			if scale > 0 {
+				intensity = v / scale
+			}
+			sb.WriteString(heatCell(v, intensity))
+		}
+		sb.WriteString("\n")
+	}
+
+	labelLine := strings.Repeat(" ", rowLabelW+3)
+	if len(cols) >= 3 {
+		first := formatDateLabel(cols[0])
+		mid := formatDateLabel(cols[len(cols)/2])
+		last := formatDateLabel(cols[len(cols)-1])
+		cells := len(cols)
+		line := make([]byte, cells)
+		for i := range line {
+			line[i] = ' '
+		}
+		put := func(text string, pos int) {
+			start := pos - len(text)/2
+			if start < 0 {
+				start = 0
+			}
+			if start+len(text) > cells {
+				start = cells - len(text)
+			}
+			if start < 0 {
+				start = 0
+			}
+			for i := 0; i < len(text) && start+i < cells; i++ {
+				line[start+i] = text[i]
+			}
+		}
+		put(first, 0)
+		put(mid, cells/2)
+		put(last, cells-1)
+		labelLine += dimStyle.Render(string(line))
+	}
+	sb.WriteString("  " + labelLine + "\n")
+	sb.WriteString("  " + dimStyle.Render("      low ") + lipgloss.NewStyle().Foreground(heatColor(0.2)).Render("██") +
+		lipgloss.NewStyle().Foreground(heatColor(0.5)).Render("██") +
+		lipgloss.NewStyle().Foreground(heatColor(0.8)).Render("██") +
+		dimStyle.Render(" high"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+func heatColor(intensity float64) lipgloss.Color {
+	switch {
+	case intensity >= 0.85:
+		return colorRed
+	case intensity >= 0.65:
+		return colorPeach
+	case intensity >= 0.45:
+		return colorYellow
+	case intensity >= 0.25:
+		return colorGreen
+	default:
+		return colorSurface1
+	}
+}
+
+func heatCell(value, intensity float64) string {
+	if value <= 0 {
+		return lipgloss.NewStyle().Foreground(colorSurface1).Render("·")
+	}
+	r := "█"
+	switch {
+	case intensity < 0.22:
+		r = "░"
+	case intensity < 0.48:
+		r = "▒"
+	case intensity < 0.75:
+		r = "▓"
+	}
+	return lipgloss.NewStyle().Foreground(heatColor(intensity)).Render(r)
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 type UIConfig struct {
@@ -20,6 +21,12 @@ type UIConfig struct {
 
 type ExperimentalConfig struct {
 	Analytics bool `json:"analytics"`
+}
+
+type TelemetryConfig struct {
+	// ProviderLinks maps source telemetry provider IDs to configured provider IDs.
+	// Example: {"anthropic":"claude_code"}.
+	ProviderLinks map[string]string `json:"provider_links"`
 }
 
 type DashboardProviderConfig struct {
@@ -54,6 +61,7 @@ type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
 	Experimental         ExperimentalConfig            `json:"experimental"`
+	Telemetry            TelemetryConfig               `json:"telemetry"`
 	Dashboard            DashboardConfig               `json:"dashboard"`
 	ModelNormalization   core.ModelNormalizationConfig `json:"model_normalization"`
 	AutoDetect           bool                          `json:"auto_detect"`
@@ -61,18 +69,11 @@ type Config struct {
 	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
 }
 
-var legacyAccountIDAliases = map[string]string{
-	"openai-auto":        "openai",
-	"anthropic-auto":     "anthropic",
-	"openrouter-auto":    "openrouter",
-	"groq-auto":          "groq",
-	"mistral-auto":       "mistral",
-	"deepseek-auto":      "deepseek",
-	"xai-auto":           "xai",
-	"gemini-api-auto":    "gemini-api",
-	"gemini-google-auto": "gemini-google",
-	"copilot-auto":       "copilot",
-	"gemini-cli-auto":    "gemini-cli",
+// DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
+func DefaultProviderLinks() map[string]string {
+	return map[string]string{
+		"anthropic": "claude_code",
+	}
 }
 
 func DefaultConfig() Config {
@@ -85,6 +86,7 @@ func DefaultConfig() Config {
 			CritThreshold:          0.05,
 		},
 		Experimental:       ExperimentalConfig{Analytics: false},
+		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
 	}
 }
@@ -133,6 +135,7 @@ func LoadFrom(path string) (Config, error) {
 		cfg.Theme = DefaultConfig().Theme
 	}
 	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
+	cfg.Telemetry = normalizeTelemetryConfig(cfg.Telemetry)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
@@ -141,29 +144,34 @@ func LoadFrom(path string) (Config, error) {
 }
 
 func normalizeAccountID(id string) string {
-	trimmed := strings.TrimSpace(id)
-	if canonical, ok := legacyAccountIDAliases[trimmed]; ok {
-		return canonical
-	}
-	return trimmed
+	return strings.TrimSpace(id)
 }
 
 func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 	if len(in) == 0 {
 		return nil
 	}
-
-	seen := make(map[string]bool, len(in))
-	out := make([]core.AccountConfig, 0, len(in))
-	for _, acct := range in {
+	normalized := lo.Map(in, func(acct core.AccountConfig, _ int) core.AccountConfig {
 		acct.ID = normalizeAccountID(acct.ID)
-		if acct.ID == "" || seen[acct.ID] {
+		return acct
+	})
+	filtered := lo.Filter(normalized, func(acct core.AccountConfig, _ int) bool { return acct.ID != "" })
+	return lo.UniqBy(filtered, func(acct core.AccountConfig) string { return acct.ID })
+}
+
+func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
+	out := TelemetryConfig{
+		ProviderLinks: DefaultProviderLinks(),
+	}
+	for source, target := range in.ProviderLinks {
+		source = strings.ToLower(strings.TrimSpace(source))
+		target = strings.ToLower(strings.TrimSpace(target))
+		if source == "" || target == "" {
 			continue
 		}
-		seen[acct.ID] = true
-		out = append(out, acct)
+		// user overrides win
+		out.ProviderLinks[source] = target
 	}
-
 	return out
 }
 
@@ -171,21 +179,14 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 	if len(in) == 0 {
 		return nil
 	}
-
-	seen := make(map[string]bool, len(in))
-	out := make([]DashboardProviderConfig, 0, len(in))
-	for _, entry := range in {
-		id := normalizeAccountID(entry.AccountID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, DashboardProviderConfig{
-			AccountID: id,
+	normalized := lo.Map(in, func(entry DashboardProviderConfig, _ int) DashboardProviderConfig {
+		return DashboardProviderConfig{
+			AccountID: normalizeAccountID(entry.AccountID),
 			Enabled:   entry.Enabled,
-		})
-	}
-	return out
+		}
+	})
+	filtered := lo.Filter(normalized, func(entry DashboardProviderConfig, _ int) bool { return entry.AccountID != "" })
+	return lo.UniqBy(filtered, func(entry DashboardProviderConfig) string { return entry.AccountID })
 }
 
 // saveMu guards read-modify-write cycles on the config file.

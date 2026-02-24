@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/samber/lo"
+)
 
 type Status string
 
@@ -46,10 +50,37 @@ type UsageSnapshot struct {
 	Resets      map[string]time.Time   `json:"resets,omitempty"`       // e.g. "rpm_reset"
 	Attributes  map[string]string      `json:"attributes,omitempty"`   // normalized provider/account metadata
 	Diagnostics map[string]string      `json:"diagnostics,omitempty"`  // non-fatal errors, warnings, probe/debug notes
-	Raw         map[string]string      `json:"raw,omitempty"`          // deprecated compatibility bag (use Attributes/Diagnostics)
+	Raw         map[string]string      `json:"raw,omitempty"`          // provider metadata/debug bag (not for primary quota analytics)
 	ModelUsage  []ModelUsageRecord     `json:"model_usage,omitempty"`  // per-model usage rows with canonical IDs
 	DailySeries map[string][]TimePoint `json:"daily_series,omitempty"` // time-indexed data (e.g. "messages", "cost", "tokens_<model>")
 	Message     string                 `json:"message,omitempty"`      // human-readable summary
+}
+
+func NewUsageSnapshot(providerID, accountID string) UsageSnapshot {
+	return UsageSnapshot{
+		ProviderID: providerID,
+		AccountID:  accountID,
+		Timestamp:  time.Now(),
+		Metrics:    make(map[string]Metric),
+		Resets:     make(map[string]time.Time),
+		Raw:        make(map[string]string),
+	}
+}
+
+func NewAuthSnapshot(providerID, accountID, message string) UsageSnapshot {
+	return UsageSnapshot{
+		ProviderID: providerID,
+		AccountID:  accountID,
+		Timestamp:  time.Now(),
+		Status:     StatusAuth,
+		Message:    message,
+	}
+}
+
+func MergeAccounts(manual, autoDetected []AccountConfig) []AccountConfig {
+	return lo.UniqBy(append(manual, autoDetected...), func(acct AccountConfig) string {
+		return acct.ID
+	})
 }
 
 func (s *UsageSnapshot) EnsureMaps() {

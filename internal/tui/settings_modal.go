@@ -14,17 +14,19 @@ type settingsModalTab int
 
 const (
 	settingsTabProviders settingsModalTab = iota
-	settingsTabOrder
 	settingsTabTheme
 	settingsTabAPIKeys
+	settingsTabTelemetry
+	settingsTabIntegrations
 	settingsTabCount
 )
 
 var settingsTabNames = []string{
 	"Providers",
-	"Order",
 	"Theme",
 	"API Keys",
+	"Telemetry",
+	"Integrations",
 }
 
 func (m *Model) openSettingsModal() {
@@ -34,6 +36,7 @@ func (m *Model) openSettingsModal() {
 	m.apiKeyEditing = false
 	m.apiKeyInput = ""
 	m.apiKeyStatus = ""
+	m.settingsBodyOffset = 0
 	if len(m.providerOrder) > 0 {
 		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
 	}
@@ -42,6 +45,7 @@ func (m *Model) openSettingsModal() {
 	} else {
 		m.settingsThemeCursor = 0
 	}
+	m.refreshIntegrationStatuses()
 }
 
 func (m *Model) closeSettingsModal() {
@@ -50,6 +54,7 @@ func (m *Model) closeSettingsModal() {
 	m.apiKeyEditing = false
 	m.apiKeyInput = ""
 	m.apiKeyStatus = ""
+	m.settingsBodyOffset = 0
 }
 
 func (m Model) settingsModalInfo() string {
@@ -91,19 +96,31 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "tab", "right", "l", "]":
 		m.settingsModalTab = (m.settingsModalTab + 1) % settingsTabCount
+		m.settingsBodyOffset = 0
 		return m, nil
 	case "shift+tab", "left", "h", "[":
 		m.settingsModalTab = (m.settingsModalTab + settingsTabCount - 1) % settingsTabCount
-		return m, nil
-	case "1", "2", "3", "4":
-		idx := int(msg.String()[0] - '1')
-		if idx >= 0 && idx < int(settingsTabCount) {
-			m.settingsModalTab = settingsModalTab(idx)
-		}
+		m.settingsBodyOffset = 0
 		return m, nil
 	case "r":
+		if m.settingsModalTab == settingsTabIntegrations {
+			m.refreshIntegrationStatuses()
+			m.settingsStatus = "integration status refreshed"
+			return m, nil
+		}
 		m = m.requestRefresh()
 		return m, nil
+	}
+	if len(msg.String()) == 1 {
+		key := msg.String()[0]
+		if key >= '1' && key <= '9' {
+			idx := int(key - '1')
+			if idx >= 0 && idx < int(settingsTabCount) {
+				m.settingsModalTab = settingsModalTab(idx)
+				m.settingsBodyOffset = 0
+				return m, nil
+			}
+		}
 	}
 
 	switch m.settingsModalTab {
@@ -117,6 +134,16 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.settingsCursor < len(ids)-1 {
 				m.settingsCursor++
 			}
+		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
+			cmd := m.moveSelectedProvider(ids, -1)
+			if cmd != nil {
+				return m, cmd
+			}
+		case "J", "shift+j", "shift+down", "ctrl+down", "alt+down":
+			cmd := m.moveSelectedProvider(ids, 1)
+			if cmd != nil {
+				return m, cmd
+			}
 		case " ", "enter":
 			if len(ids) == 0 {
 				return m, nil
@@ -126,47 +153,6 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rebuildSortedIDs()
 			m.settingsStatus = "saving settings..."
 			return m, m.persistDashboardPrefsCmd()
-		}
-	case settingsTabOrder:
-		switch msg.String() {
-		case "up", "k":
-			if m.settingsCursor > 0 {
-				m.settingsCursor--
-			}
-		case "down", "j":
-			if m.settingsCursor < len(ids)-1 {
-				m.settingsCursor++
-			}
-		case "K":
-			if len(ids) == 0 || m.settingsCursor <= 0 {
-				return m, nil
-			}
-			id := ids[m.settingsCursor]
-			prevID := ids[m.settingsCursor-1]
-			currIdx := m.providerOrderIndex(id)
-			prevIdx := m.providerOrderIndex(prevID)
-			if currIdx >= 0 && prevIdx >= 0 {
-				m.providerOrder[currIdx], m.providerOrder[prevIdx] = m.providerOrder[prevIdx], m.providerOrder[currIdx]
-				m.settingsCursor--
-				m.rebuildSortedIDs()
-				m.settingsStatus = "saving order..."
-				return m, m.persistDashboardPrefsCmd()
-			}
-		case "J":
-			if len(ids) == 0 || m.settingsCursor >= len(ids)-1 {
-				return m, nil
-			}
-			id := ids[m.settingsCursor]
-			nextID := ids[m.settingsCursor+1]
-			currIdx := m.providerOrderIndex(id)
-			nextIdx := m.providerOrderIndex(nextID)
-			if currIdx >= 0 && nextIdx >= 0 {
-				m.providerOrder[currIdx], m.providerOrder[nextIdx] = m.providerOrder[nextIdx], m.providerOrder[currIdx]
-				m.settingsCursor++
-				m.rebuildSortedIDs()
-				m.settingsStatus = "saving order..."
-				return m, m.persistDashboardPrefsCmd()
-			}
 		}
 	case settingsTabTheme:
 		switch msg.String() {
@@ -224,9 +210,85 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.deleteCredentialCmd(id)
 			}
 		}
+	case settingsTabTelemetry:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsBodyOffset > 0 {
+				m.settingsBodyOffset--
+			}
+		case "down", "j":
+			m.settingsBodyOffset++
+		case "pgup", "ctrl+u":
+			m.settingsBodyOffset -= 4
+			if m.settingsBodyOffset < 0 {
+				m.settingsBodyOffset = 0
+			}
+		case "pgdown", "ctrl+d":
+			m.settingsBodyOffset += 4
+		case "home", "g":
+			m.settingsBodyOffset = 0
+		case "end", "G":
+			m.settingsBodyOffset = 1 << 30
+		}
+	case settingsTabIntegrations:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsCursor > 0 {
+				m.settingsCursor--
+			}
+		case "down", "j":
+			if m.settingsCursor < len(m.integrationStatuses)-1 {
+				m.settingsCursor++
+			}
+		case "i", " ", "enter":
+			if len(m.integrationStatuses) == 0 {
+				return m, nil
+			}
+			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
+			entry := m.integrationStatuses[cursor]
+			m.settingsStatus = "installing integration..."
+			return m, m.installIntegrationCmd(entry.ID)
+		case "u":
+			if len(m.integrationStatuses) == 0 {
+				return m, nil
+			}
+			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
+			entry := m.integrationStatuses[cursor]
+			if !entry.NeedsUpgrade {
+				m.settingsStatus = "selected integration is already current"
+				return m, nil
+			}
+			m.settingsStatus = "upgrading integration..."
+			return m, m.installIntegrationCmd(entry.ID)
+		}
 	}
 
 	return m, nil
+}
+
+func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {
+	if m == nil || len(ids) == 0 || delta == 0 {
+		return nil
+	}
+	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	target := cursor + delta
+	if target < 0 || target >= len(ids) {
+		return nil
+	}
+
+	id := ids[cursor]
+	swapID := ids[target]
+	currIdx := m.providerOrderIndex(id)
+	swapIdx := m.providerOrderIndex(swapID)
+	if currIdx < 0 || swapIdx < 0 {
+		return nil
+	}
+
+	m.providerOrder[currIdx], m.providerOrder[swapIdx] = m.providerOrder[swapIdx], m.providerOrder[currIdx]
+	m.settingsCursor = target
+	m.rebuildSortedIDs()
+	m.settingsStatus = "saving order..."
+	return m.persistDashboardPrefsCmd()
 }
 
 func (m Model) renderSettingsModalOverlay() string {
@@ -242,12 +304,14 @@ func (m Model) renderSettingsModalOverlay() string {
 		contentW = 92
 	}
 
-	contentH := m.height - 14
-	if contentH < 8 {
-		contentH = 8
+	const modalBodyHeight = 20
+	contentH := modalBodyHeight
+	maxAllowed := m.height - 14
+	if maxAllowed < 8 {
+		maxAllowed = 8
 	}
-	if contentH > 16 {
-		contentH = 16
+	if contentH > maxAllowed {
+		contentH = maxAllowed
 	}
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Settings")
@@ -299,14 +363,16 @@ func (m Model) renderSettingsModalTabs() string {
 func (m Model) settingsModalHint() string {
 	switch m.settingsModalTab {
 	case settingsTabProviders:
-		return "Up/Down: select  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
-	case settingsTabOrder:
-		return "Up/Down: select  ·  Shift+K/J: move item  ·  Left/Right: switch tab  ·  Esc: close"
+		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabTelemetry:
+		return "Up/Down: scroll  ·  PgUp/PgDn: faster scroll  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabIntegrations:
+		return "Up/Down: select  ·  Enter/i: install/configure  ·  u: upgrade  ·  r: refresh  ·  Esc: close"
 	default:
 		return "Up/Down: select theme  ·  Space/Enter: apply theme  ·  Left/Right: switch tab  ·  Esc: close"
 	}
@@ -316,10 +382,12 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 	switch m.settingsModalTab {
 	case settingsTabProviders:
 		return m.renderSettingsProvidersBody(w, h)
-	case settingsTabOrder:
-		return m.renderSettingsOrderBody(w, h)
 	case settingsTabAPIKeys:
 		return m.renderSettingsAPIKeysBody(w, h)
+	case settingsTabTelemetry:
+		return m.renderSettingsTelemetryBody(w, h)
+	case settingsTabIntegrations:
+		return m.renderSettingsIntegrationsBody(w, h)
 	default:
 		return m.renderSettingsThemeBody(w, h)
 	}
@@ -356,30 +424,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
-		line := fmt.Sprintf("%s%s %s  %s", prefix, boxStyle.Render(box), id, dimStyle.Render(providerID))
-		lines = append(lines, line)
-	}
-
-	return padToSize(strings.Join(lines, "\n"), w, h)
-}
-
-func (m Model) renderSettingsOrderBody(w, h int) string {
-	ids := m.settingsIDs()
-	if len(ids) == 0 {
-		return padToSize(dimStyle.Render("No providers available."), w, h)
-	}
-
-	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, h)
-	lines := make([]string, 0, h)
-
-	for i := start; i < end; i++ {
-		id := ids[i]
-		prefix := "  "
-		if i == cursor {
-			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
-		}
-		line := fmt.Sprintf("%s%2d. %s", prefix, i+1, id)
+		line := fmt.Sprintf("%s%s %2d. %s  %s", prefix, boxStyle.Render(box), i+1, id, dimStyle.Render(providerID))
 		lines = append(lines, line)
 	}
 
@@ -517,6 +562,90 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			lines = append(lines, line)
 		}
 	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) renderSettingsTelemetryBody(w, h int) string {
+	unmapped := m.telemetryUnmappedProviders()
+	hints := m.telemetryProviderLinkHints()
+	configured := m.configuredProviderIDs()
+
+	var lines []string
+	if len(unmapped) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).Render("All telemetry providers are mapped."))
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("No action needed right now."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"))
+	for _, providerID := range unmapped {
+		lines = append(lines, "  - "+providerID)
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Map them in settings.json under telemetry.provider_links:")
+	lines = append(lines, "  <source_provider>=<configured_provider_id>")
+	if len(hints) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Hint:")
+		lines = append(lines, "  "+hints[0])
+	}
+	if len(configured) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Configured provider IDs:")
+		lines = append(lines, "  "+strings.Join(configured, ", "))
+	}
+
+	start, end := listWindow(len(lines), m.settingsBodyOffset, h)
+	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
+}
+
+func (m Model) renderSettingsIntegrationsBody(w, h int) string {
+	statuses := m.integrationStatuses
+	if len(statuses) == 0 {
+		return padToSize(dimStyle.Render("No integration status available yet. Press r to refresh."), w, h)
+	}
+
+	cursor := clamp(m.settingsCursor, 0, len(statuses)-1)
+	start, end := listWindow(len(statuses), cursor, h-4)
+	lines := make([]string, 0, h)
+
+	for i := start; i < end; i++ {
+		entry := statuses[i]
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+
+		stateColor := colorRed
+		switch entry.State {
+		case "ready":
+			stateColor = colorGreen
+		case "outdated":
+			stateColor = colorYellow
+		case "partial":
+			stateColor = colorPeach
+		}
+
+		versionText := entry.DesiredVersion
+		if strings.TrimSpace(entry.InstalledVersion) != "" {
+			versionText = entry.InstalledVersion
+		}
+		stateText := lipgloss.NewStyle().Foreground(stateColor).Render(strings.ToUpper(entry.State))
+		line := fmt.Sprintf("%s%s  %s  %s", prefix, entry.Name, stateText, dimStyle.Render("v"+versionText))
+		lines = append(lines, line)
+		lines = append(lines, "    "+dimStyle.Render(entry.Summary))
+	}
+
+	selected := statuses[cursor]
+	lines = append(lines, "")
+	lines = append(lines, "Selected:")
+	lines = append(lines, fmt.Sprintf("  %s · installed=%t configured=%t", selected.Name, selected.Installed, selected.Configured))
+	if selected.NeedsUpgrade {
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorYellow).Render("Upgrade recommended: installed version differs from current integration version"))
+	}
+	lines = append(lines, "  Install/configure command writes plugin/hook files and updates tool configs automatically.")
 
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }

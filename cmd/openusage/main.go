@@ -1,28 +1,20 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/janekbaraniewski/openusage/internal/config"
-	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/detect"
-	"github.com/janekbaraniewski/openusage/internal/providers"
-	"github.com/janekbaraniewski/openusage/internal/tui"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	if os.Getenv("OPENUSAGE_DEBUG") == "" {
-		log.SetOutput(io.Discard)
-	} else {
+	if os.Getenv("OPENUSAGE_DEBUG") != "" {
 		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(io.Discard)
 	}
 
 	cfg, err := config.Load()
@@ -32,145 +24,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	tui.SetThemeByName(cfg.Theme)
-
-	// Combine manual + cached auto-detected accounts for immediate display
-	allAccounts := mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-	if cfg.AutoDetect {
-		result := detect.AutoDetect()
-
-		// Manual account IDs take precedence
-		manualIDs := make(map[string]bool, len(cfg.Accounts))
-		for _, acct := range cfg.Accounts {
-			manualIDs[acct.ID] = true
-		}
-		var autoDetected []core.AccountConfig
-		for _, acct := range result.Accounts {
-			if !manualIDs[acct.ID] {
-				autoDetected = append(autoDetected, acct)
-			}
-		}
-
-		cfg.AutoDetectedAccounts = autoDetected
-		if err := config.SaveAutoDetected(autoDetected); err != nil {
-			log.Printf("Warning: could not persist auto-detected accounts: %v", err)
-		}
-
-		allAccounts = mergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-
-		if os.Getenv("OPENUSAGE_DEBUG") != "" {
-			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
-				fmt.Fprint(os.Stderr, result.Summary())
-				fmt.Fprintln(os.Stderr)
-			}
-		}
+	root := cobra.Command{
+		Use:   "openusage",
+		Short: "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
+		Run: func(_ *cobra.Command, _ []string) {
+			runDashboard(cfg)
+		},
 	}
 
-	// Apply stored credentials for accounts missing API keys
-	{
-		credResult := detect.Result{Accounts: allAccounts}
-		detect.ApplyCredentials(&credResult)
-		allAccounts = credResult.Accounts
+	root.AddCommand(newTelemetryCommand())
+
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
 	}
-
-	if len(allAccounts) == 0 {
-		fmt.Println("⚡ OpenUsage — No accounts configured or detected.")
-		fmt.Println()
-		fmt.Printf("Config path: %s\n\n", config.ConfigPath())
-		fmt.Println("Auto-detection checks for:")
-		fmt.Println("  • Cursor IDE       (local DBs + API)")
-		fmt.Println("  • Claude Code CLI  (stats-cache.json)")
-		fmt.Println("  • OpenAI Codex CLI (session usage windows + tokens)")
-		fmt.Println("  • GitHub Copilot   (gh CLI)")
-		fmt.Println("  • Gemini CLI       (gemini binary)")
-		fmt.Println("  • Aider CLI        (aider binary)")
-		fmt.Println("  • Environment variables:")
-		fmt.Println("    OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY,")
-		fmt.Println("    GROQ_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,")
-		fmt.Println("    XAI_API_KEY, ZEN_API_KEY, OPENCODE_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY")
-		fmt.Println()
-		fmt.Println("Set any of the above env vars, install a tool, or create a config:")
-		fmt.Printf("  mkdir -p %s\n", config.ConfigDir())
-		fmt.Printf("  cat > %s <<'EOF'\n", config.ConfigPath())
-		fmt.Print(`{
-  "auto_detect": true,
-  "ui": {
-    "refresh_interval_seconds": 30,
-    "warn_threshold": 0.20,
-    "crit_threshold": 0.05
-  },
-  "accounts": [
-    {
-      "id": "openai-personal",
-      "provider": "openai",
-      "api_key_env": "OPENAI_API_KEY",
-      "probe_model": "gpt-4.1-mini"
-    }
-  ]
-}
-`)
-		fmt.Println("EOF")
-		os.Exit(0)
-	}
-
-	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
-	engine := core.NewEngine(interval)
-	engine.SetModelNormalizationConfig(cfg.ModelNormalization)
-
-	for _, p := range providers.AllProviders() {
-		engine.RegisterProvider(p)
-	}
-	engine.SetAccounts(allAccounts)
-
-	model := tui.NewModel(
-		cfg.UI.WarnThreshold,
-		cfg.UI.CritThreshold,
-		cfg.Experimental.Analytics,
-		cfg.Dashboard,
-		allAccounts,
-	)
-	model.SetOnAddAccount(engine.AddAccount)
-	model.SetOnRefresh(func() {
-		go engine.RefreshAll(context.Background())
-	})
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-
-	engine.OnUpdate(func(snaps map[string]core.UsageSnapshot) {
-		p.Send(tui.SnapshotsMsg(snaps))
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go engine.Run(ctx)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-		p.Quit()
-	}()
-
-	if _, err := p.Run(); err != nil {
-		log.SetOutput(os.Stderr)
-		log.Fatalf("TUI error: %v", err)
-	}
-}
-
-// mergeAccounts combines manual and auto-detected accounts, with manual taking precedence by ID.
-func mergeAccounts(manual, autoDetected []core.AccountConfig) []core.AccountConfig {
-	seen := make(map[string]bool, len(manual))
-	result := make([]core.AccountConfig, 0, len(manual)+len(autoDetected))
-	for _, acct := range manual {
-		seen[acct.ID] = true
-		result = append(result, acct)
-	}
-	for _, acct := range autoDetected {
-		if !seen[acct.ID] {
-			result = append(result, acct)
-		}
-	}
-	return result
 }

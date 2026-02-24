@@ -2,10 +2,6 @@ package core
 
 import "strings"
 
-func NormalizeUsageSnapshot(s UsageSnapshot) UsageSnapshot {
-	return NormalizeUsageSnapshotWithConfig(s, DefaultModelNormalizationConfig())
-}
-
 func NormalizeUsageSnapshotWithConfig(s UsageSnapshot, modelCfg ModelNormalizationConfig) UsageSnapshot {
 	s.EnsureMaps()
 
@@ -31,6 +27,7 @@ func NormalizeUsageSnapshotWithConfig(s UsageSnapshot, modelCfg ModelNormalizati
 		}
 		s.ModelUsage = normalizeModelUsageRecords(s, modelCfg)
 	}
+	normalizeAnalyticsDailySeries(&s)
 
 	return s
 }
@@ -85,6 +82,7 @@ func normalizeModelUsageRecords(s UsageSnapshot, cfg ModelNormalizationConfig) [
 		rec.CanonicalVendor = identity.Vendor
 		rec.CanonicalFamily = identity.Family
 		rec.CanonicalVariant = identity.Variant
+		rec.Canonical = identity.Canonical
 		rec.Confidence = identity.Confidence
 		rec.Reason = identity.Reason
 		groupID := rec.CanonicalLineageID

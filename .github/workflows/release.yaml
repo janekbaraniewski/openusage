@@ -104,9 +104,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.version.outputs.version }}
+          chmod +x scripts/install.sh
           gh release upload "${GITHUB_REF_NAME}" \
             dist/openusage_${VERSION}_darwin_amd64.tar.gz \
             dist/openusage_${VERSION}_darwin_arm64.tar.gz \
+            scripts/install.sh \
             --clobber
 
   update-homebrew:

@@ -16,13 +16,25 @@ Or side by side with your agent
 
 ## Install
 
+### macOS (Homebrew, recommended)
+
 ```bash
 brew install janekbaraniewski/tap/openusage
 ```
 
-Pre-built binaries for macOS, Linux, and Windows are available on the [GitHub Releases](https://github.com/janekbaraniewski/openusage/releases) page.
+### All platforms (quick install script)
 
-Or from source (Go 1.25+):
+Downloads the latest release artifact for your platform and installs `openusage`.
+
+```bash
+curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | bash
+```
+
+On Windows, run the command in Git Bash, MSYS2, or Cygwin.
+
+### From source (Go 1.25+)
+
+Pre-built binaries for macOS, Linux, and Windows are also available on the [GitHub Releases](https://github.com/janekbaraniewski/openusage/releases) page.
 
 ```bash
 go install github.com/janekbaraniewski/openusage/cmd/openusage@latest

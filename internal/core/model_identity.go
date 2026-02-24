@@ -20,6 +20,7 @@ type canonicalModelIdentity struct {
 	Variant    string
 	Confidence float64
 	Reason     string
+	Canonical  string // Canonical model name for consistent identification
 }
 
 func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizationConfig) canonicalModelIdentity {
@@ -41,7 +42,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 		}
 		release := strings.TrimSpace(ov.CanonicalRelease)
 		vendor, family := parseVendorFamilyFromCanonical(lineage)
-		return canonicalModelIdentity{
+		identity := canonicalModelIdentity{
 			LineageID:  lineage,
 			ReleaseID:  release,
 			Vendor:     vendor,
@@ -49,7 +50,9 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 			Variant:    parseVariantFromCanonical(lineage),
 			Confidence: 1.0,
 			Reason:     "override",
+			Canonical:  ov.CanonicalModel, // Add canonical model name from override
 		}
+		return identity
 	}
 
 	vendorFromProvider := canonicalVendorFromProvider(providerID)
@@ -100,6 +103,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 		identity.LineageID = identity.Vendor + "/" + claude.lineage
 		identity.Confidence = claude.confidence
 		identity.Reason = claude.reason
+		identity.Canonical = "anthropic/claude-" + firstNonEmpty(claude.variant, "unknown")
 	case "gpt":
 		gpt := canonicalizeGPT(tokens)
 		identity.Vendor = firstNonEmpty(identity.Vendor, "openai")
@@ -108,6 +112,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 		identity.LineageID = identity.Vendor + "/" + gpt.lineage
 		identity.Confidence = gpt.confidence
 		identity.Reason = gpt.reason
+		identity.Canonical = "openai/gpt-" + firstNonEmpty(gpt.variant, "unknown")
 	case "gemini":
 		gem := canonicalizeGemini(tokens)
 		identity.Vendor = firstNonEmpty(identity.Vendor, "google")
@@ -116,6 +121,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 		identity.LineageID = identity.Vendor + "/" + gem.lineage
 		identity.Confidence = gem.confidence
 		identity.Reason = gem.reason
+		identity.Canonical = "google/gemini-" + firstNonEmpty(gem.variant, "unknown")
 	default:
 		v := identity.Vendor
 		if v == "" {
@@ -133,6 +139,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 			identity.Confidence = 0.72
 			identity.Reason = "provider_vendor"
 		}
+		identity.Canonical = v + "/" + norm
 	}
 
 	if releaseDate != "" {

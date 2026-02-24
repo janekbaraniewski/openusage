@@ -22,6 +22,7 @@ func TestNormalizeCanonicalModel_OverrideWins(t *testing.T) {
 			RawModelID:       "claude-4.6-opus-high-thinking",
 			CanonicalLineage: "anthropic/claude-opus-4.6",
 			CanonicalRelease: "anthropic/claude-opus-4.6@20260219",
+			CanonicalModel:   "anthropic/claude-opus-4.6",
 		},
 	}
 
@@ -37,6 +38,9 @@ func TestNormalizeCanonicalModel_OverrideWins(t *testing.T) {
 	}
 	if got.Reason != "override" {
 		t.Fatalf("reason = %q, want override", got.Reason)
+	}
+	if got.Canonical != "anthropic/claude-opus-4.6" {
+		t.Fatalf("canonical = %q, want anthropic/claude-opus-4.6", got.Canonical)
 	}
 }
 
@@ -60,6 +64,15 @@ func TestNormalizeUsageSnapshotWithConfig_BuildsModelUsage(t *testing.T) {
 	rec := got.ModelUsage[0]
 	if rec.CanonicalLineageID != "anthropic/claude-opus-4.6" {
 		t.Fatalf("canonical lineage = %q", rec.CanonicalLineageID)
+	}
+	if rec.CanonicalVendor != "anthropic" {
+		t.Fatalf("canonical vendor = %q", rec.CanonicalVendor)
+	}
+	if rec.CanonicalFamily != "claude" {
+		t.Fatalf("canonical family = %q", rec.CanonicalFamily)
+	}
+	if rec.CanonicalVariant != "opus" {
+		t.Fatalf("canonical variant = %q", rec.CanonicalVariant)
 	}
 	if rec.TotalTokens == nil || *rec.TotalTokens != 1250 {
 		t.Fatalf("total tokens = %v", rec.TotalTokens)

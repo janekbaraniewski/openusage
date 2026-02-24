@@ -19,6 +19,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/samber/lo"
 )
 
 const (
@@ -475,22 +476,6 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 	return tokenResp.AccessToken, nil
 }
 
-func loadCodeAssist(ctx context.Context, accessToken, existingProjectID string) (string, error) {
-	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
-	if err != nil {
-		return "", err
-	}
-	return resp.CloudAICompanionProject, nil
-}
-
-func loadCodeAssistWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string) (string, error) {
-	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, baseURL)
-	if err != nil {
-		return "", err
-	}
-	return resp.CloudAICompanionProject, nil
-}
-
 func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string) (*loadCodeAssistResponse, error) {
 	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
 }
@@ -529,13 +514,6 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	}
 
 	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL)
-	if err != nil && shouldTryLegacyQuotaMethod(err) {
-		legacyResp, legacyErr := retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, baseURL)
-		if legacyErr != nil {
-			return nil, "", fmt.Errorf("retrieveUserQuota: %w; retrieveUserUsage: %w", err, legacyErr)
-		}
-		return legacyResp, "retrieveUserUsage", nil
-	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -546,33 +524,6 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	}
 
 	return &resp, "retrieveUserQuota", nil
-}
-
-// retrieveUserUsage remains as a compatibility fallback for older endpoints.
-func retrieveUserUsage(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, error) {
-	return retrieveUserUsageWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
-}
-
-func retrieveUserUsageWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, error) {
-	reqBody := retrieveUserQuotaRequest{
-		Project: projectID,
-	}
-
-	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserUsage", reqBody, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp retrieveUserQuotaResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("parse retrieveUserUsage response: %w", err)
-	}
-
-	return &resp, nil
-}
-
-func codeAssistPost(ctx context.Context, accessToken, method string, body interface{}) ([]byte, error) {
-	return codeAssistPostWithEndpoint(ctx, accessToken, method, body, codeAssistEndpoint)
 }
 
 func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string, body interface{}, baseURL string) ([]byte, error) {
@@ -709,14 +660,6 @@ func applyLoadCodeAssistMetadata(snap *core.UsageSnapshot, resp *loadCodeAssistR
 	}
 }
 
-func shouldTryLegacyQuotaMethod(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "http 404") || strings.Contains(msg, "not found")
-}
-
 func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggregationResult {
 	result := quotaAggregationResult{bucketCount: len(buckets), worstFraction: 1.0}
 	if len(buckets) == 0 {
@@ -774,10 +717,7 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 		return result
 	}
 
-	keys := make([]string, 0, len(aggregates))
-	for key := range aggregates {
-		keys = append(keys, key)
-	}
+	keys := lo.Keys(aggregates)
 	sort.Strings(keys)
 
 	modelWorst := make(map[string]float64)
@@ -1365,11 +1305,7 @@ func findGeminiSessionFiles(tmpDir string) ([]string, error) {
 		return files[i].modTime.After(files[j].modTime)
 	})
 
-	out := make([]string, 0, len(files))
-	for _, file := range files {
-		out = append(out, file.path)
-	}
-	return out, nil
+	return lo.Map(files, func(f item, _ int) string { return f.path }), nil
 }
 
 func readGeminiChatFile(path string) (*geminiChatFile, error) {
@@ -1775,10 +1711,7 @@ func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
 	if len(byDate) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(byDate))
-	for date := range byDate {
-		keys = append(keys, date)
-	}
+	keys := lo.Keys(byDate)
 	sort.Strings(keys)
 
 	points := make([]core.TimePoint, 0, len(keys))
@@ -1799,10 +1732,7 @@ func latestSeriesValue(values map[string]float64) (string, float64) {
 	if len(values) == 0 {
 		return "", 0
 	}
-	dates := make([]string, 0, len(values))
-	for date := range values {
-		dates = append(dates, date)
-	}
+	dates := lo.Keys(values)
 	sort.Strings(dates)
 	last := dates[len(dates)-1]
 	return last, values[last]

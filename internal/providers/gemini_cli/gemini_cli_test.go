@@ -189,10 +189,11 @@ func TestFetch_UsageAPI(t *testing.T) {
 		t.Error("token endpoint was not called")
 	}
 
-	projectID, err := loadCodeAssistWithEndpoint(ctx, accessToken, "", server.URL)
+	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, "", server.URL)
 	if err != nil {
 		t.Fatalf("loadCodeAssist() error: %v", err)
 	}
+	projectID := resp.CloudAICompanionProject
 	if projectID != "test-project-123" {
 		t.Errorf("projectID = %q, want test-project-123", projectID)
 	}
@@ -231,7 +232,7 @@ func TestFetch_UsageAPI(t *testing.T) {
 	}
 }
 
-func TestFetch_UsageAPI_FallbackLegacyMethod(t *testing.T) {
+func TestFetch_UsageAPI_DoesNotFallbackToLegacyMethod(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1internal:retrieveUserQuota":
@@ -245,15 +246,8 @@ func TestFetch_UsageAPI_FallbackLegacyMethod(t *testing.T) {
 	}))
 	defer server.Close()
 
-	quota, method, err := retrieveUserQuotaWithEndpoint(context.Background(), "test-token", "test-project", server.URL)
-	if err != nil {
-		t.Fatalf("retrieveUserQuotaWithEndpoint() error: %v", err)
-	}
-	if method != "retrieveUserUsage" {
-		t.Fatalf("method = %q, want retrieveUserUsage", method)
-	}
-	if len(quota.Buckets) != 1 {
-		t.Fatalf("buckets = %d, want 1", len(quota.Buckets))
+	if _, _, err := retrieveUserQuotaWithEndpoint(context.Background(), "test-token", "test-project", server.URL); err == nil {
+		t.Fatalf("retrieveUserQuotaWithEndpoint() error = nil, want not found error")
 	}
 }
 

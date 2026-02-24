@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 type DetailTab int
@@ -600,10 +601,7 @@ func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, widge
 	labelW := sectionLabelWidth(w)
 	renderDetailSectionHeader(sb, "Timers", w)
 
-	timerKeys := make([]string, 0, len(resets))
-	for k := range resets {
-		timerKeys = append(timerKeys, k)
-	}
+	timerKeys := lo.Keys(resets)
 	sort.Strings(timerKeys)
 
 	for _, k := range timerKeys {
@@ -1055,10 +1053,7 @@ func renderRawData(sb *strings.Builder, raw map[string]string, widget core.Dashb
 		}
 	}
 
-	keys := make([]string, 0, len(raw))
-	for k := range raw {
-		keys = append(keys, k)
-	}
+	keys := lo.Keys(raw)
 	sort.Strings(keys)
 
 	for _, k := range keys {
@@ -1265,6 +1260,8 @@ func prettifyModelName(name string) string {
 	result := strings.ReplaceAll(name, "_", "-")
 
 	switch strings.ToLower(result) {
+	case "unattributed":
+		return "unmapped spend (missing historical mapping)"
 	case "default":
 		return "default (auto)"
 	case "composer-1":

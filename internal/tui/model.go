@@ -12,7 +12,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/samber/lo"
 )
 
 type tickMsg time.Time
@@ -49,6 +51,27 @@ const (
 
 type SnapshotsMsg map[string]core.UsageSnapshot
 
+type DaemonStatus string
+
+const (
+	DaemonConnecting   DaemonStatus = "connecting"
+	DaemonNotInstalled DaemonStatus = "not_installed"
+	DaemonStarting     DaemonStatus = "starting"
+	DaemonRunning      DaemonStatus = "running"
+	DaemonOutdated     DaemonStatus = "outdated"
+	DaemonError        DaemonStatus = "error"
+)
+
+type DaemonStatusMsg struct {
+	Status      DaemonStatus
+	Message     string
+	InstallHint string
+}
+
+type daemonInstallResultMsg struct {
+	err error
+}
+
 type Model struct {
 	snapshots map[string]core.UsageSnapshot
 	sortedIDs []string
@@ -80,24 +103,29 @@ type Model struct {
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
+	daemonStatus     DaemonStatus
+	daemonMessage    string
+	daemonInstalling bool
+
 	providerOrder       []string
 	providerEnabled     map[string]bool
 	accountProviders    map[string]string
 	showSettingsModal   bool
 	settingsModalTab    settingsModalTab
 	settingsCursor      int
+	settingsBodyOffset  int
 	settingsThemeCursor int
 	settingsStatus      string
+	integrationStatuses []integrations.Status
 
 	apiKeyEditing       bool
 	apiKeyInput         string
 	apiKeyEditAccountID string
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 
-	// onAddAccount is called when a new provider account is added from the API Keys tab.
-	// Set from main.go to wire into the engine.
-	onAddAccount func(core.AccountConfig)
-	onRefresh    func()
+	onAddAccount    func(core.AccountConfig)
+	onRefresh       func()
+	onInstallDaemon func() error
 }
 
 func NewModel(
@@ -114,10 +142,15 @@ func NewModel(
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
+		daemonStatus:          DaemonConnecting,
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
 	return model
+}
+
+func (m *Model) SetOnInstallDaemon(fn func() error) {
+	m.onInstallDaemon = fn
 }
 
 // SetOnAddAccount sets a callback invoked when a new provider account is added via the API Keys tab.
@@ -151,6 +184,12 @@ type credentialSavedMsg struct {
 type credentialDeletedMsg struct {
 	AccountID string
 	Err       error
+}
+
+type integrationInstallResultMsg struct {
+	IntegrationID integrations.ID
+	Statuses      []integrations.Status
+	Err           error
 }
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
@@ -224,6 +263,18 @@ func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
 	}
 }
 
+func (m Model) installIntegrationCmd(id integrations.ID) tea.Cmd {
+	return func() tea.Msg {
+		manager := integrations.NewDefaultManager()
+		err := manager.Install(id)
+		return integrationInstallResultMsg{
+			IntegrationID: id,
+			Statuses:      manager.ListStatuses(),
+			Err:           err,
+		}
+	}
+}
+
 func (m Model) Init() tea.Cmd { return tickCmd() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -237,10 +288,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case DaemonStatusMsg:
+		m.daemonStatus = msg.Status
+		m.daemonMessage = msg.Message
+		if msg.Status == DaemonRunning {
+			m.daemonInstalling = false
+		}
+		return m, nil
+
+	case daemonInstallResultMsg:
+		m.daemonInstalling = false
+		if msg.err != nil {
+			m.daemonStatus = DaemonError
+			m.daemonMessage = msg.err.Error()
+		}
+		return m, nil
+
 	case SnapshotsMsg:
 		m.snapshots = msg
 		m.refreshing = false
-		m.hasData = true
+		if len(msg) > 0 || snapshotsReady(msg) {
+			m.hasData = true
+			m.daemonStatus = DaemonRunning
+		}
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
 		return m, nil
@@ -314,10 +384,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case integrationInstallResultMsg:
+		m.integrationStatuses = msg.Statuses
+		if msg.Err != nil {
+			errMsg := msg.Err.Error()
+			if len(errMsg) > 80 {
+				errMsg = errMsg[:77] + "..."
+			}
+			m.settingsStatus = "integration install failed: " + errMsg
+		} else {
+			m.settingsStatus = "integration installed"
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		if !m.hasData {
+			return m.handleSplashKey(msg)
+		}
 		return m.handleKey(msg)
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+	}
+	return m, nil
+}
+
+func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		if (m.daemonStatus == DaemonNotInstalled || m.daemonStatus == DaemonOutdated) && !m.daemonInstalling {
+			m.daemonInstalling = true
+			m.daemonMessage = "Installing daemon service..."
+			return m, m.installDaemonCmd()
+		}
 	}
 	return m, nil
 }
@@ -669,6 +769,24 @@ func (m Model) mouseScrollStep() int {
 	return step
 }
 
+func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
+	if len(snaps) == 0 {
+		return false
+	}
+	for _, snap := range snaps {
+		if snap.Status != core.StatusUnknown {
+			return true
+		}
+		if len(snap.Metrics) > 0 ||
+			len(snap.Resets) > 0 ||
+			len(snap.DailySeries) > 0 ||
+			len(snap.ModelUsage) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) View() string {
 	if m.width < 30 || m.height < 8 {
 		return lipgloss.NewStyle().
@@ -686,6 +804,16 @@ func (m Model) View() string {
 		return m.renderSettingsModalOverlay()
 	}
 	return view
+}
+
+func (m Model) installDaemonCmd() tea.Cmd {
+	fn := m.onInstallDaemon
+	return func() tea.Msg {
+		if fn == nil {
+			return daemonInstallResultMsg{err: fmt.Errorf("install callback not configured")}
+		}
+		return daemonInstallResultMsg{err: fn()}
+	}
 }
 
 func (m Model) renderDashboard() string {
@@ -737,6 +865,22 @@ func (m Model) renderHeader(w int) string {
 		spinnerStr = " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
 	}
 
+	ids := m.filteredIDs()
+	unmappedProviders := m.telemetryUnmappedProviders()
+
+	okCount, warnCount, errCount := 0, 0, 0
+	for _, id := range ids {
+		snap := m.snapshots[id]
+		switch snap.Status {
+		case core.StatusOK:
+			okCount++
+		case core.StatusNearLimit:
+			warnCount++
+		case core.StatusLimited, core.StatusError:
+			errCount++
+		}
+	}
+
 	var info string
 
 	if m.showSettingsModal {
@@ -749,26 +893,14 @@ func (m Model) renderHeader(w int) string {
 				info += " (filtered)"
 			}
 		default:
-			ids := m.filteredIDs()
 			info = fmt.Sprintf("⊞ %d providers", len(ids))
 			if m.filter != "" {
 				info += " (filtered)"
 			}
 		}
 	}
-
-	ids := m.filteredIDs()
-	okCount, warnCount, errCount := 0, 0, 0
-	for _, id := range ids {
-		snap := m.snapshots[id]
-		switch snap.Status {
-		case core.StatusOK:
-			okCount++
-		case core.StatusNearLimit:
-			warnCount++
-		case core.StatusLimited, core.StatusError:
-			errCount++
-		}
+	if !m.showSettingsModal && len(unmappedProviders) > 0 {
+		info += " · detected additional providers, check settings"
 	}
 
 	statusInfo := ""
@@ -783,6 +915,11 @@ func (m Model) renderHeader(w int) string {
 	if errCount > 0 {
 		dot := PulseChar("✗", "✕", m.animFrame)
 		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d%s", errCount, dot))
+	}
+	if len(unmappedProviders) > 0 {
+		statusInfo += lipgloss.NewStyle().
+			Foreground(colorPeach).
+			Render(fmt.Sprintf(" ⚠ %d unmapped", len(unmappedProviders)))
 	}
 
 	infoRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(info)
@@ -1329,7 +1466,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		return info
 	}
 
-	for key, m := range snap.Metrics {
+	for _, key := range fallbackDisplayMetricKeys(snap.Metrics) {
+		m := snap.Metrics[key]
 		if m.Used != nil {
 			info.tagEmoji = "⚡"
 			info.tagLabel = "Usage"
@@ -1351,13 +1489,46 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 
 	info.tagEmoji = "⚡"
 	info.tagLabel = "Usage"
-	info.summary = string(snap.Status)
+	if snap.Status == core.StatusUnknown {
+		info.summary = "Syncing telemetry..."
+	} else {
+		info.summary = string(snap.Status)
+	}
 	return info
+}
+
+func fallbackDisplayMetricKeys(metrics map[string]core.Metric) []string {
+	keys := sortedMetricKeys(metrics)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	excludePrefixes := []string{
+		"model_", "client_", "tool_", "source_",
+		"usage_model_", "usage_source_", "usage_client_",
+		"tokens_client_", "analytics_",
+	}
+	filtered := lo.Filter(keys, func(key string, _ int) bool {
+		return !lo.SomeBy(excludePrefixes, func(prefix string) bool {
+			return strings.HasPrefix(key, prefix)
+		})
+	})
+	if len(filtered) > 0 {
+		return filtered
+	}
+	return keys
 }
 
 // computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view
 // for providers that expose both balance and usage dimensions.
 func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDisplayInfo) providerDisplayInfo {
+	metricUsed := func(key string) *float64 {
+		if m, ok := snap.Metrics[key]; ok && m.Used != nil {
+			return m.Used
+		}
+		return nil
+	}
+
 	// Prefer account-level purchased credits when available.
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
@@ -1372,11 +1543,17 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 		}
 
 		detailParts := []string{fmt.Sprintf("$%.2f remaining", *m.Remaining)}
-		if daily, ok := snap.Metrics["usage_daily"]; ok && daily.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *daily.Used))
+		switch {
+		case metricUsed("today_cost") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("today_cost")))
+		case metricUsed("usage_daily") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("usage_daily")))
 		}
-		if weekly, ok := snap.Metrics["usage_weekly"]; ok && weekly.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *weekly.Used))
+		switch {
+		case metricUsed("7d_api_cost") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("7d_api_cost")))
+		case metricUsed("usage_weekly") != nil:
+			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("usage_weekly")))
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
@@ -1555,10 +1732,7 @@ func (m *Model) ensureSnapshotProvidersKnown() {
 	if len(m.snapshots) == 0 {
 		return
 	}
-	keys := make([]string, 0, len(m.snapshots))
-	for id := range m.snapshots {
-		keys = append(keys, id)
-	}
+	keys := lo.Keys(m.snapshots)
 	sort.Strings(keys)
 
 	for _, id := range keys {
@@ -1591,6 +1765,70 @@ func (m Model) settingsIDs() []string {
 	ids := make([]string, len(m.providerOrder))
 	copy(ids, m.providerOrder)
 	return ids
+}
+
+func (m Model) telemetryUnmappedProviders() []string {
+	seen := make(map[string]bool)
+	for _, snap := range m.snapshots {
+		raw := strings.TrimSpace(snap.Diagnostics["telemetry_unmapped_providers"])
+		if raw == "" {
+			continue
+		}
+		for _, token := range strings.Split(raw, ",") {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			seen[token] = true
+		}
+	}
+
+	out := lo.Keys(seen)
+	sort.Strings(out)
+	return out
+}
+
+func (m Model) telemetryProviderLinkHints() []string {
+	seen := make(map[string]bool)
+	for _, snap := range m.snapshots {
+		hint := strings.TrimSpace(snap.Diagnostics["telemetry_provider_link_hint"])
+		if hint == "" {
+			continue
+		}
+		seen[hint] = true
+	}
+
+	out := lo.Keys(seen)
+	sort.Strings(out)
+	return out
+}
+
+func (m Model) configuredProviderIDs() []string {
+	seen := make(map[string]bool)
+
+	for _, providerID := range m.accountProviders {
+		providerID = strings.TrimSpace(providerID)
+		if providerID == "" {
+			continue
+		}
+		seen[providerID] = true
+	}
+	for _, snap := range m.snapshots {
+		providerID := strings.TrimSpace(snap.ProviderID)
+		if providerID == "" {
+			continue
+		}
+		seen[providerID] = true
+	}
+
+	out := lo.Keys(seen)
+	sort.Strings(out)
+	return out
+}
+
+func (m *Model) refreshIntegrationStatuses() {
+	manager := integrations.NewDefaultManager()
+	m.integrationStatuses = manager.ListStatuses()
 }
 
 func (m Model) dashboardConfigProviders() []config.DashboardProviderConfig {
@@ -1638,13 +1876,9 @@ func (m *Model) rebuildSortedIDs() {
 		seen[id] = true
 	}
 
-	var extra []string
-	for id := range m.snapshots {
-		if seen[id] || !m.isProviderEnabled(id) {
-			continue
-		}
-		extra = append(extra, id)
-	}
+	extra := lo.Filter(lo.Keys(m.snapshots), func(id string, _ int) bool {
+		return !seen[id] && m.isProviderEnabled(id)
+	})
 	sort.Strings(extra)
 
 	m.sortedIDs = append(ordered, extra...)
@@ -1661,16 +1895,12 @@ func (m Model) filteredIDs() []string {
 		return m.sortedIDs
 	}
 	lower := strings.ToLower(m.filter)
-	var out []string
-	for _, id := range m.sortedIDs {
+	return lo.Filter(m.sortedIDs, func(id string, _ int) bool {
 		snap := m.snapshots[id]
-		if strings.Contains(strings.ToLower(id), lower) ||
+		return strings.Contains(strings.ToLower(id), lower) ||
 			strings.Contains(strings.ToLower(snap.ProviderID), lower) ||
-			strings.Contains(strings.ToLower(string(snap.Status)), lower) {
-			out = append(out, id)
-		}
-	}
-	return out
+			strings.Contains(strings.ToLower(string(snap.Status)), lower)
+	})
 }
 
 func padToSize(content string, w, h int) string {
