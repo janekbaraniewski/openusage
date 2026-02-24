@@ -77,8 +77,9 @@ type telemetryUsageAgg struct {
 }
 
 type usageFilter struct {
-	ProviderIDs []string
-	AccountID   string
+	ProviderIDs     []string
+	AccountID       string
+	TimeWindowHours int // 0 = no filter
 }
 
 func applyCanonicalUsageViewWithDB(
@@ -86,6 +87,8 @@ func applyCanonicalUsageViewWithDB(
 	db *sql.DB,
 	snaps map[string]core.UsageSnapshot,
 	providerLinks map[string]string,
+	timeWindowHours int,
+	timeWindow string,
 ) (map[string]core.UsageSnapshot, error) {
 	if db == nil {
 		return snaps, nil
@@ -114,7 +117,7 @@ func applyCanonicalUsageViewWithDB(
 		cacheKey := strings.Join(sourceProviders, ",") + "|" + accountScope
 		agg, ok := cache[cacheKey]
 		if !ok {
-			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, sourceProviders, accountScope)
+			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, sourceProviders, accountScope, timeWindowHours)
 			if loadErr != nil {
 				return snaps, loadErr
 			}
@@ -126,14 +129,18 @@ func applyCanonicalUsageViewWithDB(
 			continue
 		}
 
-		applyUsageViewToSnapshot(&s, agg)
+		windowLabel := "all"
+		if timeWindowHours > 0 && timeWindow != "" {
+			windowLabel = timeWindow
+		}
+		applyUsageViewToSnapshot(&s, agg, windowLabel)
 		out[accountID] = s
 	}
 
 	return out, nil
 }
 
-func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) {
+func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, timeWindow string) {
 	if snap == nil || agg == nil {
 		return
 	}
@@ -199,33 +206,33 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 	modelCostTotal := 0.0
 	for _, model := range agg.Models {
 		mk := sanitizeMetricID(model.Model)
-		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: "all"}
-		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: "all"}
-		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: "all"}
+		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: timeWindow}
 		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
 		modelCostTotal += model.CostUSD
 	}
 	if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
 		uk := "model_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
 		snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
 	}
 
 	providerCostTotal := 0.0
 	for _, provider := range agg.Providers {
 		pk := sanitizeMetricID(provider.Provider)
-		snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: "all"}
-		snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: "all"}
-		snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: "all"}
-		snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: "all"}
+		snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: timeWindow}
+		snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: timeWindow}
 		providerCostTotal += provider.CostUSD
 	}
 	if delta := authoritativeCost - providerCostTotal; authoritativeCost > 0 && delta > 0.000001 {
 		uk := "provider_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: "all"}
+		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
 		snap.SetDiagnostic("telemetry_unattributed_provider_cost_usd", fmt.Sprintf("%.6f", delta))
 	}
 
@@ -237,19 +244,36 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 		// to Go's random map iteration order.
 		snap.Metrics["source_"+sk+"_requests_today"] = core.Metric{Used: float64Ptr(source.Requests1d), Unit: "requests", Window: "1d"}
 
-		snap.Metrics["client_"+sk+"_total_tokens"] = core.Metric{Used: float64Ptr(source.Tokens), Unit: "tokens", Window: "all"}
-		snap.Metrics["client_"+sk+"_input_tokens"] = core.Metric{Used: float64Ptr(source.Input), Unit: "tokens", Window: "all"}
-		snap.Metrics["client_"+sk+"_output_tokens"] = core.Metric{Used: float64Ptr(source.Output), Unit: "tokens", Window: "all"}
-		snap.Metrics["client_"+sk+"_cached_tokens"] = core.Metric{Used: float64Ptr(source.Cached), Unit: "tokens", Window: "all"}
-		snap.Metrics["client_"+sk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(source.Reasoning), Unit: "tokens", Window: "all"}
-		snap.Metrics["client_"+sk+"_requests"] = core.Metric{Used: float64Ptr(source.Requests), Unit: "requests", Window: "all"}
-		snap.Metrics["client_"+sk+"_sessions"] = core.Metric{Used: float64Ptr(source.Sessions), Unit: "sessions", Window: "all"}
+		snap.Metrics["client_"+sk+"_total_tokens"] = core.Metric{Used: float64Ptr(source.Tokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_input_tokens"] = core.Metric{Used: float64Ptr(source.Input), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_output_tokens"] = core.Metric{Used: float64Ptr(source.Output), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_cached_tokens"] = core.Metric{Used: float64Ptr(source.Cached), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(source.Reasoning), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_requests"] = core.Metric{Used: float64Ptr(source.Requests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_sessions"] = core.Metric{Used: float64Ptr(source.Sessions), Unit: "sessions", Window: timeWindow}
 	}
 
 	for _, tool := range agg.Tools {
 		tk := sanitizeMetricID(tool.Tool)
-		snap.Metrics["tool_"+tk] = core.Metric{Used: float64Ptr(tool.Calls), Unit: "calls", Window: "all"}
+		snap.Metrics["tool_"+tk] = core.Metric{Used: float64Ptr(tool.Calls), Unit: "calls", Window: timeWindow}
 		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
+	}
+
+	// Emit window-level aggregate metrics for the TUI header/tile display.
+	var windowRequests, windowCost, windowTokens float64
+	for _, model := range agg.Models {
+		windowRequests += model.Requests
+		windowCost += model.CostUSD
+		windowTokens += model.TotalTokens
+	}
+	if windowRequests > 0 {
+		snap.Metrics["window_requests"] = core.Metric{Used: float64Ptr(windowRequests), Unit: "requests", Window: timeWindow}
+	}
+	if windowCost > 0 {
+		snap.Metrics["window_cost"] = core.Metric{Used: float64Ptr(windowCost), Unit: "USD", Window: timeWindow}
+	}
+	if windowTokens > 0 {
+		snap.Metrics["window_tokens"] = core.Metric{Used: float64Ptr(windowTokens), Unit: "tokens", Window: timeWindow}
 	}
 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
@@ -293,7 +317,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg) 
 	snap.SetDiagnostic("telemetry_event_count", fmt.Sprintf("%d", agg.EventCount))
 }
 
-func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string) (*telemetryUsageAgg, error) {
+func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string, timeWindowHours int) (*telemetryUsageAgg, error) {
 	providerIDs = normalizeProviderIDs(providerIDs)
 	if len(providerIDs) == 0 {
 		return &telemetryUsageAgg{}, nil
@@ -302,8 +326,9 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 
 	if accountID != "" {
 		scoped, err := loadUsageViewForFilter(ctx, db, usageFilter{
-			ProviderIDs: providerIDs,
-			AccountID:   accountID,
+			ProviderIDs:     providerIDs,
+			AccountID:       accountID,
+			TimeWindowHours: timeWindowHours,
 		})
 		if err != nil {
 			return nil, err
@@ -317,7 +342,8 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 	}
 
 	fallback, err := loadUsageViewForFilter(ctx, db, usageFilter{
-		ProviderIDs: providerIDs,
+		ProviderIDs:     providerIDs,
+		TimeWindowHours: timeWindowHours,
 	})
 	if err != nil {
 		return nil, err
@@ -583,7 +609,11 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 
 func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryDayPoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	dailyTimeFilter := ""
+	if filter.TimeWindowHours <= 0 {
+		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
+	}
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			date(occurred_at) AS day,
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
@@ -597,11 +627,10 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		FROM deduped_usage
 		WHERE 1=1
 		  AND event_type = 'message_usage'
-		  AND status != 'error'
-		  AND occurred_at >= datetime('now', '-30 day')
+		  AND status != 'error'%s
 		GROUP BY day
 		ORDER BY day ASC
-	`
+	`, dailyTimeFilter)
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage daily query: %w", err)
@@ -621,33 +650,35 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 
 func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, dimension string) (map[string][]core.TimePoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	dailyTimeFilter := ""
+	if filter.TimeWindowHours <= 0 {
+		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
+	}
 	var query string
 
 	switch dimension {
 	case "model":
-		query = usageCTE + `
+		query = usageCTE + fmt.Sprintf(`
 			SELECT date(occurred_at) AS day,
 			       COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), 'unknown') AS dim_key,
 			       SUM(COALESCE(requests, 1)) AS value
 			FROM deduped_usage
 			WHERE 1=1
 			  AND event_type = 'message_usage'
-			  AND status != 'error'
-			  AND occurred_at >= datetime('now', '-30 day')
+			  AND status != 'error'%s
 			GROUP BY day, dim_key
-		`
+		`, dailyTimeFilter)
 	case "source", "client":
-		query = usageCTE + `
+		query = usageCTE + fmt.Sprintf(`
 			SELECT date(occurred_at) AS day,
 			       COALESCE(NULLIF(TRIM(workspace_id), ''), COALESCE(NULLIF(TRIM(source_system), ''), 'unknown')) AS dim_key,
 			       SUM(COALESCE(requests, 1)) AS value
 			FROM deduped_usage
 			WHERE 1=1
 			  AND event_type = 'message_usage'
-			  AND status != 'error'
-			  AND occurred_at >= datetime('now', '-30 day')
+			  AND status != 'error'%s
 			GROUP BY day, dim_key
-		`
+		`, dailyTimeFilter)
 	default:
 		return map[string][]core.TimePoint{}, nil
 	}
@@ -684,7 +715,11 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 
 func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter) (map[string][]core.TimePoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	dailyTimeFilter := ""
+	if filter.TimeWindowHours <= 0 {
+		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
+	}
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			date(occurred_at) AS day,
 			COALESCE(NULLIF(TRIM(workspace_id), ''), COALESCE(NULLIF(TRIM(source_system), ''), 'unknown')) AS source_name,
@@ -697,10 +732,9 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 		FROM deduped_usage
 		WHERE 1=1
 		  AND event_type = 'message_usage'
-		  AND status != 'error'
-		  AND occurred_at >= datetime('now', '-30 day')
+		  AND status != 'error'%s
 		GROUP BY day, source_name
-	`
+	`, dailyTimeFilter)
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage daily client token query: %w", err)
@@ -820,6 +854,9 @@ func usageWhereClause(alias string, filter usageFilter) (string, []any) {
 	if strings.TrimSpace(filter.AccountID) != "" {
 		where += " AND " + prefix + "account_id = ?"
 		args = append(args, strings.TrimSpace(filter.AccountID))
+	}
+	if filter.TimeWindowHours > 0 {
+		where += fmt.Sprintf(" AND %soccurred_at >= datetime('now', '-%d hour')", prefix, filter.TimeWindowHours)
 	}
 	return where, args
 }

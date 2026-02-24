@@ -561,6 +561,23 @@ func nullableFloat64(v *float64) interface{} {
 	return *v
 }
 
+// PruneOldEvents deletes usage_events older than retentionDays and returns the count deleted.
+func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int) (int64, error) {
+	if s == nil || s.db == nil || retentionDays <= 0 {
+		return 0, nil
+	}
+	cutoff := fmt.Sprintf("-%d day", retentionDays)
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM usage_events
+		WHERE occurred_at < datetime('now', ?)
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune old events: %w", err)
+	}
+	deleted, _ := result.RowsAffected()
+	return deleted, nil
+}
+
 func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, error) {
 	if s == nil || s.db == nil || limit <= 0 {
 		return 0, nil

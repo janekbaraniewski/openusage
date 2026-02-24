@@ -23,8 +23,9 @@ type ViewRuntime struct {
 	readModelMu         sync.Mutex
 	lastReadModelErrLog time.Time
 
-	stateMu sync.RWMutex
-	state   DaemonState
+	stateMu    sync.RWMutex
+	state      DaemonState
+	timeWindow string
 }
 
 func NewViewRuntime(
@@ -112,6 +113,24 @@ func (r *ViewRuntime) State() DaemonState {
 	return r.state
 }
 
+func (r *ViewRuntime) SetTimeWindow(tw string) {
+	if r == nil {
+		return
+	}
+	r.stateMu.Lock()
+	r.timeWindow = tw
+	r.stateMu.Unlock()
+}
+
+func (r *ViewRuntime) TimeWindow() string {
+	if r == nil {
+		return ""
+	}
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.timeWindow
+}
+
 func (r *ViewRuntime) ResetEnsureThrottle() {
 	if r == nil {
 		return
@@ -132,7 +151,7 @@ func (r *ViewRuntime) ReadWithFallback(ctx context.Context) map[string]core.Usag
 		client = r.EnsureClient(ctx)
 	}
 
-	snaps, err := r.fetchReadModel(ctx, client, ReadModelRequest{})
+	snaps, err := r.fetchReadModel(ctx, client, ReadModelRequest{TimeWindow: r.TimeWindow()})
 	if err != nil {
 		r.throttledLogError(err)
 		return nil

@@ -22,7 +22,7 @@ func ClassifyEnsureError(err error) DaemonState {
 	case strings.Contains(msg, "not installed"):
 		return DaemonState{
 			Status:      DaemonStatusNotInstalled,
-			Message:     "Daemon service is not installed.",
+			Message:     "Background helper is not set up.",
 			InstallHint: "openusage telemetry daemon install",
 		}
 	case strings.Contains(msg, "out of date"):

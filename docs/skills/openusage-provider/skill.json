@@ -1,0 +1,21 @@
+{
+  "name": "openusage-provider",
+  "description": "Add new AI usage providers to the OpenUsage TUI dashboard",
+  "version": "1.0.0",
+  "scope": "project",
+  "author": "OpenUsage Project",
+  "triggers": [
+    "add provider",
+    "create provider",
+    "new provider",
+    "implement provider",
+    "add ai provider",
+    "add usage provider",
+    "add quota provider"
+  ],
+  "required_context": [
+    "internal/providers/",
+    "internal/core/",
+    "configs/example_settings.json"
+  ]
+}

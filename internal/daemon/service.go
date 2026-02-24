@@ -338,11 +338,7 @@ func InstallService(socketPath string) error {
 	if !manager.IsSupported() {
 		return fmt.Errorf("daemon service install is unsupported on %s", runtime.GOOS)
 	}
-	if err := manager.Install(); err != nil {
-		return err
-	}
-	fmt.Printf("telemetry daemon service installed (%s)\n", manager.Kind)
-	return nil
+	return manager.Install()
 }
 
 func UninstallService(socketPath string) error {
@@ -353,11 +349,7 @@ func UninstallService(socketPath string) error {
 	if !manager.IsSupported() {
 		return fmt.Errorf("daemon service uninstall is unsupported on %s", runtime.GOOS)
 	}
-	if err := manager.Uninstall(); err != nil {
-		return err
-	}
-	fmt.Printf("telemetry daemon service uninstalled (%s)\n", manager.Kind)
-	return nil
+	return manager.Uninstall()
 }
 
 func ServiceStatus(socketPath string) error {

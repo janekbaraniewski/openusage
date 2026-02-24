@@ -40,7 +40,9 @@ type storedLimitEnvelope struct {
 }
 
 type ReadModelOptions struct {
-	ProviderLinks map[string]string
+	ProviderLinks   map[string]string
+	TimeWindowHours int    // 0 = no filter (all data)
+	TimeWindow      string // raw value like "7d", "1h" for metric labels
 }
 
 // ApplyCanonicalTelemetryView hydrates snapshots from canonical telemetry streams.
@@ -81,7 +83,7 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	if err != nil {
 		return snaps, err
 	}
-	return applyCanonicalUsageViewWithDB(ctx, db, merged, links)
+	return applyCanonicalUsageViewWithDB(ctx, db, merged, links, options.TimeWindowHours, options.TimeWindow)
 }
 
 func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {

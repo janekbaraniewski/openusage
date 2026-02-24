@@ -240,6 +240,19 @@ func New() *Provider {
 	}
 }
 
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DetailWidget{
+		Sections: []core.DetailSection{
+			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
+			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
+			{Name: "Spending", Order: 3, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 4, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 5, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 6, Style: core.DetailSectionStyleActivity},
+		},
+	}
+}
+
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
 	if authSnap != nil {

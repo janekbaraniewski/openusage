@@ -72,7 +72,7 @@ func TestRenderSettingsTelemetryBody_ShowsUnmappedProviders(t *testing.T) {
 		},
 	}
 
-	body := m.renderSettingsTelemetryBody(120, 12)
+	body := m.renderSettingsTelemetryBody(120, 30)
 	if !strings.Contains(body, "Detected additional telemetry providers") {
 		t.Fatalf("telemetry settings body missing detection banner: %q", body)
 	}

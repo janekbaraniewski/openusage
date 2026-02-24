@@ -28,6 +28,7 @@ type ReadModelAccount struct {
 type ReadModelRequest struct {
 	Accounts      []ReadModelAccount `json:"accounts"`
 	ProviderLinks map[string]string  `json:"provider_links"`
+	TimeWindow    string             `json:"time_window,omitempty"`
 }
 
 type ReadModelResponse struct {
@@ -52,8 +53,9 @@ type HealthResponse struct {
 }
 
 type cachedReadModelEntry struct {
-	snapshots map[string]core.UsageSnapshot
-	updatedAt time.Time
+	snapshots  map[string]core.UsageSnapshot
+	updatedAt  time.Time
+	timeWindow string
 }
 
 type ingestTally struct {

@@ -149,6 +149,7 @@ func TestBuildReadModelRequest_DedupsAndNormalizes(t *testing.T) {
 			"":            "openrouter",
 			"openai":      "",
 		},
+		"7d",
 	)
 
 	if len(req.Accounts) != 2 {

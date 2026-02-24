@@ -360,6 +360,9 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	if di.detail != "" {
 		topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
 	}
+	if wl := windowActivityLine(snap, m.timeWindow); wl != "" {
+		topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
+	}
 	if len(topUsageLines) > 0 {
 		sectionsByID[core.DashboardSectionTopUsageProgress] = section{withSectionPadding(topUsageLines)}
 	}
