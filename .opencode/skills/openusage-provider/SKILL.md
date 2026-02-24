@@ -1,3 +1,8 @@
+---
+name: openusage-provider
+description: Run the openusage-provider skill for provider-specific guidance
+---
+
 # Skill: Openusage Provider
 
 > **Invocation**: Run the openusage-provider skill

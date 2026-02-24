@@ -1,3 +1,8 @@
+---
+name: add-new-provider
+description: Add a new AI provider to the OpenUsage dashboard
+---
+
 # Skill: Add New Provider
 
 > **Invocation**: When a user asks to add, create, or implement a new AI provider.
