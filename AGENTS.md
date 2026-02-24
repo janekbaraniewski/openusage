@@ -134,13 +134,19 @@ configs/                Example configuration file
 
 ## Adding a New Provider
 
-1. Create `internal/providers/<name>/` with `<name>.go` and `<name>_test.go`.
-2. Define a `Provider` struct implementing `core.QuotaProvider` (ID, Describe, Fetch).
-3. Constructor: `func New() *Provider { return &Provider{} }`.
-4. Register in `internal/providers/registry.go` → `AllProviders()`.
-5. Add auto-detection logic in `internal/detect/detect.go` if applicable.
-6. Use `internal/parsers/` helpers for HTTP header-based providers.
-7. Return `StatusAuth` snapshots (not errors) when API keys are missing.
+For the **full specification** — including a mandatory user quiz, research phase,
+implementation templates, widget design guidelines, test templates, and verification
+checklist — see: **[`docs/skills/add-new-provider.md`](docs/skills/add-new-provider.md)**
+
+Quick summary of the phases:
+
+1. **Phase 0 — Quiz**: Gather provider name, auth method, env var, data sources, metrics, docs URL, color role.
+2. **Phase 1 — Research**: Study the provider's API docs, headers, JSON schemas, error codes.
+3. **Phase 2 — Create package**: `internal/providers/<name>/` with `<name>.go`, `<name>_test.go`, optional `widget.go`.
+4. **Phase 3 — Widget**: Configure dashboard tile (gauges, compact rows, color role, label overrides).
+5. **Phase 4 — Register**: Add to `registry.go`, `detect.go`, `example_settings.json`.
+6. **Phase 5 — Tests**: Minimum 3 tests (success, auth-required, rate-limited) using `httptest.NewServer`.
+7. **Phase 6 — Verify**: `go build`, `go test`, `make vet`.
 
 ## Security
 
@@ -152,3 +158,28 @@ configs/                Example configuration file
 
 - Short, imperative subjects (e.g., "Add Gemini CLI parser", "Fix rate limit header parsing").
 - Include test results (`go test ./...`) in PR descriptions.
+
+
+## Skills
+A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill.
+### Available skills
+- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /Users/janekbaraniewski/.codex/skills/.system/skill-creator/SKILL.md)
+- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /Users/janekbaraniewski/.codex/skills/.system/skill-installer/SKILL.md)
+### How to use skills
+- Discovery: The list above is the skills available in this session (name + description + file path). Skill bodies live on disk at the listed paths.
+- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
+- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.
+- How to use a skill (progressive disclosure):
+  1) After deciding to use a skill, open its `SKILL.md`. Read only enough to follow the workflow.
+  2) When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the skill directory listed above first, and only consider other paths if needed.
+  3) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
+  4) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
+  5) If `assets/` or templates exist, reuse them instead of recreating from scratch.
+- Coordination and sequencing:
+  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
+  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.
+- Context hygiene:
+  - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.
+  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
+  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
+- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.
