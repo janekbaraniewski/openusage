@@ -15,6 +15,19 @@ type Spool struct {
 	dir string
 }
 
+type SpoolCleanupPolicy struct {
+	MaxAge   time.Duration
+	MaxFiles int
+	MaxBytes int64
+}
+
+type SpoolCleanupResult struct {
+	RemovedFiles   int
+	RemovedBytes   int64
+	RemainingFiles int
+	RemainingBytes int64
+}
+
 type SpoolRecord struct {
 	SpoolID       string          `json:"spool_id"`
 	CreatedAt     time.Time       `json:"created_at"`
@@ -119,6 +132,83 @@ func (s *Spool) MarkFailed(path, lastError string) error {
 	rec.Attempt++
 	rec.LastError = lastError
 	return writeSpoolFile(path, rec)
+}
+
+func (s *Spool) Cleanup(policy SpoolCleanupPolicy) (SpoolCleanupResult, error) {
+	if s == nil {
+		return SpoolCleanupResult{}, nil
+	}
+	files, err := filepath.Glob(filepath.Join(s.dir, "*.jsonl"))
+	if err != nil {
+		return SpoolCleanupResult{}, fmt.Errorf("telemetry spool: cleanup glob files: %w", err)
+	}
+	sort.Strings(files)
+
+	type spoolFile struct {
+		path string
+		size int64
+		mod  time.Time
+	}
+	now := time.Now().UTC()
+	entries := make([]spoolFile, 0, len(files))
+	var totalBytes int64
+	for _, path := range files {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return SpoolCleanupResult{}, fmt.Errorf("telemetry spool: cleanup stat %s: %w", path, statErr)
+		}
+		size := info.Size()
+		totalBytes += size
+		entries = append(entries, spoolFile{
+			path: path,
+			size: size,
+			mod:  info.ModTime().UTC(),
+		})
+	}
+
+	remove := func(entry spoolFile, result *SpoolCleanupResult) {
+		if err := os.Remove(entry.path); err == nil || os.IsNotExist(err) {
+			result.RemovedFiles++
+			result.RemovedBytes += entry.size
+		}
+	}
+
+	var result SpoolCleanupResult
+	kept := make([]spoolFile, 0, len(entries))
+
+	for _, entry := range entries {
+		if policy.MaxAge > 0 && now.Sub(entry.mod) > policy.MaxAge {
+			remove(entry, &result)
+			totalBytes -= entry.size
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	entries = kept
+
+	for len(entries) > 0 && policy.MaxFiles > 0 && len(entries) > policy.MaxFiles {
+		entry := entries[0]
+		remove(entry, &result)
+		totalBytes -= entry.size
+		entries = entries[1:]
+	}
+
+	for len(entries) > 0 && policy.MaxBytes > 0 && totalBytes > policy.MaxBytes {
+		entry := entries[0]
+		remove(entry, &result)
+		totalBytes -= entry.size
+		entries = entries[1:]
+	}
+
+	if totalBytes < 0 {
+		totalBytes = 0
+	}
+	result.RemainingFiles = len(entries)
+	result.RemainingBytes = totalBytes
+	return result, nil
 }
 
 func readSpoolFile(path string) (SpoolRecord, bool) {

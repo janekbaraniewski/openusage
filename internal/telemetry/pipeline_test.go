@@ -71,8 +71,8 @@ func TestPipeline_EnqueueAndFlush(t *testing.T) {
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawCount); err != nil {
 		t.Fatalf("count raw events: %v", err)
 	}
-	if rawCount != 2 {
-		t.Fatalf("raw events = %d, want 2", rawCount)
+	if rawCount != 1 {
+		t.Fatalf("raw events = %d, want 1", rawCount)
 	}
 	var canonicalCount int64
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM usage_events`).Scan(&canonicalCount); err != nil {

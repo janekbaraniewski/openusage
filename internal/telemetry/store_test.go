@@ -93,8 +93,8 @@ func TestStoreIngest_IdempotentByDedupKey(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawCount); err != nil {
 		t.Fatalf("count raw rows: %v", err)
 	}
-	if rawCount != 2 {
-		t.Fatalf("raw row count = %d, want 2", rawCount)
+	if rawCount != 1 {
+		t.Fatalf("raw row count = %d, want 1", rawCount)
 	}
 
 	var canonicalCount int
@@ -335,5 +335,88 @@ func TestStoreIngest_DedupStableIDIgnoresAccountProviderAgentDrift(t *testing.T)
 	}
 	if canonicalCount != 1 {
 		t.Fatalf("canonical row count = %d, want 1", canonicalCount)
+	}
+}
+
+func TestStorePruneOrphanRawEvents_RemovesOnlyUnreferencedRows(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	req := IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    time.Now().UTC(),
+		ProviderID:    "openai",
+		AccountID:     "codex",
+		AgentName:     "codex",
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		EventType:     EventTypeMessageUsage,
+		InputTokens:   int64Ptr(12),
+		OutputTokens:  int64Ptr(3),
+		TotalTokens:   int64Ptr(15),
+		Payload:       map[string]any{"ok": true},
+	}
+	if _, err := store.Ingest(context.Background(), req); err != nil {
+		t.Fatalf("ingest canonical event: %v", err)
+	}
+
+	if _, err := db.Exec(
+		`INSERT INTO usage_raw_events (
+			raw_event_id, ingested_at, source_system, source_channel, source_schema_version,
+			source_payload, source_payload_hash, workspace_id, agent_session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"raw-orphan-1", now, "opencode", "sqlite", "test", `{"x":1}`, "hash-1", "", "",
+	); err != nil {
+		t.Fatalf("insert orphan raw-1: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO usage_raw_events (
+			raw_event_id, ingested_at, source_system, source_channel, source_schema_version,
+			source_payload, source_payload_hash, workspace_id, agent_session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"raw-orphan-2", now, "opencode", "sqlite", "test", `{"x":2}`, "hash-2", "", "",
+	); err != nil {
+		t.Fatalf("insert orphan raw-2: %v", err)
+	}
+
+	removed, err := store.PruneOrphanRawEvents(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("prune orphan raw events: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+
+	var rawCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawCount); err != nil {
+		t.Fatalf("count raw rows: %v", err)
+	}
+	if rawCount != 2 {
+		t.Fatalf("raw rows after prune = %d, want 2", rawCount)
+	}
+
+	removed, err = store.PruneOrphanRawEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("second prune orphan raw events: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("second removed = %d, want 1", removed)
+	}
+
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawCount); err != nil {
+		t.Fatalf("count raw rows after second prune: %v", err)
+	}
+	if rawCount != 1 {
+		t.Fatalf("raw rows after second prune = %d, want 1", rawCount)
 	}
 }

@@ -137,6 +137,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
+	go svc.runSpoolMaintenanceLoop(ctx)
 
 	return svc, nil
 }
@@ -393,6 +394,96 @@ func (s *Service) runCollectLoop(ctx context.Context) {
 	}
 }
 
+func (s *Service) runSpoolMaintenanceLoop(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	flushTicker := time.NewTicker(5 * time.Second)
+	cleanupTicker := time.NewTicker(60 * time.Second)
+	defer flushTicker.Stop()
+	defer cleanupTicker.Stop()
+
+	s.infof("spool_loop_start", "flush_interval=%s cleanup_interval=%s", 5*time.Second, 60*time.Second)
+	s.flushSpoolBacklog(ctx, 10000)
+	s.cleanupSpool(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.infof("spool_loop_stop", "reason=context_done")
+			return
+		case <-flushTicker.C:
+			s.flushSpoolBacklog(ctx, 10000)
+		case <-cleanupTicker.C:
+			s.cleanupSpool(ctx)
+		}
+	}
+}
+
+func (s *Service) flushSpoolBacklog(ctx context.Context, maxTotal int) {
+	if s == nil || s.pipeline == nil {
+		return
+	}
+
+	s.pipelineMu.Lock()
+	s.ingestMu.Lock()
+	flush, warnings := FlushInBatches(ctx, s.pipeline, maxTotal)
+	s.ingestMu.Unlock()
+	s.pipelineMu.Unlock()
+
+	if flush.Processed > 0 || flush.Failed > 0 || len(warnings) > 0 {
+		s.infof(
+			"spool_flush",
+			"processed=%d ingested=%d deduped=%d failed=%d warnings=%d",
+			flush.Processed, flush.Ingested, flush.Deduped, flush.Failed, len(warnings),
+		)
+		for _, w := range warnings {
+			s.warnf("spool_flush_warning", "message=%q", w)
+		}
+	}
+}
+
+func (s *Service) cleanupSpool(ctx context.Context) {
+	if s == nil || strings.TrimSpace(s.cfg.SpoolDir) == "" {
+		return
+	}
+
+	policy := telemetry.SpoolCleanupPolicy{
+		MaxAge:   96 * time.Hour,
+		MaxFiles: 25000,
+		MaxBytes: 768 << 20, // 768 MB
+	}
+
+	s.pipelineMu.Lock()
+	result, err := telemetry.NewSpool(s.cfg.SpoolDir).Cleanup(policy)
+	s.pipelineMu.Unlock()
+	if err != nil {
+		if s.shouldLog("spool_cleanup_error", 20*time.Second) {
+			s.warnf("spool_cleanup_error", "error=%v", err)
+		}
+		return
+	}
+	if result.RemovedFiles > 0 {
+		s.infof(
+			"spool_cleanup",
+			"removed_files=%d removed_bytes=%d remaining_files=%d remaining_bytes=%d",
+			result.RemovedFiles,
+			result.RemovedBytes,
+			result.RemainingFiles,
+			result.RemainingBytes,
+		)
+		return
+	}
+	if s.shouldLog("spool_cleanup_steady", 30*time.Minute) {
+		s.infof(
+			"spool_cleanup_steady",
+			"remaining_files=%d remaining_bytes=%d",
+			result.RemainingFiles,
+			result.RemainingBytes,
+		)
+	}
+}
+
 func (s *Service) collectAndFlush(ctx context.Context) {
 	if s == nil {
 		return
@@ -431,11 +522,40 @@ func (s *Service) collectAndFlush(ctx context.Context) {
 		for _, w := range warnings {
 			s.warnf("collect_warning", "message=%q", w)
 		}
+		s.pruneTelemetryOrphans(ctx)
 		return
 	}
 
 	if durationMs >= 1500 && s.shouldLog("collect_slow", 30*time.Second) {
 		s.infof("collect_idle_slow", "duration_ms=%d", durationMs)
+	}
+
+	// Keep raw telemetry storage bounded by pruning orphan raw rows created by
+	// historical dedup paths and intermittent duplicate ingestion races.
+	s.pruneTelemetryOrphans(ctx)
+}
+
+func (s *Service) pruneTelemetryOrphans(ctx context.Context) {
+	if s == nil || s.store == nil {
+		return
+	}
+	if !s.shouldLog("prune_orphan_raw_events_tick", 45*time.Second) {
+		return
+	}
+
+	const pruneBatchSize = 10000
+	pruneCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	removed, err := s.store.PruneOrphanRawEvents(pruneCtx, pruneBatchSize)
+	if err != nil {
+		if s.shouldLog("prune_orphan_raw_events_error", 20*time.Second) {
+			s.warnf("prune_orphan_raw_events_error", "error=%v", err)
+		}
+		return
+	}
+	if removed > 0 {
+		s.infof("prune_orphan_raw_events", "removed=%d batch_size=%d", removed, pruneBatchSize)
 	}
 }
 

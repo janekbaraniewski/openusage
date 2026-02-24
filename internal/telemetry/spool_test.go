@@ -2,8 +2,10 @@ package telemetry
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,5 +123,100 @@ func TestSpoolMarkFailed_IncrementsAttempt(t *testing.T) {
 	}
 	if items[0].Record.LastError != "timeout" {
 		t.Fatalf("last_error = %q, want timeout", items[0].Record.LastError)
+	}
+}
+
+func TestSpoolCleanup_RemovesOldByAge(t *testing.T) {
+	dir := t.TempDir()
+	s := NewSpool(dir)
+
+	oldPath, err := s.Append(SpoolRecord{
+		SpoolID:       "old",
+		CreatedAt:     time.Now().Add(-10 * time.Hour).UTC(),
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelSQLite,
+		Payload:       json.RawMessage(`{"x":1}`),
+	})
+	if err != nil {
+		t.Fatalf("append old: %v", err)
+	}
+	newPath, err := s.Append(SpoolRecord{
+		SpoolID:       "new",
+		CreatedAt:     time.Now().UTC(),
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelHook,
+		Payload:       json.RawMessage(`{"x":2}`),
+	})
+	if err != nil {
+		t.Fatalf("append new: %v", err)
+	}
+
+	oldTS := time.Now().Add(-10 * time.Hour)
+	if err := os.Chtimes(oldPath, oldTS, oldTS); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+	newTS := time.Now()
+	if err := os.Chtimes(newPath, newTS, newTS); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+
+	result, err := s.Cleanup(SpoolCleanupPolicy{MaxAge: 2 * time.Hour})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.RemovedFiles != 1 {
+		t.Fatalf("removed_files = %d, want 1", result.RemovedFiles)
+	}
+
+	items, err := s.ReadOldest(10)
+	if err != nil {
+		t.Fatalf("ReadOldest: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if items[0].Record.SpoolID != "new" {
+		t.Fatalf("remaining spool id = %q, want new", items[0].Record.SpoolID)
+	}
+}
+
+func TestSpoolCleanup_EnforcesFileAndByteCaps(t *testing.T) {
+	dir := t.TempDir()
+	s := NewSpool(dir)
+
+	makePayload := func(size int) json.RawMessage {
+		return json.RawMessage(`{"blob":"` + strings.Repeat("x", size) + `"}`)
+	}
+
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		_, err := s.Append(SpoolRecord{
+			SpoolID:       fmt.Sprintf("id-%d", i),
+			CreatedAt:     now.Add(time.Duration(i) * time.Second),
+			SourceSystem:  SourceSystem("opencode"),
+			SourceChannel: SourceChannelSQLite,
+			Payload:       makePayload(500),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Keep at most 3 files and ~2KB total payload envelope.
+	result, err := s.Cleanup(SpoolCleanupPolicy{
+		MaxFiles: 3,
+		MaxBytes: 2200,
+	})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.RemainingFiles > 3 {
+		t.Fatalf("remaining_files = %d, want <= 3", result.RemainingFiles)
+	}
+	if result.RemainingBytes > 2200 {
+		t.Fatalf("remaining_bytes = %d, want <= 2200", result.RemainingBytes)
+	}
+	if result.RemovedFiles < 2 {
+		t.Fatalf("removed_files = %d, want >= 2", result.RemovedFiles)
 	}
 }

@@ -101,6 +101,7 @@ func (s *Store) Init(ctx context.Context) error {
 			FOREIGN KEY(raw_event_id) REFERENCES usage_raw_events(raw_event_id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_occurred_at ON usage_events(occurred_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_events_raw_event_id ON usage_events(raw_event_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_window ON usage_events(provider_id, account_id, occurred_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_account_type_occurred ON usage_events(provider_id, account_id, event_type, occurred_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_type_provider ON usage_events(event_type, provider_id);`,
@@ -157,6 +158,25 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 		return IngestResult{}, fmt.Errorf("telemetry: begin tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	existing, found, err := findEventByDedupKey(ctx, tx, dedupKey)
+	if err != nil {
+		return IngestResult{}, fmt.Errorf("telemetry: lookup dedup key: %w", err)
+	}
+	if found {
+		if enrichErr := enrichEventByDedupKey(ctx, tx, dedupKey, norm); enrichErr != nil {
+			return IngestResult{}, fmt.Errorf("telemetry: enrich dedup event: %w", enrichErr)
+		}
+		if commitErr := tx.Commit(); commitErr != nil {
+			return IngestResult{}, fmt.Errorf("telemetry: commit dedup tx: %w", commitErr)
+		}
+		return IngestResult{
+			Status:     "accepted",
+			Deduped:    true,
+			EventID:    existing.EventID,
+			RawEventID: existing.RawEventID,
+		}, nil
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO usage_raw_events (
@@ -216,9 +236,12 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 	)
 	if err != nil {
 		if isUniqueConstraintError(err, "usage_events.dedup_key") {
-			existingID, lookupErr := findEventIDByDedupKey(ctx, tx, dedupKey)
+			existing, found, lookupErr := findEventByDedupKey(ctx, tx, dedupKey)
 			if lookupErr != nil {
-				return IngestResult{}, fmt.Errorf("telemetry: lookup dedup event id: %w", lookupErr)
+				return IngestResult{}, fmt.Errorf("telemetry: lookup dedup event: %w", lookupErr)
+			}
+			if !found {
+				return IngestResult{}, fmt.Errorf("telemetry: dedup event disappeared for key %q", dedupKey)
 			}
 			if enrichErr := enrichEventByDedupKey(ctx, tx, dedupKey, norm); enrichErr != nil {
 				return IngestResult{}, fmt.Errorf("telemetry: enrich dedup event: %w", enrichErr)
@@ -229,8 +252,8 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 			return IngestResult{
 				Status:     "accepted",
 				Deduped:    true,
-				EventID:    existingID,
-				RawEventID: rawEventID,
+				EventID:    existing.EventID,
+				RawEventID: existing.RawEventID,
 			}, nil
 		}
 		return IngestResult{}, fmt.Errorf("telemetry: insert canonical event: %w", err)
@@ -248,12 +271,25 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 	}, nil
 }
 
-func findEventIDByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string) (string, error) {
-	var eventID string
-	if err := tx.QueryRowContext(ctx, `SELECT event_id FROM usage_events WHERE dedup_key = ?`, dedupKey).Scan(&eventID); err != nil {
-		return "", err
+type storedDedupEventRef struct {
+	EventID    string
+	RawEventID string
+}
+
+func findEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string) (storedDedupEventRef, bool, error) {
+	var ref storedDedupEventRef
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT event_id, raw_event_id FROM usage_events WHERE dedup_key = ? LIMIT 1`,
+		dedupKey,
+	).Scan(&ref.EventID, &ref.RawEventID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return storedDedupEventRef{}, false, nil
+		}
+		return storedDedupEventRef{}, false, err
 	}
-	return eventID, nil
+	return ref, true, nil
 }
 
 type storedCanonicalEvent struct {
@@ -523,6 +559,31 @@ func nullableFloat64(v *float64) interface{} {
 		return nil
 	}
 	return *v
+}
+
+func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, error) {
+	if s == nil || s.db == nil || limit <= 0 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM usage_raw_events
+		WHERE raw_event_id IN (
+			SELECT r.raw_event_id
+			FROM usage_raw_events r
+			LEFT JOIN usage_events e ON e.raw_event_id = r.raw_event_id
+			WHERE e.raw_event_id IS NULL
+			ORDER BY r.ingested_at ASC
+			LIMIT ?
+		)
+	`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune orphan raw events: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune orphan raw events rows affected: %w", err)
+	}
+	return n, nil
 }
 
 func newUUID() (string, error) {

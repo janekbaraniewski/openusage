@@ -430,8 +430,6 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 							"time_created": timeCreated,
 							"time_updated": timeUpdated,
 						},
-						"message": messagePayload,
-						"part":    partPayload,
 						"context": contextSummary,
 					},
 				})
@@ -555,7 +553,6 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 						"time_created": timeCreated,
 						"time_updated": timeUpdated,
 					},
-					"message": payload,
 					"context": contextSummary,
 				},
 			})
@@ -665,8 +662,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 					"time_created": timeCreated,
 					"time_updated": timeUpdated,
 				},
-				"part":    partPayload,
-				"message": messagePayload,
+				"status": statusRaw,
 			},
 		})
 	}
@@ -1297,10 +1293,7 @@ func mergePayload(rawPayload map[string]any, normalized map[string]any) map[stri
 	if len(rawPayload) == 0 && len(normalized) == 0 {
 		return map[string]any{}
 	}
-	out := make(map[string]any, len(rawPayload)+1)
-	for key, value := range rawPayload {
-		out[key] = value
-	}
+	out := make(map[string]any, 8)
 	if len(normalized) > 0 {
 		out["_normalized"] = normalized
 		for key, value := range normalized {
@@ -1308,6 +1301,82 @@ func mergePayload(rawPayload map[string]any, normalized map[string]any) map[stri
 				out[key] = value
 			}
 		}
+	}
+	rawSummary := summarizeRawPayload(rawPayload)
+	if len(rawSummary) > 0 {
+		out["_raw"] = rawSummary
+		for key, value := range rawSummary {
+			if _, exists := out[key]; !exists {
+				out[key] = value
+			}
+		}
+	}
+	return out
+}
+
+func summarizeRawPayload(rawPayload map[string]any) map[string]any {
+	if len(rawPayload) == 0 {
+		return map[string]any{}
+	}
+	out := map[string]any{
+		"raw_keys": len(rawPayload),
+	}
+
+	if hook := firstPathString(rawPayload, []string{"hook"}); hook != "" {
+		out["hook"] = hook
+	}
+	if typ := firstPathString(rawPayload, []string{"type"}); typ != "" {
+		out["type"] = typ
+	}
+
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"hook"}),
+		firstPathString(rawPayload, []string{"event"}),
+		firstPathString(rawPayload, []string{"type"}),
+	); value != "" {
+		out["event"] = value
+	}
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"sessionID"}),
+		firstPathString(rawPayload, []string{"session_id"}),
+		firstPathString(rawPayload, []string{"input", "sessionID"}),
+		firstPathString(rawPayload, []string{"output", "message", "sessionID"}),
+	); value != "" {
+		out["session_id"] = value
+	}
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"messageID"}),
+		firstPathString(rawPayload, []string{"message_id"}),
+		firstPathString(rawPayload, []string{"input", "messageID"}),
+		firstPathString(rawPayload, []string{"output", "message", "id"}),
+	); value != "" {
+		out["message_id"] = value
+	}
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"toolCallID"}),
+		firstPathString(rawPayload, []string{"tool_call_id"}),
+		firstPathString(rawPayload, []string{"input", "callID"}),
+	); value != "" {
+		out["tool_call_id"] = value
+	}
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"providerID"}),
+		firstPathString(rawPayload, []string{"provider_id"}),
+		firstPathString(rawPayload, []string{"input", "model", "providerID"}),
+		firstPathString(rawPayload, []string{"output", "message", "model", "providerID"}),
+	); value != "" {
+		out["provider_id"] = value
+	}
+	if value := shared.FirstNonEmpty(
+		firstPathString(rawPayload, []string{"modelID"}),
+		firstPathString(rawPayload, []string{"model_id"}),
+		firstPathString(rawPayload, []string{"input", "model", "modelID"}),
+		firstPathString(rawPayload, []string{"output", "message", "model", "modelID"}),
+	); value != "" {
+		out["model_id"] = value
+	}
+	if ts := firstPathString(rawPayload, []string{"timestamp"}, []string{"time"}); ts != "" {
+		out["timestamp"] = ts
 	}
 	return out
 }

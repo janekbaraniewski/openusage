@@ -100,8 +100,8 @@ func TestQuotaSnapshotIngestor_DedupsBySnapshotTurnID(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_events`).Scan(&canonicalCount); err != nil {
 		t.Fatalf("count usage_events: %v", err)
 	}
-	if rawCount != 2 {
-		t.Fatalf("raw count = %d, want 2", rawCount)
+	if rawCount != 1 {
+		t.Fatalf("raw count = %d, want 1", rawCount)
 	}
 	if canonicalCount != 1 {
 		t.Fatalf("canonical count = %d, want 1", canonicalCount)
