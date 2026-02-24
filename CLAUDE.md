@@ -107,6 +107,36 @@ Background data collection system with server/client architecture:
 
 Scans for installed tools (Cursor, Claude Code, Codex, Copilot, Gemini CLI, Aider, Ollama) and environment variables for API keys. Auto-detected accounts merge with manually configured ones; configured accounts take precedence.
 
+## Skills
+
+### Full Lifecycle (end-to-end)
+
+`/develop-feature <name>` — Orchestrates the full lifecycle from idea to PR. Chains all skills below with user decision points between each phase. Start here for new features.
+
+Full specification: `docs/skills/develop-feature/SKILL.md`
+
+### Individual Skills
+
+Use these directly when you need a specific phase, or let `/develop-feature` chain them:
+
+| Command | Skill | Purpose |
+|---------|-------|---------|
+| `/design-feature <name>` | [SKILL.md](docs/skills/design-feature/SKILL.md) | Design a feature: quiz, explore codebase, write design doc with tasks |
+| `/review-design <name>` | [SKILL.md](docs/skills/review-design/SKILL.md) | Validate design doc against codebase, fix discrepancies via quiz loop |
+| `/implement-feature <name>` | [SKILL.md](docs/skills/implement-feature/SKILL.md) | Execute design tasks with tests, parallel where possible |
+| `/validate-feature <name>` | [SKILL.md](docs/skills/validate-feature/SKILL.md) | Verify build, tests, design compliance, code quality |
+| `/iterate-feature <name>` | [SKILL.md](docs/skills/iterate-feature/SKILL.md) | Triage and fix issues from validation or PR review |
+| `/finalize-feature <name>` | [SKILL.md](docs/skills/finalize-feature/SKILL.md) | Create branch, commit, open PR with summary |
+| `/add-new-provider <name>` | [add-new-provider.md](docs/skills/add-new-provider.md) | Add a new AI provider (specialized 7-phase process) |
+
+### Lifecycle Flow
+
+```
+/design-feature  →  /review-design  →  /implement-feature  →  /validate-feature  →  /iterate-feature  →  /finalize-feature
+```
+
+Each skill has a design doc in `docs/skills/<name>/` and a slash command in `.claude/commands/<name>.md`.
+
 ## Key design notes
 
 - CGO is required due to `github.com/mattn/go-sqlite3` (Cursor provider + telemetry store). This affects cross-compilation.
@@ -127,4 +157,4 @@ Scans for installed tools (Cursor, Claude Code, Codex, Copilot, Gemini CLI, Aide
 
 ## Adding a new provider
 
-Follow the full specification in `docs/skills/add-new-provider.md`. It defines a mandatory 7-phase process: Quiz -> Research -> Implement -> Widget -> Register -> Test -> Verify. Do not skip the quiz phase.
+Follow `/add-new-provider <name>`. See the Skills section above for details.

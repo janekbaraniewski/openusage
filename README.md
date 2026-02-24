@@ -102,6 +102,31 @@ Configured accounts are merged with auto-detected accounts, and configured ones 
 | xAI (Grok) | `XAI_API_KEY` | |
 | OpenCode Zen | `ZEN_API_KEY` / `OPENCODE_API_KEY` | |
 | Google Gemini API | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | |
+| Alibaba Cloud | `ALIBABA_CLOUD_API_KEY` | |
+| Ollama | `OLLAMA_HOST` / `OLLAMA_API_KEY` | |
+
+## Telemetry & Daemon
+
+OpenUsage includes a background daemon for continuous monitoring and integration with other tools via hooks.
+
+### Start the daemon
+
+```bash
+# Run in foreground
+openusage telemetry daemon
+
+# Install as system service
+openusage telemetry daemon install
+```
+
+### Ingest events via hooks
+
+You can pipe JSON payloads to the daemon for supported providers (e.g., `opencode`, `codex`, `claude_code`).
+
+```bash
+# Example: Send a hook event
+cat event.json | openusage telemetry hook opencode
+```
 
 ## Keybindings
 
@@ -122,6 +147,14 @@ make lint
 make test
 make run
 make build
+```
+
+### Run Demo
+
+To preview the dashboard with simulated data:
+
+```bash
+make demo
 ```
 
 ## License
