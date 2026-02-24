@@ -45,4 +45,3 @@ func TestTileShouldRenderLoading_ErrorStatus(t *testing.T) {
 		t.Fatal("tileShouldRenderLoading(error) = true, want false")
 	}
 }
-

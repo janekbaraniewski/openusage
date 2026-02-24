@@ -25,4 +25,3 @@ func TestResolveLoadingMessage_IgnoresConnectedPseudoMessage(t *testing.T) {
 		t.Fatalf("resolveLoadingMessage() = %q, want fallback for connected", got)
 	}
 }
-
