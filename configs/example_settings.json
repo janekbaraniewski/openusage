@@ -5,6 +5,10 @@
     "crit_threshold": 0.05
   },
   "theme": "Gruvbox",
+  "data": {
+    "time_window": "7d",
+    "retention_days": 30
+  },
   "experimental": {
     "analytics": false
   },

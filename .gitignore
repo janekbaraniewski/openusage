@@ -20,8 +20,8 @@ vendor/
 *.swp
 *.swo
 *~
-.claude/
-.opencode/
+#.claude/
+#.opencode/
 
 # OS
 .DS_Store
