@@ -28,10 +28,18 @@ func DetailTabs(snap core.UsageSnapshot) []string {
 			tabs = append(tabs, g.title)
 		}
 	}
+	// Add Models tab if model data is available.
+	if len(snap.ModelUsage) > 0 || hasModelCostMetrics(snap) {
+		tabs = append(tabs, "Models")
+	}
+	// Add Trends tab if daily series has enough data for a chart.
+	if hasChartableSeries(snap.DailySeries) {
+		tabs = append(tabs, "Trends")
+	}
 	if len(snap.Resets) > 0 {
 		tabs = append(tabs, "Timers")
 	}
-	if len(snap.Raw) > 0 {
+	if len(snap.Attributes) > 0 || len(snap.Diagnostics) > 0 || len(snap.Raw) > 0 {
 		tabs = append(tabs, "Info")
 	}
 	return tabs
@@ -65,15 +73,36 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 	showAll := tabName == "All"
 	showTimers := tabName == "Timers" || showAll
 	showInfo := tabName == "Info" || showAll
-	meta := snapshotMetaEntries(snap)
+
+	// Extract burn rate from metrics for spending section.
+	burnRate := float64(0)
+	if brm, ok := snap.Metrics["burn_rate"]; ok && brm.Used != nil {
+		burnRate = *brm.Used
+	}
 
 	if len(snap.Metrics) > 0 {
 		groups := groupMetrics(snap.Metrics, widget, details)
 		for _, group := range groups {
 			if showAll || group.title == tabName {
-				renderMetricGroup(&sb, group, widget, details, w, warnThresh, critThresh, snap.DailySeries)
+				renderMetricGroup(&sb, group, widget, details, w, warnThresh, critThresh, snap.DailySeries, burnRate)
 			}
 		}
+	}
+
+	// Models section — dispatched directly (needs full snapshot, not just metric entries).
+	showModels := tabName == "Models" || showAll
+	if showModels && (len(snap.ModelUsage) > 0 || hasModelCostMetrics(snap)) {
+		sb.WriteString("\n")
+		renderDetailSectionHeader(&sb, "Models", w)
+		renderModelsSection(&sb, snap, widget, w)
+	}
+
+	// Trends section — dispatched directly (needs full snapshot DailySeries).
+	showTrends := tabName == "Trends" || showAll
+	if showTrends && hasChartableSeries(snap.DailySeries) {
+		sb.WriteString("\n")
+		renderDetailSectionHeader(&sb, "Trends", w)
+		renderTrendsSection(&sb, snap, widget, w)
 	}
 
 	if showTimers && len(snap.Resets) > 0 {
@@ -81,11 +110,10 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 		renderTimersSection(&sb, snap.Resets, widget, w)
 	}
 
-	if showInfo && len(meta) > 0 {
+	hasInfoData := len(snap.Attributes) > 0 || len(snap.Diagnostics) > 0 || len(snap.Raw) > 0
+	if showInfo && hasInfoData {
 		sb.WriteString("\n")
-		count := len(meta)
-		renderDetailSectionHeader(&sb, fmt.Sprintf("› Details (%d entries)", count), w)
-		renderRawData(&sb, meta, widget, w)
+		renderInfoSection(&sb, snap, widget, w)
 	}
 
 	age := time.Since(snap.Timestamp)
@@ -455,21 +483,27 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, details core.DetailWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint) {
+func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, details core.DetailWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint, burnRate float64) {
 	sb.WriteString("\n")
 	renderDetailSectionHeader(sb, group.title, w)
 
+	// Zero-value suppression: filter out zero-value metrics when the provider opts in.
+	entries := group.entries
+	if widget.SuppressZeroNonUsageMetrics || len(widget.SuppressZeroMetricKeys) > 0 {
+		entries = filterNonZeroEntries(entries, widget)
+	}
+
 	switch details.SectionStyle(group.title) {
 	case core.DetailSectionStyleUsage:
-		renderUsageSection(sb, group.entries, w, warnThresh, critThresh)
+		renderUsageSection(sb, entries, w, warnThresh, critThresh)
 	case core.DetailSectionStyleSpending:
-		renderSpendingSection(sb, group.entries, w)
+		renderSpendingSection(sb, entries, w, burnRate)
 	case core.DetailSectionStyleTokens:
-		renderTokensSection(sb, group.entries, widget, w, series)
+		renderTokensSection(sb, entries, widget, w, series)
 	case core.DetailSectionStyleActivity:
-		renderActivitySection(sb, group.entries, widget, w, series)
+		renderActivitySection(sb, entries, widget, w, series)
 	default:
-		renderListSection(sb, group.entries, w)
+		renderListSection(sb, entries, w)
 	}
 }
 
@@ -509,8 +543,9 @@ func renderUsageSection(sb *strings.Builder, entries []metricEntry, w int, warnT
 	}
 }
 
-func renderSpendingSection(sb *strings.Builder, entries []metricEntry, w int) {
+func renderSpendingSection(sb *strings.Builder, entries []metricEntry, w int, burnRate float64) {
 	labelW := sectionLabelWidth(w)
+	gaugeW := sectionGaugeWidth(w, labelW)
 
 	var modelCosts []metricEntry
 	var otherCosts []metricEntry
@@ -524,20 +559,21 @@ func renderSpendingSection(sb *strings.Builder, entries []metricEntry, w int) {
 	}
 
 	for _, e := range otherCosts {
-		val := formatMetricValue(e.metric)
-		vs := metricValueStyle
-		if !strings.Contains(val, "$") && !strings.Contains(val, "USD") {
-			vs = valueStyle
-		}
 		if e.metric.Used != nil && e.metric.Limit != nil && *e.metric.Limit > 0 {
-			pct := ((*e.metric.Limit - *e.metric.Used) / *e.metric.Limit) * 100
-			if pct < 0 {
-				pct = 0
+			color := colorTeal
+			if *e.metric.Used >= *e.metric.Limit*0.8 {
+				color = colorRed
+			} else if *e.metric.Used >= *e.metric.Limit*0.5 {
+				color = colorYellow
 			}
-			gauge := RenderMiniGauge(pct, 8)
-			sb.WriteString(fmt.Sprintf("  %s %s %s\n",
-				labelStyle.Width(labelW).Render(e.label), gauge, vs.Render(val)))
+			line := RenderBudgetGauge(e.label, *e.metric.Used, *e.metric.Limit, gaugeW, labelW, color, burnRate)
+			sb.WriteString(line + "\n")
 		} else {
+			val := formatMetricValue(e.metric)
+			vs := metricValueStyle
+			if !strings.Contains(val, "$") && !strings.Contains(val, "USD") {
+				vs = valueStyle
+			}
 			sb.WriteString(fmt.Sprintf("  %s %s\n",
 				labelStyle.Width(labelW).Render(e.label), vs.Render(val)))
 		}
@@ -696,6 +732,307 @@ func renderSectionSparklines(sb *strings.Builder, widget core.DashboardWidget, w
 				sb.WriteString(fmt.Sprintf("  %s %s\n", dimStyle.Render(label), spark))
 			}
 		}
+	}
+}
+
+// renderModelsSection renders ModelUsageRecord data as a horizontal bar chart of costs
+// and a token breakdown for the top model. Falls back to existing model cost table
+// if ModelUsage is empty but metric-based model costs exist.
+func renderModelsSection(sb *strings.Builder, snap core.UsageSnapshot, widget core.DashboardWidget, w int) {
+	if len(snap.ModelUsage) > 0 {
+		// Sort by cost descending, take top 8.
+		records := make([]core.ModelUsageRecord, len(snap.ModelUsage))
+		copy(records, snap.ModelUsage)
+		sort.Slice(records, func(i, j int) bool {
+			ci, cj := float64(0), float64(0)
+			if records[i].CostUSD != nil {
+				ci = *records[i].CostUSD
+			}
+			if records[j].CostUSD != nil {
+				cj = *records[j].CostUSD
+			}
+			return ci > cj
+		})
+		if len(records) > 8 {
+			records = records[:8]
+		}
+
+		// Build chart items.
+		var items []chartItem
+		for i, rec := range records {
+			cost := float64(0)
+			if rec.CostUSD != nil {
+				cost = *rec.CostUSD
+			}
+			if cost <= 0 {
+				continue
+			}
+			name := rec.Canonical
+			if name == "" {
+				name = rec.RawModelID
+			}
+			items = append(items, chartItem{
+				Label: prettifyModelName(name),
+				Value: cost,
+				Color: stableModelColor(name, snap.ProviderID),
+				SubLabel: func() string {
+					if i == 0 && rec.InputTokens != nil {
+						return formatTokens(*rec.InputTokens) + " in"
+					}
+					return ""
+				}(),
+			})
+		}
+
+		if len(items) > 0 {
+			labelW := 22
+			if w < 55 {
+				labelW = 16
+			}
+			barW := w - labelW - 20
+			if barW < 8 {
+				barW = 8
+			}
+			if barW > 30 {
+				barW = 30
+			}
+			sb.WriteString(RenderHBarChart(items, barW, labelW) + "\n")
+		}
+
+		// Token breakdown for the top model with token data.
+		for _, rec := range records {
+			inTok := float64(0)
+			outTok := float64(0)
+			if rec.InputTokens != nil {
+				inTok = *rec.InputTokens
+			}
+			if rec.OutputTokens != nil {
+				outTok = *rec.OutputTokens
+			}
+			if inTok > 0 || outTok > 0 {
+				sb.WriteString("\n")
+				name := rec.Canonical
+				if name == "" {
+					name = rec.RawModelID
+				}
+				sb.WriteString("  " + dimStyle.Render("Token breakdown: "+prettifyModelName(name)) + "\n")
+				sb.WriteString(RenderTokenBreakdown(inTok, outTok, w-4) + "\n")
+				break
+			}
+		}
+		return
+	}
+
+	// Fallback: check for model cost metrics.
+	if hasModelCostMetrics(snap) {
+		groups := groupMetrics(snap.Metrics, widget, detailWidget(snap.ProviderID))
+		for _, g := range groups {
+			var modelCosts []metricEntry
+			for _, e := range g.entries {
+				if isModelCostKey(e.key) {
+					modelCosts = append(modelCosts, e)
+				}
+			}
+			if len(modelCosts) > 0 {
+				renderModelCostsTable(sb, modelCosts, w)
+				return
+			}
+		}
+	}
+}
+
+// hasChartableSeries returns true if at least one daily series has >= 2 data points.
+func hasChartableSeries(series map[string][]core.TimePoint) bool {
+	for _, pts := range series {
+		if len(pts) >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// hasModelCostMetrics checks if the snapshot contains model cost metric keys.
+func hasModelCostMetrics(snap core.UsageSnapshot) bool {
+	for key := range snap.Metrics {
+		if core.IsModelCostMetricKey(key) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderTrendsSection renders DailySeries data as a braille chart for the primary series
+// and sparklines for secondary series.
+func renderTrendsSection(sb *strings.Builder, snap core.UsageSnapshot, widget core.DashboardWidget, w int) {
+	if len(snap.DailySeries) == 0 {
+		return
+	}
+
+	// Pick primary series key.
+	primaryCandidates := []string{"cost", "tokens_total", "messages", "requests", "sessions"}
+	primaryKey := ""
+	for _, key := range primaryCandidates {
+		if pts, ok := snap.DailySeries[key]; ok && len(pts) >= 2 {
+			primaryKey = key
+			break
+		}
+	}
+
+	// If no candidate found, pick the first series with enough points.
+	if primaryKey == "" {
+		for key, pts := range snap.DailySeries {
+			if len(pts) >= 2 {
+				primaryKey = key
+				break
+			}
+		}
+	}
+
+	if primaryKey == "" {
+		return
+	}
+
+	// Render primary series as braille chart.
+	pts := snap.DailySeries[primaryKey]
+	yFmt := formatChartValue
+	if primaryKey == "cost" {
+		yFmt = formatCostAxis
+	}
+
+	chartW := w - 4
+	if chartW < 30 {
+		chartW = 30
+	}
+	chartH := 6
+	if w < 60 {
+		chartH = 4
+	}
+
+	series := []BrailleSeries{{
+		Label:  metricLabel(widget, primaryKey),
+		Color:  colorTeal,
+		Points: pts,
+	}}
+
+	chart := RenderBrailleChart(metricLabel(widget, primaryKey), series, chartW, chartH, yFmt)
+	if chart != "" {
+		sb.WriteString(chart)
+	}
+
+	// Render remaining series as sparklines.
+	sparkW := w - 8
+	if sparkW < 12 {
+		sparkW = 12
+	}
+	if sparkW > 60 {
+		sparkW = 60
+	}
+
+	colors := []lipgloss.Color{colorSapphire, colorGreen, colorPeach, colorLavender}
+	colorIdx := 0
+
+	for _, candidate := range primaryCandidates {
+		if candidate == primaryKey {
+			continue
+		}
+		seriesPts, ok := snap.DailySeries[candidate]
+		if !ok || len(seriesPts) < 2 {
+			continue
+		}
+		values := make([]float64, len(seriesPts))
+		for i, p := range seriesPts {
+			values[i] = p.Value
+		}
+		c := colors[colorIdx%len(colors)]
+		colorIdx++
+		spark := RenderSparkline(values, sparkW, c)
+		label := metricLabel(widget, candidate)
+		sb.WriteString(fmt.Sprintf("  %s %s\n", dimStyle.Render(label), spark))
+	}
+}
+
+// filterNonZeroEntries removes entries where all numeric values are nil or zero,
+// respecting the widget's suppression configuration.
+func filterNonZeroEntries(entries []metricEntry, widget core.DashboardWidget) []metricEntry {
+	suppressKeys := make(map[string]bool, len(widget.SuppressZeroMetricKeys))
+	for _, k := range widget.SuppressZeroMetricKeys {
+		suppressKeys[k] = true
+	}
+
+	var result []metricEntry
+	for _, e := range entries {
+		m := e.metric
+		isZero := (m.Used == nil || *m.Used == 0) &&
+			(m.Remaining == nil || *m.Remaining == 0) &&
+			(m.Limit == nil || *m.Limit == 0)
+
+		if isZero {
+			if widget.SuppressZeroNonUsageMetrics {
+				// Skip if it's not a quota/usage metric (has no limit).
+				if m.Limit == nil {
+					continue
+				}
+			}
+			if suppressKeys[e.key] {
+				continue
+			}
+		}
+		result = append(result, e)
+	}
+	return result
+}
+
+// renderInfoSection renders Attributes, Diagnostics, and Raw as separate sub-sections.
+func renderInfoSection(sb *strings.Builder, snap core.UsageSnapshot, widget core.DashboardWidget, w int) {
+	labelW := sectionLabelWidth(w)
+	maxValW := w - labelW - 6
+	if maxValW < 20 {
+		maxValW = 20
+	}
+	if maxValW > 45 {
+		maxValW = 45
+	}
+
+	if len(snap.Attributes) > 0 {
+		renderDetailSectionHeader(sb, "Attributes", w)
+		renderKeyValuePairs(sb, snap.Attributes, labelW, maxValW, valueStyle)
+	}
+
+	if len(snap.Diagnostics) > 0 {
+		if len(snap.Attributes) > 0 {
+			sb.WriteString("\n")
+		}
+		renderDetailSectionHeader(sb, "Diagnostics", w)
+		warnValueStyle := lipgloss.NewStyle().Foreground(colorYellow)
+		renderKeyValuePairs(sb, snap.Diagnostics, labelW, maxValW, warnValueStyle)
+	}
+
+	if len(snap.Raw) > 0 {
+		if len(snap.Attributes) > 0 || len(snap.Diagnostics) > 0 {
+			sb.WriteString("\n")
+		}
+		renderDetailSectionHeader(sb, "Raw Data", w)
+		renderRawData(sb, snap.Raw, widget, w)
+	}
+}
+
+// renderKeyValuePairs renders a sorted key-value map with consistent formatting.
+func renderKeyValuePairs(sb *strings.Builder, data map[string]string, labelW, maxValW int, vs lipgloss.Style) {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		v := smartFormatValue(data[k])
+		if len(v) > maxValW {
+			v = v[:maxValW-3] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("  %s  %s\n",
+			labelStyle.Width(labelW).Render(prettifyKey(k)),
+			vs.Render(v),
+		))
 	}
 }
 
@@ -1115,6 +1452,16 @@ func sectionIcon(title string) string {
 		return "📈"
 	case "Timers":
 		return "⏰"
+	case "Models":
+		return "🤖"
+	case "Trends":
+		return "📈"
+	case "Attributes":
+		return "📋"
+	case "Diagnostics":
+		return "⚠"
+	case "Raw Data":
+		return "🔧"
 	default:
 		return "›"
 	}
@@ -1132,6 +1479,16 @@ func sectionColor(title string) lipgloss.Color {
 		return colorGreen
 	case "Timers":
 		return colorMaroon
+	case "Models":
+		return colorLavender
+	case "Trends":
+		return colorSapphire
+	case "Attributes":
+		return colorBlue
+	case "Diagnostics":
+		return colorYellow
+	case "Raw Data":
+		return colorDim
 	default:
 		return colorBlue
 	}

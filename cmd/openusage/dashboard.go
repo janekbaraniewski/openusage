@@ -22,12 +22,15 @@ func runDashboard(cfg config.Config) {
 	cachedAccounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 	interval := time.Duration(cfg.UI.RefreshIntervalSeconds) * time.Second
 
+	timeWindow := core.ParseTimeWindow(cfg.Data.TimeWindow)
+
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
 		cfg.UI.CritThreshold,
 		cfg.Experimental.Analytics,
 		cfg.Dashboard,
 		cachedAccounts,
+		timeWindow,
 	)
 
 	socketPath := daemon.ResolveSocketPath()
@@ -38,6 +41,7 @@ func runDashboard(cfg config.Config) {
 		socketPath,
 		verbose,
 	)
+	viewRuntime.SetTimeWindow(string(timeWindow))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,6 +61,10 @@ func runDashboard(cfg config.Config) {
 				program.Send(tui.SnapshotsMsg(snaps))
 			}
 		}()
+	})
+
+	model.SetOnTimeWindowChange(func(tw string) {
+		viewRuntime.SetTimeWindow(tw)
 	})
 
 	model.SetOnInstallDaemon(func() error {

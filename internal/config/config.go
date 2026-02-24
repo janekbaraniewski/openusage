@@ -29,6 +29,11 @@ type TelemetryConfig struct {
 	ProviderLinks map[string]string `json:"provider_links"`
 }
 
+type DataConfig struct {
+	TimeWindow    string `json:"time_window"`    // "1d", "3d", "7d", "30d"
+	RetentionDays int    `json:"retention_days"` // max days to keep in SQLite
+}
+
 type DashboardProviderConfig struct {
 	AccountID string `json:"account_id"`
 	Enabled   bool   `json:"enabled"`
@@ -60,6 +65,7 @@ type DashboardConfig struct {
 type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
+	Data                 DataConfig                    `json:"data"`
 	Experimental         ExperimentalConfig            `json:"experimental"`
 	Telemetry            TelemetryConfig               `json:"telemetry"`
 	Dashboard            DashboardConfig               `json:"dashboard"`
@@ -85,6 +91,7 @@ func DefaultConfig() Config {
 			WarnThreshold:          0.20,
 			CritThreshold:          0.05,
 		},
+		Data:               DataConfig{TimeWindow: "30d", RetentionDays: 30},
 		Experimental:       ExperimentalConfig{Analytics: false},
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
@@ -134,6 +141,7 @@ func LoadFrom(path string) (Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = DefaultConfig().Theme
 	}
+	cfg.Data = normalizeDataConfig(cfg.Data)
 	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
 	cfg.Telemetry = normalizeTelemetryConfig(cfg.Telemetry)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
@@ -141,6 +149,24 @@ func LoadFrom(path string) (Config, error) {
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 
 	return cfg, nil
+}
+
+func normalizeDataConfig(in DataConfig) DataConfig {
+	tw := core.ParseTimeWindow(in.TimeWindow)
+	retention := in.RetentionDays
+	if retention <= 0 {
+		retention = 30
+	}
+	if retention > 90 {
+		retention = 90
+	}
+	if tw.Days() > retention {
+		tw = core.LargestWindowFitting(retention)
+	}
+	return DataConfig{
+		TimeWindow:    string(tw),
+		RetentionDays: retention,
+	}
 }
 
 func normalizeAccountID(id string) string {
@@ -262,5 +288,22 @@ func SaveAutoDetectedTo(path string, accounts []core.AccountConfig) error {
 		cfg = DefaultConfig()
 	}
 	cfg.AutoDetectedAccounts = accounts
+	return SaveTo(path, cfg)
+}
+
+// SaveTimeWindow persists a time window into the config file (read-modify-write).
+func SaveTimeWindow(window string) error {
+	return SaveTimeWindowTo(ConfigPath(), window)
+}
+
+func SaveTimeWindowTo(path string, window string) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	cfg.Data.TimeWindow = string(core.ParseTimeWindow(window))
 	return SaveTo(path, cfg)
 }

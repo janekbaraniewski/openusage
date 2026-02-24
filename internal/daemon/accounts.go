@@ -149,6 +149,7 @@ func LoadAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfig,
 func BuildReadModelRequest(
 	accounts []core.AccountConfig,
 	providerLinks map[string]string,
+	timeWindow string,
 ) ReadModelRequest {
 	seen := make(map[string]bool, len(accounts))
 	outAccounts := make([]ReadModelAccount, 0, len(accounts))
@@ -172,7 +173,7 @@ func BuildReadModelRequest(
 			links[source] = target
 		}
 	}
-	return ReadModelRequest{Accounts: outAccounts, ProviderLinks: links}
+	return ReadModelRequest{Accounts: outAccounts, ProviderLinks: links, TimeWindow: timeWindow}
 }
 
 func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
@@ -181,7 +182,7 @@ func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
 		return ReadModelRequest{}, err
 	}
 	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
-	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks), nil
+	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks, cfg.Data.TimeWindow), nil
 }
 
 func ReadModelRequestKey(req ReadModelRequest) string {

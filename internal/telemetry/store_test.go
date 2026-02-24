@@ -338,6 +338,106 @@ func TestStoreIngest_DedupStableIDIgnoresAccountProviderAgentDrift(t *testing.T)
 	}
 }
 
+func TestStorePruneOldEvents_DeletesExpiredEventsOnly(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	now := time.Now().UTC()
+	recentTS := now.Add(-5 * 24 * time.Hour).Format(time.RFC3339Nano)
+	oldTS := now.Add(-60 * 24 * time.Hour).Format(time.RFC3339Nano)
+	ingestedAt := now.Format(time.RFC3339Nano)
+
+	// Insert raw events (required by foreign key).
+	for _, rawID := range []string{"raw-recent-1", "raw-recent-2", "raw-old-1", "raw-old-2"} {
+		if _, err := db.Exec(
+			`INSERT INTO usage_raw_events (
+				raw_event_id, ingested_at, source_system, source_channel, source_schema_version,
+				source_payload, source_payload_hash, workspace_id, agent_session_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rawID, ingestedAt, "test", "hook", "v1", `{"x":1}`, "hash-"+rawID, "", "",
+		); err != nil {
+			t.Fatalf("insert raw event %s: %v", rawID, err)
+		}
+	}
+
+	// Insert usage_events: 2 recent (5 days old), 2 old (60 days old).
+	type eventRow struct {
+		eventID    string
+		occurredAt string
+		rawEventID string
+		dedupKey   string
+	}
+	events := []eventRow{
+		{"evt-recent-1", recentTS, "raw-recent-1", "dedup-recent-1"},
+		{"evt-recent-2", recentTS, "raw-recent-2", "dedup-recent-2"},
+		{"evt-old-1", oldTS, "raw-old-1", "dedup-old-1"},
+		{"evt-old-2", oldTS, "raw-old-2", "dedup-old-2"},
+	}
+	for _, e := range events {
+		if _, err := db.Exec(
+			`INSERT INTO usage_events (
+				event_id, occurred_at, agent_name, event_type, status, dedup_key,
+				raw_event_id, normalization_version
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.eventID, e.occurredAt, "test-agent", "message_usage", "ok", e.dedupKey,
+			e.rawEventID, "v1",
+		); err != nil {
+			t.Fatalf("insert event %s: %v", e.eventID, err)
+		}
+	}
+
+	// Prune with 30-day retention: should delete the 2 old events.
+	deleted, err := store.PruneOldEvents(context.Background(), 30)
+	if err != nil {
+		t.Fatalf("PruneOldEvents: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted = %d, want 2", deleted)
+	}
+
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_events`).Scan(&remaining); err != nil {
+		t.Fatalf("count remaining events: %v", err)
+	}
+	if remaining != 2 {
+		t.Fatalf("remaining events = %d, want 2", remaining)
+	}
+
+	// Orphan raw events should now be prunable.
+	orphaned, err := store.PruneOrphanRawEvents(context.Background(), 50000)
+	if err != nil {
+		t.Fatalf("PruneOrphanRawEvents: %v", err)
+	}
+	if orphaned != 2 {
+		t.Fatalf("orphaned raw events removed = %d, want 2", orphaned)
+	}
+
+	var rawRemaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_raw_events`).Scan(&rawRemaining); err != nil {
+		t.Fatalf("count remaining raw events: %v", err)
+	}
+	if rawRemaining != 2 {
+		t.Fatalf("remaining raw events = %d, want 2", rawRemaining)
+	}
+
+	// Edge case: retentionDays <= 0 should be a no-op.
+	noOp, err := store.PruneOldEvents(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("PruneOldEvents(0): %v", err)
+	}
+	if noOp != 0 {
+		t.Fatalf("PruneOldEvents(0) deleted = %d, want 0", noOp)
+	}
+}
+
 func TestStorePruneOrphanRawEvents_RemovesOnlyUnreferencedRows(t *testing.T) {
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
 	if err != nil {

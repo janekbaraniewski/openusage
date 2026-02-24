@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -138,6 +139,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
 	go svc.runSpoolMaintenanceLoop(ctx)
+	go svc.runRetentionLoop(ctx)
 
 	return svc, nil
 }
@@ -252,7 +254,7 @@ func (s *Service) shouldLog(key string, interval time.Duration) bool {
 
 // --- Read-model cache ---
 
-func (s *Service) readModelCacheGet(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
+func (s *Service) readModelCacheGet(cacheKey string, timeWindow string) (map[string]core.UsageSnapshot, time.Time, bool) {
 	if s == nil || strings.TrimSpace(cacheKey) == "" {
 		return nil, time.Time{}, false
 	}
@@ -262,17 +264,22 @@ func (s *Service) readModelCacheGet(cacheKey string) (map[string]core.UsageSnaps
 	if !ok || len(entry.snapshots) == 0 {
 		return nil, time.Time{}, false
 	}
+	// Time window mismatch → treat as cache miss so gauge data is always fresh.
+	if entry.timeWindow != timeWindow {
+		return nil, time.Time{}, false
+	}
 	return maps.Clone(entry.snapshots), entry.updatedAt, true
 }
 
-func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot) {
+func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot, timeWindow string) {
 	if s == nil || strings.TrimSpace(cacheKey) == "" || len(snapshots) == 0 {
 		return
 	}
 	s.readModelMu.Lock()
 	s.readModelCache[cacheKey] = cachedReadModelEntry{
-		snapshots: maps.Clone(snapshots),
-		updatedAt: time.Now().UTC(),
+		snapshots:  maps.Clone(snapshots),
+		updatedAt:  time.Now().UTC(),
+		timeWindow: timeWindow,
 	}
 	s.readModelMu.Unlock()
 }
@@ -307,8 +314,11 @@ func (s *Service) computeReadModel(
 	if len(templates) == 0 {
 		return map[string]core.UsageSnapshot{}, nil
 	}
+	tw := core.ParseTimeWindow(req.TimeWindow)
 	return telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
-		ProviderLinks: req.ProviderLinks,
+		ProviderLinks:   req.ProviderLinks,
+		TimeWindowHours: tw.Hours(),
+		TimeWindow:      req.TimeWindow,
 	})
 }
 
@@ -332,7 +342,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			}
 			return
 		}
-		s.readModelCacheSet(cacheKey, snapshots)
+		s.readModelCacheSet(cacheKey, snapshots, req.TimeWindow)
 	}()
 }
 
@@ -556,6 +566,63 @@ func (s *Service) pruneTelemetryOrphans(ctx context.Context) {
 	}
 	if removed > 0 {
 		s.infof("prune_orphan_raw_events", "removed=%d batch_size=%d", removed, pruneBatchSize)
+	}
+}
+
+// --- Retention loop ---
+
+func (s *Service) runRetentionLoop(ctx context.Context) {
+	s.pruneOldData(ctx)
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.infof("retention_loop_stop", "reason=context_done")
+			return
+		case <-ticker.C:
+			s.pruneOldData(ctx)
+		}
+	}
+}
+
+func (s *Service) pruneOldData(ctx context.Context) {
+	if s == nil || s.store == nil {
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		if s.shouldLog("retention_config_error", 30*time.Second) {
+			s.warnf("retention_config_error", "error=%v", err)
+		}
+		return
+	}
+	retentionDays := cfg.Data.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+
+	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	deleted, err := s.store.PruneOldEvents(pruneCtx, retentionDays)
+	if err != nil {
+		if s.shouldLog("retention_prune_error", 30*time.Second) {
+			s.warnf("retention_prune_error", "error=%v", err)
+		}
+		return
+	}
+	if deleted > 0 {
+		s.infof("retention_prune", "deleted=%d retention_days=%d", deleted, retentionDays)
+		// Clean up orphaned raw events after pruning
+		orphanCtx, orphanCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer orphanCancel()
+		orphaned, orphanErr := s.store.PruneOrphanRawEvents(orphanCtx, 50000)
+		if orphanErr != nil {
+			s.warnf("retention_orphan_prune_error", "error=%v", orphanErr)
+		} else if orphaned > 0 {
+			s.infof("retention_orphan_prune", "removed=%d", orphaned)
+		}
 	}
 }
 
@@ -881,7 +948,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheKey := ReadModelRequestKey(req)
-	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey); ok {
+	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey, req.TimeWindow); ok {
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
 			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
@@ -893,7 +960,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
-		s.readModelCacheSet(cacheKey, snapshots)
+		s.readModelCacheSet(cacheKey, snapshots, req.TimeWindow)
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 		return
 	}

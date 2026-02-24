@@ -538,6 +538,114 @@ func TestNormalizeTelemetryConfig_MergesDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_DataDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Data.TimeWindow != "30d" {
+		t.Errorf("default time_window = %q, want '30d'", cfg.Data.TimeWindow)
+	}
+	if cfg.Data.RetentionDays != 30 {
+		t.Errorf("default retention_days = %d, want 30", cfg.Data.RetentionDays)
+	}
+}
+
+func TestLoadFrom_DataConfigDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"Nord"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Data.TimeWindow != "30d" {
+		t.Errorf("missing data section should default time_window to '30d', got %q", cfg.Data.TimeWindow)
+	}
+	if cfg.Data.RetentionDays != 30 {
+		t.Errorf("missing data section should default retention_days to 30, got %d", cfg.Data.RetentionDays)
+	}
+}
+
+func TestLoadFrom_DataConfigValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		json          string
+		wantWindow    string
+		wantRetention int
+	}{
+		{"valid 7d", `{"data":{"time_window":"7d","retention_days":30}}`, "7d", 30},
+		{"invalid 1h clamps to 7d", `{"data":{"time_window":"1h","retention_days":10}}`, "7d", 10},
+		{"invalid window defaults to 30d", `{"data":{"time_window":"bogus","retention_days":30}}`, "30d", 30},
+		{"zero retention defaults to 30", `{"data":{"time_window":"7d","retention_days":0}}`, "7d", 30},
+		{"negative retention defaults to 30", `{"data":{"time_window":"7d","retention_days":-5}}`, "7d", 30},
+		{"retention capped at 90", `{"data":{"time_window":"30d","retention_days":999}}`, "30d", 90},
+		{"window clamped to retention", `{"data":{"time_window":"30d","retention_days":7}}`, "7d", 7},
+		{"invalid sub-day clamps to 1d", `{"data":{"time_window":"6h","retention_days":1}}`, "1d", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "settings.json")
+			if err := os.WriteFile(path, []byte(tt.json), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadFrom(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Data.TimeWindow != tt.wantWindow {
+				t.Errorf("time_window = %q, want %q", cfg.Data.TimeWindow, tt.wantWindow)
+			}
+			if cfg.Data.RetentionDays != tt.wantRetention {
+				t.Errorf("retention_days = %d, want %d", cfg.Data.RetentionDays, tt.wantRetention)
+			}
+		})
+	}
+}
+
+func TestSaveTimeWindowTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveTimeWindowTo(path, "7d"); err != nil {
+		t.Fatalf("SaveTimeWindowTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Data.TimeWindow != "7d" {
+		t.Errorf("time_window = %q, want '7d'", loaded.Data.TimeWindow)
+	}
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+}
+
+func TestSaveTimeWindowTo_InvalidWindowDefaultsTo30d(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := SaveTo(path, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveTimeWindowTo(path, "bogus"); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Data.TimeWindow != "30d" {
+		t.Errorf("invalid window should save as '30d', got %q", loaded.Data.TimeWindow)
+	}
+}
+
 func TestLoadFrom_ModelNormalizationConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

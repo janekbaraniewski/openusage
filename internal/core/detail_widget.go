@@ -8,6 +8,8 @@ const (
 	DetailSectionStyleTokens   DetailSectionStyle = "tokens"
 	DetailSectionStyleActivity DetailSectionStyle = "activity"
 	DetailSectionStyleList     DetailSectionStyle = "list"
+	DetailSectionStyleModels   DetailSectionStyle = "models"
+	DetailSectionStyleTrends   DetailSectionStyle = "trends"
 )
 
 type DetailSection struct {

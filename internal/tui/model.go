@@ -123,9 +123,12 @@ type Model struct {
 	apiKeyEditAccountID string
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 
-	onAddAccount    func(core.AccountConfig)
-	onRefresh       func()
-	onInstallDaemon func() error
+	timeWindow core.TimeWindow
+
+	onAddAccount       func(core.AccountConfig)
+	onRefresh          func()
+	onInstallDaemon    func() error
+	onTimeWindowChange func(string)
 }
 
 func NewModel(
@@ -133,6 +136,7 @@ func NewModel(
 	experimentalAnalytics bool,
 	dashboardCfg config.DashboardConfig,
 	accounts []core.AccountConfig,
+	timeWindow core.TimeWindow,
 ) Model {
 	model := Model{
 		snapshots:             make(map[string]core.UsageSnapshot),
@@ -143,6 +147,7 @@ func NewModel(
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
 		daemonStatus:          DaemonConnecting,
+		timeWindow:            timeWindow,
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
@@ -163,10 +168,18 @@ func (m *Model) SetOnRefresh(fn func()) {
 	m.onRefresh = fn
 }
 
+// SetOnTimeWindowChange sets a callback invoked when the user changes the time window.
+func (m *Model) SetOnTimeWindowChange(fn func(string)) {
+	m.onTimeWindowChange = fn
+}
+
 type themePersistedMsg struct {
 	err error
 }
 type dashboardPrefsPersistedMsg struct {
+	err error
+}
+type timeWindowPersistedMsg struct {
 	err error
 }
 
@@ -210,6 +223,16 @@ func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 			log.Printf("dashboard settings persist: %v", err)
 		}
 		return dashboardPrefsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistTimeWindowCmd(window string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.SaveTimeWindow(window)
+		if err != nil {
+			log.Printf("time window persist: %v", err)
+		}
+		return timeWindowPersistedMsg{err: err}
 	}
 }
 
@@ -328,6 +351,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsStatus = "theme save failed"
 		} else {
 			m.settingsStatus = "theme saved"
+		}
+		return m, nil
+
+	case timeWindowPersistedMsg:
+		if msg.err != nil {
+			m.settingsStatus = "time window save failed"
+		} else {
+			m.settingsStatus = "time window saved"
 		}
 		return m, nil
 
@@ -499,6 +530,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "t":
 			name := CycleTheme()
 			return m, m.persistThemeCmd(name)
+		case "w":
+			return m.cycleTimeWindow()
 		}
 	}
 
@@ -735,6 +768,19 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) cycleTimeWindow() (tea.Model, tea.Cmd) {
+	next := core.NextTimeWindow(m.timeWindow)
+	m.timeWindow = next
+	if m.onTimeWindowChange != nil {
+		m.onTimeWindowChange(string(next))
+	}
+	m.refreshing = true
+	if m.onRefresh != nil {
+		m.onRefresh()
+	}
+	return m, m.persistTimeWindowCmd(string(next))
+}
+
 func (m Model) requestRefresh() Model {
 	m.refreshing = true
 	if m.onRefresh != nil {
@@ -898,6 +944,10 @@ func (m Model) renderHeader(w int) string {
 				info += " (filtered)"
 			}
 		}
+	}
+	if !m.showSettingsModal {
+		twLabel := m.timeWindow.Label()
+		info += " · " + twLabel
 	}
 	if !m.showSettingsModal && len(unmappedProviders) > 0 {
 		info += " · detected additional providers, check settings"
@@ -1594,6 +1644,25 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 
 func providerSummary(snap core.UsageSnapshot) string {
 	return computeDisplayInfo(snap, dashboardWidget(snap.ProviderID)).summary
+}
+
+// windowActivityLine returns a subtle summary of time-windowed telemetry activity.
+// Returns "" when there is no telemetry data for the current window.
+func windowActivityLine(snap core.UsageSnapshot, tw core.TimeWindow) string {
+	var parts []string
+	if m, ok := snap.Metrics["window_requests"]; ok && m.Used != nil && *m.Used > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f reqs", *m.Used))
+	}
+	if m, ok := snap.Metrics["window_cost"]; ok && m.Used != nil && *m.Used > 0.001 {
+		parts = append(parts, fmt.Sprintf("$%.2f", *m.Used))
+	}
+	if m, ok := snap.Metrics["window_tokens"]; ok && m.Used != nil && *m.Used > 0 {
+		parts = append(parts, shortCompact(*m.Used)+" tok")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ") + " in " + tw.Label()
 }
 
 func bestMetricPercent(snap core.UsageSnapshot) float64 {

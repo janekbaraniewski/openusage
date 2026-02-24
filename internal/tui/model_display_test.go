@@ -145,7 +145,7 @@ func TestSnapshotsReady(t *testing.T) {
 }
 
 func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil)
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	if m.hasData {
 		t.Fatal("expected hasData=false on fresh model")
 	}

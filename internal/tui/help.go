@@ -140,6 +140,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	actionKeys = append(actionKeys,
 		struct{ key, desc string }{"r", "Refresh"},
 		struct{ key, desc string }{"t", "Cycle theme"},
+		struct{ key, desc string }{"w", "Cycle time window"},
 	)
 
 	groups := []keyGroup{

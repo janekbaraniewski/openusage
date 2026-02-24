@@ -97,10 +97,12 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "right", "l", "]":
 		m.settingsModalTab = (m.settingsModalTab + 1) % settingsTabCount
 		m.settingsBodyOffset = 0
+		m.resetSettingsCursorForTab()
 		return m, nil
 	case "shift+tab", "left", "h", "[":
 		m.settingsModalTab = (m.settingsModalTab + settingsTabCount - 1) % settingsTabCount
 		m.settingsBodyOffset = 0
+		m.resetSettingsCursorForTab()
 		return m, nil
 	case "r":
 		if m.settingsModalTab == settingsTabIntegrations {
@@ -118,6 +120,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if idx >= 0 && idx < int(settingsTabCount) {
 				m.settingsModalTab = settingsModalTab(idx)
 				m.settingsBodyOffset = 0
+				m.resetSettingsCursorForTab()
 				return m, nil
 			}
 		}
@@ -211,13 +214,30 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case settingsTabTelemetry:
+		twCount := len(core.ValidTimeWindows)
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsBodyOffset > 0 {
-				m.settingsBodyOffset--
+			if m.settingsCursor > 0 {
+				m.settingsCursor--
 			}
 		case "down", "j":
-			m.settingsBodyOffset++
+			if m.settingsCursor < twCount-1 {
+				m.settingsCursor++
+			}
+		case " ", "enter":
+			if m.settingsCursor >= 0 && m.settingsCursor < twCount {
+				tw := core.ValidTimeWindows[m.settingsCursor]
+				m.timeWindow = tw
+				if m.onTimeWindowChange != nil {
+					m.onTimeWindowChange(string(tw))
+				}
+				m.refreshing = true
+				if m.onRefresh != nil {
+					m.onRefresh()
+				}
+				m.settingsStatus = "saving time window..."
+				return m, m.persistTimeWindowCmd(string(tw))
+			}
 		case "pgup", "ctrl+u":
 			m.settingsBodyOffset -= 4
 			if m.settingsBodyOffset < 0 {
@@ -225,10 +245,6 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "pgdown", "ctrl+d":
 			m.settingsBodyOffset += 4
-		case "home", "g":
-			m.settingsBodyOffset = 0
-		case "end", "G":
-			m.settingsBodyOffset = 1 << 30
 		}
 	case settingsTabIntegrations:
 		switch msg.String() {
@@ -289,6 +305,24 @@ func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {
 	m.rebuildSortedIDs()
 	m.settingsStatus = "saving order..."
 	return m.persistDashboardPrefsCmd()
+}
+
+func (m *Model) resetSettingsCursorForTab() {
+	switch m.settingsModalTab {
+	case settingsTabTelemetry:
+		m.settingsCursor = m.currentTimeWindowIndex()
+	default:
+		m.settingsCursor = 0
+	}
+}
+
+func (m Model) currentTimeWindowIndex() int {
+	for i, tw := range core.ValidTimeWindows {
+		if tw == m.timeWindow {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m Model) renderSettingsModalOverlay() string {
@@ -370,7 +404,7 @@ func (m Model) settingsModalHint() string {
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabTelemetry:
-		return "Up/Down: scroll  ·  PgUp/PgDn: faster scroll  ·  Left/Right: switch tab  ·  Esc: close"
+		return "Up/Down: select  ·  Space/Enter: apply time window  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabIntegrations:
 		return "Up/Down: select  ·  Enter/i: install/configure  ·  u: upgrade  ·  r: refresh  ·  Esc: close"
 	default:
@@ -567,34 +601,49 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
+	var lines []string
+
+	// Time window selector
+	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Time Window")+"  "+dimStyle.Render("press w or select below"))
+	lines = append(lines, "")
+	for i, tw := range core.ValidTimeWindows {
+		prefix := "  "
+		if i == m.settingsCursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+		current := "  "
+		if tw == m.timeWindow {
+			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
+		}
+		lines = append(lines, fmt.Sprintf("%s%s%s", prefix, current, tw.Label()))
+	}
+	lines = append(lines, "")
+
+	// Telemetry provider mapping section
 	unmapped := m.telemetryUnmappedProviders()
 	hints := m.telemetryProviderLinkHints()
 	configured := m.configuredProviderIDs()
 
-	var lines []string
 	if len(unmapped) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).Render("All telemetry providers are mapped."))
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"))
+		for _, providerID := range unmapped {
+			lines = append(lines, "  - "+providerID)
+		}
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("No action needed right now."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
-	}
-
-	lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"))
-	for _, providerID := range unmapped {
-		lines = append(lines, "  - "+providerID)
-	}
-	lines = append(lines, "")
-	lines = append(lines, "Map them in settings.json under telemetry.provider_links:")
-	lines = append(lines, "  <source_provider>=<configured_provider_id>")
-	if len(hints) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "Hint:")
-		lines = append(lines, "  "+hints[0])
-	}
-	if len(configured) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "Configured provider IDs:")
-		lines = append(lines, "  "+strings.Join(configured, ", "))
+		lines = append(lines, "Map them in settings.json under telemetry.provider_links:")
+		lines = append(lines, "  <source_provider>=<configured_provider_id>")
+		if len(hints) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "Hint:")
+			lines = append(lines, "  "+hints[0])
+		}
+		if len(configured) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "Configured provider IDs:")
+			lines = append(lines, "  "+strings.Join(configured, ", "))
+		}
 	}
 
 	start, end := listWindow(len(lines), m.settingsBodyOffset, h)
