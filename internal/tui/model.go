@@ -113,6 +113,7 @@ type Model struct {
 	showSettingsModal   bool
 	settingsModalTab    settingsModalTab
 	settingsCursor      int
+	settingsBodyOffset  int
 	settingsThemeCursor int
 	settingsStatus      string
 	integrationStatuses []integrations.Status
