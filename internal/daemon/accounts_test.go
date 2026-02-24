@@ -67,6 +67,56 @@ func TestDisabledAccountsFromDashboard(t *testing.T) {
 	}
 }
 
+func TestResolveConfigAccounts_ColdStartUsesResolver(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AutoDetect = true
+	cfg.Accounts = nil
+	cfg.AutoDetectedAccounts = nil
+
+	called := false
+	got := resolveConfigAccounts(&cfg, func(_ *config.Config) []core.AccountConfig {
+		called = true
+		return []core.AccountConfig{
+			{ID: "ollama-local", Provider: "ollama"},
+			{ID: "codex-cli", Provider: "codex"},
+		}
+	})
+
+	if !called {
+		t.Fatal("expected resolver to be called on cold start")
+	}
+	if len(got) != 2 {
+		t.Fatalf("resolved accounts len = %d, want 2", len(got))
+	}
+	if got[0].ID != "ollama-local" || got[1].ID != "codex-cli" {
+		t.Fatalf("resolved accounts = %+v, want [ollama-local codex-cli]", got)
+	}
+}
+
+func TestResolveConfigAccounts_ColdStartRespectsDashboardDisabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AutoDetect = true
+	cfg.Dashboard = config.DashboardConfig{
+		Providers: []config.DashboardProviderConfig{
+			{AccountID: "codex-cli", Enabled: false},
+		},
+	}
+
+	got := resolveConfigAccounts(&cfg, func(_ *config.Config) []core.AccountConfig {
+		return []core.AccountConfig{
+			{ID: "ollama-local", Provider: "ollama"},
+			{ID: "codex-cli", Provider: "codex"},
+		}
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("resolved accounts len = %d, want 1", len(got))
+	}
+	if got[0].ID != "ollama-local" {
+		t.Fatalf("resolved account = %q, want ollama-local", got[0].ID)
+	}
+}
+
 func TestReadModelTemplatesFromRequest_ExcludesDisabledAccounts(t *testing.T) {
 	templates := ReadModelTemplatesFromRequest(ReadModelRequest{
 		Accounts: []ReadModelAccount{

@@ -2,6 +2,8 @@ package detect
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -112,5 +114,42 @@ func TestResultSummary_Empty(t *testing.T) {
 	summary := result.Summary()
 	if summary == "" {
 		t.Error("Expected non-empty summary even when nothing detected")
+	}
+}
+
+func TestFindBinary_UsesExtraDetectBinDirs(t *testing.T) {
+	tmp := t.TempDir()
+	name := "openusage-testbin"
+	path := filepath.Join(tmp, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write temp executable: %v", err)
+	}
+
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", tmp)
+
+	got := findBinary(name)
+	if got != path {
+		t.Fatalf("findBinary() = %q, want %q", got, path)
+	}
+}
+
+func TestFindBinary_SkipsNonExecutableFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix execute bit semantics do not apply on windows")
+	}
+
+	tmp := t.TempDir()
+	name := "openusage-testbin-noexec"
+	path := filepath.Join(tmp, name)
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", tmp)
+
+	if got := findBinary(name); got != "" {
+		t.Fatalf("findBinary() = %q, want empty for non-executable", got)
 	}
 }

@@ -289,6 +289,35 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		}
 	}
 
+	renderWithBody := func(body []string) string {
+		if bodyBudget >= 0 {
+			for len(body) < bodyBudget {
+				body = append(body, "")
+			}
+		}
+
+		all := make([]string, 0, len(header)+len(body)+len(footer))
+		all = append(all, header...)
+		all = append(all, body...)
+		all = append(all, footer...)
+
+		content := strings.Join(all, "\n")
+
+		border := tileBorderStyle.Width(tileW)
+		if selected {
+			border = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(provColor).
+				Padding(0, tilePadH).
+				Width(tileW)
+		}
+		return border.Render(content)
+	}
+
+	if m.tileShouldRenderLoading(snap) {
+		return renderWithBody(m.buildTileLoadingBody(innerW, bodyBudget, snap))
+	}
+
 	type section struct {
 		lines []string
 	}
@@ -436,28 +465,53 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		break
 	}
 
-	if bodyBudget >= 0 {
-		for len(body) < bodyBudget {
-			body = append(body, "")
+	return renderWithBody(body)
+}
+
+func (m Model) tileShouldRenderLoading(snap core.UsageSnapshot) bool {
+	switch snap.Status {
+	case core.StatusError, core.StatusAuth, core.StatusLimited:
+		return false
+	}
+	if len(snap.Metrics) > 0 || len(snap.ModelUsage) > 0 || len(snap.DailySeries) > 0 || len(snap.Resets) > 0 {
+		return false
+	}
+	return true
+}
+
+func (m Model) buildTileLoadingBody(innerW, bodyBudget int, snap core.UsageSnapshot) []string {
+	center := func(line string) string {
+		lineW := lipgloss.Width(line)
+		if lineW >= innerW {
+			return line
+		}
+		pad := (innerW - lineW) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		return strings.Repeat(" ", pad) + line
+	}
+
+	lines := m.brandedLoaderLines(innerW, snap.Message, "Syncing telemetry...")
+	for i := range lines {
+		lines[i] = center(lines[i])
+	}
+	if bodyBudget > len(lines) {
+		padTop := (bodyBudget - len(lines)) / 2
+		if padTop > 0 {
+			padded := make([]string, 0, len(lines)+padTop)
+			for i := 0; i < padTop; i++ {
+				padded = append(padded, "")
+			}
+			padded = append(padded, lines...)
+			lines = padded
 		}
 	}
 
-	all := make([]string, 0, len(header)+len(body)+len(footer))
-	all = append(all, header...)
-	all = append(all, body...)
-	all = append(all, footer...)
-
-	content := strings.Join(all, "\n")
-
-	border := tileBorderStyle.Width(tileW)
-	if selected {
-		border = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(provColor).
-			Padding(0, tilePadH).
-			Width(tileW)
+	if bodyBudget > 0 && len(lines) > bodyBudget {
+		lines = lines[:bodyBudget]
 	}
-	return border.Render(content)
+	return lines
 }
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {

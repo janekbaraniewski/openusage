@@ -117,14 +117,32 @@ func DisabledAccountsFromConfig() map[string]bool {
 	return DisabledAccountsFromDashboard(cfg.Dashboard)
 }
 
+func resolveConfigAccounts(
+	cfg *config.Config,
+	resolver func(*config.Config) []core.AccountConfig,
+) []core.AccountConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
+	if len(accounts) == 0 && cfg.AutoDetect && resolver != nil {
+		// Cold-start bootstrap: no persisted settings/accounts yet.
+		// Run host autodetect so dashboard can render provider snapshots immediately.
+		accounts = resolver(cfg)
+		return FilterAccountsByDashboard(accounts, cfg.Dashboard)
+	}
+
+	accounts = FilterAccountsByDashboard(accounts, cfg.Dashboard)
+	return ApplyCredentials(accounts)
+}
+
 func LoadAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, core.DefaultModelNormalizationConfig(), err
 	}
-	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-	accounts = FilterAccountsByDashboard(accounts, cfg.Dashboard)
-	accounts = ApplyCredentials(accounts)
+	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
 	return accounts, core.NormalizeModelNormalizationConfig(cfg.ModelNormalization), nil
 }
 
@@ -162,9 +180,7 @@ func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
 	if err != nil {
 		return ReadModelRequest{}, err
 	}
-	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-	accounts = FilterAccountsByDashboard(accounts, cfg.Dashboard)
-	accounts = ApplyCredentials(accounts)
+	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
 	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks), nil
 }
 
