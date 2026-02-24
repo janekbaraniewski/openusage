@@ -1,4 +1,4 @@
-# Telemetry Integrations (Native Setup)
+# Telemetry Integrations
 
 This repository supports three native coding-agent telemetry streams:
 
@@ -13,6 +13,55 @@ All streams emit normalized telemetry events into the same SQLite store:
 When the OpenUsage app is running, background collection and canonical telemetry read-model updates are automatic.
 You do not need to run `openusage telemetry collect` manually for normal operation.
 OpenUsage does not auto-create synthetic providers from telemetry. Unmapped telemetry provider IDs are flagged for explicit user action.
+
+## Installing Integrations
+
+All integration hook/plugin definitions are embedded in the `openusage` binary.
+Use the built-in CLI to install, upgrade, or uninstall them:
+
+```bash
+# List detected integrations and their status
+openusage integrations list
+
+# List all integrations, including ones for tools not detected on this machine
+openusage integrations list --all
+
+# Install an integration by ID
+openusage integrations install claude_code
+openusage integrations install codex
+openusage integrations install opencode
+
+# Upgrade an integration to the latest embedded version
+openusage integrations upgrade claude_code
+
+# Upgrade all outdated integrations at once
+openusage integrations upgrade --all
+
+# Uninstall an integration (removes hook and unregisters from tool config)
+openusage integrations uninstall claude_code
+```
+
+The daemon also prints a hint at startup when it detects tools with missing integrations.
+
+## What Gets Installed
+
+### OpenCode (Plugin)
+
+- `~/.config/opencode/plugins/openusage-telemetry.ts`
+- plugin entry in `~/.config/opencode/opencode.json`
+
+### Codex (Notify Hook)
+
+- `~/.config/openusage/hooks/codex-notify.sh`
+- `notify = ["~/.config/openusage/hooks/codex-notify.sh"]` in `~/.codex/config.toml`
+
+### Claude Code (Command Hooks)
+
+- `~/.config/openusage/hooks/claude-hook.sh`
+- command hooks in `~/.claude/settings.json` for:
+  - `Stop`
+  - `SubagentStop`
+  - `PostToolUse`
 
 ## Provider Linking (Explicit Control)
 
@@ -35,48 +84,6 @@ Behavior:
    - `telemetry_unmapped_providers`
    - `telemetry_provider_link_hint`
 3. Canonical telemetry usage metrics are applied only to configured providers (or explicitly linked providers).
-
-## 1) OpenCode (Plugin)
-
-Install:
-
-```bash
-./plugins/openusage-telemetry/install.sh
-```
-
-This installs:
-
-- `~/.config/opencode/plugins/openusage-telemetry.ts`
-- plugin entry in `~/.config/opencode/opencode.json`
-
-## 2) Codex (Native notify)
-
-Install:
-
-```bash
-./plugins/codex-telemetry/install.sh
-```
-
-This installs:
-
-- `~/.config/openusage/hooks/codex-notify.sh`
-- `notify = ["~/.config/openusage/hooks/codex-notify.sh"]` in `~/.codex/config.toml`
-
-## 3) Claude Code (Native hooks)
-
-Install:
-
-```bash
-./plugins/claude-code-telemetry/install.sh
-```
-
-This installs:
-
-- `~/.config/openusage/hooks/claude-hook.sh`
-- command hooks in `~/.claude/settings.json` for:
-  - `Stop`
-  - `SubagentStop`
-  - `PostToolUse`
 
 ## Optional runtime env vars (all integrations)
 

@@ -1,10 +1,8 @@
 package integrations
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -16,110 +14,111 @@ func TestParseIntegrationVersion(t *testing.T) {
 	}
 }
 
-func TestInstallOpenCodeAndDetectReady(t *testing.T) {
+func TestManagerInstallAndListStatuses(t *testing.T) {
 	root := t.TempDir()
-	m := Manager{
-		openCodeConfigFile: filepath.Join(root, "opencode", "opencode.json"),
-		openCodePluginFile: filepath.Join(root, "opencode", "plugins", "openusage-telemetry.ts"),
-		openusageBin:       "/tmp/openusage-bin",
+	dirs := Dirs{
+		Home:         root,
+		ConfigRoot:   filepath.Join(root, ".config"),
+		HooksDir:     filepath.Join(root, ".config", "openusage", "hooks"),
+		OpenusageBin: "/tmp/openusage-bin",
 	}
+	m := Manager{dirs: dirs}
 
-	if err := m.Install(OpenCodeID); err != nil {
-		t.Fatalf("Install(OpenCodeID) error = %v", err)
-	}
-
-	pluginData, err := os.ReadFile(m.openCodePluginFile)
-	if err != nil {
-		t.Fatalf("read plugin file: %v", err)
-	}
-	plugin := string(pluginData)
-	if !strings.Contains(plugin, "openusage-integration-version: "+IntegrationVersion) {
-		t.Fatalf("plugin missing integration version marker: %q", plugin)
-	}
-	if !strings.Contains(plugin, "/tmp/openusage-bin") {
-		t.Fatalf("plugin missing pinned openusage bin: %q", plugin)
-	}
-
-	cfgData, err := os.ReadFile(m.openCodeConfigFile)
-	if err != nil {
-		t.Fatalf("read opencode config: %v", err)
-	}
-	var cfg map[string]any
-	if err := json.Unmarshal(cfgData, &cfg); err != nil {
-		t.Fatalf("parse opencode config: %v", err)
-	}
-	list, ok := cfg["plugin"].([]any)
-	if !ok {
-		t.Fatalf("opencode config missing plugin list: %#v", cfg)
-	}
-	found := false
-	wantURL := "file://" + m.openCodePluginFile
-	for _, item := range list {
-		text, _ := item.(string)
-		if text == wantURL {
-			found = true
-			break
+	for _, id := range []ID{OpenCodeID, CodexID, ClaudeCodeID} {
+		if err := m.Install(id); err != nil {
+			t.Fatalf("Install(%s) error = %v", id, err)
 		}
 	}
-	if !found {
-		t.Fatalf("plugin list missing %q: %#v", wantURL, list)
+
+	statuses := m.ListStatuses()
+	if len(statuses) != len(AllDefinitions()) {
+		t.Fatalf("ListStatuses() returned %d statuses, want %d", len(statuses), len(AllDefinitions()))
 	}
 
-	status := m.detectOpenCode()
-	if status.State != "ready" {
-		t.Fatalf("status.State = %q, want ready", status.State)
-	}
-	if status.InstalledVersion != IntegrationVersion {
-		t.Fatalf("status.InstalledVersion = %q, want %q", status.InstalledVersion, IntegrationVersion)
+	for _, st := range statuses {
+		if st.State != "ready" {
+			t.Errorf("status for %s: State = %q, want ready", st.ID, st.State)
+		}
+		if st.InstalledVersion != IntegrationVersion {
+			t.Errorf("status for %s: InstalledVersion = %q, want %q", st.ID, st.InstalledVersion, IntegrationVersion)
+		}
 	}
 }
 
-func TestDetectCodexOutdated(t *testing.T) {
+func TestManagerInstallUnknownID(t *testing.T) {
 	root := t.TempDir()
-	hookPath := filepath.Join(root, "hooks", "codex-notify.sh")
-	configPath := filepath.Join(root, "codex", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
+	dirs := Dirs{
+		Home:         root,
+		ConfigRoot:   filepath.Join(root, ".config"),
+		HooksDir:     filepath.Join(root, ".config", "openusage", "hooks"),
+		OpenusageBin: "/tmp/openusage-bin",
+	}
+	m := Manager{dirs: dirs}
+
+	err := m.Install("nonexistent")
+	if err == nil {
+		t.Fatal("Install(nonexistent) should return an error")
+	}
+}
+
+func TestManagerListStatusesMissing(t *testing.T) {
+	root := t.TempDir()
+	dirs := Dirs{
+		Home:         root,
+		ConfigRoot:   filepath.Join(root, ".config"),
+		HooksDir:     filepath.Join(root, ".config", "openusage", "hooks"),
+		OpenusageBin: "/tmp/openusage-bin",
+	}
+	m := Manager{dirs: dirs}
+
+	statuses := m.ListStatuses()
+	for _, st := range statuses {
+		if st.State != "missing" {
+			t.Errorf("status for %s: State = %q, want missing", st.ID, st.State)
+		}
+	}
+}
+
+func TestManagerDetectOutdated(t *testing.T) {
+	root := t.TempDir()
+	dirs := Dirs{
+		Home:         root,
+		ConfigRoot:   filepath.Join(root, ".config"),
+		HooksDir:     filepath.Join(root, ".config", "openusage", "hooks"),
+		OpenusageBin: "/tmp/openusage-bin",
+	}
+
+	// Create an old-version hook file for codex.
+	def, _ := DefinitionByID(CodexID)
+	hookFile := def.TargetFileFunc(dirs)
+	configFile := def.ConfigFileFunc(dirs)
+	if err := os.MkdirAll(filepath.Dir(hookFile), 0o755); err != nil {
 		t.Fatalf("mkdir hook dir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	if err := os.WriteFile(hookPath, []byte("# openusage-integration-version: 2025-01-01\n"), 0o755); err != nil {
+	if err := os.WriteFile(hookFile, []byte("# openusage-integration-version: 2025-01-01\n"), 0o755); err != nil {
 		t.Fatalf("write hook: %v", err)
 	}
-	if err := os.WriteFile(configPath, []byte("notify = [\""+hookPath+"\"]\n"), 0o600); err != nil {
+	if err := os.WriteFile(configFile, []byte("notify = [\""+hookFile+"\"]\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	m := Manager{
-		codexHookFile:   hookPath,
-		codexConfigFile: configPath,
-	}
-	status := m.detectCodex()
-	if !status.NeedsUpgrade {
-		t.Fatalf("status.NeedsUpgrade = false, want true")
-	}
-	if status.State != "outdated" {
-		t.Fatalf("status.State = %q, want outdated", status.State)
-	}
-}
+	m := Manager{dirs: dirs}
+	statuses := m.ListStatuses()
 
-func TestInstallClaudeCodeAndDetectReady(t *testing.T) {
-	root := t.TempDir()
-	m := Manager{
-		claudeHookFile:     filepath.Join(root, "hooks", "claude-hook.sh"),
-		claudeSettingsFile: filepath.Join(root, "claude", "settings.json"),
-		openusageBin:       "/tmp/openusage-bin",
+	var codexStatus Status
+	for _, st := range statuses {
+		if st.ID == CodexID {
+			codexStatus = st
+			break
+		}
 	}
-	if err := m.Install(ClaudeCodeID); err != nil {
-		t.Fatalf("Install(ClaudeCodeID) error = %v", err)
+	if !codexStatus.NeedsUpgrade {
+		t.Fatalf("codex status.NeedsUpgrade = false, want true")
 	}
-
-	status := m.detectClaudeCode()
-	if status.State != "ready" {
-		t.Fatalf("status.State = %q, want ready", status.State)
-	}
-	if status.InstalledVersion != IntegrationVersion {
-		t.Fatalf("status.InstalledVersion = %q, want %q", status.InstalledVersion, IntegrationVersion)
+	if codexStatus.State != "outdated" {
+		t.Fatalf("codex status.State = %q, want outdated", codexStatus.State)
 	}
 }

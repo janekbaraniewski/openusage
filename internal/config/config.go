@@ -62,6 +62,13 @@ type DashboardConfig struct {
 	Providers []DashboardProviderConfig `json:"providers"`
 }
 
+type IntegrationState struct {
+	Installed   bool   `json:"installed"`
+	Version     string `json:"version,omitempty"`
+	InstalledAt string `json:"installed_at,omitempty"`
+	Declined    bool   `json:"declined,omitempty"`
+}
+
 type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
@@ -73,6 +80,7 @@ type Config struct {
 	AutoDetect           bool                          `json:"auto_detect"`
 	Accounts             []core.AccountConfig          `json:"accounts"`
 	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
+	Integrations         map[string]IntegrationState   `json:"integrations,omitempty"`
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
@@ -305,5 +313,25 @@ func SaveTimeWindowTo(path string, window string) error {
 		cfg = DefaultConfig()
 	}
 	cfg.Data.TimeWindow = string(core.ParseTimeWindow(window))
+	return SaveTo(path, cfg)
+}
+
+// SaveIntegrationState persists an integration state into the config file (read-modify-write).
+func SaveIntegrationState(id string, state IntegrationState) error {
+	return SaveIntegrationStateTo(ConfigPath(), id, state)
+}
+
+func SaveIntegrationStateTo(path string, id string, state IntegrationState) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	if cfg.Integrations == nil {
+		cfg.Integrations = make(map[string]IntegrationState)
+	}
+	cfg.Integrations[id] = state
 	return SaveTo(path, cfg)
 }

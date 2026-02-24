@@ -10,6 +10,8 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/daemon"
+	"github.com/janekbaraniewski/openusage/internal/detect"
+	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/spf13/cobra"
@@ -134,6 +136,21 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			resolvedPoll := pollInterval
 			if resolvedPoll <= 0 {
 				resolvedPoll = resolvedInterval
+			}
+
+			// Check for actionable integrations and print advisory hints.
+			detected := detect.AutoDetect()
+			dirs := integrations.NewDefaultDirs()
+			matches := integrations.MatchDetected(integrations.AllDefinitions(), detected, dirs)
+			var actionableIDs []string
+			for _, m := range matches {
+				if m.Actionable {
+					actionableIDs = append(actionableIDs, string(m.Definition.ID))
+				}
+			}
+			if len(actionableIDs) > 0 {
+				fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
+				fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
 			}
 
 			return daemon.RunServer(daemon.Config{

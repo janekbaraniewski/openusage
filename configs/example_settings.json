@@ -114,5 +114,16 @@
       "api_key_env": "ALIBABA_CLOUD_API_KEY"
     }
   ],
-  "auto_detected_accounts": []
+  "auto_detected_accounts": [],
+  "integrations": {
+    "claude-code-hooks": {
+      "installed": true,
+      "version": "1.0.0",
+      "installed_at": "2025-01-15T10:30:00Z"
+    },
+    "cursor-rules": {
+      "installed": false,
+      "declined": true
+    }
+  }
 }

@@ -303,14 +303,13 @@ func checkIntegrations(cfg config.Config, dirs integrations.Dirs) {
 
 Non-interactive: just logs a message. No interactive prompts in daemon mode. The TUI can show a banner with the same info.
 
-### 5.7 Deprecation of `plugins/` Shell Scripts
+### 5.7 Remove `plugins/` Directory
 
-After the CLI install command works:
+The `plugins/` directory contains shell install scripts and source file copies that duplicate the embedded templates and Go manager logic. Remove it entirely:
 
-1. Update `plugins/*/README.md` to say: "Deprecated. Use `openusage integrations install <id>` instead."
-2. Update `TELEMETRY_INTEGRATIONS.md` to reference the CLI command.
-3. Keep the `plugins/` directory for one release cycle, then remove.
-4. The shell `install.sh` scripts are no longer needed — all logic lives in the Go manager.
+1. Delete `plugins/` directory (9 files: 3 install.sh, 3 hook/plugin source copies, 3 READMEs).
+2. Update `TELEMETRY_INTEGRATIONS.md` to reference `openusage integrations install` as the sole install method.
+3. Update `.gitignore` if it references `plugins/`.
 
 ### 5.8 Backward Compatibility
 
@@ -386,10 +385,10 @@ Tests: Rewrite `manager_test.go` — existing tests directly call removed method
 
 ### Task 8: Update docs and deprecate shell scripts
 
-Files: `docs/TELEMETRY_INTEGRATIONS.md`, `plugins/*/README.md`
+Files: `docs/TELEMETRY_INTEGRATIONS.md`, `plugins/` (delete entire directory)
 Depends on: Task 5
-Description: Update `TELEMETRY_INTEGRATIONS.md` to document the CLI command as the primary install method. Add deprecation notices to `plugins/*/README.md` pointing to `openusage integrations install`. Add a section to the main README if it references plugin installation.
-Tests: None (documentation only).
+Description: Delete `plugins/` directory entirely (redundant shell scripts and source copies). Update `TELEMETRY_INTEGRATIONS.md` to document `openusage integrations install` as the sole install method. Update any other docs that reference `plugins/`.
+Tests: None (documentation + deletion only).
 
 ### Task 9: Integration verification (end-to-end)
 
