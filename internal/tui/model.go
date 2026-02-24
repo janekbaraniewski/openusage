@@ -103,9 +103,10 @@ type Model struct {
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
-	daemonStatus     DaemonStatus
-	daemonMessage    string
-	daemonInstalling bool
+	daemonStatus      DaemonStatus
+	daemonMessage     string
+	daemonInstalling  bool
+	daemonInstallDone bool // true after a successful install in this session
 
 	providerOrder       []string
 	providerEnabled     map[string]bool
@@ -324,6 +325,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.daemonStatus = DaemonError
 			m.daemonMessage = msg.err.Error()
+		} else {
+			m.daemonInstallDone = true
+			m.daemonStatus = DaemonStarting
 		}
 		return m, nil
 
@@ -446,7 +450,7 @@ func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if (m.daemonStatus == DaemonNotInstalled || m.daemonStatus == DaemonOutdated) && !m.daemonInstalling {
 			m.daemonInstalling = true
-			m.daemonMessage = "Installing daemon service..."
+			m.daemonMessage = "Setting up background helper..."
 			return m, m.installDaemonCmd()
 		}
 	}

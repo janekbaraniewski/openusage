@@ -172,7 +172,11 @@ func newDaemonInstallCommand() *cobra.Command {
 		Short: "Install the telemetry daemon as a system service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return daemon.InstallService(strings.TrimSpace(socketPath))
+			if err := daemon.InstallService(strings.TrimSpace(socketPath)); err != nil {
+				return err
+			}
+			fmt.Println("telemetry daemon service installed")
+			return nil
 		},
 	}
 }
@@ -183,7 +187,11 @@ func newDaemonUninstallCommand() *cobra.Command {
 		Short: "Uninstall the telemetry daemon system service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return daemon.UninstallService(strings.TrimSpace(socketPath))
+			if err := daemon.UninstallService(strings.TrimSpace(socketPath)); err != nil {
+				return err
+			}
+			fmt.Println("telemetry daemon service uninstalled")
+			return nil
 		},
 	}
 }

@@ -240,154 +240,149 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 }
 
 func (m Model) renderSplash(screenW, screenH int) string {
-	var lines []string
-	if m.useBrandedSplashLoader() {
-		for _, line := range m.brandedLoaderLines(0, "", m.loadingSplashMessage()) {
-			lines = append(lines, "  "+line)
-		}
-	} else {
-		banner := ASCIIBanner(m.animFrame)
-		bannerLines := strings.Split(banner, "\n")
-		for _, bl := range bannerLines {
-			lines = append(lines, "  "+bl)
-		}
-		lines = append(lines, "")
-		lines = append(lines, m.splashStatusLines()...)
+	dimHint := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
+
+	// Build banner lines.
+	var bannerLines []string
+	banner := ASCIIBanner(m.animFrame)
+	for _, bl := range strings.Split(banner, "\n") {
+		bannerLines = append(bannerLines, "  "+bl)
 	}
 
-	blockH := len(lines)
-	padTop := (screenH - blockH) / 2
-	if padTop < 0 {
-		padTop = 0
-	}
+	// Build content lines (progress + hint).
+	var contentLines []string
+	contentLines = append(contentLines, m.splashProgressLines()...)
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, "  "+dimHint.Render("Press q to quit"))
 
-	maxW := 0
-	for _, l := range lines {
-		if w := lipgloss.Width(l); w > maxW {
-			maxW = w
+	// Horizontal centering based on banner width only — banner is the anchor.
+	// Content aligns to the same left edge; if wider, it extends right.
+	bannerMaxW := 0
+	for _, l := range bannerLines {
+		if w := lipgloss.Width(l); w > bannerMaxW {
+			bannerMaxW = w
 		}
 	}
-	padLeft := (screenW - maxW) / 2
+	padLeft := (screenW - bannerMaxW) / 2
 	if padLeft < 0 {
 		padLeft = 0
 	}
 
+	// Fixed banner vertical position at ~1/3 from top.
+	bannerH := len(bannerLines)
+	bannerTop := (screenH / 3) - (bannerH / 2)
+	if bannerTop < 1 {
+		bannerTop = 1
+	}
+
 	var out strings.Builder
-	for i := 0; i < padTop; i++ {
+
+	for i := 0; i < bannerTop; i++ {
 		out.WriteRune('\n')
 	}
-	for i, line := range lines {
+	for i, line := range bannerLines {
 		if i > 0 {
 			out.WriteRune('\n')
 		}
 		out.WriteString(strings.Repeat(" ", padLeft))
 		out.WriteString(line)
 	}
+	out.WriteRune('\n')
+	for _, line := range contentLines {
+		out.WriteRune('\n')
+		out.WriteString(strings.Repeat(" ", padLeft))
+		out.WriteString(line)
+	}
+
 	return out.String()
 }
 
-func (m Model) splashStatusLines() []string {
+func (m Model) splashProgressLines() []string {
 	accent := lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
 	warn := lipgloss.NewStyle().Foreground(colorYellow)
 	errStyle := lipgloss.NewStyle().Foreground(colorRed)
 	hint := lipgloss.NewStyle().Foreground(colorGreen)
+	ok := lipgloss.NewStyle().Foreground(colorGreen)
 
-	spinnerIdx := m.animFrame % len(SpinnerFrames)
-	spinner := accent.Render(SpinnerFrames[spinnerIdx])
+	spinner := accent.Render(SpinnerFrames[m.animFrame%len(SpinnerFrames)])
 
+	done := func(text string) string { return "  " + ok.Render("✓") + " " + text }
+	spin := func(text string) string { return "  " + spinner + " " + dim.Render(text) }
+
+	var lines []string
+
+	// Step 1: Config — always done.
+	lines = append(lines, done("Configuration loaded"))
+
+	// Step 2: Providers.
+	n := len(m.providerOrder)
+	if n > 0 {
+		lines = append(lines, done(fmt.Sprintf("%d providers detected", n)))
+	} else {
+		lines = append(lines, "  "+dim.Render("· No providers detected"))
+	}
+
+	// Step 3+: Helper lifecycle — show accumulated progress.
 	switch m.daemonStatus {
+	case DaemonConnecting:
+		lines = append(lines, spin("Connecting to background helper..."))
+
 	case DaemonNotInstalled:
 		if m.daemonInstalling {
-			return []string{
-				"  " + spinner + " " + dim.Render("Installing daemon service..."),
-			}
-		}
-		return []string{
-			"  " + warn.Render("Daemon service is not installed."),
-			"",
-			"  " + hint.Render("Press Enter to install automatically"),
-			"  " + dim.Render("or run: openusage telemetry daemon install"),
+			lines = append(lines, spin("Setting up background helper..."))
+		} else {
+			lines = append(lines, "")
+			lines = append(lines, "  "+dim.Render("OpenUsage uses a small background helper to"))
+			lines = append(lines, "  "+dim.Render("collect and cache usage data from your providers."))
+			lines = append(lines, "")
+			lines = append(lines, "  "+hint.Render("▸ Press Enter to set it up"))
+			lines = append(lines, "  "+dim.Render("  or run: openusage telemetry daemon install"))
 		}
 
 	case DaemonOutdated:
 		if m.daemonInstalling {
-			return []string{
-				"  " + spinner + " " + dim.Render("Upgrading daemon service..."),
-			}
-		}
-		msg := "Daemon is outdated."
-		if m.daemonMessage != "" {
-			msg = m.daemonMessage
-		}
-		return []string{
-			"  " + warn.Render(msg),
-			"",
-			"  " + hint.Render("Press Enter to upgrade"),
+			lines = append(lines, spin("Updating background helper..."))
+		} else {
+			lines = append(lines, "  "+warn.Render("Background helper needs an update."))
+			lines = append(lines, "")
+			lines = append(lines, "  "+hint.Render("▸ Press Enter to update"))
 		}
 
+	case DaemonStarting:
+		if m.daemonInstallDone {
+			lines = append(lines, done("Background helper installed"))
+		}
+		lines = append(lines, spin("Starting background helper..."))
+
 	case DaemonError:
-		msg := "Could not connect to daemon."
+		if m.daemonInstallDone {
+			lines = append(lines, done("Background helper installed"))
+		}
+		msg := "Could not connect to background helper."
 		if m.daemonMessage != "" {
 			msg = m.daemonMessage
+			if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+				msg = msg[:idx]
+			}
 			if len(msg) > 60 {
 				msg = msg[:57] + "..."
 			}
 		}
-		return []string{
-			"  " + errStyle.Render(msg),
-			"",
-			"  " + dim.Render("Try: openusage telemetry daemon status"),
-		}
+		lines = append(lines, "  "+errStyle.Render("✗")+" "+errStyle.Render(msg))
+		lines = append(lines, "  "+dim.Render("Try: openusage telemetry daemon status"))
 
-	case DaemonStarting:
-		return []string{
-			"  " + spinner + " " + dim.Render("Starting daemon..."),
+	default: // DaemonRunning or any other state.
+		if m.daemonInstallDone {
+			lines = append(lines, done("Background helper installed"))
 		}
+		lines = append(lines, done("Background helper running"))
+		if !m.hasData {
+			lines = append(lines, spin("Fetching usage data..."))
+		}
+	}
 
-	default:
-		loader := m.brandedLoaderLines(0, "", m.loadingSplashMessage())
-		subtitle := ""
-		if len(loader) > 0 {
-			subtitle = loader[len(loader)-1]
-		}
-		if subtitle == "" {
-			subtitle = spinner + " " + dim.Render(m.loadingSplashMessage())
-		}
-		return []string{
-			"  " + subtitle,
-		}
-	}
-}
-
-func (m Model) loadingSplashMessage() string {
-	if len(m.snapshots) == 0 {
-		return "Connecting to telemetry daemon..."
-	}
-	for _, id := range m.sortedIDs {
-		snap, ok := m.snapshots[id]
-		if !ok {
-			continue
-		}
-		if msg := strings.TrimSpace(snap.Message); msg != "" {
-			return msg
-		}
-	}
-	for _, snap := range m.snapshots {
-		if msg := strings.TrimSpace(snap.Message); msg != "" {
-			return msg
-		}
-	}
-	return "Connecting to telemetry daemon..."
-}
-
-func (m Model) useBrandedSplashLoader() bool {
-	switch m.daemonStatus {
-	case DaemonNotInstalled, DaemonOutdated, DaemonError, DaemonStarting:
-		return false
-	default:
-		return true
-	}
+	return lines
 }
 
 func (m Model) resolveLoadingMessage(message, fallback string) string {
