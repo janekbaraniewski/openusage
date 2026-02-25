@@ -42,14 +42,16 @@ func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight i
 		maxCols = n
 	}
 
-	for c := maxCols; c >= 1; c-- {
+	// Evaluate all valid multi-column layouts and pick the most balanced one.
+	// "Balanced" = fewest empty cells in the grid; ties broken by more columns.
+	// Single column is a scrollable fallback used only when no multi-column fits.
+	bestCols, bestW, bestH := 0, 0, 0
+	bestEmpty := n + 1 // worse than any real candidate
+
+	for c := 2; c <= maxCols; c++ {
 		perCol := (usableW-(c-1)*tileGapH)/c - tileBorderH
 		if perCol < tileMinWidth {
 			continue
-		}
-
-		if c == 1 {
-			return 1, perCol, 0
 		}
 		if perCol < tileMinMultiColumnWidth {
 			continue
@@ -65,9 +67,17 @@ func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight i
 			continue
 		}
 
-		return c, perCol, perRowContentH
+		empty := rows*c - n
+		if empty < bestEmpty || (empty == bestEmpty && c > bestCols) {
+			bestCols, bestW, bestH, bestEmpty = c, perCol, perRowContentH, empty
+		}
 	}
 
+	if bestCols > 0 {
+		return bestCols, bestW, bestH
+	}
+
+	// Fallback: single scrollable column (no height cap).
 	fallbackW := usableW - tileBorderH
 	if fallbackW < tileMinWidth {
 		fallbackW = tileMinWidth
