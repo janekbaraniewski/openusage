@@ -125,14 +125,12 @@ func resolveConfigAccounts(
 		return nil
 	}
 
-	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
-	if len(accounts) == 0 && cfg.AutoDetect && resolver != nil {
-		// Cold-start bootstrap: no persisted settings/accounts yet.
-		// Run host autodetect so dashboard can render provider snapshots immediately.
-		accounts = resolver(cfg)
+	if cfg.AutoDetect && resolver != nil {
+		accounts := resolver(cfg)
 		return FilterAccountsByDashboard(accounts, cfg.Dashboard)
 	}
 
+	accounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 	accounts = FilterAccountsByDashboard(accounts, cfg.Dashboard)
 	return ApplyCredentials(accounts)
 }

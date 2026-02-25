@@ -117,6 +117,64 @@ func TestResolveConfigAccounts_ColdStartRespectsDashboardDisabled(t *testing.T) 
 	}
 }
 
+func TestResolveConfigAccounts_ReRunsResolverWhenAccountsExist(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AutoDetect = true
+	cfg.AutoDetectedAccounts = []core.AccountConfig{
+		{ID: "ollama-local", Provider: "ollama"},
+	}
+
+	called := false
+	got := resolveConfigAccounts(&cfg, func(_ *config.Config) []core.AccountConfig {
+		called = true
+		return []core.AccountConfig{
+			{ID: "ollama-local", Provider: "ollama"},
+			{ID: "copilot", Provider: "copilot"},
+		}
+	})
+
+	if !called {
+		t.Fatal("expected resolver to be called even when accounts already exist")
+	}
+	if len(got) != 2 {
+		t.Fatalf("resolved accounts len = %d, want 2", len(got))
+	}
+}
+
+func TestResolveConfigAccounts_SkipsResolverWhenAutoDetectFalse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AutoDetect = false
+	cfg.Accounts = []core.AccountConfig{
+		{ID: "openai", Provider: "openai"},
+	}
+
+	called := false
+	got := resolveConfigAccounts(&cfg, func(_ *config.Config) []core.AccountConfig {
+		called = true
+		return []core.AccountConfig{
+			{ID: "openai", Provider: "openai"},
+			{ID: "copilot", Provider: "copilot"},
+		}
+	})
+
+	if called {
+		t.Fatal("resolver should not be called when AutoDetect is false")
+	}
+	// Must contain at least the manual account; ApplyCredentials may add more
+	// from stored credentials on the host, so we only check the resolver wasn't called
+	// and the manual account is present.
+	found := false
+	for _, acct := range got {
+		if acct.ID == "openai" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("resolved accounts %v missing openai", got)
+	}
+}
+
 func TestReadModelTemplatesFromRequest_ExcludesDisabledAccounts(t *testing.T) {
 	templates := ReadModelTemplatesFromRequest(ReadModelRequest{
 		Accounts: []ReadModelAccount{

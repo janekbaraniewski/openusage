@@ -91,8 +91,12 @@ func findBinary(name string) string {
 func candidateBinaryDirs() []string {
 	var dirs []string
 
-	if custom := strings.TrimSpace(os.Getenv("OPENUSAGE_DETECT_BIN_DIRS")); custom != "" {
-		parts := strings.Split(custom, string(os.PathListSeparator))
+	// When OPENUSAGE_DETECT_BIN_DIRS is explicitly set (even to empty), use
+	// only its dirs + PATH and skip hardcoded system dirs. This gives tests
+	// full control over binary lookup isolation.
+	customVal, customSet := os.LookupEnv("OPENUSAGE_DETECT_BIN_DIRS")
+	if customSet && customVal != "" {
+		parts := strings.Split(customVal, string(os.PathListSeparator))
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if part != "" {
@@ -110,15 +114,17 @@ func candidateBinaryDirs() []string {
 		}
 	}
 
-	home := homeDir()
-	if home != "" {
-		dirs = append(dirs,
-			filepath.Join(home, ".local", "bin"),
-			filepath.Join(home, "bin"),
-		)
-	}
+	if !customSet {
+		home := homeDir()
+		if home != "" {
+			dirs = append(dirs,
+				filepath.Join(home, ".local", "bin"),
+				filepath.Join(home, "bin"),
+			)
+		}
 
-	dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+		dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+	}
 	return lo.Uniq(dirs)
 }
 
@@ -171,35 +177,81 @@ func detectAider(result *Result) {
 }
 
 func detectGHCopilot(result *Result) {
-	bin := findBinary("gh")
-	if bin == "" {
-		return
-	}
-
-	log.Printf("[detect] Found gh CLI at %s", bin)
-
-	cmd := exec.Command(bin, "copilot", "--version")
-	if err := cmd.Run(); err != nil {
-		log.Printf("[detect] gh copilot extension not installed, skipping")
-		return
-	}
-
 	home := homeDir()
-	configDir := filepath.Join(home, ".config", "github-copilot")
-
-	tool := DetectedTool{
-		Name:       "GitHub Copilot (gh CLI)",
-		BinaryPath: bin,
-		ConfigDir:  configDir,
-		Type:       "cli",
+	if home == "" {
+		return
 	}
-	result.Tools = append(result.Tools, tool)
+
+	ghBin := findBinary("gh")
+	ghCopilotOK := false
+
+	// Try gh copilot extension first (existing/deprecated path).
+	if ghBin != "" {
+		log.Printf("[detect] Found gh CLI at %s", ghBin)
+		cmd := exec.Command(ghBin, "copilot", "--version")
+		if err := cmd.Run(); err == nil {
+			ghCopilotOK = true
+		} else {
+			log.Printf("[detect] gh copilot extension not installed")
+		}
+	}
+
+	// If gh copilot works, register it as before.
+	if ghCopilotOK {
+		configDir := filepath.Join(home, ".config", "github-copilot")
+		result.Tools = append(result.Tools, DetectedTool{
+			Name:       "GitHub Copilot (gh CLI)",
+			BinaryPath: ghBin,
+			ConfigDir:  configDir,
+			Type:       "cli",
+		})
+		addAccount(result, core.AccountConfig{
+			ID:       "copilot",
+			Provider: "copilot",
+			Auth:     "cli",
+			Binary:   ghBin,
+		})
+		return
+	}
+
+	// Fall back to standalone copilot binary.
+	copilotBin := findBinary("copilot")
+	if copilotBin == "" {
+		log.Printf("[detect] No gh copilot extension or standalone copilot binary found, skipping")
+		return
+	}
+
+	log.Printf("[detect] Found standalone copilot binary at %s", copilotBin)
+
+	// Confirm the CLI has been used by checking for ~/.copilot/ directory.
+	copilotDir := filepath.Join(home, ".copilot")
+	if !dirExists(copilotDir) {
+		log.Printf("[detect] Standalone copilot binary found but %s does not exist, skipping", copilotDir)
+		return
+	}
+
+	// Determine the Binary field: prefer gh (for gh api quota calls), fall back to copilot path.
+	binaryPath := copilotBin
+	if ghBin != "" {
+		binaryPath = ghBin
+	}
+
+	result.Tools = append(result.Tools, DetectedTool{
+		Name:       "GitHub Copilot CLI",
+		BinaryPath: copilotBin,
+		ConfigDir:  copilotDir,
+		Type:       "cli",
+	})
 
 	addAccount(result, core.AccountConfig{
 		ID:       "copilot",
 		Provider: "copilot",
 		Auth:     "cli",
-		Binary:   bin,
+		Binary:   binaryPath,
+		ExtraData: map[string]string{
+			"copilot_binary": copilotBin,
+			"config_dir":     copilotDir,
+		},
 	})
 }
 

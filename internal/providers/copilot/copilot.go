@@ -800,6 +800,52 @@ type assistantMsgData struct {
 	ToolRequests json.RawMessage `json:"toolRequests"`
 }
 
+type quotaSnapshotEntry struct {
+	EntitlementRequests int     `json:"entitlementRequests"`
+	UsedRequests        int     `json:"usedRequests"`
+	RemainingPercentage float64 `json:"remainingPercentage"`
+	ResetDate           string  `json:"resetDate"`
+}
+
+type assistantUsageData struct {
+	Model            string                        `json:"model"`
+	InputTokens      float64                       `json:"inputTokens"`
+	OutputTokens     float64                       `json:"outputTokens"`
+	CacheReadTokens  float64                       `json:"cacheReadTokens"`
+	CacheWriteTokens float64                       `json:"cacheWriteTokens"`
+	Cost             float64                       `json:"cost"`
+	Duration         int64                         `json:"duration"`
+	QuotaSnapshots   map[string]quotaSnapshotEntry `json:"quotaSnapshots"`
+}
+
+type sessionShutdownData struct {
+	ShutdownType         string                         `json:"shutdownType"`
+	TotalPremiumRequests int                            `json:"totalPremiumRequests"`
+	TotalAPIDurationMs   int64                          `json:"totalApiDurationMs"`
+	SessionStartTime     string                         `json:"sessionStartTime"`
+	CodeChanges          shutdownCodeChanges            `json:"codeChanges"`
+	ModelMetrics         map[string]shutdownModelMetric `json:"modelMetrics"`
+}
+
+type shutdownCodeChanges struct {
+	LinesAdded    int `json:"linesAdded"`
+	LinesRemoved  int `json:"linesRemoved"`
+	FilesModified int `json:"filesModified"`
+}
+
+type shutdownModelMetric struct {
+	Requests struct {
+		Count int     `json:"count"`
+		Cost  float64 `json:"cost"`
+	} `json:"requests"`
+	Usage struct {
+		InputTokens      float64 `json:"inputTokens"`
+		OutputTokens     float64 `json:"outputTokens"`
+		CacheReadTokens  float64 `json:"cacheReadTokens"`
+		CacheWriteTokens float64 `json:"cacheWriteTokens"`
+	} `json:"usage"`
+}
+
 func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, logs logSummary) {
 	sessionDir := filepath.Join(copilotDir, "session-state")
 	entries, err := os.ReadDir(sessionDir)
@@ -810,23 +856,29 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	snap.Raw["total_sessions"] = fmt.Sprintf("%d", len(entries))
 
 	type sessionInfo struct {
-		id             string
-		createdAt      time.Time
-		updatedAt      time.Time
-		cwd            string
-		repo           string
-		branch         string
-		client         string
-		summary        string
-		messages       int
-		turns          int
-		model          string
-		responseChars  int
-		reasoningChars int
-		toolCalls      int
-		tokenUsed      int
-		tokenTotal     int
-		tokenBurn      float64
+		id                      string
+		createdAt               time.Time
+		updatedAt               time.Time
+		cwd                     string
+		repo                    string
+		branch                  string
+		client                  string
+		summary                 string
+		messages                int
+		turns                   int
+		model                   string
+		responseChars           int
+		reasoningChars          int
+		toolCalls               int
+		tokenUsed               int
+		tokenTotal              int
+		tokenBurn               float64
+		usageCost               float64
+		premiumRequests         int
+		shutdownPremiumRequests int
+		linesAdded              int
+		linesRemoved            int
+		filesModified           int
 	}
 
 	var sessions []sessionInfo
@@ -843,6 +895,21 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	dailyModelMessages := make(map[string]map[string]float64)
 	dailyModelTokens := make(map[string]map[string]float64)
 	modelInputTokens := make(map[string]float64)
+	usageInputTokens := make(map[string]float64)
+	usageOutputTokens := make(map[string]float64)
+	usageCacheReadTokens := make(map[string]float64)
+	usageCacheWriteTokens := make(map[string]float64)
+	usageCost := make(map[string]float64)
+	usageRequests := make(map[string]int)
+	usageDuration := make(map[string]int64)
+	dailyCost := make(map[string]float64)
+	var latestQuotaSnapshots map[string]quotaSnapshotEntry
+	var shutdownPremiumRequests int
+	var shutdownLinesAdded, shutdownLinesRemoved, shutdownFilesModified int
+	shutdownModelCost := make(map[string]float64)
+	shutdownModelRequests := make(map[string]int)
+	shutdownModelInputTokens := make(map[string]float64)
+	shutdownModelOutputTokens := make(map[string]float64)
 	toolUsageCounts := make(map[string]int)
 	clientLabels := make(map[string]string)
 	clientTokens := make(map[string]float64)
@@ -988,6 +1055,51 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 							}
 						}
 					}
+
+				case "assistant.usage":
+					var usage assistantUsageData
+					if json.Unmarshal(evt.Data, &usage) == nil && usage.Model != "" {
+						usageInputTokens[usage.Model] += usage.InputTokens
+						usageOutputTokens[usage.Model] += usage.OutputTokens
+						usageCacheReadTokens[usage.Model] += usage.CacheReadTokens
+						usageCacheWriteTokens[usage.Model] += usage.CacheWriteTokens
+						usageCost[usage.Model] += usage.Cost
+						usageRequests[usage.Model]++
+						usageDuration[usage.Model] += usage.Duration
+
+						si.usageCost += usage.Cost
+						si.premiumRequests++
+
+						day := parseDayFromTimestamp(evt.Timestamp)
+						if day != "" {
+							dailyCost[day] += usage.Cost
+						}
+
+						if len(usage.QuotaSnapshots) > 0 {
+							latestQuotaSnapshots = usage.QuotaSnapshots
+						}
+					}
+
+				case "session.shutdown":
+					var shutdown sessionShutdownData
+					if json.Unmarshal(evt.Data, &shutdown) == nil {
+						shutdownPremiumRequests += shutdown.TotalPremiumRequests
+						si.shutdownPremiumRequests += shutdown.TotalPremiumRequests
+
+						si.linesAdded += shutdown.CodeChanges.LinesAdded
+						si.linesRemoved += shutdown.CodeChanges.LinesRemoved
+						si.filesModified += shutdown.CodeChanges.FilesModified
+						shutdownLinesAdded += shutdown.CodeChanges.LinesAdded
+						shutdownLinesRemoved += shutdown.CodeChanges.LinesRemoved
+						shutdownFilesModified += shutdown.CodeChanges.FilesModified
+
+						for model, metrics := range shutdown.ModelMetrics {
+							shutdownModelCost[model] += metrics.Requests.Cost
+							shutdownModelRequests[model] += metrics.Requests.Count
+							shutdownModelInputTokens[model] += metrics.Usage.InputTokens
+							shutdownModelOutputTokens[model] += metrics.Usage.OutputTokens
+						}
+					}
 				}
 			}
 			if !firstEventAt.IsZero() && si.createdAt.IsZero() {
@@ -1052,6 +1164,9 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	storeSeries(snap, "cli_messages", dailyMessages)
 	storeSeries(snap, "cli_sessions", dailySessions)
 	storeSeries(snap, "cli_tool_calls", dailyToolCalls)
+	if len(dailyCost) > 0 {
+		storeSeries(snap, "cost", dailyCost)
+	}
 	for model, dayCounts := range dailyModelMessages {
 		safe := sanitizeMetricName(model)
 		storeSeries(snap, "cli_messages_"+safe, dayCounts)
@@ -1117,6 +1232,78 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	setUsedMetric(snap, "cli_input_tokens", totalTokens, "tokens", copilotAllTimeWindow)
 	setUsedMetric(snap, "cli_total_tokens", totalTokens, "tokens", copilotAllTimeWindow)
 
+	// Emit new metrics from assistant.usage and session.shutdown events.
+	var totalUsageOutputTokens, totalUsageCacheRead, totalUsageCacheWrite, totalUsageCost float64
+	var totalUsageRequests int
+	for _, v := range usageOutputTokens {
+		totalUsageOutputTokens += v
+	}
+	for _, v := range usageCacheReadTokens {
+		totalUsageCacheRead += v
+	}
+	for _, v := range usageCacheWriteTokens {
+		totalUsageCacheWrite += v
+	}
+	for _, v := range usageCost {
+		totalUsageCost += v
+	}
+	for _, v := range usageRequests {
+		totalUsageRequests += v
+	}
+	if totalUsageOutputTokens > 0 {
+		setUsedMetric(snap, "cli_output_tokens", totalUsageOutputTokens, "tokens", copilotAllTimeWindow)
+	}
+	if totalUsageCacheRead > 0 {
+		setUsedMetric(snap, "cli_cache_read_tokens", totalUsageCacheRead, "tokens", copilotAllTimeWindow)
+	}
+	if totalUsageCacheWrite > 0 {
+		setUsedMetric(snap, "cli_cache_write_tokens", totalUsageCacheWrite, "tokens", copilotAllTimeWindow)
+	}
+	if totalUsageCost > 0 {
+		setUsedMetric(snap, "cli_cost", totalUsageCost, "USD", copilotAllTimeWindow)
+	}
+	if totalUsageRequests > 0 {
+		setUsedMetric(snap, "cli_premium_requests", float64(totalUsageRequests), "requests", copilotAllTimeWindow)
+	} else if shutdownPremiumRequests > 0 {
+		setUsedMetric(snap, "cli_premium_requests", float64(shutdownPremiumRequests), "requests", copilotAllTimeWindow)
+	}
+	if shutdownLinesAdded > 0 || shutdownLinesRemoved > 0 {
+		setUsedMetric(snap, "cli_lines_added", float64(shutdownLinesAdded), "lines", copilotAllTimeWindow)
+		setUsedMetric(snap, "cli_lines_removed", float64(shutdownLinesRemoved), "lines", copilotAllTimeWindow)
+	}
+	if totalUsageRequests > 0 {
+		var totalDuration int64
+		for _, d := range usageDuration {
+			totalDuration += d
+		}
+		avgMs := float64(totalDuration) / float64(totalUsageRequests)
+		setUsedMetric(snap, "cli_avg_latency_ms", avgMs, "ms", copilotAllTimeWindow)
+	}
+
+	// Apply latestQuotaSnapshots as fallback for premium_interactions_quota.
+	if qs, ok := latestQuotaSnapshots["premium_interactions"]; ok {
+		if _, exists := snap.Metrics["premium_interactions_quota"]; !exists {
+			entitlement := float64(qs.EntitlementRequests)
+			used := float64(qs.UsedRequests)
+			remaining := entitlement - used
+			if remaining < 0 {
+				remaining = 0
+			}
+			snap.Metrics["premium_interactions_quota"] = core.Metric{
+				Limit:     &entitlement,
+				Used:      float64Ptr(used),
+				Remaining: float64Ptr(remaining),
+				Unit:      "requests",
+				Window:    "billing-cycle",
+			}
+		}
+	}
+
+	if _, v := latestSeriesValue(dailyCost); v > 0 {
+		setUsedMetric(snap, "cost_today", v, "USD", "today")
+	}
+	setUsedMetric(snap, "7d_cost", sumLastNDays(dailyCost, 7), "USD", "7d")
+
 	if _, v := latestSeriesValue(dailyMessages); v > 0 {
 		setUsedMetric(snap, "messages_today", v, "messages", "today")
 	}
@@ -1134,7 +1321,27 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	setUsedMetric(snap, "7d_tool_calls", sumLastNDays(dailyToolCalls, 7), "calls", "7d")
 	setUsedMetric(snap, "7d_tokens", sumLastNDays(dailyTokens, 7), "tokens", "7d")
 
-	topModels := topModelNames(modelInputTokens, modelMessages, maxCopilotModels)
+	// Merge usage event models into the topModels set so they appear even if
+	// they have no log-compaction data.
+	allModelTokens := make(map[string]float64, len(modelInputTokens))
+	for k, v := range modelInputTokens {
+		allModelTokens[k] = v
+	}
+	for k, v := range usageInputTokens {
+		if allModelTokens[k] < v {
+			allModelTokens[k] = v
+		}
+	}
+	allModelMessages := make(map[string]int, len(modelMessages))
+	for k, v := range modelMessages {
+		allModelMessages[k] = v
+	}
+	for k, v := range usageRequests {
+		if allModelMessages[k] < v {
+			allModelMessages[k] = v
+		}
+	}
+	topModels := topModelNames(allModelTokens, allModelMessages, maxCopilotModels)
 	for _, model := range topModels {
 		prefix := "model_" + sanitizeMetricName(model)
 		rec := core.ModelUsageRecord{
@@ -1142,11 +1349,46 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 			RawSource:  "json",
 			Window:     copilotAllTimeWindow,
 		}
-		setUsedMetric(snap, prefix+"_input_tokens", modelInputTokens[model], "tokens", copilotAllTimeWindow)
-		if modelInputTokens[model] > 0 {
-			rec.InputTokens = core.Float64Ptr(modelInputTokens[model])
-			rec.TotalTokens = core.Float64Ptr(modelInputTokens[model])
+
+		// Prefer usage event data (accurate) over log-compaction data (approximate).
+		inputTok := modelInputTokens[model]
+		if v := usageInputTokens[model]; v > 0 {
+			inputTok = v
 		}
+		outputTok := usageOutputTokens[model]
+		cacheTok := usageCacheReadTokens[model] + usageCacheWriteTokens[model]
+
+		setUsedMetric(snap, prefix+"_input_tokens", inputTok, "tokens", copilotAllTimeWindow)
+		if inputTok > 0 {
+			rec.InputTokens = core.Float64Ptr(inputTok)
+		}
+		if outputTok > 0 {
+			setUsedMetric(snap, prefix+"_output_tokens", outputTok, "tokens", copilotAllTimeWindow)
+			rec.OutputTokens = core.Float64Ptr(outputTok)
+		}
+		if cacheTok > 0 {
+			rec.CachedTokens = core.Float64Ptr(cacheTok)
+		}
+		totalTok := inputTok + outputTok
+		if totalTok > 0 {
+			rec.TotalTokens = core.Float64Ptr(totalTok)
+		}
+
+		// Cost from usage events; fall back to shutdown model metrics.
+		modelCost := usageCost[model]
+		if modelCost == 0 {
+			modelCost = shutdownModelCost[model]
+		}
+		if modelCost > 0 {
+			rec.CostUSD = core.Float64Ptr(modelCost)
+			setUsedMetric(snap, prefix+"_cost", modelCost, "USD", copilotAllTimeWindow)
+		}
+
+		// Requests from usage events.
+		if reqs := usageRequests[model]; reqs > 0 {
+			rec.Requests = core.Float64Ptr(float64(reqs))
+		}
+
 		setUsedMetric(snap, prefix+"_messages", float64(modelMessages[model]), "messages", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_turns", float64(modelTurns[model]), "turns", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_sessions", float64(modelSessions[model]), "sessions", copilotAllTimeWindow)
