@@ -162,6 +162,14 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"quota",
 				"quota_model_gemini_2_5_pro_requests",
 				"tool_calls_success",
+				"tool_calls_total",
+				"tool_success_rate",
+				"composer_lines_added",
+				"composer_files_changed",
+				"lang_go",
+			},
+			raw: []string{
+				"language_usage",
 			},
 			resets: []string{
 				"quota_model_gemini_2_5_pro_requests_reset",
@@ -224,6 +232,14 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"gh_graphql_rpm",
 				"model_claude_haiku_4_5_input_tokens",
 				"client_skynet_labs_total_tokens",
+				"tool_calls_total",
+				"tool_success_rate",
+				"composer_lines_added",
+				"composer_files_changed",
+				"lang_go",
+			},
+			raw: []string{
+				"language_usage",
 			},
 			resets: []string{
 				"gh_core_rpm_reset",
