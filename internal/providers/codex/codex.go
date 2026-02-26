@@ -131,6 +131,15 @@ type usagePayload struct {
 	CodeReviewRateLimit  *usageLimitDetails     `json:"code_review_rate_limit,omitempty"`
 	AdditionalRateLimits []usageAdditionalLimit `json:"additional_rate_limits,omitempty"`
 	Credits              *usageCredits          `json:"credits,omitempty"`
+	RateLimitStatus      *usageRateLimitStatus  `json:"rate_limit_status,omitempty"`
+}
+
+type usageRateLimitStatus struct {
+	PlanType             string                 `json:"plan_type,omitempty"`
+	RateLimit            *usageLimitDetails     `json:"rate_limit,omitempty"`
+	CodeReviewRateLimit  *usageLimitDetails     `json:"code_review_rate_limit,omitempty"`
+	AdditionalRateLimits []usageAdditionalLimit `json:"additional_rate_limits,omitempty"`
+	Credits              *usageCredits          `json:"credits,omitempty"`
 }
 
 type usageLimitDetails struct {
@@ -138,12 +147,18 @@ type usageLimitDetails struct {
 	LimitReached    bool             `json:"limit_reached"`
 	PrimaryWindow   *usageWindowInfo `json:"primary_window,omitempty"`
 	SecondaryWindow *usageWindowInfo `json:"secondary_window,omitempty"`
+	Primary         *usageWindowInfo `json:"primary,omitempty"`
+	Secondary       *usageWindowInfo `json:"secondary,omitempty"`
 }
 
 type usageWindowInfo struct {
-	UsedPercent        float64 `json:"used_percent"`
-	LimitWindowSeconds int     `json:"limit_window_seconds"`
-	ResetAt            int64   `json:"reset_at"`
+	UsedPercent        *float64 `json:"used_percent,omitempty"`
+	RemainingPercent   *float64 `json:"remaining_percent,omitempty"`
+	LimitWindowSeconds int      `json:"limit_window_seconds,omitempty"`
+	WindowMinutes      int      `json:"window_minutes,omitempty"`
+	ResetAt            int64    `json:"reset_at,omitempty"`
+	ResetsAt           int64    `json:"resets_at,omitempty"`
+	ResetAfterSeconds  int      `json:"reset_after_seconds,omitempty"`
 }
 
 type usageAdditionalLimit struct {
@@ -171,6 +186,57 @@ type turnContextPayload struct {
 type usageEntry struct {
 	Name string
 	Data tokenUsage
+}
+
+type usageApplySummary struct {
+	limitMetricsApplied int
+}
+
+type responseItemPayload struct {
+	Type      string          `json:"type"`
+	Role      string          `json:"role,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Input     string          `json:"input,omitempty"`
+	Output    string          `json:"output,omitempty"`
+	Action    *responseAction `json:"action,omitempty"`
+}
+
+type responseAction struct {
+	Type string `json:"type,omitempty"`
+}
+
+type commandArgs struct {
+	Cmd string `json:"cmd"`
+}
+
+type patchStats struct {
+	Added      int
+	Removed    int
+	Files      map[string]struct{}
+	Deleted    map[string]struct{}
+	PatchCalls int
+}
+
+type countEntry struct {
+	name  string
+	count int
+}
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DetailWidget{
+		Sections: []core.DetailSection{
+			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
+			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
+		},
+	}
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
@@ -257,6 +323,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	p.applyCursorCompatibilityMetrics(&snap)
 	p.applyRateLimitStatus(&snap)
 
 	switch {
@@ -334,14 +401,22 @@ func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, 
 		return false, fmt.Errorf("codex: parsing live usage response: %w", err)
 	}
 
-	applyUsagePayload(&payload, snap)
+	summary := applyUsagePayload(&payload, snap)
+	if summary.limitMetricsApplied > 0 {
+		snap.Raw["rate_limit_source"] = "live"
+	} else {
+		clearRateLimitMetrics(snap)
+		snap.Raw["rate_limit_source"] = "live_unavailable"
+		snap.Raw["rate_limit_warning"] = "live usage payload did not include limit windows"
+	}
 	snap.Raw["quota_api"] = "live"
 	return true, nil
 }
 
-func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) {
+func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApplySummary {
+	var summary usageApplySummary
 	if payload == nil {
-		return
+		return summary
 	}
 
 	if payload.Email != "" {
@@ -354,10 +429,30 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) {
 		snap.Raw["plan_type"] = payload.PlanType
 	}
 
-	applyUsageLimitDetails(payload.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
-	applyUsageLimitDetails(payload.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
+	summary.limitMetricsApplied += applyUsageLimitDetails(payload.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
+	summary.limitMetricsApplied += applyUsageLimitDetails(payload.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
+	summary.limitMetricsApplied += applyUsageAdditionalLimits(payload.AdditionalRateLimits, snap)
 
-	for _, extra := range payload.AdditionalRateLimits {
+	if payload.RateLimitStatus != nil {
+		status := payload.RateLimitStatus
+		if payload.PlanType == "" && status.PlanType != "" {
+			snap.Raw["plan_type"] = status.PlanType
+		}
+		summary.limitMetricsApplied += applyUsageLimitDetails(status.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
+		summary.limitMetricsApplied += applyUsageLimitDetails(status.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
+		summary.limitMetricsApplied += applyUsageAdditionalLimits(status.AdditionalRateLimits, snap)
+		if payload.Credits == nil {
+			applyUsageCredits(status.Credits, snap)
+		}
+	}
+
+	applyUsageCredits(payload.Credits, snap)
+	return summary
+}
+
+func applyUsageAdditionalLimits(additional []usageAdditionalLimit, snap *core.UsageSnapshot) int {
+	applied := 0
+	for _, extra := range additional {
 		limitID := sanitizeMetricName(firstNonEmpty(extra.MeteredFeature, extra.LimitName))
 		if limitID == "" || limitID == "codex" {
 			continue
@@ -365,13 +460,12 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) {
 
 		primaryKey := "rate_limit_" + limitID + "_primary"
 		secondaryKey := "rate_limit_" + limitID + "_secondary"
-		applyUsageLimitDetails(extra.RateLimit, primaryKey, secondaryKey, snap)
+		applied += applyUsageLimitDetails(extra.RateLimit, primaryKey, secondaryKey, snap)
 		if extra.LimitName != "" {
 			snap.Raw["rate_limit_"+limitID+"_name"] = extra.LimitName
 		}
 	}
-
-	applyUsageCredits(payload.Credits, snap)
+	return applied
 }
 
 func applyUsageCredits(credits *usageCredits, snap *core.UsageSnapshot) {
@@ -414,23 +508,41 @@ func formatCreditsBalance(balance any) string {
 	return ""
 }
 
-func applyUsageLimitDetails(details *usageLimitDetails, primaryKey, secondaryKey string, snap *core.UsageSnapshot) {
+func applyUsageLimitDetails(details *usageLimitDetails, primaryKey, secondaryKey string, snap *core.UsageSnapshot) int {
 	if details == nil {
-		return
+		return 0
 	}
-	applyUsageWindowMetric(details.PrimaryWindow, primaryKey, snap)
-	applyUsageWindowMetric(details.SecondaryWindow, secondaryKey, snap)
+	applied := 0
+	primary := details.PrimaryWindow
+	if primary == nil {
+		primary = details.Primary
+	}
+	secondary := details.SecondaryWindow
+	if secondary == nil {
+		secondary = details.Secondary
+	}
+	if applyUsageWindowMetric(primary, primaryKey, snap) {
+		applied++
+	}
+	if applyUsageWindowMetric(secondary, secondaryKey, snap) {
+		applied++
+	}
+	return applied
 }
 
-func applyUsageWindowMetric(window *usageWindowInfo, key string, snap *core.UsageSnapshot) {
+func applyUsageWindowMetric(window *usageWindowInfo, key string, snap *core.UsageSnapshot) bool {
 	if window == nil || key == "" {
-		return
+		return false
+	}
+
+	used, ok := resolveWindowUsedPercent(window)
+	if !ok {
+		return false
 	}
 
 	limit := float64(100)
-	used := clampPercent(window.UsedPercent)
 	remaining := 100 - used
-	windowLabel := formatWindow(secondsToMinutes(window.LimitWindowSeconds))
+	windowLabel := formatWindow(resolveWindowMinutes(window))
 
 	snap.Metrics[key] = core.Metric{
 		Limit:     &limit,
@@ -440,8 +552,64 @@ func applyUsageWindowMetric(window *usageWindowInfo, key string, snap *core.Usag
 		Window:    windowLabel,
 	}
 
-	if window.ResetAt > 0 {
-		snap.Resets[key] = time.Unix(window.ResetAt, 0)
+	if resetAt := resolveWindowResetAt(window); resetAt > 0 {
+		snap.Resets[key] = time.Unix(resetAt, 0)
+	}
+	return true
+}
+
+func resolveWindowUsedPercent(window *usageWindowInfo) (float64, bool) {
+	if window == nil {
+		return 0, false
+	}
+	if window.UsedPercent != nil {
+		return clampPercent(*window.UsedPercent), true
+	}
+	if window.RemainingPercent != nil {
+		return clampPercent(100 - *window.RemainingPercent), true
+	}
+	return 0, false
+}
+
+func resolveWindowMinutes(window *usageWindowInfo) int {
+	if window == nil {
+		return 0
+	}
+	if window.LimitWindowSeconds > 0 {
+		return secondsToMinutes(window.LimitWindowSeconds)
+	}
+	if window.WindowMinutes > 0 {
+		return window.WindowMinutes
+	}
+	return 0
+}
+
+func resolveWindowResetAt(window *usageWindowInfo) int64 {
+	if window == nil {
+		return 0
+	}
+	switch {
+	case window.ResetAt > 0:
+		return window.ResetAt
+	case window.ResetsAt > 0:
+		return window.ResetsAt
+	case window.ResetAfterSeconds > 0:
+		return time.Now().UTC().Add(time.Duration(window.ResetAfterSeconds) * time.Second).Unix()
+	default:
+		return 0
+	}
+}
+
+func clearRateLimitMetrics(snap *core.UsageSnapshot) {
+	for key := range snap.Metrics {
+		if strings.HasPrefix(key, "rate_limit_") {
+			delete(snap.Metrics, key)
+		}
+	}
+	for key := range snap.Resets {
+		if strings.HasPrefix(key, "rate_limit_") {
+			delete(snap.Resets, key)
+		}
 	}
 }
 
@@ -621,6 +789,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 
 	if lastPayload.RateLimits != nil {
 		rl := lastPayload.RateLimits
+		rateLimitSet := false
 
 		if rl.Primary != nil {
 			limit := float64(100)
@@ -639,6 +808,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 				resetTime := time.Unix(rl.Primary.ResetsAt, 0)
 				snap.Resets["rate_limit_primary"] = resetTime
 			}
+			rateLimitSet = true
 		}
 
 		if rl.Secondary != nil {
@@ -658,6 +828,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 				resetTime := time.Unix(rl.Secondary.ResetsAt, 0)
 				snap.Resets["rate_limit_secondary"] = resetTime
 			}
+			rateLimitSet = true
 		}
 
 		if rl.Credits != nil {
@@ -676,6 +847,9 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 		if rl.PlanType != nil {
 			snap.Raw["plan_type"] = *rl.PlanType
 		}
+		if rateLimitSet && snap.Raw["rate_limit_source"] == "" {
+			snap.Raw["rate_limit_source"] = "session"
+		}
 	}
 
 	return nil
@@ -686,7 +860,25 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	clientTotals := make(map[string]tokenUsage)
 	modelDaily := make(map[string]map[string]float64)
 	clientDaily := make(map[string]map[string]float64)
+	interfaceDaily := make(map[string]map[string]float64)
+	dailyTokenTotals := make(map[string]float64)
+	dailyRequestTotals := make(map[string]float64)
 	clientSessions := make(map[string]int)
+	clientRequests := make(map[string]int)
+	toolCalls := make(map[string]int)
+	langRequests := make(map[string]int)
+	callTool := make(map[string]string)
+	callOutcome := make(map[string]int)
+	stats := patchStats{
+		Files:   make(map[string]struct{}),
+		Deleted: make(map[string]struct{}),
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	totalRequests := 0
+	requestsToday := 0
+	promptCount := 0
+	commits := 0
+	completedWithoutCallID := 0
 
 	walkErr := filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
@@ -714,7 +906,8 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 			line := scanner.Bytes()
 			if !bytes.Contains(line, []byte(`"type":"event_msg"`)) &&
 				!bytes.Contains(line, []byte(`"type":"turn_context"`)) &&
-				!bytes.Contains(line, []byte(`"type":"session_meta"`)) {
+				!bytes.Contains(line, []byte(`"type":"session_meta"`)) &&
+				!bytes.Contains(line, []byte(`"type":"response_item"`)) {
 				continue
 			}
 
@@ -739,7 +932,14 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				}
 			case "event_msg":
 				var payload eventPayload
-				if json.Unmarshal(event.Payload, &payload) != nil || payload.Type != "token_count" || payload.Info == nil {
+				if json.Unmarshal(event.Payload, &payload) != nil {
+					continue
+				}
+				if payload.Type == "user_message" {
+					promptCount++
+					continue
+				}
+				if payload.Type != "token_count" || payload.Info == nil {
 					continue
 				}
 
@@ -769,10 +969,49 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				addUsage(clientTotals, clientName, delta)
 				addDailyUsage(modelDaily, modelName, day, float64(delta.TotalTokens))
 				addDailyUsage(clientDaily, clientName, day, float64(delta.TotalTokens))
+				addDailyUsage(interfaceDaily, clientInterfaceBucket(clientName), day, 1)
+				dailyTokenTotals[day] += float64(delta.TotalTokens)
+				dailyRequestTotals[day]++
+				clientRequests[clientName]++
+				totalRequests++
+				if day == today {
+					requestsToday++
+				}
 
 				if !countedSession {
 					clientSessions[clientName]++
 					countedSession = true
+				}
+			case "response_item":
+				var item responseItemPayload
+				if json.Unmarshal(event.Payload, &item) != nil {
+					continue
+				}
+				switch item.Type {
+				case "function_call":
+					tool := normalizeToolName(item.Name)
+					recordToolCall(toolCalls, callTool, item.CallID, tool)
+					if strings.EqualFold(tool, "exec_command") {
+						var args commandArgs
+						if json.Unmarshal(item.Arguments, &args) == nil {
+							recordCommandLanguage(args.Cmd, langRequests)
+							if commandContainsGitCommit(args.Cmd) {
+								commits++
+							}
+						}
+					}
+				case "custom_tool_call":
+					tool := normalizeToolName(item.Name)
+					recordToolCall(toolCalls, callTool, item.CallID, tool)
+					if strings.EqualFold(tool, "apply_patch") {
+						stats.PatchCalls++
+						accumulatePatchStats(item.Input, &stats, langRequests)
+					}
+				case "web_search_call":
+					recordToolCall(toolCalls, callTool, "", "web_search")
+					completedWithoutCallID++
+				case "function_call_output", "custom_tool_call_output":
+					setToolCallOutcome(item.CallID, item.Output, callOutcome)
 				}
 			}
 		}
@@ -786,8 +1025,467 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	emitBreakdownMetrics("model", modelTotals, modelDaily, snap)
 	emitBreakdownMetrics("client", clientTotals, clientDaily, snap)
 	emitClientSessionMetrics(clientSessions, snap)
+	emitClientRequestMetrics(clientRequests, snap)
+	emitToolMetrics(toolCalls, callTool, callOutcome, completedWithoutCallID, snap)
+	emitLanguageMetrics(langRequests, snap)
+	emitProductivityMetrics(stats, promptCount, commits, totalRequests, requestsToday, clientSessions, snap)
+	emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals, interfaceDaily, snap)
 
 	return nil
+}
+
+func recordToolCall(toolCalls map[string]int, callTool map[string]string, callID, tool string) {
+	tool = normalizeToolName(tool)
+	toolCalls[tool]++
+	if strings.TrimSpace(callID) != "" {
+		callTool[callID] = tool
+	}
+}
+
+func normalizeToolName(tool string) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return "unknown"
+	}
+	return tool
+}
+
+func setToolCallOutcome(callID, output string, outcomes map[string]int) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return
+	}
+	outcomes[callID] = inferToolCallOutcome(output)
+}
+
+func inferToolCallOutcome(output string) int {
+	lower := strings.ToLower(strings.TrimSpace(output))
+	if lower == "" {
+		return 1
+	}
+	if strings.Contains(lower, `"exit_code":0`) || strings.Contains(lower, "process exited with code 0") {
+		return 1
+	}
+	if strings.Contains(lower, "cancelled") || strings.Contains(lower, "canceled") || strings.Contains(lower, "aborted") {
+		return 3
+	}
+	if idx := strings.Index(lower, "process exited with code "); idx >= 0 {
+		rest := lower[idx+len("process exited with code "):]
+		n := 0
+		for _, r := range rest {
+			if r < '0' || r > '9' {
+				break
+			}
+			n = n*10 + int(r-'0')
+		}
+		if n == 0 {
+			return 1
+		}
+		return 2
+	}
+	if strings.Contains(lower, `"exit_code":`) && !strings.Contains(lower, `"exit_code":0`) {
+		return 2
+	}
+	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
+		return 2
+	}
+	return 1
+}
+
+func recordCommandLanguage(cmd string, langs map[string]int) {
+	language := detectCommandLanguage(cmd)
+	if language != "" {
+		langs[language]++
+	}
+}
+
+func detectCommandLanguage(cmd string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(cmd))
+	if trimmed == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(trimmed, " go ") || strings.HasPrefix(trimmed, "go ") || strings.Contains(trimmed, "gofmt ") || strings.Contains(trimmed, "golangci-lint"):
+		return "go"
+	case strings.Contains(trimmed, " terraform ") || strings.HasPrefix(trimmed, "terraform "):
+		return "terraform"
+	case strings.Contains(trimmed, " python ") || strings.HasPrefix(trimmed, "python ") || strings.HasPrefix(trimmed, "python3 "):
+		return "python"
+	case strings.Contains(trimmed, " npm ") || strings.HasPrefix(trimmed, "npm ") || strings.Contains(trimmed, " yarn ") || strings.HasPrefix(trimmed, "pnpm ") || strings.Contains(trimmed, " node "):
+		return "ts"
+	case strings.Contains(trimmed, " cargo ") || strings.HasPrefix(trimmed, "cargo ") || strings.Contains(trimmed, " rustc "):
+		return "rust"
+	case strings.Contains(trimmed, " java ") || strings.HasPrefix(trimmed, "java ") || strings.Contains(trimmed, " gradle ") || strings.Contains(trimmed, " mvn "):
+		return "java"
+	case strings.Contains(trimmed, ".log"):
+		return "log"
+	case strings.Contains(trimmed, ".txt"):
+		return "txt"
+	default:
+		return "shell"
+	}
+}
+
+func commandContainsGitCommit(cmd string) bool {
+	normalized := " " + strings.ToLower(cmd) + " "
+	return strings.Contains(normalized, " git commit ")
+}
+
+func accumulatePatchStats(input string, stats *patchStats, langs map[string]int) {
+	if stats == nil {
+		return
+	}
+	lines := strings.Split(input, "\n")
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "*** Update File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
+			if path != "" {
+				stats.Files[path] = struct{}{}
+				if language := languageFromPath(path); language != "" {
+					langs[language]++
+				}
+			}
+		case strings.HasPrefix(line, "*** Add File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
+			if path != "" {
+				stats.Files[path] = struct{}{}
+				if language := languageFromPath(path); language != "" {
+					langs[language]++
+				}
+			}
+		case strings.HasPrefix(line, "*** Delete File: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
+			if path != "" {
+				stats.Files[path] = struct{}{}
+				stats.Deleted[path] = struct{}{}
+				if language := languageFromPath(path); language != "" {
+					langs[language]++
+				}
+			}
+		case strings.HasPrefix(line, "*** Move to: "):
+			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Move to: "))
+			if path != "" {
+				stats.Files[path] = struct{}{}
+				if language := languageFromPath(path); language != "" {
+					langs[language]++
+				}
+			}
+		case strings.HasPrefix(line, "+++ "), strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "***"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			stats.Added++
+		case strings.HasPrefix(line, "-"):
+			stats.Removed++
+		}
+	}
+}
+
+func languageFromPath(path string) string {
+	lower := strings.ToLower(strings.TrimSpace(path))
+	switch {
+	case strings.HasSuffix(lower, ".go"):
+		return "go"
+	case strings.HasSuffix(lower, ".tf"):
+		return "terraform"
+	case strings.HasSuffix(lower, ".ts"), strings.HasSuffix(lower, ".tsx"), strings.HasSuffix(lower, ".js"), strings.HasSuffix(lower, ".jsx"):
+		return "ts"
+	case strings.HasSuffix(lower, ".py"):
+		return "python"
+	case strings.HasSuffix(lower, ".rs"):
+		return "rust"
+	case strings.HasSuffix(lower, ".java"):
+		return "java"
+	case strings.HasSuffix(lower, ".yaml"), strings.HasSuffix(lower, ".yml"):
+		return "yaml"
+	case strings.HasSuffix(lower, ".json"):
+		return "json"
+	case strings.HasSuffix(lower, ".md"):
+		return "md"
+	case strings.HasSuffix(lower, ".tpl"):
+		return "tpl"
+	case strings.HasSuffix(lower, ".txt"):
+		return "txt"
+	case strings.HasSuffix(lower, ".log"):
+		return "log"
+	case strings.HasSuffix(lower, ".sh"), strings.HasSuffix(lower, ".zsh"), strings.HasSuffix(lower, ".bash"):
+		return "shell"
+	default:
+		return ""
+	}
+}
+
+func emitClientRequestMetrics(clientRequests map[string]int, snap *core.UsageSnapshot) {
+	type entry struct {
+		name  string
+		count int
+	}
+	var all []entry
+	interfaceTotals := make(map[string]float64)
+	for name, count := range clientRequests {
+		if count > 0 {
+			all = append(all, entry{name: name, count: count})
+			interfaceTotals[clientInterfaceBucket(name)] += float64(count)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].count == all[j].count {
+			return all[i].name < all[j].name
+		}
+		return all[i].count > all[j].count
+	})
+	for i, item := range all {
+		if i >= maxBreakdownMetrics {
+			break
+		}
+		value := float64(item.count)
+		snap.Metrics["client_"+sanitizeMetricName(item.name)+"_requests"] = core.Metric{
+			Used:   &value,
+			Unit:   "requests",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+	for bucket, value := range interfaceTotals {
+		v := value
+		snap.Metrics["interface_"+sanitizeMetricName(bucket)] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+}
+
+func clientInterfaceBucket(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(lower, "desktop"):
+		return "desktop_app"
+	case strings.Contains(lower, "cli"), strings.Contains(lower, "exec"), strings.Contains(lower, "terminal"):
+		return "cli_agents"
+	case strings.Contains(lower, "ide"), strings.Contains(lower, "vscode"), strings.Contains(lower, "editor"):
+		return "ide"
+	case strings.Contains(lower, "cloud"), strings.Contains(lower, "web"):
+		return "cloud_agents"
+	case strings.Contains(lower, "human"), strings.Contains(lower, "other"):
+		return "human"
+	default:
+		return sanitizeMetricName(name)
+	}
+}
+
+func emitToolMetrics(toolCalls map[string]int, callTool map[string]string, callOutcome map[string]int, completedWithoutCallID int, snap *core.UsageSnapshot) {
+	var all []countEntry
+	totalCalls := 0
+	for name, count := range toolCalls {
+		if count <= 0 {
+			continue
+		}
+		all = append(all, countEntry{name: name, count: count})
+		totalCalls += count
+		v := float64(count)
+		snap.Metrics["tool_"+sanitizeMetricName(name)] = core.Metric{
+			Used:   &v,
+			Unit:   "calls",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+	if totalCalls <= 0 {
+		return
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].count == all[j].count {
+			return all[i].name < all[j].name
+		}
+		return all[i].count > all[j].count
+	})
+
+	completed := completedWithoutCallID
+	errored := 0
+	cancelled := 0
+	for callID := range callTool {
+		switch callOutcome[callID] {
+		case 2:
+			errored++
+		case 3:
+			cancelled++
+		default:
+			completed++
+		}
+	}
+	if completed+errored+cancelled < totalCalls {
+		completed += totalCalls - (completed + errored + cancelled)
+	}
+
+	totalV := float64(totalCalls)
+	snap.Metrics["tool_calls_total"] = core.Metric{Used: &totalV, Unit: "calls", Window: defaultUsageWindowLabel}
+	if completed > 0 {
+		v := float64(completed)
+		snap.Metrics["tool_completed"] = core.Metric{Used: &v, Unit: "calls", Window: defaultUsageWindowLabel}
+	}
+	if errored > 0 {
+		v := float64(errored)
+		snap.Metrics["tool_errored"] = core.Metric{Used: &v, Unit: "calls", Window: defaultUsageWindowLabel}
+	}
+	if cancelled > 0 {
+		v := float64(cancelled)
+		snap.Metrics["tool_cancelled"] = core.Metric{Used: &v, Unit: "calls", Window: defaultUsageWindowLabel}
+	}
+	if totalCalls > 0 {
+		success := float64(completed) / float64(totalCalls) * 100
+		snap.Metrics["tool_success_rate"] = core.Metric{
+			Used:   &success,
+			Unit:   "%",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+	snap.Raw["tool_usage"] = formatCountSummary(all, maxBreakdownRaw)
+}
+
+func emitLanguageMetrics(langRequests map[string]int, snap *core.UsageSnapshot) {
+	var all []countEntry
+	for language, count := range langRequests {
+		if count <= 0 {
+			continue
+		}
+		all = append(all, countEntry{name: language, count: count})
+		v := float64(count)
+		snap.Metrics["lang_"+sanitizeMetricName(language)] = core.Metric{
+			Used:   &v,
+			Unit:   "requests",
+			Window: defaultUsageWindowLabel,
+		}
+	}
+	if len(all) == 0 {
+		return
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].count == all[j].count {
+			return all[i].name < all[j].name
+		}
+		return all[i].count > all[j].count
+	})
+	snap.Raw["language_usage"] = formatCountSummary(all, maxBreakdownRaw)
+}
+
+func emitProductivityMetrics(stats patchStats, promptCount, commits, totalRequests, requestsToday int, clientSessions map[string]int, snap *core.UsageSnapshot) {
+	if totalRequests > 0 {
+		v := float64(totalRequests)
+		snap.Metrics["total_ai_requests"] = core.Metric{Used: &v, Unit: "requests", Window: defaultUsageWindowLabel}
+		snap.Metrics["composer_requests"] = core.Metric{Used: &v, Unit: "requests", Window: defaultUsageWindowLabel}
+	}
+	if requestsToday > 0 {
+		v := float64(requestsToday)
+		snap.Metrics["requests_today"] = core.Metric{Used: &v, Unit: "requests", Window: "today"}
+		snap.Metrics["today_composer_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "today"}
+	}
+
+	totalSessions := 0
+	for _, count := range clientSessions {
+		totalSessions += count
+	}
+	if totalSessions > 0 {
+		v := float64(totalSessions)
+		snap.Metrics["composer_sessions"] = core.Metric{Used: &v, Unit: "sessions", Window: defaultUsageWindowLabel}
+	}
+
+	if metric, ok := snap.Metrics["context_window"]; ok && metric.Used != nil && metric.Limit != nil && *metric.Limit > 0 {
+		pct := *metric.Used / *metric.Limit * 100
+		if pct > 100 {
+			pct = 100
+		}
+		if pct < 0 {
+			pct = 0
+		}
+		snap.Metrics["composer_context_pct"] = core.Metric{
+			Used:   &pct,
+			Unit:   "%",
+			Window: metric.Window,
+		}
+	}
+
+	if stats.Added > 0 {
+		v := float64(stats.Added)
+		snap.Metrics["composer_lines_added"] = core.Metric{Used: &v, Unit: "lines", Window: defaultUsageWindowLabel}
+	}
+	if stats.Removed > 0 {
+		v := float64(stats.Removed)
+		snap.Metrics["composer_lines_removed"] = core.Metric{Used: &v, Unit: "lines", Window: defaultUsageWindowLabel}
+	}
+	if filesChanged := len(stats.Files); filesChanged > 0 {
+		v := float64(filesChanged)
+		snap.Metrics["composer_files_changed"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
+		snap.Metrics["ai_tracked_files"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
+	}
+	if deleted := len(stats.Deleted); deleted > 0 {
+		v := float64(deleted)
+		snap.Metrics["ai_deleted_files"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
+	}
+	if commits > 0 {
+		v := float64(commits)
+		snap.Metrics["scored_commits"] = core.Metric{Used: &v, Unit: "commits", Window: defaultUsageWindowLabel}
+	}
+	if promptCount > 0 {
+		v := float64(promptCount)
+		snap.Metrics["total_prompts"] = core.Metric{Used: &v, Unit: "prompts", Window: defaultUsageWindowLabel}
+	}
+	if stats.PatchCalls > 0 {
+		base := totalRequests
+		if base < stats.PatchCalls {
+			base = stats.PatchCalls
+		}
+		if base > 0 {
+			pct := float64(stats.PatchCalls) / float64(base) * 100
+			snap.Metrics["ai_code_percentage"] = core.Metric{Used: &pct, Unit: "%", Window: defaultUsageWindowLabel}
+		}
+	}
+}
+
+func emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals map[string]float64, interfaceDaily map[string]map[string]float64, snap *core.UsageSnapshot) {
+	if len(dailyTokenTotals) > 0 {
+		points := mapToSortedTimePoints(dailyTokenTotals)
+		snap.DailySeries["analytics_tokens"] = points
+		snap.DailySeries["tokens_total"] = points
+	}
+	if len(dailyRequestTotals) > 0 {
+		points := mapToSortedTimePoints(dailyRequestTotals)
+		snap.DailySeries["analytics_requests"] = points
+		snap.DailySeries["requests"] = points
+	}
+	for name, byDay := range interfaceDaily {
+		if len(byDay) == 0 {
+			continue
+		}
+		key := sanitizeMetricName(name)
+		snap.DailySeries["usage_client_"+key] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["usage_source_"+key] = mapToSortedTimePoints(byDay)
+	}
+}
+
+func formatCountSummary(entries []countEntry, max int) string {
+	if len(entries) == 0 || max <= 0 {
+		return ""
+	}
+	total := 0
+	for _, entry := range entries {
+		total += entry.count
+	}
+	if total <= 0 {
+		return ""
+	}
+	limit := max
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	parts := make([]string, 0, limit+1)
+	for i := 0; i < limit; i++ {
+		pct := float64(entries[i].count) / float64(total) * 100
+		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entries[i].name, formatTokenCount(entries[i].count), pct))
+	}
+	if len(entries) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map[string]map[string]float64, snap *core.UsageSnapshot) {
@@ -813,8 +1511,9 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 		}
 
 		if byDay, ok := daily[entry.Name]; ok {
-			seriesKey := "tokens_" + prefix + "_" + sanitizeMetricName(entry.Name)
-			snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDay)
+			series := mapToSortedTimePoints(byDay)
+			snap.DailySeries["tokens_"+prefix+"_"+sanitizeMetricName(entry.Name)] = series
+			snap.DailySeries["usage_"+prefix+"_"+sanitizeMetricName(entry.Name)] = series
 		}
 
 		if prefix == "model" {
@@ -1114,6 +1813,93 @@ func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {
 		}
 	}
 	snap.Status = status
+}
+
+func (p *Provider) applyCursorCompatibilityMetrics(snap *core.UsageSnapshot) {
+	aliasMetricIfMissing(snap, "rate_limit_primary", "plan_auto_percent_used")
+	aliasMetricIfMissing(snap, "rate_limit_secondary", "plan_api_percent_used")
+
+	if _, ok := snap.Metrics["plan_percent_used"]; !ok {
+		used := 0.0
+		sourceWindow := ""
+		if metric, ok := snap.Metrics["rate_limit_primary"]; ok && metric.Used != nil {
+			used = *metric.Used
+			sourceWindow = metric.Window
+		}
+		if metric, ok := snap.Metrics["rate_limit_secondary"]; ok && metric.Used != nil && *metric.Used > used {
+			used = *metric.Used
+			sourceWindow = metric.Window
+		}
+		if used > 0 {
+			limit := float64(100)
+			remaining := 100 - used
+			snap.Metrics["plan_percent_used"] = core.Metric{
+				Limit:     &limit,
+				Used:      &used,
+				Remaining: &remaining,
+				Unit:      "%",
+				Window:    sourceWindow,
+			}
+		}
+	}
+
+	if _, ok := snap.Metrics["composer_context_pct"]; !ok {
+		if metric, ok := snap.Metrics["context_window"]; ok && metric.Used != nil && metric.Limit != nil && *metric.Limit > 0 {
+			pct := *metric.Used / *metric.Limit * 100
+			if pct < 0 {
+				pct = 0
+			}
+			if pct > 100 {
+				pct = 100
+			}
+			snap.Metrics["composer_context_pct"] = core.Metric{
+				Used:   &pct,
+				Unit:   "%",
+				Window: metric.Window,
+			}
+		}
+	}
+
+	if _, ok := snap.Metrics["credit_balance"]; !ok {
+		if balance, ok := parseCurrencyValue(snap.Raw["credit_balance"]); ok {
+			snap.Metrics["credit_balance"] = core.Metric{
+				Used:   &balance,
+				Unit:   "USD",
+				Window: "current",
+			}
+		}
+	}
+
+	aliasMetricIfMissing(snap, "total_ai_requests", "composer_requests")
+	aliasMetricIfMissing(snap, "requests_today", "today_composer_requests")
+}
+
+func aliasMetricIfMissing(snap *core.UsageSnapshot, source, target string) {
+	if snap == nil || source == "" || target == "" {
+		return
+	}
+	if _, exists := snap.Metrics[target]; exists {
+		return
+	}
+	metric, ok := snap.Metrics[source]
+	if !ok {
+		return
+	}
+	snap.Metrics[target] = metric
+}
+
+func parseCurrencyValue(raw string) (float64, bool) {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return 0, false
+	}
+	normalized = strings.TrimPrefix(normalized, "$")
+	normalized = strings.ReplaceAll(normalized, ",", "")
+	value, err := strconv.ParseFloat(normalized, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func findLatestSessionFile(sessionsDir string) (string, error) {
