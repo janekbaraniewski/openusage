@@ -358,6 +358,30 @@ func TestProvider_Fetch_ExposesPlanSplitAndCacheTokenMetrics(t *testing.T) {
 	if snap.Raw["can_configure_spend_limit"] != "true" {
 		t.Fatalf("can_configure_spend_limit = %q, want true", snap.Raw["can_configure_spend_limit"])
 	}
+
+	// team_budget metric: pooled limit/used in dollars (50000/100=500, 10000/100=100)
+	if m, ok := snap.Metrics["team_budget"]; !ok {
+		t.Fatal("team_budget metric missing")
+	} else {
+		if m.Limit == nil || *m.Limit != 500 {
+			t.Fatalf("team_budget.Limit = %v, want 500", m.Limit)
+		}
+		if m.Used == nil || *m.Used != 100 {
+			t.Fatalf("team_budget.Used = %v, want 100", m.Used)
+		}
+	}
+	// team_budget_self metric: individual spend in dollars (8000/100=80)
+	if m, ok := snap.Metrics["team_budget_self"]; !ok {
+		t.Fatal("team_budget_self metric missing")
+	} else if m.Used == nil || *m.Used != 80 {
+		t.Fatalf("team_budget_self.Used = %v, want 80", m.Used)
+	}
+	// team_budget_others metric: others spend in dollars ((10000-8000)/100=20)
+	if m, ok := snap.Metrics["team_budget_others"]; !ok {
+		t.Fatal("team_budget_others metric missing")
+	} else if m.Used == nil || *m.Used != 20 {
+		t.Fatalf("team_budget_others.Used = %v, want 20", m.Used)
+	}
 }
 
 func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointErrors(t *testing.T) {
@@ -508,15 +532,15 @@ func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["source_cli_requests"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("source_cli_requests missing or invalid: %+v", m)
 	}
-	// Verify tool_* metrics are emitted from source breakdown.
-	if m, ok := snap.Metrics["tool_composer"]; !ok || m.Used == nil || *m.Used != 2 {
-		t.Fatalf("tool_composer missing or invalid: %+v", m)
+	// Verify interface_* metrics are emitted from source breakdown.
+	if m, ok := snap.Metrics["interface_composer"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("interface_composer missing or invalid: %+v", m)
 	}
-	if m, ok := snap.Metrics["tool_tab"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("tool_tab missing or invalid: %+v", m)
+	if m, ok := snap.Metrics["interface_tab"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("interface_tab missing or invalid: %+v", m)
 	}
-	if m, ok := snap.Metrics["tool_cli"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("tool_cli missing or invalid: %+v", m)
+	if m, ok := snap.Metrics["interface_cli"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("interface_cli missing or invalid: %+v", m)
 	}
 	if m, ok := snap.Metrics["client_ide_sessions"]; !ok || m.Used == nil || *m.Used != 3 {
 		t.Fatalf("client_ide_sessions missing or invalid: %+v", m)
@@ -779,8 +803,10 @@ func TestCursorClientBucket(t *testing.T) {
 		{source: "tab", want: "ide"},
 		{source: "human", want: "ide"},
 		{source: "cli", want: "cli_agents"},
-		{source: "background-agent", want: "cli_agents"},
 		{source: "terminal", want: "cli_agents"},
+		{source: "background-agent", want: "cloud_agents"},
+		{source: "cloud", want: "cloud_agents"},
+		{source: "web_agent", want: "cloud_agents"},
 		{source: "unknown-source", want: "other"},
 		{source: "", want: "other"},
 	}

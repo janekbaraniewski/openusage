@@ -144,6 +144,82 @@ func TestSnapshotsReady(t *testing.T) {
 	}
 }
 
+func TestComputeDisplayInfo_SpendLimitWithoutIndividualSpend(t *testing.T) {
+	used := 488.0
+	limit := 3600.0
+	snap := core.UsageSnapshot{
+		ProviderID: "cursor",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"spend_limit": {Used: &used, Limit: &limit, Unit: "USD"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Credits" {
+		t.Fatalf("tagLabel = %q, want Credits", got.tagLabel)
+	}
+	if !strings.Contains(got.summary, "$488 / $3600 spent") {
+		t.Fatalf("summary = %q, want '$488 / $3600 spent'", got.summary)
+	}
+	if !strings.Contains(got.detail, "$3112 remaining") {
+		t.Fatalf("detail = %q, want '$3112 remaining'", got.detail)
+	}
+}
+
+func TestComputeDisplayInfo_SpendLimitWithIndividualSpend(t *testing.T) {
+	used := 488.0
+	limit := 3600.0
+	indivUsed := 200.0
+	snap := core.UsageSnapshot{
+		ProviderID: "cursor",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"spend_limit":      {Used: &used, Limit: &limit, Unit: "USD"},
+			"individual_spend": {Used: &indivUsed, Unit: "USD"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Credits" {
+		t.Fatalf("tagLabel = %q, want Credits", got.tagLabel)
+	}
+	if !strings.Contains(got.summary, "$488 / $3600 spent") {
+		t.Fatalf("summary = %q, want '$488 / $3600 spent'", got.summary)
+	}
+	// Should show self vs team breakdown
+	if !strings.Contains(got.detail, "you $200") {
+		t.Fatalf("detail = %q, want 'you $200' in breakdown", got.detail)
+	}
+	if !strings.Contains(got.detail, "team $288") {
+		t.Fatalf("detail = %q, want 'team $288' in breakdown", got.detail)
+	}
+	if !strings.Contains(got.detail, "$3112 remaining") {
+		t.Fatalf("detail = %q, want '$3112 remaining' in breakdown", got.detail)
+	}
+}
+
+func TestComputeDisplayInfo_IndividualSpendClampedToZero(t *testing.T) {
+	used := 100.0
+	limit := 3600.0
+	// individual_spend > total used (edge case / data inconsistency)
+	indivUsed := 150.0
+	snap := core.UsageSnapshot{
+		ProviderID: "cursor",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"spend_limit":      {Used: &used, Limit: &limit, Unit: "USD"},
+			"individual_spend": {Used: &indivUsed, Unit: "USD"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	// team portion should be clamped to 0, not negative
+	if !strings.Contains(got.detail, "team $0") {
+		t.Fatalf("detail = %q, want 'team $0' (clamped)", got.detail)
+	}
+}
+
 func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
 	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	if m.hasData {

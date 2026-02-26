@@ -172,9 +172,9 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		},
 		"cursor": {
 			metrics: []string{
-				"source_ide_requests",
+				"interface_composer",
 				"composer_accepted_lines",
-				"client_ide_sessions",
+				"tool_calls_total",
 			},
 			raw: []string{
 				"billing_cycle_start",
@@ -184,7 +184,6 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"billing_cycle_end",
 			},
 			series: []string{
-				"usage_source_ide",
 				"usage_model_claude-4.6-opus-high-thinking",
 			},
 		},

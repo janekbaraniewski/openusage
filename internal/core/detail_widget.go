@@ -3,13 +3,14 @@ package core
 type DetailSectionStyle string
 
 const (
-	DetailSectionStyleUsage    DetailSectionStyle = "usage"
-	DetailSectionStyleSpending DetailSectionStyle = "spending"
-	DetailSectionStyleTokens   DetailSectionStyle = "tokens"
-	DetailSectionStyleActivity DetailSectionStyle = "activity"
-	DetailSectionStyleList     DetailSectionStyle = "list"
-	DetailSectionStyleModels   DetailSectionStyle = "models"
-	DetailSectionStyleTrends   DetailSectionStyle = "trends"
+	DetailSectionStyleUsage     DetailSectionStyle = "usage"
+	DetailSectionStyleSpending  DetailSectionStyle = "spending"
+	DetailSectionStyleTokens    DetailSectionStyle = "tokens"
+	DetailSectionStyleActivity  DetailSectionStyle = "activity"
+	DetailSectionStyleList      DetailSectionStyle = "list"
+	DetailSectionStyleModels    DetailSectionStyle = "models"
+	DetailSectionStyleTrends    DetailSectionStyle = "trends"
+	DetailSectionStyleLanguages DetailSectionStyle = "languages"
 )
 
 type DetailSection struct {
