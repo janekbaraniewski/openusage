@@ -12,9 +12,9 @@ func dashboardWidget() core.DashboardWidget {
 	}
 	cfg.StackedGaugeKeys = map[string]core.StackedGaugeConfig{
 		"team_budget": {
-			SegmentRawKeys: []string{"team_budget_self", "team_budget_others"},
-			SegmentLabels:  []string{"You", "Team"},
-			SegmentColors:  []string{"teal", "peach"},
+			SegmentMetricKeys: []string{"team_budget_self", "team_budget_others"},
+			SegmentLabels:     []string{"You", "Team"},
+			SegmentColors:     []string{"teal", "peach"},
 		},
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
@@ -29,7 +29,8 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "client_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "mode_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "tool_")
-	cfg.HideMetricKeys = append(cfg.HideMetricKeys, "plan_total_spend_usd", "plan_limit_usd", "plan_included_amount")
+	cfg.HideMetricKeys = append(cfg.HideMetricKeys, "plan_total_spend_usd", "plan_limit_usd", "plan_included_amount",
+		"team_budget_self", "team_budget_others")
 	cfg.MetricLabelOverrides["plan_auto_percent_used"] = "Auto Used"
 	cfg.MetricLabelOverrides["plan_api_percent_used"] = "API Used"
 	cfg.MetricLabelOverrides["ai_code_percentage"] = "AI Code"

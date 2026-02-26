@@ -370,11 +370,17 @@ func TestProvider_Fetch_ExposesPlanSplitAndCacheTokenMetrics(t *testing.T) {
 			t.Fatalf("team_budget.Used = %v, want 100", m.Used)
 		}
 	}
-	if snap.Raw["team_budget_self"] != "80.00" {
-		t.Fatalf("team_budget_self = %q, want \"80.00\"", snap.Raw["team_budget_self"])
+	// team_budget_self metric: individual spend in dollars (8000/100=80)
+	if m, ok := snap.Metrics["team_budget_self"]; !ok {
+		t.Fatal("team_budget_self metric missing")
+	} else if m.Used == nil || *m.Used != 80 {
+		t.Fatalf("team_budget_self.Used = %v, want 80", m.Used)
 	}
-	if snap.Raw["team_budget_others"] != "20.00" {
-		t.Fatalf("team_budget_others = %q, want \"20.00\"", snap.Raw["team_budget_others"])
+	// team_budget_others metric: others spend in dollars ((10000-8000)/100=20)
+	if m, ok := snap.Metrics["team_budget_others"]; !ok {
+		t.Fatal("team_budget_others metric missing")
+	} else if m.Used == nil || *m.Used != 20 {
+		t.Fatalf("team_budget_others.Used = %v, want 20", m.Used)
 	}
 }
 
@@ -797,8 +803,10 @@ func TestCursorClientBucket(t *testing.T) {
 		{source: "tab", want: "ide"},
 		{source: "human", want: "ide"},
 		{source: "cli", want: "cli_agents"},
-		{source: "background-agent", want: "cli_agents"},
 		{source: "terminal", want: "cli_agents"},
+		{source: "background-agent", want: "cloud_agents"},
+		{source: "cloud", want: "cloud_agents"},
+		{source: "web_agent", want: "cloud_agents"},
 		{source: "unknown-source", want: "other"},
 		{source: "", want: "other"},
 	}

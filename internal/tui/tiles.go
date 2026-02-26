@@ -575,7 +575,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
 
 		// Check for stacked gauge configuration
-		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentRawKeys) > 0 {
+		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentMetricKeys) > 0 {
 			segments := buildStackedSegments(snap, sgCfg, met)
 			if len(segments) > 0 {
 				gauge = RenderStackedUsageGauge(segments, usedPct, gaugeW)
@@ -597,16 +597,12 @@ func buildStackedSegments(snap core.UsageSnapshot, cfg core.StackedGaugeConfig, 
 	}
 	limit := *met.Limit
 	var segments []GaugeSegment
-	for i, rawKey := range cfg.SegmentRawKeys {
-		valStr, ok := snap.Raw[rawKey]
-		if !ok {
+	for i, metricKey := range cfg.SegmentMetricKeys {
+		segMetric, ok := snap.Metrics[metricKey]
+		if !ok || segMetric.Used == nil || *segMetric.Used <= 0 {
 			continue
 		}
-		val, err := strconv.ParseFloat(valStr, 64)
-		if err != nil || val <= 0 {
-			continue
-		}
-		pct := val / limit * 100
+		pct := *segMetric.Used / limit * 100
 		color := resolveSegmentColor(cfg, i)
 		segments = append(segments, GaugeSegment{Percent: pct, Color: color})
 	}
@@ -2567,12 +2563,17 @@ func sourceAsClientBucket(source string) string {
 	switch s {
 	case "composer", "tab", "human", "vscode", "ide", "editor":
 		return "ide"
-	case "cli", "terminal", "background_agent", "agent", "agents", "cli_agents":
+	case "cloud", "cloud_agent", "cloud_agents", "web", "web_agent", "background_agent":
+		return "cloud_agents"
+	case "cli", "terminal", "agent", "agents", "cli_agents":
 		return "cli_agents"
 	case "desktop", "desktop_app":
 		return "desktop_app"
 	}
 
+	if strings.Contains(s, "cloud") || strings.Contains(s, "web") {
+		return "cloud_agents"
+	}
 	if strings.Contains(s, "cli") || strings.Contains(s, "terminal") || strings.Contains(s, "agent") {
 		return "cli_agents"
 	}
@@ -2620,6 +2621,8 @@ func prettifySourceName(name string) string {
 		return "CLI"
 	case "cli_agents":
 		return "CLI Agents"
+	case "cloud_agents":
+		return "Cloud Agents"
 	case "agents":
 		return "Agents"
 	case "terminal":

@@ -423,12 +423,21 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 				Unit:   "USD",
 				Window: "billing-cycle",
 			}
-			snap.Raw["team_budget_self"] = fmt.Sprintf("%.2f", individualDollars)
-			othersDollars := pooledUsedDollars - individualDollars
-			if othersDollars < 0 {
-				othersDollars = 0
+			selfSpend := individualDollars
+			snap.Metrics["team_budget_self"] = core.Metric{
+				Used:   &selfSpend,
+				Unit:   "USD",
+				Window: "billing-cycle",
 			}
-			snap.Raw["team_budget_others"] = fmt.Sprintf("%.2f", othersDollars)
+			othersSpend := pooledUsedDollars - individualDollars
+			if othersSpend < 0 {
+				othersSpend = 0
+			}
+			snap.Metrics["team_budget_others"] = core.Metric{
+				Used:   &othersSpend,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
 
 			snap.Raw["spend_limit_type"] = su.LimitType
 		}
@@ -857,8 +866,8 @@ func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, bi
 // billingMetricKeys lists the metric keys cached for local-only fallback.
 var billingMetricKeys = []string{
 	"plan_spend", "plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used",
-	"spend_limit", "individual_spend", "team_budget", "plan_included", "plan_bonus",
-	"plan_total_spend_usd", "plan_limit_usd",
+	"spend_limit", "individual_spend", "team_budget", "team_budget_self", "team_budget_others",
+	"plan_included", "plan_bonus", "plan_total_spend_usd", "plan_limit_usd",
 }
 
 func cloneMetric(m core.Metric) core.Metric {
@@ -1409,6 +1418,8 @@ func cursorClientBucket(source string) string {
 	switch {
 	case s == "":
 		return "other"
+	case strings.Contains(s, "cloud"), strings.Contains(s, "web"), s == "background-agent", s == "background_agent":
+		return "cloud_agents"
 	case strings.Contains(s, "cli"), strings.Contains(s, "agent"), strings.Contains(s, "terminal"), strings.Contains(s, "cmd"):
 		return "cli_agents"
 	case s == "composer", s == "tab", s == "human", strings.Contains(s, "ide"), strings.Contains(s, "editor"):

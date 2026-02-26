@@ -58,10 +58,13 @@ type DashboardRawGroup struct {
 }
 
 // StackedGaugeConfig describes how a metric renders as a stacked gauge bar.
+// Each segment references another metric key whose Used value provides the
+// segment's absolute amount.  Percentages are computed against the parent
+// metric's Limit at render time.
 type StackedGaugeConfig struct {
-	SegmentRawKeys []string // Raw keys holding each segment's USD value
-	SegmentLabels  []string // Display labels for each segment
-	SegmentColors  []string // Theme color names: "teal", "peach", "green", etc.
+	SegmentMetricKeys []string // Metric keys — segment value = metric.Used
+	SegmentLabels     []string // Display labels for each segment
+	SegmentColors     []string // Theme color names: "teal", "peach", "green", etc.
 }
 
 // WidgetDataSpec describes the expected metric payload for a dashboard widget.
