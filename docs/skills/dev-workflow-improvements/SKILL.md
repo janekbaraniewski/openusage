@@ -28,6 +28,7 @@ docs/skills/<skill-name>/SKILL.md          ← individual skill specifications
 .github/copilot-instructions.md  ← GitHub Copilot
 .aider/conventions.md            ← Aider
 .opencode/skills/*/SKILL.md      ← OpenCode (thin stubs → docs/skills/)
+.codex/skills/*/SKILL.md         ← Codex (thin stubs → docs/skills/)
 .claude/commands/*.md             ← Claude Code (slash command stubs)
 ```
 
@@ -50,6 +51,12 @@ Run via `make sync-tools`.
      - Listed in `docs/skills/tool-configs/skills-table.md`?
      - Has a matching `.claude/commands/<name>.md`?
      - Has a matching `.opencode/skills/<name>/SKILL.md`?
+     - Has a matching `.codex/skills/<name>/SKILL.md`?
+   - For `docs/skills/add-new-provider.md`:
+     - Listed in `docs/skills/tool-configs/skills-table.md`?
+     - Has `.claude/commands/add-new-provider.md`?
+     - Has `.opencode/skills/add-new-provider/SKILL.md`?
+     - Has `.codex/skills/add-new-provider/SKILL.md`?
    - Report any gaps.
 
 3. Validate skill references:
@@ -108,6 +115,7 @@ If the user requested workflow improvements (not just sync):
 4. The template is authoritative — if a tool config disagrees, the template wins.
 5. Claude commands get more detail than other tools (phase breakdowns) — this is intentional.
 6. OpenCode skills are thin stubs pointing to `docs/skills/` — don't duplicate content.
+7. Codex skills are thin stubs pointing to `docs/skills/` — don't duplicate content.
 
 ## Adding a new AI tool
 
@@ -123,6 +131,7 @@ If the user requested workflow improvements (not just sync):
 - [ ] Every `docs/skills/*/SKILL.md` is in `skills-table.md`
 - [ ] Every skill has a `.claude/commands/<name>.md` stub
 - [ ] Every skill has a `.opencode/skills/<name>/SKILL.md` stub
+- [ ] Every skill has a `.codex/skills/<name>/SKILL.md` stub
 - [ ] CLAUDE.md skills table matches `skills-table.md`
 - [ ] No broken file references in any SKILL.md
 - [ ] `make build` passes

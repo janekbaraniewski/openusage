@@ -17,8 +17,10 @@ This directory contains the **single source of truth** for all AI tool configura
 | GitHub Copilot | `.github/copilot-instructions.md` |
 | Aider | `.aider/conventions.md` |
 | OpenCode | `.opencode/skills/*/SKILL.md` |
+| Codex | `.codex/skills/*/SKILL.md` |
+| Claude Code | `.claude/commands/*.md` |
 
-Claude Code commands (`.claude/commands/`) are **not** generated — they use a different format (slash command stubs that reference `docs/skills/`).
+Skill/command stubs are thin wrappers that reference the canonical specs in `docs/skills/`.
 
 ## When to update
 

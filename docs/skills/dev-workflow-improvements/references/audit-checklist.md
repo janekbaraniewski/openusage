@@ -13,11 +13,12 @@ For each generated file, verify it matches what `make sync-tools` would produce:
 
 ## 2. Skill Registration
 
-For each skill in `docs/skills/*/SKILL.md`:
+For each skill in `docs/skills/*/SKILL.md`, plus `docs/skills/add-new-provider.md`:
 
 - [ ] Row exists in `docs/skills/tool-configs/skills-table.md`
 - [ ] Entry exists in `.claude/commands/<skill-name>.md`
 - [ ] Entry exists in `.opencode/skills/<skill-name>/SKILL.md`
+- [ ] Entry exists in `.codex/skills/<skill-name>/SKILL.md`
 - [ ] Entry exists in CLAUDE.md's skills table (if applicable)
 
 ## 3. Skill Quality
@@ -48,10 +49,11 @@ The generator (`scripts/sync-tool-configs.sh`) should:
 
 - [ ] Generate all 4 tool config files
 - [ ] Generate all OpenCode skill stubs
+- [ ] Generate all Codex skill stubs
 - [ ] Generate all Claude command stubs
 - [ ] Be idempotent (running twice produces same output)
 - [ ] Handle new skills added to `docs/skills/` automatically
-- [ ] Have descriptions for each skill in both SKILL_DESCRIPTIONS and CLAUDE_DESCRIPTIONS arrays
+- [ ] Have descriptions for each skill in `skill_description()` and coverage in `claude_command_content()`
 
 ## 6. Cross-References
 

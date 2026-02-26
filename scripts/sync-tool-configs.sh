@@ -12,6 +12,7 @@
 #   .github/copilot-instructions.md
 #   .aider/conventions.md
 #   .opencode/skills/*/SKILL.md (skill stubs)
+#   .codex/skills/*/SKILL.md (skill stubs)
 #   .claude/commands/*.md (command stubs)
 #
 # Usage:
@@ -65,7 +66,17 @@ skill_description() {
     review-design)          echo "Review a design doc against the codebase" ;;
     validate-feature)       echo "Validate a feature implementation: build, tests, compliance, quality" ;;
     dev-workflow-improvements) echo "Audit and improve the development workflow, sync tool configs" ;;
+    openusage-provider)     echo "Run the openusage-provider skill for provider-specific guidance" ;;
     *)                      echo "Run the $1 skill" ;;
+  esac
+}
+
+# skill_doc_path <skill-name>
+# Returns the canonical docs/skills path for the skill
+skill_doc_path() {
+  case "$1" in
+    add-new-provider) echo "docs/skills/add-new-provider.md" ;;
+    *)                echo "docs/skills/$1/SKILL.md" ;;
   esac
 }
 
@@ -90,7 +101,9 @@ echo "Syncing OpenCode skill stubs..."
 
 SKILLS_DIR="$REPO_ROOT/docs/skills"
 OPENCODE_DIR="$REPO_ROOT/.opencode/skills"
+CODEX_DIR="$REPO_ROOT/.codex/skills"
 
+declare -a SKILL_NAMES=("add-new-provider")
 for skill_dir in "$SKILLS_DIR"/*/; do
   skill_name=$(basename "$skill_dir")
 
@@ -99,19 +112,58 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     continue
   fi
 
+  SKILL_NAMES+=("$skill_name")
+done
+
+for skill_name in "${SKILL_NAMES[@]}"; do
   desc=$(skill_description "$skill_name")
   pretty_name=$(title_case "$skill_name")
+  skill_doc=$(skill_doc_path "$skill_name")
   target_dir="$OPENCODE_DIR/$skill_name"
   target_file="$target_dir/SKILL.md"
 
   mkdir -p "$target_dir"
 
   cat > "$target_file" <<EOF
+---
+name: $skill_name
+description: $desc
+---
+
 # Skill: $pretty_name
 
 > **Invocation**: $desc
 
-Read and follow the full skill specification in \`docs/skills/$skill_name/SKILL.md\`.
+Read and follow the full skill specification in \`$skill_doc\`.
+EOF
+
+  echo "  Generated: $target_file"
+done
+
+# --- Codex skill stubs ---
+echo ""
+echo "Syncing Codex skill stubs..."
+
+for skill_name in "${SKILL_NAMES[@]}"; do
+  desc=$(skill_description "$skill_name")
+  pretty_name=$(title_case "$skill_name")
+  skill_doc=$(skill_doc_path "$skill_name")
+  target_dir="$CODEX_DIR/$skill_name"
+  target_file="$target_dir/SKILL.md"
+
+  mkdir -p "$target_dir"
+
+  cat > "$target_file" <<EOF
+---
+name: $skill_name
+description: $desc
+---
+
+# Skill: $pretty_name
+
+> **Invocation**: $desc
+
+Read and follow the full skill specification in \`$skill_doc\`.
 EOF
 
   echo "  Generated: $target_file"
@@ -280,7 +332,7 @@ This skill ensures the development flow is complete, consistent, and propagated 
 
 Follow all phases:
 
-1. **Phase 0 — Audit**: Run `make sync-tools`, check for drift. Validate all skills are registered in skills-table.md, have Claude commands, OpenCode stubs. Check for broken references.
+1. **Phase 0 — Audit**: Run `make sync-tools`, check for drift. Validate all skills are registered in skills-table.md, have Claude commands, OpenCode stubs, and Codex stubs. Check for broken references.
 
 2. **Phase 1 — Fix**: Fix any issues found: sync drift, missing registrations, broken references, CLAUDE.md mismatches.
 
@@ -302,14 +354,7 @@ CMDEOF
   esac
 }
 
-for skill_dir in "$SKILLS_DIR"/*/; do
-  skill_name=$(basename "$skill_dir")
-
-  # Skip directories without a SKILL.md
-  if [[ ! -f "$skill_dir/SKILL.md" ]]; then
-    continue
-  fi
-
+for skill_name in "${SKILL_NAMES[@]}"; do
   target_file="$CLAUDE_CMD_DIR/$skill_name.md"
   claude_command_content "$skill_name" > "$target_file"
   echo "  Generated: $target_file"
@@ -324,4 +369,5 @@ echo "  .windsurfrules"
 echo "  .github/copilot-instructions.md"
 echo "  .aider/conventions.md"
 echo "  .opencode/skills/*/SKILL.md"
+echo "  .codex/skills/*/SKILL.md"
 echo "  .claude/commands/*.md"
