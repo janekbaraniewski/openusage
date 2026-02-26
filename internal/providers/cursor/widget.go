@@ -7,7 +7,7 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.ColorRole = core.DashboardColorRoleLavender
 	cfg.ShowClientComposition = true
 	cfg.GaugePriority = []string{
-		"spend_limit", "team_budget", "plan_percent_used",
+		"team_budget", "plan_percent_used",
 		"plan_auto_percent_used", "plan_api_percent_used",
 	}
 	cfg.StackedGaugeKeys = map[string]core.StackedGaugeConfig{
