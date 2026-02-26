@@ -32,6 +32,10 @@ func DetailTabs(snap core.UsageSnapshot) []string {
 	if len(snap.ModelUsage) > 0 || hasModelCostMetrics(snap) {
 		tabs = append(tabs, "Models")
 	}
+	// Add Languages tab if language data is available.
+	if hasLanguageMetrics(snap) {
+		tabs = append(tabs, "Languages")
+	}
 	// Add Trends tab if daily series has enough data for a chart.
 	if hasChartableSeries(snap.DailySeries) {
 		tabs = append(tabs, "Trends")
@@ -95,6 +99,14 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 		sb.WriteString("\n")
 		renderDetailSectionHeader(&sb, "Models", w)
 		renderModelsSection(&sb, snap, widget, w)
+	}
+
+	// Languages section — dispatched directly (needs full snapshot metrics).
+	showLanguages := tabName == "Languages" || showAll
+	if showLanguages && hasLanguageMetrics(snap) {
+		sb.WriteString("\n")
+		renderDetailSectionHeader(&sb, "Languages", w)
+		renderLanguagesSection(&sb, snap, w)
 	}
 
 	// Trends section — dispatched directly (needs full snapshot DailySeries).
@@ -502,6 +514,8 @@ func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.Dashb
 		renderTokensSection(sb, entries, widget, w, series)
 	case core.DetailSectionStyleActivity:
 		renderActivitySection(sb, entries, widget, w, series)
+	case core.DetailSectionStyleLanguages:
+		renderListSection(sb, entries, w)
 	default:
 		renderListSection(sb, entries, w)
 	}
@@ -849,6 +863,101 @@ func hasChartableSeries(series map[string][]core.TimePoint) bool {
 		}
 	}
 	return false
+}
+
+// hasLanguageMetrics checks if the snapshot contains lang_ metric keys.
+func hasLanguageMetrics(snap core.UsageSnapshot) bool {
+	for key := range snap.Metrics {
+		if strings.HasPrefix(key, "lang_") {
+			return true
+		}
+	}
+	return false
+}
+
+func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
+	type langEntry struct {
+		name  string
+		count float64
+	}
+
+	var langs []langEntry
+	for key, m := range snap.Metrics {
+		if !strings.HasPrefix(key, "lang_") || m.Used == nil {
+			continue
+		}
+		name := strings.TrimPrefix(key, "lang_")
+		langs = append(langs, langEntry{name: name, count: *m.Used})
+	}
+	sort.Slice(langs, func(i, j int) bool { return langs[i].count > langs[j].count })
+
+	if len(langs) == 0 {
+		return
+	}
+
+	total := float64(0)
+	for _, l := range langs {
+		total += l.count
+	}
+	if total <= 0 {
+		return
+	}
+
+	maxShow := 10
+	if len(langs) > maxShow {
+		langs = langs[:maxShow]
+	}
+
+	var items []chartItem
+	for _, l := range langs {
+		items = append(items, chartItem{
+			Label: l.name,
+			Value: l.count,
+			Color: stableModelColor("lang:"+l.name, "languages"),
+		})
+	}
+
+	labelW := 18
+	if w < 55 {
+		labelW = 14
+	}
+	barW := w - labelW - 20
+	if barW < 8 {
+		barW = 8
+	}
+	if barW > 30 {
+		barW = 30
+	}
+
+	for _, item := range items {
+		pct := item.Value / total * 100
+		label := item.Label
+		if len(label) > labelW {
+			label = label[:labelW-1] + "…"
+		}
+
+		barLen := int(item.Value / items[0].Value * float64(barW))
+		if barLen < 1 && item.Value > 0 {
+			barLen = 1
+		}
+		emptyLen := barW - barLen
+		bar := lipgloss.NewStyle().Foreground(item.Color).Render(strings.Repeat("█", barLen))
+		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", emptyLen))
+
+		pctStr := lipgloss.NewStyle().Foreground(item.Color).Render(fmt.Sprintf("%4.1f%%", pct))
+		countStr := dimStyle.Render(formatNumber(item.Value))
+
+		sb.WriteString(fmt.Sprintf("  %s %s%s  %s  %s\n",
+			labelStyle.Width(labelW).Render(label),
+			bar, track, pctStr, countStr))
+	}
+
+	if len(snap.Metrics) > maxShow {
+		remaining := len(snap.Metrics) - maxShow
+		if remaining > 0 {
+			sb.WriteString("  " + dimStyle.Render(fmt.Sprintf("+ %d more languages", remaining)) + "\n")
+		}
+	}
 }
 
 // hasModelCostMetrics checks if the snapshot contains model cost metric keys.
@@ -1454,6 +1563,8 @@ func sectionIcon(title string) string {
 		return "⏰"
 	case "Models":
 		return "🤖"
+	case "Languages":
+		return "🗂"
 	case "Trends":
 		return "📈"
 	case "Attributes":
@@ -1481,6 +1592,8 @@ func sectionColor(title string) lipgloss.Color {
 		return colorMaroon
 	case "Models":
 		return colorLavender
+	case "Languages":
+		return colorPeach
 	case "Trends":
 		return colorSapphire
 	case "Attributes":

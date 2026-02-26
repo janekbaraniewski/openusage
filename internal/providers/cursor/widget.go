@@ -6,8 +6,22 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleLavender
 	cfg.ShowClientComposition = true
+	cfg.ClientCompositionHeading = "Clients"
+	cfg.ClientCompositionIncludeInterfaces = true
+	cfg.ShowToolComposition = false
+	cfg.ShowLanguageComposition = true
+	cfg.ShowCodeStatsComposition = true
+	cfg.ShowActualToolUsage = true
+	cfg.CodeStatsMetrics = core.CodeStatsConfig{
+		LinesAdded:   "composer_lines_added",
+		LinesRemoved: "composer_lines_removed",
+		FilesChanged: "composer_files_changed",
+		Commits:      "scored_commits",
+		AIPercent:    "ai_code_percentage",
+		Prompts:      "total_prompts",
+	}
 	cfg.GaugePriority = []string{
-		"team_budget", "plan_percent_used",
+		"team_budget", "billing_cycle_progress",
 		"plan_auto_percent_used", "plan_api_percent_used",
 	}
 	cfg.StackedGaugeKeys = map[string]core.StackedGaugeConfig{
@@ -18,26 +32,30 @@ func dashboardWidget() core.DashboardWidget {
 		},
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
-		{Label: "Credits", Keys: []string{"plan_spend", "spend_limit", "individual_spend", "billing_total_cost", "composer_cost", "today_cost"}, MaxSegments: 5},
+		{Label: "Credits", Keys: []string{"plan_spend", "spend_limit", "individual_spend", "billing_total_cost", "today_cost"}, MaxSegments: 5},
 		{Label: "Team", Keys: []string{"team_size", "team_owners"}, MaxSegments: 4},
 		{Label: "Usage", Keys: []string{"plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used", "composer_context_pct"}, MaxSegments: 4},
 		{Label: "Activity", Keys: []string{"requests_today", "total_ai_requests", "composer_sessions", "composer_requests"}, MaxSegments: 4},
 		{Label: "Lines", Keys: []string{"composer_accepted_lines", "composer_suggested_lines", "tab_accepted_lines", "tab_suggested_lines"}, MaxSegments: 4},
-		{Label: "Code", Keys: []string{"composer_lines_added", "composer_lines_removed", "composer_files_changed", "scored_commits", "ai_code_percentage"}, MaxSegments: 5},
-		{Label: "Files", Keys: []string{"ai_deleted_files", "ai_tracked_files", "total_prompts"}, MaxSegments: 4},
 	}
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "model_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "source_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "client_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "mode_")
-	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "tool_")
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "interface_")
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "subagent_")
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "lang_")
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, "tool_")
 	cfg.HideMetricKeys = append(cfg.HideMetricKeys, "plan_total_spend_usd", "plan_limit_usd", "plan_included_amount",
-		"team_budget_self", "team_budget_others")
+		"team_budget_self", "team_budget_others", "composer_cost",
+		"agentic_sessions", "non_agentic_sessions", "tool_calls_total",
+		"tool_completed", "tool_errored", "tool_cancelled", "tool_success_rate",
+		"composer_files_created", "composer_files_removed")
+	cfg.MetricLabelOverrides["billing_cycle_progress"] = "Billing Cycle"
+	cfg.MetricLabelOverrides["plan_percent_used"] = "Plan Used"
 	cfg.MetricLabelOverrides["plan_auto_percent_used"] = "Auto Used"
 	cfg.MetricLabelOverrides["plan_api_percent_used"] = "API Used"
 	cfg.MetricLabelOverrides["ai_code_percentage"] = "AI Code"
-	cfg.MetricLabelOverrides["composer_cost"] = "Session Cost"
 	cfg.MetricLabelOverrides["today_cost"] = "Today Cost"
 	cfg.MetricLabelOverrides["composer_sessions"] = "Sessions"
 	cfg.MetricLabelOverrides["composer_requests"] = "Composer Req"
@@ -58,7 +76,6 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["total_ai_requests"] = "all"
 	cfg.CompactMetricLabelOverrides["composer_sessions"] = "sess"
 	cfg.CompactMetricLabelOverrides["composer_requests"] = "reqs"
-	cfg.CompactMetricLabelOverrides["composer_cost"] = "total"
 	cfg.CompactMetricLabelOverrides["today_cost"] = "today"
 	cfg.CompactMetricLabelOverrides["billing_total_cost"] = "billing"
 	cfg.CompactMetricLabelOverrides["composer_accepted_lines"] = "comp"

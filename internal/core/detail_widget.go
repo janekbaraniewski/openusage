@@ -7,9 +7,10 @@ const (
 	DetailSectionStyleSpending DetailSectionStyle = "spending"
 	DetailSectionStyleTokens   DetailSectionStyle = "tokens"
 	DetailSectionStyleActivity DetailSectionStyle = "activity"
-	DetailSectionStyleList     DetailSectionStyle = "list"
-	DetailSectionStyleModels   DetailSectionStyle = "models"
-	DetailSectionStyleTrends   DetailSectionStyle = "trends"
+	DetailSectionStyleList      DetailSectionStyle = "list"
+	DetailSectionStyleModels    DetailSectionStyle = "models"
+	DetailSectionStyleTrends    DetailSectionStyle = "trends"
+	DetailSectionStyleLanguages DetailSectionStyle = "languages"
 )
 
 type DetailSection struct {

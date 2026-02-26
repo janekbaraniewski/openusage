@@ -388,7 +388,7 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var clientBurnLines []string
 	var clientBurnKeys map[string]bool
 	if widget.ShowClientComposition {
-		clientBurnLines, clientBurnKeys = buildProviderClientCompositionLines(snap, innerW, modelMixExpanded)
+		clientBurnLines, clientBurnKeys = buildProviderClientCompositionLinesWithWidget(snap, innerW, modelMixExpanded, widget)
 		if len(clientBurnLines) > 0 {
 			sectionsByID[core.DashboardSectionClientBurn] = section{withSectionPadding(clientBurnLines)}
 		}
@@ -398,12 +398,42 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var toolBurnLines []string
 	var toolBurnKeys map[string]bool
 	if widget.ShowToolComposition {
-		toolBurnLines, toolBurnKeys = buildProviderToolCompositionLines(snap, innerW, modelMixExpanded)
+		toolBurnLines, toolBurnKeys = buildProviderToolCompositionLines(snap, innerW, modelMixExpanded, widget)
 		if len(toolBurnLines) > 0 {
 			sectionsByID[core.DashboardSectionToolUsage] = section{withSectionPadding(toolBurnLines)}
 		}
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, toolBurnKeys)
+
+	var actualToolLines []string
+	var actualToolKeys map[string]bool
+	if widget.ShowActualToolUsage {
+		actualToolLines, actualToolKeys = buildActualToolUsageLines(snap, innerW, modelMixExpanded)
+		if len(actualToolLines) > 0 {
+			sectionsByID[core.DashboardSectionActualToolUsage] = section{withSectionPadding(actualToolLines)}
+		}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, actualToolKeys)
+
+	var langBurnLines []string
+	var langBurnKeys map[string]bool
+	if widget.ShowLanguageComposition {
+		langBurnLines, langBurnKeys = buildProviderLanguageCompositionLines(snap, innerW, modelMixExpanded)
+		if len(langBurnLines) > 0 {
+			sectionsByID[core.DashboardSectionLanguageBurn] = section{withSectionPadding(langBurnLines)}
+		}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, langBurnKeys)
+
+	var codeStatsLines []string
+	var codeStatsKeys map[string]bool
+	if widget.ShowCodeStatsComposition {
+		codeStatsLines, codeStatsKeys = buildProviderCodeStatsLines(snap, widget, innerW)
+		if len(codeStatsLines) > 0 {
+			sectionsByID[core.DashboardSectionCodeStats] = section{withSectionPadding(codeStatsLines)}
+		}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, codeStatsKeys)
 
 	dailyUsageLines := buildProviderDailyTrendLines(snap, innerW)
 	if len(dailyUsageLines) > 0 {
@@ -2613,6 +2643,48 @@ func sourceAsClientBucket(source string) string {
 	return s
 }
 
+// collectInterfaceAsClients builds clientMixEntry items from interface_ metrics
+// so the interface breakdown (composer, cli, human, tab) can be shown directly
+// in the client composition section instead of a separate panel.
+func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {
+	byName := make(map[string]float64)
+	usedKeys := make(map[string]bool)
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil {
+			continue
+		}
+		if !strings.HasPrefix(key, "interface_") {
+			continue
+		}
+		name := strings.TrimPrefix(key, "interface_")
+		if name == "" {
+			continue
+		}
+		byName[name] += *met.Used
+		usedKeys[key] = true
+	}
+
+	if len(byName) == 0 {
+		return nil, nil
+	}
+
+	clients := make([]clientMixEntry, 0, len(byName))
+	for name, count := range byName {
+		if count <= 0 {
+			continue
+		}
+		clients = append(clients, clientMixEntry{
+			name:     name,
+			requests: count,
+		})
+	}
+	sort.Slice(clients, func(i, j int) bool {
+		return clients[i].requests > clients[j].requests
+	})
+	return clients, usedKeys
+}
+
 func limitSourceMix(sources []sourceMixEntry, expanded bool, maxVisible int) ([]sourceMixEntry, int) {
 	if expanded || maxVisible <= 0 || len(sources) <= maxVisible {
 		return sources, 0
@@ -2761,7 +2833,22 @@ func renderSourceMixBar(top []sourceMixEntry, total float64, barW int, colors ma
 }
 
 func buildProviderClientCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	return buildProviderClientCompositionLinesWithWidget(snap, innerW, expanded, core.DashboardWidget{})
+}
+
+func buildProviderClientCompositionLinesWithWidget(snap core.UsageSnapshot, innerW int, expanded bool, widget core.DashboardWidget) ([]string, map[string]bool) {
 	allClients, usedKeys := collectProviderClientMix(snap)
+
+	if widget.ClientCompositionIncludeInterfaces {
+		ifaceClients, ifaceKeys := collectInterfaceAsClients(snap)
+		if len(ifaceClients) > 0 {
+			allClients = ifaceClients
+			for k, v := range ifaceKeys {
+				usedKeys[k] = v
+			}
+		}
+	}
+
 	if len(allClients) == 0 {
 		return nil, nil
 	}
@@ -2782,11 +2869,14 @@ func buildProviderClientCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		barW = 40
 	}
 
-	heading := "Client Burn (tokens)"
-	if mode == "requests" {
-		heading = "Client Activity (requests)"
-	} else if mode == "sessions" {
-		heading = "Client Activity (sessions)"
+	heading := widget.ClientCompositionHeading
+	if heading == "" {
+		heading = "Client Burn (tokens)"
+		if mode == "requests" {
+			heading = "Client Activity (requests)"
+		} else if mode == "sessions" {
+			heading = "Client Activity (sessions)"
+		}
 	}
 	lines := []string{
 		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
@@ -3168,7 +3258,7 @@ func limitClientTrendEntries(clients []clientMixEntry, expanded bool) []clientMi
 func prettifyClientName(name string) string {
 	switch name {
 	case "cli":
-		return "CLI"
+		return "CLI Agents"
 	case "ide":
 		return "IDE"
 	case "exec":
@@ -3177,6 +3267,12 @@ func prettifyClientName(name string) string {
 		return "Desktop App"
 	case "other":
 		return "Other"
+	case "composer":
+		return "Composer"
+	case "human":
+		return "Human"
+	case "tab":
+		return "Tab Completion"
 	}
 
 	parts := strings.Split(name, "_")
@@ -3533,7 +3629,7 @@ type toolMixEntry struct {
 	count float64
 }
 
-func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool, widget core.DashboardWidget) ([]string, map[string]bool) {
 	allTools, usedKeys := collectProviderToolMix(snap)
 	if len(allTools) == 0 {
 		return nil, nil
@@ -3558,8 +3654,13 @@ func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expa
 		barW = 40
 	}
 
+	heading := "Tool Usage (calls)"
+	if widget.ToolCompositionHeading != "" {
+		heading = widget.ToolCompositionHeading
+	}
+
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage (calls)"),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
 		"  " + renderToolMixBar(allTools, totalCalls, barW, toolColors),
 	}
 
@@ -3594,14 +3695,17 @@ func collectProviderToolMix(snap core.UsageSnapshot) ([]toolMixEntry, map[string
 	usedKeys := make(map[string]bool)
 
 	for key, met := range snap.Metrics {
-		if met.Used == nil || !strings.HasPrefix(key, "tool_") || strings.HasSuffix(key, "_today") {
+		if met.Used == nil || strings.HasSuffix(key, "_today") {
 			continue
 		}
-		name := strings.TrimPrefix(key, "tool_")
+		if !strings.HasPrefix(key, "interface_") {
+			continue
+		}
+		name := strings.TrimPrefix(key, "interface_")
 		if name == "" {
 			continue
 		}
-		byTool[name] = *met.Used
+		byTool[name] += *met.Used
 		usedKeys[key] = true
 	}
 
@@ -3648,6 +3752,108 @@ func colorForTool(colors map[string]lipgloss.Color, name string) lipgloss.Color 
 		return color
 	}
 	return stableModelColor("tool:"+name, "tool")
+}
+
+func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allLangs, usedKeys := collectProviderLanguageMix(snap)
+	if len(allLangs) == 0 {
+		return nil, nil
+	}
+
+	langs, hiddenCount := limitToolMix(allLangs, expanded, 6)
+	langColors := buildLangColorMap(allLangs, snap.AccountID)
+
+	totalReqs := float64(0)
+	for _, lang := range allLangs {
+		totalReqs += lang.count
+	}
+	if totalReqs <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language (requests)"),
+		"  " + renderToolMixBar(allLangs, totalReqs, barW, langColors),
+	}
+
+	for idx, lang := range langs {
+		if lang.count <= 0 {
+			continue
+		}
+		pct := lang.count / totalReqs * 100
+		label := lang.name
+		langColor := colorForTool(langColors, lang.name)
+		colorDot := lipgloss.NewStyle().Foreground(langColor).Render("■")
+
+		maxLabelLen := tableLabelMaxLen(innerW)
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+
+		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(lang.count))
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more languages (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+func collectProviderLanguageMix(snap core.UsageSnapshot) ([]toolMixEntry, map[string]bool) {
+	byLang := make(map[string]float64)
+	usedKeys := make(map[string]bool)
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil || !strings.HasPrefix(key, "lang_") {
+			continue
+		}
+		name := strings.TrimPrefix(key, "lang_")
+		if name == "" {
+			continue
+		}
+		byLang[name] = *met.Used
+		usedKeys[key] = true
+	}
+
+	langs := make([]toolMixEntry, 0, len(byLang))
+	for name, count := range byLang {
+		if count <= 0 {
+			continue
+		}
+		langs = append(langs, toolMixEntry{name: name, count: count})
+	}
+
+	sort.Slice(langs, func(i, j int) bool {
+		if langs[i].count == langs[j].count {
+			return langs[i].name < langs[j].name
+		}
+		return langs[i].count > langs[j].count
+	})
+
+	return langs, usedKeys
+}
+
+func buildLangColorMap(langs []toolMixEntry, providerID string) map[string]lipgloss.Color {
+	colors := make(map[string]lipgloss.Color, len(langs))
+	if len(langs) == 0 {
+		return colors
+	}
+	base := stablePaletteOffset("lang", providerID)
+	for i, lang := range langs {
+		colors[lang.name] = distributedPaletteColor(base, i)
+	}
+	return colors
 }
 
 func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[string]lipgloss.Color) string {
@@ -3713,4 +3919,209 @@ func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[st
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
 	}
 	return sb.String()
+}
+
+func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
+	cs := widget.CodeStatsMetrics
+	usedKeys := make(map[string]bool)
+
+	getVal := func(key string) float64 {
+		if key == "" {
+			return 0
+		}
+		if m, ok := snap.Metrics[key]; ok && m.Used != nil {
+			usedKeys[key] = true
+			return *m.Used
+		}
+		return 0
+	}
+
+	added := getVal(cs.LinesAdded)
+	removed := getVal(cs.LinesRemoved)
+	files := getVal(cs.FilesChanged)
+	commits := getVal(cs.Commits)
+	aiPct := getVal(cs.AIPercent)
+	prompts := getVal(cs.Prompts)
+
+	if added <= 0 && removed <= 0 && commits <= 0 {
+		return nil, nil
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Code Statistics"),
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	if added > 0 || removed > 0 {
+		total := added + removed
+		addedColor := lipgloss.Color("#a6e3a1")
+		removedColor := lipgloss.Color("#f38ba8")
+		addedW := int(math.Round(added / total * float64(barW)))
+		if addedW < 1 && added > 0 {
+			addedW = 1
+		}
+		removedW := barW - addedW
+		bar := lipgloss.NewStyle().Foreground(addedColor).Render(strings.Repeat("█", addedW)) +
+			lipgloss.NewStyle().Foreground(removedColor).Render(strings.Repeat("█", removedW))
+		lines = append(lines, "  "+bar)
+
+		addedDot := lipgloss.NewStyle().Foreground(addedColor).Render("■")
+		removedDot := lipgloss.NewStyle().Foreground(removedColor).Render("■")
+		addedLabel := fmt.Sprintf("%s +%s added", addedDot, shortCompact(added))
+		removedLabel := fmt.Sprintf("%s -%s removed", removedDot, shortCompact(removed))
+		lines = append(lines, renderDotLeaderRow(addedLabel, removedLabel, innerW))
+	}
+
+	if files > 0 {
+		lines = append(lines, renderDotLeaderRow("Files Changed", shortCompact(files)+" files", innerW))
+	}
+
+	if commits > 0 {
+		commitLabel := shortCompact(commits) + " commits"
+		if aiPct > 0 {
+			commitLabel += fmt.Sprintf(" · %.0f%% AI", aiPct)
+		}
+		lines = append(lines, renderDotLeaderRow("Commits", commitLabel, innerW))
+	}
+
+	if aiPct > 0 {
+		aiBarW := barW
+		aiFilledW := int(math.Round(aiPct / 100 * float64(aiBarW)))
+		if aiFilledW < 1 && aiPct > 0 {
+			aiFilledW = 1
+		}
+		aiEmptyW := aiBarW - aiFilledW
+		if aiEmptyW < 0 {
+			aiEmptyW = 0
+		}
+		aiColor := lipgloss.Color("#89b4fa")
+		aiBar := lipgloss.NewStyle().Foreground(aiColor).Render(strings.Repeat("█", aiFilledW)) +
+			lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", aiEmptyW))
+		lines = append(lines, "  "+aiBar)
+	}
+
+	if prompts > 0 {
+		lines = append(lines, renderDotLeaderRow("Prompts", shortCompact(prompts)+" total", innerW))
+	}
+
+	return lines, usedKeys
+}
+
+// actualToolUsage status/aggregate keys that should not appear as individual tool entries.
+var actualToolAggregateKeys = map[string]bool{
+	"tool_calls_total": true,
+	"tool_completed":   true,
+	"tool_errored":     true,
+	"tool_cancelled":   true,
+	"tool_success_rate": true,
+}
+
+func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	byTool := make(map[string]float64)
+	usedKeys := make(map[string]bool)
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil {
+			continue
+		}
+		if !strings.HasPrefix(key, "tool_") {
+			continue
+		}
+		if actualToolAggregateKeys[key] {
+			usedKeys[key] = true
+			continue
+		}
+		name := strings.TrimPrefix(key, "tool_")
+		if name == "" {
+			continue
+		}
+		byTool[name] += *met.Used
+		usedKeys[key] = true
+	}
+
+	if len(byTool) == 0 {
+		return nil, nil
+	}
+
+	allTools := make([]toolMixEntry, 0, len(byTool))
+	var totalCalls float64
+	for name, count := range byTool {
+		if count <= 0 {
+			continue
+		}
+		allTools = append(allTools, toolMixEntry{name: name, count: count})
+		totalCalls += count
+	}
+	if totalCalls <= 0 {
+		return nil, nil
+	}
+
+	sort.Slice(allTools, func(i, j int) bool {
+		return allTools[i].count > allTools[j].count
+	})
+
+	displayLimit := 6
+	if expanded {
+		displayLimit = len(allTools)
+	}
+	visibleTools := allTools
+	hiddenCount := 0
+	if len(allTools) > displayLimit {
+		visibleTools = allTools[:displayLimit]
+		hiddenCount = len(allTools) - displayLimit
+	}
+
+	toolColors := buildToolColorMap(allTools, snap.AccountID)
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	// Header with total call count and success rate.
+	headerSuffix := shortCompact(totalCalls) + " calls"
+	if m, ok := snap.Metrics["tool_success_rate"]; ok && m.Used != nil {
+		headerSuffix += fmt.Sprintf(" · %.0f%% ok", *m.Used)
+	}
+	heading := lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage") +
+		"  " + dimStyle.Render(headerSuffix)
+
+	lines := []string{
+		heading,
+		"  " + renderToolMixBar(allTools, totalCalls, barW, toolColors),
+	}
+
+	for idx, tool := range visibleTools {
+		if tool.count <= 0 {
+			continue
+		}
+		pct := tool.count / totalCalls * 100
+		label := tool.name
+		toolColor := colorForTool(toolColors, tool.name)
+		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
+
+		maxLabelLen := tableLabelMaxLen(innerW)
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+		valueStr := fmt.Sprintf("%2.0f%% %s", pct, shortCompact(tool.count))
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more tools (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
 }

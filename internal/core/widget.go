@@ -67,6 +67,16 @@ type StackedGaugeConfig struct {
 	SegmentColors     []string // Theme color names: "teal", "peach", "green", etc.
 }
 
+// CodeStatsConfig maps metric keys to code statistics roles for graphical display.
+type CodeStatsConfig struct {
+	LinesAdded   string // metric key for lines added
+	LinesRemoved string // metric key for lines removed
+	FilesChanged string // metric key for files changed
+	Commits      string // metric key for scored commits
+	AIPercent    string // metric key for AI code %
+	Prompts      string // metric key for total prompts
+}
+
 // WidgetDataSpec describes the expected metric payload for a dashboard widget.
 // RequiredMetricKeys provide a strict contract; MetricPrefixes provide extensibility.
 type WidgetDataSpec struct {
@@ -84,6 +94,9 @@ const (
 	DashboardSectionModelBurn        DashboardStandardSection = "model_burn"
 	DashboardSectionClientBurn       DashboardStandardSection = "client_burn"
 	DashboardSectionToolUsage        DashboardStandardSection = "tool_usage"
+	DashboardSectionActualToolUsage  DashboardStandardSection = "actual_tool_usage"
+	DashboardSectionLanguageBurn     DashboardStandardSection = "language_burn"
+	DashboardSectionCodeStats        DashboardStandardSection = "code_stats"
 	DashboardSectionDailyUsage       DashboardStandardSection = "daily_usage"
 	DashboardSectionProviderBurn     DashboardStandardSection = "provider_burn"
 	DashboardSectionOtherData        DashboardStandardSection = "other_data"
@@ -96,6 +109,9 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
+		DashboardSectionActualToolUsage,
+		DashboardSectionLanguageBurn,
+		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
 		DashboardSectionOtherData,
@@ -109,6 +125,9 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
+		DashboardSectionActualToolUsage,
+		DashboardSectionLanguageBurn,
+		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
 		DashboardSectionOtherData:
@@ -124,8 +143,22 @@ type DashboardWidget struct {
 	ColorRole    DashboardColorRole
 	// Opt-in client composition panel (client share + trend) in tile view.
 	ShowClientComposition bool
+	// Override the default heading for the client composition section.
+	ClientCompositionHeading string
+	// When true, fold interface_ metrics into the client composition as separate entries.
+	ClientCompositionIncludeInterfaces bool
 	// Opt-in tool composition panel (tool share) in tile view.
 	ShowToolComposition bool
+	// Override the default "Tool Usage (calls)" heading for the tool composition section.
+	ToolCompositionHeading string
+	// Opt-in language composition panel (by-language request share) in tile view.
+	ShowLanguageComposition bool
+	// Opt-in graphical code statistics panel (lines added/removed, commits, AI %).
+	ShowCodeStatsComposition bool
+	// Metric keys for the code stats section (added, removed, files, commits, ai%).
+	CodeStatsMetrics CodeStatsConfig
+	// Opt-in actual tool usage panel (tool calls from agent bubbles).
+	ShowActualToolUsage bool
 
 	// API key provider metadata. APIKeyEnv marks a provider as configurable in API Keys tab.
 	APIKeyEnv        string

@@ -204,6 +204,17 @@ func RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, widt
 
 	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 
+	// Find the last non-empty segment index so we can avoid partial block
+	// characters between segments (they leave visible gaps because the
+	// unfilled part of the cell shows the terminal background).
+	lastFilledIdx := -1
+	for i := len(segUnits) - 1; i >= 0; i-- {
+		if segUnits[i] > 0 {
+			lastFilledIdx = i
+			break
+		}
+	}
+
 	var b strings.Builder
 	usedCells := 0
 	for i, units := range segUnits {
@@ -213,6 +224,10 @@ func RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, widt
 		style := lipgloss.NewStyle().Foreground(segments[i].Color)
 		fullCells := units / 8
 		remainder := units % 8
+		if i != lastFilledIdx && remainder > 0 {
+			fullCells++
+			remainder = 0
+		}
 		b.WriteString(style.Render(strings.Repeat("█", fullCells)))
 		usedCells += fullCells
 		if remainder > 0 {

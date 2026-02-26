@@ -358,6 +358,11 @@ func TestCompositionBars_AreStableAcrossCollapsedAndExpanded(t *testing.T) {
 
 	for i := 1; i <= 7; i++ {
 		calls := float64(1200 - i*90)
+		snap.Metrics[fmt.Sprintf("interface_iface%d", i)] = core.Metric{Used: float64Ptr(calls), Unit: "calls"}
+	}
+
+	for i := 1; i <= 7; i++ {
+		calls := float64(1200 - i*90)
 		snap.Metrics[fmt.Sprintf("tool_tool%d", i)] = core.Metric{Used: float64Ptr(calls), Unit: "calls"}
 	}
 
@@ -370,7 +375,10 @@ func TestCompositionBars_AreStableAcrossCollapsedAndExpanded(t *testing.T) {
 		{name: "provider", fn: buildProviderVendorCompositionLines},
 		{name: "source", fn: buildProviderSourceCompositionLines},
 		{name: "client", fn: buildProviderClientCompositionLines},
-		{name: "tool", fn: buildProviderToolCompositionLines},
+		{name: "tool", fn: func(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+			return buildProviderToolCompositionLines(snap, innerW, expanded, core.DefaultDashboardWidget())
+		}},
+		{name: "actual_tool", fn: buildActualToolUsageLines},
 	}
 
 	for _, tc := range checks {

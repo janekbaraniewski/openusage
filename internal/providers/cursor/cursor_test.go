@@ -532,15 +532,15 @@ func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["source_cli_requests"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("source_cli_requests missing or invalid: %+v", m)
 	}
-	// Verify tool_* metrics are emitted from source breakdown.
-	if m, ok := snap.Metrics["tool_composer"]; !ok || m.Used == nil || *m.Used != 2 {
-		t.Fatalf("tool_composer missing or invalid: %+v", m)
+	// Verify interface_* metrics are emitted from source breakdown.
+	if m, ok := snap.Metrics["interface_composer"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("interface_composer missing or invalid: %+v", m)
 	}
-	if m, ok := snap.Metrics["tool_tab"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("tool_tab missing or invalid: %+v", m)
+	if m, ok := snap.Metrics["interface_tab"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("interface_tab missing or invalid: %+v", m)
 	}
-	if m, ok := snap.Metrics["tool_cli"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("tool_cli missing or invalid: %+v", m)
+	if m, ok := snap.Metrics["interface_cli"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("interface_cli missing or invalid: %+v", m)
 	}
 	if m, ok := snap.Metrics["client_ide_sessions"]; !ok || m.Used == nil || *m.Used != 3 {
 		t.Fatalf("client_ide_sessions missing or invalid: %+v", m)
