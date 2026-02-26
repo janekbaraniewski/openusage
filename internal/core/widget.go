@@ -57,6 +57,13 @@ type DashboardRawGroup struct {
 	Keys  []string
 }
 
+// StackedGaugeConfig describes how a metric renders as a stacked gauge bar.
+type StackedGaugeConfig struct {
+	SegmentRawKeys []string // Raw keys holding each segment's USD value
+	SegmentLabels  []string // Display labels for each segment
+	SegmentColors  []string // Theme color names: "teal", "peach", "green", etc.
+}
+
 // WidgetDataSpec describes the expected metric payload for a dashboard widget.
 // RequiredMetricKeys provide a strict contract; MetricPrefixes provide extensibility.
 type WidgetDataSpec struct {
@@ -126,6 +133,7 @@ type DashboardWidget struct {
 	ResetCompactThreshold int
 
 	GaugePriority               []string
+	StackedGaugeKeys            map[string]StackedGaugeConfig
 	GaugeMaxLines               int
 	CompactRows                 []DashboardCompactRow
 	RawGroups                   []DashboardRawGroup
@@ -159,7 +167,8 @@ func DefaultDashboardWidget() DashboardWidget {
 		GaugePriority: []string{
 			"spend_limit", "plan_spend", "credits", "credit_balance",
 		},
-		GaugeMaxLines: 2,
+		StackedGaugeKeys: map[string]StackedGaugeConfig{},
+		GaugeMaxLines:    2,
 		CompactRows: []DashboardCompactRow{
 			{
 				Label:       "Credits",

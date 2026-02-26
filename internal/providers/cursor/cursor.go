@@ -414,6 +414,22 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 				Unit:   "USD",
 				Window: "billing-cycle",
 			}
+
+			// Stacked gauge: team_budget shows self vs others within the pooled limit.
+			teamTotalUsedDollars := pooledUsedDollars
+			snap.Metrics["team_budget"] = core.Metric{
+				Limit:  &pooledLimitDollars,
+				Used:   &teamTotalUsedDollars,
+				Unit:   "USD",
+				Window: "billing-cycle",
+			}
+			snap.Raw["team_budget_self"] = fmt.Sprintf("%.2f", individualDollars)
+			othersDollars := pooledUsedDollars - individualDollars
+			if othersDollars < 0 {
+				othersDollars = 0
+			}
+			snap.Raw["team_budget_others"] = fmt.Sprintf("%.2f", othersDollars)
+
 			snap.Raw["spend_limit_type"] = su.LimitType
 		}
 
@@ -841,7 +857,7 @@ func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, bi
 // billingMetricKeys lists the metric keys cached for local-only fallback.
 var billingMetricKeys = []string{
 	"plan_spend", "plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used",
-	"spend_limit", "individual_spend", "plan_included", "plan_bonus",
+	"spend_limit", "individual_spend", "team_budget", "plan_included", "plan_bonus",
 	"plan_total_spend_usd", "plan_limit_usd",
 }
 

@@ -358,6 +358,24 @@ func TestProvider_Fetch_ExposesPlanSplitAndCacheTokenMetrics(t *testing.T) {
 	if snap.Raw["can_configure_spend_limit"] != "true" {
 		t.Fatalf("can_configure_spend_limit = %q, want true", snap.Raw["can_configure_spend_limit"])
 	}
+
+	// team_budget metric: pooled limit/used in dollars (50000/100=500, 10000/100=100)
+	if m, ok := snap.Metrics["team_budget"]; !ok {
+		t.Fatal("team_budget metric missing")
+	} else {
+		if m.Limit == nil || *m.Limit != 500 {
+			t.Fatalf("team_budget.Limit = %v, want 500", m.Limit)
+		}
+		if m.Used == nil || *m.Used != 100 {
+			t.Fatalf("team_budget.Used = %v, want 100", m.Used)
+		}
+	}
+	if snap.Raw["team_budget_self"] != "80.00" {
+		t.Fatalf("team_budget_self = %q, want \"80.00\"", snap.Raw["team_budget_self"])
+	}
+	if snap.Raw["team_budget_others"] != "20.00" {
+		t.Fatalf("team_budget_others = %q, want \"20.00\"", snap.Raw["team_budget_others"])
+	}
 }
 
 func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointErrors(t *testing.T) {

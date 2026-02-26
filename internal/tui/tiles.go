@@ -573,6 +573,15 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		}
 
 		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
+
+		// Check for stacked gauge configuration
+		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentRawKeys) > 0 {
+			segments := buildStackedSegments(snap, sgCfg, met)
+			if len(segments) > 0 {
+				gauge = RenderStackedUsageGauge(segments, usedPct, gaugeW)
+			}
+		}
+
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
 		lines = append(lines, labelR+" "+gauge)
 		if maxLines > 0 && len(lines) >= maxLines {
@@ -582,6 +591,54 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 	return lines
 }
 
+func buildStackedSegments(snap core.UsageSnapshot, cfg core.StackedGaugeConfig, met core.Metric) []GaugeSegment {
+	if met.Limit == nil || *met.Limit <= 0 {
+		return nil
+	}
+	limit := *met.Limit
+	var segments []GaugeSegment
+	for i, rawKey := range cfg.SegmentRawKeys {
+		valStr, ok := snap.Raw[rawKey]
+		if !ok {
+			continue
+		}
+		val, err := strconv.ParseFloat(valStr, 64)
+		if err != nil || val <= 0 {
+			continue
+		}
+		pct := val / limit * 100
+		color := resolveSegmentColor(cfg, i)
+		segments = append(segments, GaugeSegment{Percent: pct, Color: color})
+	}
+	return segments
+}
+
+func resolveSegmentColor(cfg core.StackedGaugeConfig, idx int) lipgloss.Color {
+	if idx >= len(cfg.SegmentColors) {
+		return colorSubtext
+	}
+	switch cfg.SegmentColors[idx] {
+	case "teal":
+		return colorTeal
+	case "peach":
+		return colorPeach
+	case "green":
+		return colorGreen
+	case "yellow":
+		return colorYellow
+	case "blue":
+		return colorBlue
+	case "red":
+		return colorRed
+	case "lavender":
+		return colorLavender
+	case "sapphire":
+		return colorSapphire
+	default:
+		return colorSubtext
+	}
+}
+
 func gaugeLabel(widget core.DashboardWidget, key string, window ...string) string {
 	overrides := map[string]string{
 		"plan_percent_used":    "Plan Used",
@@ -589,6 +646,7 @@ func gaugeLabel(widget core.DashboardWidget, key string, window ...string) strin
 		"plan_total_spend_usd": "Total Credits",
 		"spend_limit":          "Credit Limit",
 		"individual_spend":     "My Credits",
+		"team_budget":          "Team Budget",
 	}
 
 	if strings.HasPrefix(key, "rate_limit_") {

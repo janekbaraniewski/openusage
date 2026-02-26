@@ -1252,6 +1252,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f spent", *m.Used, *m.Limit)
 		info.detail = fmt.Sprintf("$%.0f remaining", remaining)
+		// Add self vs team breakdown when individual spend is available
+		if indiv, ok2 := snap.Metrics["individual_spend"]; ok2 && indiv.Used != nil {
+			otherSpend := *m.Used - *indiv.Used
+			if otherSpend < 0 {
+				otherSpend = 0
+			}
+			info.detail = fmt.Sprintf("you $%.0f · team $%.0f · $%.0f remaining", *indiv.Used, otherSpend, remaining)
+		}
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
 		}

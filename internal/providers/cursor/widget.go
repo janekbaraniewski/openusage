@@ -7,8 +7,15 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.ColorRole = core.DashboardColorRoleLavender
 	cfg.ShowClientComposition = true
 	cfg.GaugePriority = []string{
-		"spend_limit", "plan_spend", "plan_percent_used",
+		"spend_limit", "team_budget", "plan_percent_used",
 		"plan_auto_percent_used", "plan_api_percent_used",
+	}
+	cfg.StackedGaugeKeys = map[string]core.StackedGaugeConfig{
+		"team_budget": {
+			SegmentRawKeys: []string{"team_budget_self", "team_budget_others"},
+			SegmentLabels:  []string{"You", "Team"},
+			SegmentColors:  []string{"teal", "peach"},
+		},
 	}
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{Label: "Credits", Keys: []string{"plan_spend", "spend_limit", "individual_spend", "billing_total_cost", "composer_cost", "today_cost"}, MaxSegments: 5},
