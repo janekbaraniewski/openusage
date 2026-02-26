@@ -2647,8 +2647,15 @@ func sourceAsClientBucket(source string) string {
 // so the interface breakdown (composer, cli, human, tab) can be shown directly
 // in the client composition section instead of a separate panel.
 func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {
-	byName := make(map[string]float64)
+	byName := make(map[string]*clientMixEntry)
+	ensure := func(name string) *clientMixEntry {
+		if _, ok := byName[name]; !ok {
+			byName[name] = &clientMixEntry{name: name}
+		}
+		return byName[name]
+	}
 	usedKeys := make(map[string]bool)
+	usageSeriesByName := make(map[string]map[string]float64)
 
 	for key, met := range snap.Metrics {
 		if met.Used == nil {
@@ -2661,8 +2668,39 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 		if name == "" {
 			continue
 		}
-		byName[name] += *met.Used
+		entry := ensure(name)
+		entry.requests += *met.Used
 		usedKeys[key] = true
+	}
+
+	for key, points := range snap.DailySeries {
+		if len(points) == 0 {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, "usage_client_"):
+			name := strings.TrimPrefix(key, "usage_client_")
+			if name == "" {
+				continue
+			}
+			mergeSeriesByDay(usageSeriesByName, name, points)
+		case strings.HasPrefix(key, "usage_source_"):
+			source := strings.TrimPrefix(key, "usage_source_")
+			if source == "" {
+				continue
+			}
+			name := sourceAsClientBucket(source)
+			mergeSeriesByDay(usageSeriesByName, name, points)
+		}
+	}
+
+	for name, pointsByDay := range usageSeriesByName {
+		entry := ensure(name)
+		entry.series = sortedSeriesFromByDay(pointsByDay)
+		entry.seriesKind = "requests"
+		if entry.requests <= 0 {
+			entry.requests = sumSeriesValues(entry.series)
+		}
 	}
 
 	if len(byName) == 0 {
@@ -2670,14 +2708,11 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 	}
 
 	clients := make([]clientMixEntry, 0, len(byName))
-	for name, count := range byName {
-		if count <= 0 {
+	for _, entry := range byName {
+		if entry.requests <= 0 && len(entry.series) == 0 {
 			continue
 		}
-		clients = append(clients, clientMixEntry{
-			name:     name,
-			requests: count,
-		})
+		clients = append(clients, *entry)
 	}
 	sort.Slice(clients, func(i, j int) bool {
 		return clients[i].requests > clients[j].requests
@@ -3924,7 +3959,6 @@ func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[st
 func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
 	cs := widget.CodeStatsMetrics
 	usedKeys := make(map[string]bool)
-
 	getVal := func(key string) float64 {
 		if key == "" {
 			return 0

@@ -32,6 +32,31 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
+func TestDashboardWidgetCursorParityFlags(t *testing.T) {
+	widget := dashboardWidget()
+	if !widget.ShowClientComposition {
+		t.Fatal("expected ShowClientComposition=true")
+	}
+	if !widget.ClientCompositionIncludeInterfaces {
+		t.Fatal("expected ClientCompositionIncludeInterfaces=true")
+	}
+	if widget.ShowToolComposition {
+		t.Fatal("expected ShowToolComposition=false")
+	}
+	if !widget.ShowLanguageComposition {
+		t.Fatal("expected ShowLanguageComposition=true")
+	}
+	if !widget.ShowCodeStatsComposition {
+		t.Fatal("expected ShowCodeStatsComposition=true")
+	}
+	if !widget.ShowActualToolUsage {
+		t.Fatal("expected ShowActualToolUsage=true")
+	}
+	if len(widget.CompactRows) < 5 {
+		t.Fatalf("expected >=5 compact rows, got %d", len(widget.CompactRows))
+	}
+}
+
 func TestFetchWithSessionData(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
@@ -125,6 +150,16 @@ func TestFetchWithSessionData(t *testing.T) {
 		t.Error("expected rate_limit_secondary metric")
 	}
 
+	if got := metricUsed(t, snap, "plan_auto_percent_used"); got != 20.0 {
+		t.Errorf("expected plan_auto_percent_used=20.0, got %.1f", got)
+	}
+	if got := metricUsed(t, snap, "plan_api_percent_used"); got != 80.0 {
+		t.Errorf("expected plan_api_percent_used=80.0, got %.1f", got)
+	}
+	if got := metricUsed(t, snap, "plan_percent_used"); got != 80.0 {
+		t.Errorf("expected plan_percent_used=80.0, got %.1f", got)
+	}
+
 	if reset, ok := snap.Resets["rate_limit_primary"]; ok {
 		if reset.Unix() != 1770700100 {
 			t.Errorf("expected primary reset at 1770700100, got %d", reset.Unix())
@@ -159,6 +194,9 @@ func TestFetchWithSessionData(t *testing.T) {
 		}
 	} else {
 		t.Error("expected context_window metric")
+	}
+	if got := metricUsed(t, snap, "composer_context_pct"); got <= 0 {
+		t.Errorf("expected composer_context_pct > 0, got %.2f", got)
 	}
 }
 
@@ -337,8 +375,172 @@ func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
 	if snap.Raw["quota_api"] != "live" {
 		t.Fatalf("quota_api = %q, want live", snap.Raw["quota_api"])
 	}
+	if snap.Raw["rate_limit_source"] != "live" {
+		t.Fatalf("rate_limit_source = %q, want live", snap.Raw["rate_limit_source"])
+	}
 	if snap.Raw["credit_balance"] != "$9.99" {
 		t.Fatalf("credit_balance = %q, want $9.99", snap.Raw["credit_balance"])
+	}
+}
+
+func TestFetchParsesNestedLiveRateLimitStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(sessionsDir, "rollout-test.jsonl")
+	sessionContent := `{"timestamp":"2026-02-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":150},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1770700000},"secondary":{"used_percent":80.0,"window_minutes":10080,"resets_at":1770934095}}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	authPath := filepath.Join(tmpDir, "auth.json")
+	authContent := `{"tokens":{"access_token":"test-token","account_id":"acct-123"}}`
+	if err := os.WriteFile(authPath, []byte(authContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/wham/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"account_id":"acct-123",
+			"email":"nested@example.com",
+			"rate_limit_status":{
+				"plan_type":"team",
+				"rate_limit":{
+					"allowed":true,
+					"limit_reached":false,
+					"primary_window":{"used_percent":9,"limit_window_seconds":18000,"reset_at":1771688636},
+					"secondary_window":{"used_percent":45,"limit_window_seconds":604800,"reset_at":1772218274}
+				},
+				"additional_rate_limits":[
+					{
+						"limit_name":"codex_other",
+						"metered_feature":"codex_other",
+						"rate_limit":{
+							"allowed":true,
+							"limit_reached":false,
+							"primary_window":{"used_percent":61,"limit_window_seconds":3600,"reset_at":1771700000},
+							"secondary_window":null
+						}
+					}
+				],
+				"credits":{"has_credits":true,"unlimited":false,"balance":"7.50"}
+			}
+		}`)
+	}))
+	defer server.Close()
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:       "codex-live",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":       tmpDir,
+			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
+			"auth_file":        authPath,
+			"chatgpt_base_url": server.URL + "/backend-api",
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 9 {
+		t.Fatalf("rate_limit_primary used = %.1f, want 9", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_secondary"); got != 45 {
+		t.Fatalf("rate_limit_secondary used = %.1f, want 45", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_codex_other_primary"); got != 61 {
+		t.Fatalf("rate_limit_codex_other_primary used = %.1f, want 61", got)
+	}
+	if snap.Raw["plan_type"] != "team" {
+		t.Fatalf("plan_type = %q, want team", snap.Raw["plan_type"])
+	}
+	if snap.Raw["credit_balance"] != "$7.50" {
+		t.Fatalf("credit_balance = %q, want $7.50", snap.Raw["credit_balance"])
+	}
+	if snap.Raw["rate_limit_source"] != "live" {
+		t.Fatalf("rate_limit_source = %q, want live", snap.Raw["rate_limit_source"])
+	}
+}
+
+func TestFetchClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(sessionsDir, "rollout-test.jsonl")
+	sessionContent := `{"timestamp":"2026-02-10T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":150},"model_context_window":128000},"rate_limits":{"primary":{"used_percent":0.0,"window_minutes":300,"resets_at":1770700000},"secondary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1770934095}}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	authPath := filepath.Join(tmpDir, "auth.json")
+	authContent := `{"tokens":{"access_token":"test-token","account_id":"acct-123"}}`
+	if err := os.WriteFile(authPath, []byte(authContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/wham/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"account_id":"acct-123",
+			"email":"live@example.com",
+			"credits":{"has_credits":true,"unlimited":false,"balance":"9.99"}
+		}`)
+	}))
+	defer server.Close()
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:       "codex-live",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":       tmpDir,
+			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
+			"auth_file":        authPath,
+			"chatgpt_base_url": server.URL + "/backend-api",
+		},
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
+		t.Fatalf("rate_limit_primary should be cleared when live payload has no windows")
+	}
+	if _, ok := snap.Metrics["rate_limit_secondary"]; ok {
+		t.Fatalf("rate_limit_secondary should be cleared when live payload has no windows")
+	}
+	if snap.Raw["rate_limit_source"] != "live_unavailable" {
+		t.Fatalf("rate_limit_source = %q, want live_unavailable", snap.Raw["rate_limit_source"])
+	}
+	if snap.Raw["rate_limit_warning"] == "" {
+		t.Fatalf("expected rate_limit_warning to be populated")
 	}
 }
 
@@ -397,6 +599,9 @@ func TestFetchFallsBackToSessionWhenLiveUsageFails(t *testing.T) {
 	if !strings.Contains(snap.Raw["quota_api_error"], "HTTP 500") {
 		t.Fatalf("quota_api_error = %q, want HTTP 500", snap.Raw["quota_api_error"])
 	}
+	if snap.Raw["rate_limit_source"] != "session" {
+		t.Fatalf("rate_limit_source = %q, want session", snap.Raw["rate_limit_source"])
+	}
 }
 
 func TestFetchBuildsModelAndClientUsageSplits(t *testing.T) {
@@ -453,11 +658,128 @@ func TestFetchBuildsModelAndClientUsageSplits(t *testing.T) {
 	if got := metricUsed(t, snap, "client_desktop_app_total_tokens"); got != 50 {
 		t.Fatalf("client_desktop_app_total_tokens = %.1f, want 50", got)
 	}
+	if got := metricUsed(t, snap, "client_cli_requests"); got != 2 {
+		t.Fatalf("client_cli_requests = %.1f, want 2", got)
+	}
+	if got := metricUsed(t, snap, "client_desktop_app_requests"); got != 1 {
+		t.Fatalf("client_desktop_app_requests = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "total_ai_requests"); got != 3 {
+		t.Fatalf("total_ai_requests = %.1f, want 3", got)
+	}
 	if !strings.Contains(snap.Raw["model_usage"], "gpt-5.3-codex") || !strings.Contains(snap.Raw["model_usage"], "gpt-5-codex") {
 		t.Fatalf("model_usage = %q, expected both models", snap.Raw["model_usage"])
 	}
 	if !strings.Contains(snap.Raw["client_usage"], "CLI") || !strings.Contains(snap.Raw["client_usage"], "Desktop App") {
 		t.Fatalf("client_usage = %q, expected CLI and Desktop App", snap.Raw["client_usage"])
+	}
+	if len(snap.DailySeries["usage_model_gpt_5_3_codex"]) == 0 {
+		t.Fatalf("expected usage_model_gpt_5_3_codex daily series")
+	}
+	if len(snap.DailySeries["usage_client_cli"]) == 0 {
+		t.Fatalf("expected usage_client_cli daily series")
+	}
+	if len(snap.DailySeries["analytics_tokens"]) == 0 {
+		t.Fatalf("expected analytics_tokens daily series")
+	}
+	if len(snap.DailySeries["analytics_requests"]) == 0 {
+		t.Fatalf("expected analytics_requests daily series")
+	}
+}
+
+func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	now := time.Now().UTC()
+	dayDir := filepath.Join(sessionsRoot, now.Format("2006"), now.Format("01"), now.Format("02"))
+	if err := os.MkdirAll(dayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(dayDir, "rollout-rich.jsonl")
+	ts1 := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	ts2 := now.Add(-90 * time.Second).Format(time.RFC3339)
+	ts3 := now.Add(-60 * time.Second).Format(time.RFC3339)
+	ts4 := now.Add(-30 * time.Second).Format(time.RFC3339)
+	sessionContent := fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"sess-rich","source":"cli","originator":"codex_cli_rs"}}
+{"timestamp":"%s","type":"turn_context","payload":{"model":"gpt-5-codex"}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"user_message","text":"first"}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"cached_input_tokens":10,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":80},"model_context_window":128000}}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-1","arguments":{"cmd":"go test ./... && terraform plan"}}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"Process exited with code 0"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-2","arguments":{"cmd":"git commit -m \\\"ship\\\""}}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call_output","call_id":"call-2","output":"Process exited with code 0"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call-3","name":"apply_patch","input":"*** Begin Patch\n*** Update File: internal/providers/codex/codex.go\n@@\n-old\n+new\n*** Add File: infra/main.tf\n+resource \\\"null_resource\\\" \\\"x\\\" {}\n*** Delete File: notes.txt\n*** End Patch\n"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-3","output":"{\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{"type":"search"}}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"user_message","text":"second"}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":40,"reasoning_output_tokens":0,"total_tokens":140},"model_context_window":128000}}}
+`, ts1, ts1, ts1, ts1, ts2, ts2, ts2, ts3, ts3, ts3, ts3, ts4, ts4)
+
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-rich",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "tool_exec_command"); got != 2 {
+		t.Fatalf("tool_exec_command = %.1f, want 2", got)
+	}
+	if got := metricUsed(t, snap, "tool_apply_patch"); got != 1 {
+		t.Fatalf("tool_apply_patch = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "tool_web_search"); got != 1 {
+		t.Fatalf("tool_web_search = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "tool_calls_total"); got != 4 {
+		t.Fatalf("tool_calls_total = %.1f, want 4", got)
+	}
+	if got := metricUsed(t, snap, "tool_success_rate"); got != 100 {
+		t.Fatalf("tool_success_rate = %.1f, want 100", got)
+	}
+
+	if got := metricUsed(t, snap, "lang_go"); got < 1 {
+		t.Fatalf("lang_go = %.1f, want >= 1", got)
+	}
+	if got := metricUsed(t, snap, "lang_terraform"); got < 1 {
+		t.Fatalf("lang_terraform = %.1f, want >= 1", got)
+	}
+
+	if got := metricUsed(t, snap, "composer_lines_added"); got < 2 {
+		t.Fatalf("composer_lines_added = %.1f, want >= 2", got)
+	}
+	if got := metricUsed(t, snap, "composer_lines_removed"); got < 1 {
+		t.Fatalf("composer_lines_removed = %.1f, want >= 1", got)
+	}
+	if got := metricUsed(t, snap, "composer_files_changed"); got != 3 {
+		t.Fatalf("composer_files_changed = %.1f, want 3", got)
+	}
+	if got := metricUsed(t, snap, "ai_deleted_files"); got != 1 {
+		t.Fatalf("ai_deleted_files = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "scored_commits"); got != 1 {
+		t.Fatalf("scored_commits = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "total_prompts"); got != 2 {
+		t.Fatalf("total_prompts = %.1f, want 2", got)
+	}
+	if got := metricUsed(t, snap, "total_ai_requests"); got != 2 {
+		t.Fatalf("total_ai_requests = %.1f, want 2", got)
+	}
+	if got := metricUsed(t, snap, "requests_today"); got != 2 {
+		t.Fatalf("requests_today = %.1f, want 2", got)
 	}
 }
 
