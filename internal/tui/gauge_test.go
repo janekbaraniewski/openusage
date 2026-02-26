@@ -78,6 +78,29 @@ func TestRenderStackedUsageGauge_NegativeRendersNA(t *testing.T) {
 	}
 }
 
+func TestRenderShimmerGauge(t *testing.T) {
+	out := RenderShimmerGauge(20, 0)
+	if out == "" {
+		t.Fatal("expected non-empty output")
+	}
+	if !strings.Contains(out, "···") {
+		t.Fatalf("shimmer gauge should contain loading indicator, got %q", out)
+	}
+	// Verify it renders at different frames without panic.
+	for f := 0; f < 30; f++ {
+		if RenderShimmerGauge(20, f) == "" {
+			t.Fatalf("empty output at frame %d", f)
+		}
+	}
+}
+
+func TestRenderShimmerGauge_NarrowWidth(t *testing.T) {
+	out := RenderShimmerGauge(2, 0)
+	if out == "" {
+		t.Fatal("expected non-empty output for narrow width")
+	}
+}
+
 func TestRenderStackedUsageGauge_NarrowWidth(t *testing.T) {
 	segments := []GaugeSegment{
 		{Percent: 30, Color: lipgloss.Color("#00ff00")},

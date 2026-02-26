@@ -528,8 +528,19 @@ func (m Model) buildTileLoadingBody(innerW, bodyBudget int, snap core.UsageSnaps
 }
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
+	maxLabelW := 14
+	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
+	if gaugeW < 6 {
+		gaugeW = 6
+	}
+	maxLines := widget.GaugeMaxLines
+	if maxLines <= 0 {
+		maxLines = 2
+	}
+
 	if len(snap.Metrics) == 0 {
-		return nil
+		// No metrics yet — show shimmer placeholders if gauges are expected.
+		return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
 	}
 
 	keys := lo.Keys(snap.Metrics)
@@ -544,16 +555,6 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		for _, k := range widget.GaugePriority {
 			gaugeAllowSet[k] = true
 		}
-	}
-
-	maxLabelW := 14
-	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
-	if gaugeW < 6 {
-		gaugeW = 6
-	}
-	maxLines := widget.GaugeMaxLines
-	if maxLines <= 0 {
-		maxLines = 2
 	}
 
 	var lines []string
@@ -587,6 +588,35 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		if maxLines > 0 && len(lines) >= maxLines {
 			break
 		}
+	}
+
+	// Gauges expected but not yet renderable (metrics exist but none are
+	// gauge-eligible yet, e.g. local data loaded but API billing data hasn't).
+	if len(lines) == 0 {
+		return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
+	}
+	return lines
+}
+
+// buildGaugeShimmerLines renders animated placeholder gauge tracks while
+// waiting for gauge-eligible metric data.
+func (m Model) buildGaugeShimmerLines(widget core.DashboardWidget, maxLabelW, gaugeW, maxLines int) []string {
+	if len(widget.GaugePriority) == 0 {
+		return nil
+	}
+	var lines []string
+	for i, key := range widget.GaugePriority {
+		if i >= maxLines {
+			break
+		}
+		label := gaugeLabel(widget, key)
+		if len(label) > maxLabelW {
+			label = label[:maxLabelW-1] + "…"
+		}
+		// Offset each bar's animation slightly so they shimmer in sequence.
+		shimmer := RenderShimmerGauge(gaugeW, m.animFrame+i*5)
+		labelR := lipgloss.NewStyle().Foreground(colorDim).Width(maxLabelW).Render(label)
+		lines = append(lines, labelR+" "+shimmer)
 	}
 	return lines
 }

@@ -234,6 +234,34 @@ func RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, widt
 	return fmt.Sprintf("%s %s", b.String(), pctStyle.Render(fmt.Sprintf("%5.1f%%", totalPercent)))
 }
 
+// RenderShimmerGauge draws an animated empty gauge track with a moving bright
+// spot, used as a loading placeholder before real data arrives.
+func RenderShimmerGauge(width, frame int) string {
+	if width < 5 {
+		width = 5
+	}
+
+	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	shimmerStyle := lipgloss.NewStyle().Foreground(colorSurface2)
+
+	// The shimmer is a 3-char bright spot that scrolls across the track.
+	shimmerW := 3
+	cycle := width + shimmerW
+	pos := frame % cycle
+
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		dist := i - (pos - shimmerW)
+		if dist >= 0 && dist < shimmerW {
+			b.WriteString(shimmerStyle.Render("░"))
+		} else {
+			b.WriteString(trackStyle.Render("░"))
+		}
+	}
+
+	return b.String() + dimStyle.Render("   ···")
+}
+
 func RenderGradientGauge(percent float64, width int, colors []lipgloss.Color) string {
 	if width < 5 {
 		width = 5
