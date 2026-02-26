@@ -56,6 +56,20 @@ func New() *Provider {
 	}
 }
 
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DetailWidget{
+		Sections: []core.DetailSection{
+			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
+			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
+		},
+	}
+}
+
 type ghUser struct {
 	Login string `json:"login"`
 	Name  string `json:"name"`
@@ -911,11 +925,16 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	shutdownModelInputTokens := make(map[string]float64)
 	shutdownModelOutputTokens := make(map[string]float64)
 	toolUsageCounts := make(map[string]int)
+	languageUsageCounts := make(map[string]int)
+	changedFiles := make(map[string]bool)
+	commitCommands := make(map[string]bool)
 	clientLabels := make(map[string]string)
 	clientTokens := make(map[string]float64)
 	clientSessions := make(map[string]int)
 	clientMessages := make(map[string]int)
 	dailyClientTokens := make(map[string]map[string]float64)
+	var inferredLinesAdded, inferredLinesRemoved int
+	var inferredCommitCount int
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -1048,6 +1067,30 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 									toolName = "unknown"
 								}
 								toolUsageCounts[toolName]++
+								toolLower := strings.ToLower(strings.TrimSpace(toolName))
+								paths := extractCopilotToolPaths(toolReq)
+								for _, path := range paths {
+									if lang := inferCopilotLanguageFromPath(path); lang != "" {
+										languageUsageCounts[lang]++
+									}
+									if isCopilotMutatingTool(toolLower) {
+										changedFiles[path] = true
+									}
+								}
+								if isCopilotMutatingTool(toolLower) {
+									added, removed := estimateCopilotToolLineDelta(toolReq)
+									inferredLinesAdded += added
+									inferredLinesRemoved += removed
+								}
+								cmd := extractCopilotToolCommand(toolReq)
+								if cmd != "" {
+									if strings.Contains(strings.ToLower(cmd), "git commit") && !commitCommands[cmd] {
+										commitCommands[cmd] = true
+										inferredCommitCount++
+									}
+								} else if strings.Contains(toolLower, "commit") {
+									inferredCommitCount++
+								}
 							}
 							day := parseDayFromTimestamp(evt.Timestamp)
 							if day != "" {
@@ -1220,6 +1263,11 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	setUsedMetric(snap, "total_sessions", float64(len(sessions)), "sessions", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_turns", float64(totalTurns), "turns", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_tool_calls", float64(totalTools), "calls", copilotAllTimeWindow)
+	setUsedMetric(snap, "tool_calls_total", float64(totalTools), "calls", copilotAllTimeWindow)
+	if totalTools > 0 {
+		setUsedMetric(snap, "tool_completed", float64(totalTools), "calls", copilotAllTimeWindow)
+		setUsedMetric(snap, "tool_success_rate", 100.0, "%", copilotAllTimeWindow)
+	}
 	setUsedMetric(snap, "total_response_chars", float64(totalResponse), "chars", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_reasoning_chars", float64(totalReasoning), "chars", copilotAllTimeWindow)
 	setUsedMetric(snap, "total_conversations", float64(len(sessions)), "sessions", copilotAllTimeWindow)
@@ -1271,6 +1319,9 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		setUsedMetric(snap, "cli_lines_added", float64(shutdownLinesAdded), "lines", copilotAllTimeWindow)
 		setUsedMetric(snap, "cli_lines_removed", float64(shutdownLinesRemoved), "lines", copilotAllTimeWindow)
 	}
+	if shutdownFilesModified > 0 {
+		setUsedMetric(snap, "cli_files_modified", float64(shutdownFilesModified), "files", copilotAllTimeWindow)
+	}
 	if totalUsageRequests > 0 {
 		var totalDuration int64
 		for _, d := range usageDuration {
@@ -1320,6 +1371,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	setUsedMetric(snap, "7d_sessions", sumLastNDays(dailySessions, 7), "sessions", "7d")
 	setUsedMetric(snap, "7d_tool_calls", sumLastNDays(dailyToolCalls, 7), "calls", "7d")
 	setUsedMetric(snap, "7d_tokens", sumLastNDays(dailyTokens, 7), "tokens", "7d")
+	setUsedMetric(snap, "total_prompts", float64(totalMessages), "prompts", copilotAllTimeWindow)
 
 	// Merge usage event models into the topModels set so they appear even if
 	// they have no log-compaction data.
@@ -1410,11 +1462,54 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	}
 	setRawStr(snap, "client_usage", formatCopilotClientUsage(topClients, clientLabels, clientTokens, clientSessions))
 	setRawStr(snap, "tool_usage", formatModelMap(toolUsageCounts, "calls"))
+	setRawStr(snap, "language_usage", formatModelMap(languageUsageCounts, "req"))
 	for toolName, count := range toolUsageCounts {
 		if count <= 0 {
 			continue
 		}
 		setUsedMetric(snap, "tool_"+sanitizeMetricName(toolName), float64(count), "calls", copilotAllTimeWindow)
+	}
+	for lang, count := range languageUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setUsedMetric(snap, "lang_"+sanitizeMetricName(lang), float64(count), "requests", copilotAllTimeWindow)
+	}
+
+	linesAdded := shutdownLinesAdded
+	if inferredLinesAdded > linesAdded {
+		linesAdded = inferredLinesAdded
+	}
+	linesRemoved := shutdownLinesRemoved
+	if inferredLinesRemoved > linesRemoved {
+		linesRemoved = inferredLinesRemoved
+	}
+	filesChanged := shutdownFilesModified
+	if len(changedFiles) > filesChanged {
+		filesChanged = len(changedFiles)
+	}
+	if linesAdded > 0 {
+		setUsedMetric(snap, "composer_lines_added", float64(linesAdded), "lines", copilotAllTimeWindow)
+	}
+	if linesRemoved > 0 {
+		setUsedMetric(snap, "composer_lines_removed", float64(linesRemoved), "lines", copilotAllTimeWindow)
+	}
+	if filesChanged > 0 {
+		setUsedMetric(snap, "composer_files_changed", float64(filesChanged), "files", copilotAllTimeWindow)
+	}
+	if inferredCommitCount > 0 {
+		setUsedMetric(snap, "scored_commits", float64(inferredCommitCount), "commits", copilotAllTimeWindow)
+	}
+	if linesAdded > 0 || linesRemoved > 0 {
+		hundred := 100.0
+		zero := 0.0
+		snap.Metrics["ai_code_percentage"] = core.Metric{
+			Used:      &hundred,
+			Remaining: &zero,
+			Limit:     &hundred,
+			Unit:      "%",
+			Window:    copilotAllTimeWindow,
+		}
 	}
 
 	if len(sessions) > 0 {
@@ -1900,6 +1995,255 @@ func extractCopilotToolName(raw json.RawMessage) string {
 		if candidate != "" {
 			return candidate
 		}
+	}
+	return ""
+}
+
+func isCopilotMutatingTool(toolName string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	if name == "" {
+		return false
+	}
+	return strings.Contains(name, "edit") ||
+		strings.Contains(name, "write") ||
+		strings.Contains(name, "create") ||
+		strings.Contains(name, "delete") ||
+		strings.Contains(name, "rename") ||
+		strings.Contains(name, "move") ||
+		strings.Contains(name, "replace")
+}
+
+func extractCopilotToolCommand(raw json.RawMessage) string {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	var command string
+	var walk func(v any)
+	walk = func(v any) {
+		if command != "" || v == nil {
+			return
+		}
+		switch value := v.(type) {
+		case map[string]any:
+			for key, child := range value {
+				k := strings.ToLower(strings.TrimSpace(key))
+				if k == "command" || k == "cmd" || k == "script" || k == "shell_command" {
+					if s, ok := child.(string); ok {
+						command = strings.TrimSpace(s)
+						return
+					}
+				}
+			}
+			for _, child := range value {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		}
+	}
+	walk(payload)
+	return command
+}
+
+func extractCopilotToolPaths(raw json.RawMessage) []string {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+
+	pathHints := map[string]bool{
+		"path": true, "paths": true, "file": true, "files": true, "filepath": true, "file_path": true,
+		"cwd": true, "dir": true, "directory": true, "target": true, "pattern": true, "glob": true,
+		"from": true, "to": true, "include": true, "exclude": true,
+	}
+
+	candidates := make(map[string]bool)
+	var walk func(v any, hinted bool)
+	walk = func(v any, hinted bool) {
+		switch value := v.(type) {
+		case map[string]any:
+			for key, child := range value {
+				k := strings.ToLower(strings.TrimSpace(key))
+				childHinted := hinted || pathHints[k] || strings.Contains(k, "path") || strings.Contains(k, "file")
+				walk(child, childHinted)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child, hinted)
+			}
+		case string:
+			if !hinted {
+				return
+			}
+			for _, token := range extractCopilotPathTokens(value) {
+				candidates[token] = true
+			}
+		}
+	}
+	walk(payload, false)
+
+	out := make([]string, 0, len(candidates))
+	for c := range candidates {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func extractCopilotPathTokens(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		fields = []string{raw}
+	}
+
+	var out []string
+	for _, field := range fields {
+		token := strings.Trim(field, "\"'`()[]{}<>,:;")
+		if token == "" {
+			continue
+		}
+		lower := strings.ToLower(token)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "file://") {
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			continue
+		}
+		if !strings.Contains(token, "/") && !strings.Contains(token, "\\") && !strings.Contains(token, ".") {
+			continue
+		}
+		token = strings.TrimPrefix(token, "./")
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return lo.Uniq(out)
+}
+
+func estimateCopilotToolLineDelta(raw json.RawMessage) (added int, removed int) {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return 0, 0
+	}
+	lineCount := func(text string) int {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return 0
+		}
+		return strings.Count(text, "\n") + 1
+	}
+	var walk func(v any)
+	walk = func(v any) {
+		switch value := v.(type) {
+		case map[string]any:
+			var oldText, newText string
+			for _, key := range []string{"old_string", "old_text", "from", "replace"} {
+				if rawValue, ok := value[key]; ok {
+					if s, ok := rawValue.(string); ok {
+						oldText = s
+						break
+					}
+				}
+			}
+			for _, key := range []string{"new_string", "new_text", "to", "with"} {
+				if rawValue, ok := value[key]; ok {
+					if s, ok := rawValue.(string); ok {
+						newText = s
+						break
+					}
+				}
+			}
+			if oldText != "" || newText != "" {
+				removed += lineCount(oldText)
+				added += lineCount(newText)
+			}
+			if rawValue, ok := value["content"]; ok {
+				if s, ok := rawValue.(string); ok {
+					added += lineCount(s)
+				}
+			}
+			for _, child := range value {
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(payload)
+	return added, removed
+}
+
+func inferCopilotLanguageFromPath(path string) string {
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(p))
+	switch base {
+	case "dockerfile":
+		return "docker"
+	case "makefile":
+		return "make"
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".tf", ".tfvars", ".hcl":
+		return "terraform"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "shell"
+	case ".md", ".mdx":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".yml", ".yaml":
+		return "yaml"
+	case ".sql":
+		return "sql"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cc", ".cpp", ".cxx", ".hpp":
+		return "cpp"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".swift":
+		return "swift"
+	case ".vue":
+		return "vue"
+	case ".svelte":
+		return "svelte"
+	case ".toml":
+		return "toml"
+	case ".xml":
+		return "xml"
 	}
 	return ""
 }

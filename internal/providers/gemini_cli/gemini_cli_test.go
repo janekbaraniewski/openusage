@@ -363,6 +363,15 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["tool_web_search"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("tool_web_search = %v, want 1", m.Used)
 	}
+	if m, ok := snap.Metrics["tool_calls_total"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("tool_calls_total = %v, want 3", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_completed"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("tool_completed = %v, want 3", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_success_rate"]; !ok || m.Used == nil || *m.Used != 100 {
+		t.Fatalf("tool_success_rate = %v, want 100", m.Used)
+	}
 
 	if m, ok := snap.Metrics["7d_tokens"]; !ok || m.Used == nil || *m.Used != 220 {
 		t.Fatalf("7d_tokens = %v, want 220", m.Used)
@@ -382,6 +391,9 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	if m, ok := snap.Metrics["total_conversations"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("total_conversations = %v, want 1", m.Used)
 	}
+	if m, ok := snap.Metrics["total_prompts"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("total_prompts = %v, want 2", m.Used)
+	}
 	if !strings.Contains(snap.Raw["model_usage"], "gemini-3-flash-preview") {
 		t.Fatalf("model_usage = %q, expected model name", snap.Raw["model_usage"])
 	}
@@ -397,6 +409,146 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	clientSeries := snap.DailySeries["tokens_client_cli"]
 	if len(clientSeries) != 1 || clientSeries[0].Value != 220 {
 		t.Fatalf("tokens_client_cli series = %+v, want one point at 220", clientSeries)
+	}
+}
+
+func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	chatDir := filepath.Join(tmpDir, "project", "chats")
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+
+	chat := map[string]any{
+		"sessionId":   "session-1",
+		"startTime":   "2026-02-24T10:00:00Z",
+		"lastUpdated": "2026-02-24T10:03:00Z",
+		"messages": []map[string]any{
+			{
+				"type":      "user",
+				"timestamp": "2026-02-24T10:00:10Z",
+				"content":   "update files",
+			},
+			{
+				"type":      "gemini",
+				"timestamp": "2026-02-24T10:01:00Z",
+				"model":     "gemini-2.5-pro-preview",
+				"tokens": map[string]any{
+					"input":    100,
+					"output":   20,
+					"cached":   5,
+					"thoughts": 10,
+					"tool":     0,
+					"total":    125,
+				},
+				"toolCalls": []map[string]any{
+					{
+						"name":   "read_file",
+						"status": "success",
+						"args": map[string]any{
+							"file_path": "internal/providers/gemini_cli/gemini_cli.go",
+						},
+					},
+					{
+						"name":   "replace",
+						"status": "success",
+						"args": map[string]any{
+							"file_path":   "internal/providers/gemini_cli/gemini_cli.go",
+							"old_string":  "one\ntwo",
+							"new_string":  "one\ntwo\nthree",
+							"instruction": "append line",
+						},
+					},
+					{
+						"name":   "write_file",
+						"status": "success",
+						"args": map[string]any{
+							"file_path": "internal/providers/gemini_cli/widget.go",
+							"content":   "a\nb\n",
+						},
+					},
+					{
+						"name":   "run_shell_command",
+						"status": "success",
+						"args": map[string]any{
+							"command": "git commit -m \"test\"",
+						},
+					},
+					{
+						"name":   "replace",
+						"status": "error",
+						"args": map[string]any{
+							"file_path":  "internal/providers/gemini_cli/gemini_cli.go",
+							"old_string": "x",
+							"new_string": "y",
+						},
+					},
+					{
+						"name":   "run_shell_command",
+						"status": "cancelled",
+						"args": map[string]any{
+							"command": "go test ./...",
+						},
+					},
+				},
+			},
+		},
+	}
+	writeJSON(t, filepath.Join(chatDir, "session-2026-02-24T10-00-test.json"), chat)
+
+	p := New()
+	snap := core.UsageSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	count, err := p.readSessionUsageBreakdowns(tmpDir, &snap)
+	if err != nil {
+		t.Fatalf("readSessionUsageBreakdowns() error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("session count = %d, want 1", count)
+	}
+
+	if m, ok := snap.Metrics["lang_go"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("lang_go = %v, want 3", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_lines_added"]; !ok || m.Used == nil || *m.Used != 5 {
+		t.Fatalf("composer_lines_added = %v, want 5", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_lines_removed"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("composer_lines_removed = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_files_changed"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("composer_files_changed = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["scored_commits"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("scored_commits = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_calls_total"]; !ok || m.Used == nil || *m.Used != 6 {
+		t.Fatalf("tool_calls_total = %v, want 6", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_completed"]; !ok || m.Used == nil || *m.Used != 4 {
+		t.Fatalf("tool_completed = %v, want 4", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_errored"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("tool_errored = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_cancelled"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("tool_cancelled = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["tool_success_rate"]; !ok || m.Used == nil || *m.Used < 66 || *m.Used > 67 {
+		t.Fatalf("tool_success_rate = %v, want approx 66.7", m.Used)
+	}
+	if m, ok := snap.Metrics["total_prompts"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("total_prompts = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["ai_code_percentage"]; !ok || m.Used == nil || *m.Used != 100 {
+		t.Fatalf("ai_code_percentage = %v, want 100", m.Used)
+	}
+	if !strings.Contains(snap.Raw["language_usage"], "go: 3 req") {
+		t.Fatalf("language_usage = %q, want go usage summary", snap.Raw["language_usage"])
 	}
 }
 

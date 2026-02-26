@@ -1536,6 +1536,96 @@ func TestReadSessions_UsageEventsMultipleSessions(t *testing.T) {
 	}
 }
 
+func TestExtractCopilotToolPathsAndLanguage(t *testing.T) {
+	raw := json.RawMessage(`{"name":"read_file","args":{"path":"internal/providers/copilot/copilot.go"}}`)
+	paths := extractCopilotToolPaths(raw)
+	if len(paths) != 1 || paths[0] != "internal/providers/copilot/copilot.go" {
+		t.Fatalf("extractCopilotToolPaths = %v", paths)
+	}
+	if lang := inferCopilotLanguageFromPath(paths[0]); lang != "go" {
+		t.Fatalf("inferCopilotLanguageFromPath = %q, want go", lang)
+	}
+}
+
+func TestReadSessions_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
+	p := New()
+	tmp := t.TempDir()
+	copilotDir := filepath.Join(tmp, ".copilot")
+	logDir := filepath.Join(copilotDir, "logs")
+	sessionDir := filepath.Join(copilotDir, "session-state")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	logContent := strings.Join([]string{
+		"2026-02-25T14:00:00.000Z [INFO] Workspace initialized: s1 (checkpoints: 0)",
+		"2026-02-25T14:00:01.000Z [INFO] CompactionProcessor: Utilization 1.1% (1400/128000 tokens) below threshold 80%",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(logDir, "process.log"), []byte(logContent), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	s1Dir := filepath.Join(sessionDir, "s1")
+	if err := os.MkdirAll(s1Dir, 0o755); err != nil {
+		t.Fatalf("mkdir s1: %v", err)
+	}
+	ws := strings.Join([]string{
+		"id: s1",
+		"repository: owner/repo",
+		"branch: main",
+		"created_at: 2026-02-25T14:00:00Z",
+		"updated_at: 2026-02-25T14:10:00Z",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(s1Dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+		t.Fatalf("write workspace: %v", err)
+	}
+
+	events := strings.Join([]string{
+		`{"type":"session.model_change","timestamp":"2026-02-25T14:00:00Z","data":{"newModel":"claude-sonnet-4.6"}}`,
+		`{"type":"user.message","timestamp":"2026-02-25T14:00:01Z","data":{"content":"patch code"}}`,
+		`{"type":"assistant.turn_start","timestamp":"2026-02-25T14:00:02Z","data":{"turnId":"0"}}`,
+		`{"type":"assistant.message","timestamp":"2026-02-25T14:00:03Z","data":{"content":"done","reasoningText":"","toolRequests":[{"name":"read_file","args":{"path":"internal/providers/copilot/copilot.go"}},{"name":"edit_file","args":{"filePath":"internal/providers/copilot/widget.go","old_string":"a\nb","new_string":"a\nb\nc"}},{"name":"run_terminal","args":{"command":"git commit -m \"copilot metrics\""}}]}}`,
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(s1Dir, "events.jsonl"), []byte(events), 0o644); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+
+	snap := &core.UsageSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+
+	logs := p.readLogs(copilotDir, snap)
+	p.readSessions(copilotDir, snap, logs)
+
+	if m := snap.Metrics["lang_go"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("lang_go missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["composer_lines_added"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("composer_lines_added missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["composer_lines_removed"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("composer_lines_removed missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["composer_files_changed"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("composer_files_changed missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["scored_commits"]; m.Used == nil || *m.Used <= 0 {
+		t.Fatalf("scored_commits missing/zero: %+v", m)
+	}
+	if m := snap.Metrics["total_prompts"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("total_prompts = %+v, want 1", m)
+	}
+	if m := snap.Metrics["tool_calls_total"]; m.Used == nil || *m.Used != 3 {
+		t.Fatalf("tool_calls_total = %+v, want 3", m)
+	}
+}
+
 func unmarshalJSON(s string, v interface{}) error {
 	return json.Unmarshal([]byte(s), v)
 }

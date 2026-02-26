@@ -65,6 +65,20 @@ func New() *Provider {
 	}
 }
 
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DetailWidget{
+		Sections: []core.DetailSection{
+			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
+			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
+		},
+	}
+}
+
 type oauthCreds struct {
 	AccessToken  string `json:"access_token"`
 	Scope        string `json:"scope"`
@@ -175,8 +189,9 @@ type geminiChatMessage struct {
 }
 
 type geminiToolCall struct {
-	Name   string `json:"name"`
-	Status string `json:"status,omitempty"`
+	Name   string          `json:"name"`
+	Status string          `json:"status,omitempty"`
+	Args   json.RawMessage `json:"args,omitempty"`
 }
 
 type geminiMessageToken struct {
@@ -961,6 +976,9 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	modelTotals := make(map[string]tokenUsage)
 	clientTotals := make(map[string]tokenUsage)
 	toolTotals := make(map[string]int)
+	languageUsageCounts := make(map[string]int)
+	changedFiles := make(map[string]bool)
+	commitCommands := make(map[string]bool)
 	modelDaily := make(map[string]map[string]float64)
 	clientDaily := make(map[string]map[string]float64)
 	clientSessions := make(map[string]int)
@@ -987,7 +1005,12 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	totalAssistantMessages := 0
 	totalToolSuccess := 0
 	totalToolFailed := 0
+	totalToolErrored := 0
+	totalToolCancelled := 0
 	quotaLimitEvents := 0
+	inferredLinesAdded := 0
+	inferredLinesRemoved := 0
+	inferredCommitCount := 0
 
 	var lastModelName string
 	var lastModelTokens int
@@ -1054,17 +1077,56 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 					dailyToolCalls[day] += float64(len(msg.ToolCalls))
 				}
 				for _, tc := range msg.ToolCalls {
-					if tc.Name != "" {
-						toolTotals[tc.Name]++
+					toolName := strings.TrimSpace(tc.Name)
+					if toolName != "" {
+						toolTotals[toolName]++
 					}
-					if strings.EqualFold(tc.Status, "success") {
+
+					status := strings.ToLower(strings.TrimSpace(tc.Status))
+					switch {
+					case status == "" || status == "success" || status == "succeeded" || status == "ok" || status == "completed":
 						totalToolSuccess++
-					} else if strings.TrimSpace(tc.Status) != "" {
+					case status == "cancelled" || status == "canceled":
+						totalToolCancelled++
 						totalToolFailed++
+					default:
+						totalToolErrored++
+						totalToolFailed++
+					}
+
+					toolLower := strings.ToLower(toolName)
+					successfulToolCall := isGeminiToolCallSuccessful(status)
+					for _, path := range extractGeminiToolPaths(tc.Args) {
+						if successfulToolCall {
+							if lang := inferGeminiLanguageFromPath(path); lang != "" {
+								languageUsageCounts[lang]++
+							}
+						}
+						if successfulToolCall && isGeminiMutatingTool(toolLower) {
+							changedFiles[path] = true
+						}
+					}
+
+					if successfulToolCall && isGeminiMutatingTool(toolLower) {
+						added, removed := estimateGeminiToolLineDelta(tc.Args)
+						inferredLinesAdded += added
+						inferredLinesRemoved += removed
+					}
+
+					if !successfulToolCall {
+						continue
+					}
+					cmd := strings.ToLower(extractGeminiToolCommand(tc.Args))
+					if strings.Contains(cmd, "git commit") {
+						if !commitCommands[cmd] {
+							commitCommands[cmd] = true
+							inferredCommitCount++
+						}
+					} else if strings.Contains(toolLower, "commit") {
+						inferredCommitCount++
 					}
 				}
 			}
-
 			if msg.Tokens == nil {
 				continue
 			}
@@ -1145,6 +1207,15 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	emitClientSessionMetrics(clientSessions, snap)
 	emitModelRequestMetrics(modelRequests, modelSessions, snap)
 	emitToolMetrics(toolTotals, snap)
+	if languageSummary := formatNamedCountMap(languageUsageCounts, "req"); languageSummary != "" {
+		snap.Raw["language_usage"] = languageSummary
+	}
+	for lang, count := range languageUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setUsedMetric(snap, "lang_"+sanitizeMetricName(lang), float64(count), "requests", defaultUsageWindowLabel)
+	}
 
 	storeSeries(snap, "messages", dailyMessages)
 	storeSeries(snap, "sessions", dailySessions)
@@ -1165,7 +1236,16 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	setUsedMetric(snap, "total_assistant_messages", float64(totalAssistantMessages), "messages", defaultUsageWindowLabel)
 	setUsedMetric(snap, "tool_calls_success", float64(totalToolSuccess), "calls", defaultUsageWindowLabel)
 	setUsedMetric(snap, "tool_calls_failed", float64(totalToolFailed), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_calls_total", float64(totalToolCalls), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_completed", float64(totalToolSuccess), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_errored", float64(totalToolErrored), "calls", defaultUsageWindowLabel)
+	setUsedMetric(snap, "tool_cancelled", float64(totalToolCancelled), "calls", defaultUsageWindowLabel)
+	if totalToolCalls > 0 {
+		successRate := float64(totalToolSuccess) / float64(totalToolCalls) * 100
+		setUsedMetric(snap, "tool_success_rate", successRate, "%", defaultUsageWindowLabel)
+	}
 	setUsedMetric(snap, "quota_limit_events", float64(quotaLimitEvents), "events", defaultUsageWindowLabel)
+	setUsedMetric(snap, "total_prompts", float64(totalMessages), "prompts", defaultUsageWindowLabel)
 
 	if cliUsage, ok := clientTotals["CLI"]; ok {
 		setUsedMetric(snap, "client_cli_messages", float64(totalMessages), "messages", defaultUsageWindowLabel)
@@ -1242,6 +1322,22 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	setUsedMetric(snap, "7d_cached_tokens", sumLastNDays(dailyCachedTokens, 7), "tokens", "7d")
 	setUsedMetric(snap, "7d_reasoning_tokens", sumLastNDays(dailyReasoningTokens, 7), "tokens", "7d")
 	setUsedMetric(snap, "7d_tool_tokens", sumLastNDays(dailyToolTokens, 7), "tokens", "7d")
+
+	if inferredLinesAdded > 0 {
+		setUsedMetric(snap, "composer_lines_added", float64(inferredLinesAdded), "lines", defaultUsageWindowLabel)
+	}
+	if inferredLinesRemoved > 0 {
+		setUsedMetric(snap, "composer_lines_removed", float64(inferredLinesRemoved), "lines", defaultUsageWindowLabel)
+	}
+	if len(changedFiles) > 0 {
+		setUsedMetric(snap, "composer_files_changed", float64(len(changedFiles)), "files", defaultUsageWindowLabel)
+	}
+	if inferredCommitCount > 0 {
+		setUsedMetric(snap, "scored_commits", float64(inferredCommitCount), "commits", defaultUsageWindowLabel)
+	}
+	if inferredLinesAdded > 0 || inferredLinesRemoved > 0 {
+		setPercentMetric(snap, "ai_code_percentage", 100, defaultUsageWindowLabel)
+	}
 
 	if quotaLimitEvents > 0 {
 		snap.Raw["quota_limit_detected"] = "true"
@@ -1571,6 +1667,275 @@ func formatUsageSummary(entries []usageEntry, max int) string {
 		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func formatNamedCountMap(m map[string]int, unit string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(m))
+	for name, count := range m {
+		if count <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s: %d %s", name, count, unit))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
+
+func isGeminiToolCallSuccessful(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return status == "" || status == "success" || status == "succeeded" || status == "ok" || status == "completed"
+}
+
+func isGeminiMutatingTool(toolName string) bool {
+	toolName = strings.ToLower(strings.TrimSpace(toolName))
+	if toolName == "" {
+		return false
+	}
+	return strings.Contains(toolName, "edit") ||
+		strings.Contains(toolName, "write") ||
+		strings.Contains(toolName, "create") ||
+		strings.Contains(toolName, "delete") ||
+		strings.Contains(toolName, "rename") ||
+		strings.Contains(toolName, "move") ||
+		strings.Contains(toolName, "replace")
+}
+
+func extractGeminiToolCommand(raw json.RawMessage) string {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	var command string
+	var walk func(v any)
+	walk = func(v any) {
+		if command != "" || v == nil {
+			return
+		}
+		switch value := v.(type) {
+		case map[string]any:
+			for key, child := range value {
+				k := strings.ToLower(strings.TrimSpace(key))
+				if k == "command" || k == "cmd" || k == "script" || k == "shell_command" {
+					if s, ok := child.(string); ok {
+						command = strings.TrimSpace(s)
+						return
+					}
+				}
+			}
+			for _, child := range value {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		}
+	}
+	walk(payload)
+	return command
+}
+
+func extractGeminiToolPaths(raw json.RawMessage) []string {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+
+	pathHints := map[string]bool{
+		"path": true, "paths": true, "file": true, "files": true, "filepath": true, "file_path": true,
+		"cwd": true, "dir": true, "directory": true, "target": true, "pattern": true, "glob": true,
+		"from": true, "to": true, "include": true, "exclude": true,
+	}
+
+	candidates := make(map[string]bool)
+	var walk func(v any, hinted bool)
+	walk = func(v any, hinted bool) {
+		switch value := v.(type) {
+		case map[string]any:
+			for key, child := range value {
+				k := strings.ToLower(strings.TrimSpace(key))
+				childHinted := hinted || pathHints[k] || strings.Contains(k, "path") || strings.Contains(k, "file")
+				walk(child, childHinted)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child, hinted)
+			}
+		case string:
+			if !hinted {
+				return
+			}
+			for _, token := range extractGeminiPathTokens(value) {
+				candidates[token] = true
+			}
+		}
+	}
+	walk(payload, false)
+
+	out := make([]string, 0, len(candidates))
+	for c := range candidates {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func extractGeminiPathTokens(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		fields = []string{raw}
+	}
+
+	var out []string
+	for _, field := range fields {
+		token := strings.Trim(field, "\"'`()[]{}<>,:;")
+		if token == "" {
+			continue
+		}
+		lower := strings.ToLower(token)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "file://") {
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			continue
+		}
+		if !strings.Contains(token, "/") && !strings.Contains(token, "\\") && !strings.Contains(token, ".") {
+			continue
+		}
+		token = strings.TrimPrefix(token, "./")
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return lo.Uniq(out)
+}
+
+func estimateGeminiToolLineDelta(raw json.RawMessage) (added int, removed int) {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return 0, 0
+	}
+	lineCount := func(text string) int {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return 0
+		}
+		return strings.Count(text, "\n") + 1
+	}
+	var walk func(v any)
+	walk = func(v any) {
+		switch value := v.(type) {
+		case map[string]any:
+			var oldText, newText string
+			for _, key := range []string{"old_string", "old_text", "from", "replace"} {
+				if rawValue, ok := value[key]; ok {
+					if s, ok := rawValue.(string); ok {
+						oldText = s
+						break
+					}
+				}
+			}
+			for _, key := range []string{"new_string", "new_text", "to", "with"} {
+				if rawValue, ok := value[key]; ok {
+					if s, ok := rawValue.(string); ok {
+						newText = s
+						break
+					}
+				}
+			}
+			if oldText != "" || newText != "" {
+				removed += lineCount(oldText)
+				added += lineCount(newText)
+			}
+			if rawValue, ok := value["content"]; ok {
+				if s, ok := rawValue.(string); ok {
+					added += lineCount(s)
+				}
+			}
+			for _, child := range value {
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		}
+	}
+	walk(payload)
+	return added, removed
+}
+
+func inferGeminiLanguageFromPath(path string) string {
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(p))
+	switch base {
+	case "dockerfile":
+		return "docker"
+	case "makefile":
+		return "make"
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".tf", ".tfvars", ".hcl":
+		return "terraform"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "shell"
+	case ".md", ".mdx":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".yml", ".yaml":
+		return "yaml"
+	case ".sql":
+		return "sql"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cc", ".cpp", ".cxx", ".hpp":
+		return "cpp"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".swift":
+		return "swift"
+	case ".vue":
+		return "vue"
+	case ".svelte":
+		return "svelte"
+	case ".toml":
+		return "toml"
+	case ".xml":
+		return "xml"
+	}
+	return ""
 }
 
 func formatTokenCount(value int) string {
