@@ -138,6 +138,19 @@ type usageLimitPolicyResp struct {
 	LimitType              string `json:"limitType"`
 }
 
+type teamMembersResp struct {
+	TeamMembers []teamMember `json:"teamMembers"`
+	UserID      float64      `json:"userId"`
+}
+
+type teamMember struct {
+	Name      string  `json:"name"`
+	ID        float64 `json:"id"`
+	Role      string  `json:"role"`
+	Email     string  `json:"email"`
+	IsRemoved bool    `json:"isRemoved"`
+}
+
 type dailyStats struct {
 	Date                   string `json:"date"`
 	TabSuggestedLines      int    `json:"tabSuggestedLines"`
@@ -583,6 +596,36 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 		snap.Raw["limit_policy_type"] = limitPolicy.LimitType
 	}
 
+	// Fetch team members if user is on a team.
+	if profile.IsTeamMember && profile.TeamID > 0 {
+		teamIDStr := fmt.Sprintf("%.0f", profile.TeamID)
+		body := []byte(fmt.Sprintf(`{"teamId":"%s"}`, teamIDStr))
+		var teamMembers teamMembersResp
+		if err := p.callDashboardAPIWithBody(ctx, token, "GetTeamMembers", body, &teamMembers); err == nil {
+			var activeCount int
+			var memberNames []string
+			var ownerCount int
+			for _, m := range teamMembers.TeamMembers {
+				if m.IsRemoved {
+					continue
+				}
+				activeCount++
+				memberNames = append(memberNames, m.Name)
+				if strings.Contains(m.Role, "OWNER") {
+					ownerCount++
+				}
+			}
+			teamSize := float64(activeCount)
+			snap.Metrics["team_size"] = core.Metric{Used: &teamSize, Unit: "members", Window: "current"}
+			snap.Raw["team_members"] = strings.Join(memberNames, ", ")
+			snap.Raw["team_size"] = strconv.Itoa(activeCount)
+			if ownerCount > 0 {
+				ownerV := float64(ownerCount)
+				snap.Metrics["team_owners"] = core.Metric{Used: &ownerV, Unit: "owners", Window: "current"}
+			}
+		}
+	}
+
 	planName := snap.Raw["plan_name"]
 	if su.PooledLimit > 0 {
 		pooledLimitDollars := su.PooledLimit / 100.0
@@ -615,6 +658,29 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 func (p *Provider) callDashboardAPI(ctx context.Context, token, method string, result interface{}) error {
 	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", cursorAPIBase, method)
 	return p.doPost(ctx, token, url, result)
+}
+
+func (p *Provider) callDashboardAPIWithBody(ctx context.Context, token, method string, body []byte, result interface{}) error {
+	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", cursorAPIBase, method)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return json.NewDecoder(resp.Body).Decode(result)
 }
 
 func (p *Provider) callRESTAPI(ctx context.Context, token, path string, result interface{}) error {
@@ -1039,6 +1105,8 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 	p.readTrackingDailyRequests(ctx, db, snap, timeExpr)
 	p.readTrackingModelBreakdown(ctx, db, snap, todayStart, timeExpr)
 	p.readScoredCommits(ctx, db, snap)
+	p.readDeletedFiles(ctx, db, snap)
+	p.readTrackedFileContent(ctx, db, snap)
 
 	return nil
 }
@@ -1120,6 +1188,22 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 		snap.Raw["commit_tab_lines"] = strconv.Itoa(totalTabAdd)
 		snap.Raw["commit_composer_lines"] = strconv.Itoa(totalCompAdd)
 		snap.Raw["commit_human_lines"] = strconv.Itoa(totalHumanAdd)
+	}
+}
+
+func (p *Provider) readDeletedFiles(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
+	var count int
+	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ai_deleted_files`).Scan(&count) == nil && count > 0 {
+		v := float64(count)
+		snap.Metrics["ai_deleted_files"] = core.Metric{Used: &v, Unit: "files", Window: "all-time"}
+	}
+}
+
+func (p *Provider) readTrackedFileContent(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
+	var count int
+	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracked_file_content`).Scan(&count) == nil && count > 0 {
+		v := float64(count)
+		snap.Metrics["ai_tracked_files"] = core.Metric{Used: &v, Unit: "files", Window: "all-time"}
 	}
 }
 
@@ -1529,7 +1613,11 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 		       json_extract(value, '$.unifiedMode'),
 		       json_extract(value, '$.createdAt'),
 		       json_extract(value, '$.totalLinesAdded'),
-		       json_extract(value, '$.totalLinesRemoved')
+		       json_extract(value, '$.totalLinesRemoved'),
+		       json_extract(value, '$.contextTokensUsed'),
+		       json_extract(value, '$.contextTokenLimit'),
+		       json_extract(value, '$.filesChangedCount'),
+		       json_extract(value, '$.subagentInfo.subagentTypeName')
 		FROM cursorDiskKV
 		WHERE key LIKE 'composerData:%'
 		  AND json_extract(value, '$.usageData') IS NOT NULL
@@ -1541,18 +1629,23 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 	defer rows.Close()
 
 	var (
-		totalCostCents    float64
-		totalRequests     int
-		totalSessions     int
-		totalLinesAdded   int
-		totalLinesRemoved int
-		modelCosts        = make(map[string]float64)
-		modelRequests     = make(map[string]int)
-		modeSessions      = make(map[string]int)
-		dailyCost         = make(map[string]float64)
-		dailyRequests     = make(map[string]float64)
-		todayCostCents    float64
-		todayRequests     int
+		totalCostCents     float64
+		totalRequests      int
+		totalSessions      int
+		totalLinesAdded    int
+		totalLinesRemoved  int
+		totalFilesChanged  int
+		totalContextUsed   float64
+		totalContextLimit  float64
+		contextSampleCount int
+		subagentTypes      = make(map[string]int)
+		modelCosts         = make(map[string]float64)
+		modelRequests      = make(map[string]int)
+		modeSessions       = make(map[string]int)
+		dailyCost          = make(map[string]float64)
+		dailyRequests      = make(map[string]float64)
+		todayCostCents     float64
+		todayRequests      int
 	)
 
 	now := time.Now()
@@ -1564,7 +1657,12 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 		var createdAt sql.NullInt64
 		var linesAdded sql.NullInt64
 		var linesRemoved sql.NullInt64
-		if rows.Scan(&usageJSON, &mode, &createdAt, &linesAdded, &linesRemoved) != nil {
+		var ctxUsed sql.NullFloat64
+		var ctxLimit sql.NullFloat64
+		var filesChanged sql.NullInt64
+		var subagentType sql.NullString
+		if rows.Scan(&usageJSON, &mode, &createdAt, &linesAdded, &linesRemoved,
+			&ctxUsed, &ctxLimit, &filesChanged, &subagentType) != nil {
 			continue
 		}
 		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
@@ -1585,6 +1683,17 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 		}
 		if linesRemoved.Valid {
 			totalLinesRemoved += int(linesRemoved.Int64)
+		}
+		if filesChanged.Valid && filesChanged.Int64 > 0 {
+			totalFilesChanged += int(filesChanged.Int64)
+		}
+		if ctxUsed.Valid && ctxUsed.Float64 > 0 && ctxLimit.Valid && ctxLimit.Float64 > 0 {
+			totalContextUsed += ctxUsed.Float64
+			totalContextLimit += ctxLimit.Float64
+			contextSampleCount++
+		}
+		if subagentType.Valid && subagentType.String != "" {
+			subagentTypes[subagentType.String]++
 		}
 
 		var sessionDay string
@@ -1702,6 +1811,35 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 		v := float64(count)
 		modeKey := sanitizeCursorMetricName(mode)
 		snap.Metrics["mode_"+modeKey+"_sessions"] = core.Metric{
+			Used:   &v,
+			Unit:   "sessions",
+			Window: "all-time",
+		}
+	}
+
+	if totalFilesChanged > 0 {
+		fc := float64(totalFilesChanged)
+		snap.Metrics["composer_files_changed"] = core.Metric{Used: &fc, Unit: "files", Window: "all-time"}
+	}
+
+	if contextSampleCount > 0 {
+		avgPct := (totalContextUsed / totalContextLimit) * 100
+		avgPct = math.Round(avgPct*10) / 10
+		hundred := 100.0
+		remaining := hundred - avgPct
+		snap.Metrics["composer_context_pct"] = core.Metric{
+			Used:      &avgPct,
+			Remaining: &remaining,
+			Limit:     &hundred,
+			Unit:      "%",
+			Window:    "avg",
+		}
+	}
+
+	for saType, count := range subagentTypes {
+		v := float64(count)
+		saKey := sanitizeCursorMetricName(saType)
+		snap.Metrics["subagent_"+saKey+"_sessions"] = core.Metric{
 			Used:   &v,
 			Unit:   "sessions",
 			Window: "all-time",
