@@ -1163,18 +1163,18 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 	defer rows.Close()
 
 	var (
-		sumAIPct       float64
-		countWithPct   int
-		totalTabAdd    int
-		totalTabDel    int
-		totalCompAdd   int
-		totalCompDel   int
-		totalHumanAdd  int
-		totalHumanDel  int
-		totalBlankAdd  int
-		totalBlankDel  int
-		totalLinesAdd  int
-		totalLinesDel  int
+		sumAIPct      float64
+		countWithPct  int
+		totalTabAdd   int
+		totalTabDel   int
+		totalCompAdd  int
+		totalCompDel  int
+		totalHumanAdd int
+		totalHumanDel int
+		totalBlankAdd int
+		totalBlankDel int
+		totalLinesAdd int
+		totalLinesDel int
 	)
 
 	for rows.Next() {

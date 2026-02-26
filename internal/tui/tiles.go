@@ -4016,10 +4016,10 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 
 // actualToolUsage status/aggregate keys that should not appear as individual tool entries.
 var actualToolAggregateKeys = map[string]bool{
-	"tool_calls_total": true,
-	"tool_completed":   true,
-	"tool_errored":     true,
-	"tool_cancelled":   true,
+	"tool_calls_total":  true,
+	"tool_completed":    true,
+	"tool_errored":      true,
+	"tool_cancelled":    true,
 	"tool_success_rate": true,
 }
 

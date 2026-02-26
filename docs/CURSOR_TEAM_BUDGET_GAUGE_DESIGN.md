@@ -1,219 +1,236 @@
-# Design: Cursor Team Budget Stacked Gauge
+# Design: Cursor Provider Detail View Overhaul
 
 ## Problem
 
-The Cursor provider's tile shows two gauge bars: "Credit Limit" (team pooled budget) and "Credits" (total plan spend). The "Credits" bar is redundant with "Credit Limit" for team accounts — both show spend against a limit. Users on team plans want to see how much of the team budget **they** consumed vs the rest of the team, at a glance.
+The Cursor provider's detail view was text-heavy, lacked graphical representations, and left significant data unexposed. Specific issues:
+
+1. **Redundant gauge bars** — "Credits" and "Credit Limit" overlapped for team accounts
+2. **No billing cycle indicator** — no way to see where you are in the billing period
+3. **Missing interface breakdown** — the "tool usage" section was reporting interface types (composer, cli, human, tab) instead of actual agent tool calls
+4. **No actual tool usage** — Cursor's `bubbleId:*` entries in `state.vscdb` contain granular tool call data that was never surfaced
+5. **No language breakdown** — file extension data from `ai_code_hashes` was unused
+6. **Non-graphical code stats** — lines added/removed, commits, and AI contribution were plain text rows
+7. **Inaccurate AI percentage** — `LIMIT 50` in the scored_commits query skewed the average toward 100%
+8. **Unexposed data** — agentic session counts, force modes, file creation/removal stats, and billing token breakdowns were available but hidden
 
 ## Solution
 
-Replace the second gauge bar ("Credits" / `plan_spend`) with a **stacked "Team Budget" gauge** that shows two colored segments within a single bar:
+A comprehensive overhaul of the Cursor provider's data extraction and TUI rendering, adding six new graphical sections and fixing data accuracy issues.
+
+## Final State
+
+### Gauge Section (top of tile)
+
+Two gauges rendered in priority order:
 
 ```
-Credit Limit  ███▓▓░░░░░░░░  13.6%    (self=green, others=yellow, empty=track)
-Team Budget   ██████████████  100.0%   (self=teal, others=peach, empty=track)
+Team Budget   ██▓░░░░░░░░░░  14.8%    (self=teal, others=peach)
+Billing Cycle ████████░░░░░  56.9%
+$531 / $3600 spent
+you $427 · team $104 · $3069 remaining
 ```
 
-- **Segment 1 (self)**: `individual_spend` / `spend_limit` — the current user's contribution
-- **Segment 2 (others)**: (`spend_limit.Used` - `individual_spend`) / `spend_limit` — the rest of the team
-- **Empty track**: remaining budget
+- **Team Budget**: Stacked gauge via `RenderStackedUsageGauge` with `team_budget_self` + `team_budget_others` segments
+- **Billing Cycle**: Standard gauge from `billing_cycle_progress` metric, computed as `elapsed / total_cycle_days * 100`
+- Fallback: When team data is unavailable, falls through to `plan_auto_percent_used` / `plan_api_percent_used`
 
-When team data is unavailable (`PooledLimit <= 0`), fall back to the existing `plan_spend` single gauge.
+### Model Burn (credits)
 
-## Goals
+Standard model composition section from `model_*` metrics. Shows horizontal bar chart with per-model cost and token breakdown. Models sorted by cost descending.
 
-- Show self vs team spend breakdown in the tile's top usage section
-- Reuse existing data from the Cursor API (no new API calls needed)
-- Keep the change minimal — only affect the Cursor provider tile
+### Clients
 
-## Non-Goals
+Merged section combining interface-level breakdown into the client composition panel. Enabled via `ClientCompositionIncludeInterfaces = true` on the `DashboardWidget`.
 
-- Changing the detail view or analytics tab
-- Adding stacked gauge support to other providers
-- Modifying the daemon/telemetry pipeline
-- New config options for this feature
+```
+Clients
+████████████████████████████████░░░░
+1 Composer ........................ 87% 67.4k req
+2 CLI Agents ...................... 13% 10.1k req
+3 Human ...........................  0% 251 req
+4 Tab Completion ..................  0% 97 req
+```
 
-## Data Available
+Data source: `interface_*` metrics from `readTrackingSourceBreakdown`, which reads the `subagentInfo.subagentTypeName` field from `composerData` JSON in the `cursorDiskKV` table of `state.vscdb`.
 
-The Cursor `GetCurrentPeriodUsage` API already returns all needed fields:
+Label mapping in `prettifyClientName`:
+- `composer` → "Composer"
+- `cli` → "CLI Agents"
+- `human` → "Human"
+- `tab` → "Tab Completion"
 
-```json
-{
-  "spendLimitUsage": {
-    "pooledLimit": 360000,      // team budget in cents
-    "pooledUsed": 48800,        // total team spend in cents
-    "pooledRemaining": 311200,  // team budget remaining
-    "individualUsed": 20000     // current user's spend in cents
-  }
+### Tool Usage
+
+New section showing actual agent tool calls extracted from Cursor's bubble data. Enabled via `ShowActualToolUsage = true`.
+
+```
+Tool Usage  30.4k calls · 95% ok
+████████████████████████████████████
+1 run_terminal_command ........... 30% 9.0k
+2 read_file ...................... 20% 6.2k
+3 run_terminal_cmd ...............  9% 2.8k
+4 search_replace .................  8% 2.4k
+5 edit_file ......................  5% 1.5k
+6 write ..........................  4% 1.2k
++ 92 more tools (Ctrl+O)
+```
+
+Data source: `readToolUsage` function queries `bubbleId:*` entries in `cursorDiskKV` where `$.type = 2` (AI response bubbles), extracting `toolFormerData.name` and `toolFormerData.status`.
+
+Tool name normalization (`normalizeToolName`):
+- MCP tools: `mcp-*-user-*-tool` shortened to `tool (mcp)`
+- Version suffixes: `_v2`, `_v3` stripped
+
+Metrics emitted:
+- `tool_calls_total`, `tool_completed`, `tool_errored`, `tool_cancelled`, `tool_success_rate` (aggregates)
+- `tool_<normalized_name>` (per-tool counts)
+
+Aggregate keys are excluded from the bar chart via `actualToolAggregateKeys` filter map and displayed only in the heading summary.
+
+### Language (requests)
+
+Language breakdown from file extension data in the tracking database. Enabled via `ShowLanguageComposition = true`.
+
+```
+Language (requests)
+████████████████████████████████████
+1 go ............................. 53% 30.4k req
+2 terraform ...................... 21% 12.0k req
+...
++ 20 more languages (Ctrl+O)
+```
+
+Data source: `readTrackingLanguageBreakdown` queries `SELECT fileExtension, COUNT(*) FROM ai_code_hashes GROUP BY fileExtension` from `ai-code-tracking.db`.
+
+Metrics emitted: `lang_<extension>` with unit "requests".
+
+### Code Statistics
+
+Graphical code stats section replacing plain-text rows. Enabled via `ShowCodeStatsComposition = true` with a `CodeStatsConfig` mapping metric keys.
+
+```
+Code Statistics
+██████████████████████    ██
+■ +74.6k added              ■ -18.5k removed
+Files Changed .......................... 844 files
+Commits ██████████████ 239 commits · 98% AI
+Prompts ................................ 898 total
+```
+
+Config:
+```go
+cfg.CodeStatsMetrics = core.CodeStatsConfig{
+    LinesAdded:   "composer_lines_added",
+    LinesRemoved: "composer_lines_removed",
+    FilesChanged: "composer_files_changed",
+    Commits:      "scored_commits",
+    AIPercent:    "ai_code_percentage",
+    Prompts:      "total_prompts",
 }
 ```
 
-Current metrics created from this data:
-- `spend_limit`: Limit=pooledLimit, Used=pooledUsed, Remaining=pooledRemaining (USD)
-- `individual_spend`: Used=individualUsed (USD) — **no Limit set, so can't render as gauge today**
+Rendered by `buildProviderCodeStatsLines` in `tiles.go`:
+- Lines added/removed shown as proportional colored bars with numeric labels
+- Commits shown as progress bar with AI% annotation
+- Files and prompts as dot-leader rows
 
-## Design
+### Compact Rows
 
-### 1. New metric: `team_budget`
-
-Instead of modifying existing metrics, create a new composite metric in the Cursor provider's Fetch that carries both segments:
-
-```go
-// in cursor.go, after creating spend_limit and individual_spend metrics
-if su.PooledLimit > 0 {
-    selfDollars := su.IndividualUsed / 100.0
-    othersDollars := (su.PooledUsed - su.IndividualUsed) / 100.0
-    totalUsedDollars := su.PooledUsed / 100.0
-    pooledLimitDollars := su.PooledLimit / 100.0
-
-    snap.Metrics["team_budget"] = core.Metric{
-        Limit: &pooledLimitDollars,
-        Used:  &totalUsedDollars,
-        Unit:  "USD",
-        Window: "billing-cycle",
-    }
-    // Store segment data in Raw for the stacked gauge renderer
-    snap.Raw["team_budget_self"] = fmt.Sprintf("%.2f", selfDollars)
-    snap.Raw["team_budget_others"] = fmt.Sprintf("%.2f", othersDollars)
-}
+```
+Credits  plan $40.93/$20.00 · cap $531.11/$3600 · mine $427.43 · billing $41.12
+Team     members 18 members · owners 4 owners
+Usage    used 100% · auto 0% · api 100% · ctx 43%
+Activity today 15.1k · all 77.8k · sess 84 sessions · reqs 645
+Lines    comp 148 · comp sug 148
 ```
 
-### 2. New TUI function: `RenderStackedUsageGauge`
+### Individual Metrics (remaining)
 
-Add a new rendering function in `gauge.go` that draws a stacked bar with two segments:
+Metrics not consumed by compositions or compact rows render as standard dot-leader rows:
+- AI Deleted / AI Tracked files
+- Billing Cached / Input / Output Tokens
+- Plan Bonus / Plan Included
 
-```go
-func RenderStackedUsageGauge(segments []GaugeSegment, width int) string
-```
+## Data Sources
 
-Where `GaugeSegment` is:
+### API endpoints (existing)
 
-```go
-type GaugeSegment struct {
-    Percent float64
-    Color   lipgloss.Color
-    Label   string  // for legend (optional)
-}
-```
+| Endpoint | Metrics |
+|----------|---------|
+| `GetCurrentPeriodUsage` | plan_spend, spend_limit, individual_spend, team_budget, billing_cycle_progress |
+| `GetUsageBasedPricingV3` | plan_percent_used, plan_auto/api_percent_used, billing tokens |
+| Model aggregation | model_* cost and token metrics |
 
-The function:
-1. Divides the bar width proportionally between segments
-2. Renders each segment with its own color using full block chars
-3. Fills remaining width with track chars (`░`)
-4. Appends the total percentage at the end
+### Local databases (enhanced)
 
-### 3. Widget configuration: `StackedGaugeKeys`
+| Database | Table/Query | Metrics |
+|----------|-------------|---------|
+| `state.vscdb` | `cursorDiskKV` → `composerData` JSON | interface_*, composer_sessions, agentic_sessions, composer_files_created/removed, mode_* |
+| `state.vscdb` | `cursorDiskKV` → `bubbleId:*` entries | tool_* (all tool usage metrics) |
+| `ai-code-tracking.db` | `ai_code_hashes` | lang_* |
+| `ai-code-tracking.db` | `scored_commits` | ai_code_percentage, scored_commits, composer_lines_added/removed |
 
-Add a new field to `DashboardWidget` that tells the tile renderer which metrics should use stacked rendering:
+## Key Bug Fixes
 
-```go
-// In core/widget.go, add to DashboardWidget:
-StackedGaugeKeys map[string]StackedGaugeConfig
-```
+### AI Code Percentage Accuracy
 
-```go
-type StackedGaugeConfig struct {
-    SegmentRawKeys []string // Raw keys containing segment USD values
-    SegmentLabels  []string // Labels for each segment
-    SegmentColors  []string // Color names: "teal", "peach", etc.
-}
-```
+The `readScoredCommits` query had `LIMIT 50` which caused the weighted average to skew toward 100% because recent commits are more likely to be AI-heavy. Removed the limit to compute across all scored commits.
 
-Cursor configures it as:
+### Stacked Gauge Blank Space
+
+`RenderStackedUsageGauge` in `gauge.go` had rounding that could leave 1-char gaps between segments. Fixed by rounding up intermediate segments to full block characters.
+
+## Widget Configuration
 
 ```go
-cfg.StackedGaugeKeys = map[string]StackedGaugeConfig{
-    "team_budget": {
-        SegmentRawKeys: []string{"team_budget_self", "team_budget_others"},
-        SegmentLabels:  []string{"You", "Team"},
-        SegmentColors:  []string{"teal", "peach"},
-    },
-}
+cfg.ShowClientComposition = true
+cfg.ClientCompositionHeading = "Clients"
+cfg.ClientCompositionIncludeInterfaces = true
+cfg.ShowToolComposition = false              // merged into Clients
+cfg.ShowLanguageComposition = true
+cfg.ShowCodeStatsComposition = true
+cfg.ShowActualToolUsage = true
 ```
 
-### 4. Tile renderer integration
+Hidden metric prefixes: `model_`, `source_`, `client_`, `mode_`, `interface_`, `subagent_`, `lang_`, `tool_`.
 
-In `tiles.go:buildTileGaugeLines()`, before the standard gauge path, check if the metric key is in `StackedGaugeKeys`. If so, parse segment values from `snap.Raw`, compute percentages against the metric's Limit, and call `RenderStackedUsageGauge`.
+Hidden metric keys: `plan_total_spend_usd`, `plan_limit_usd`, `plan_included_amount`, `team_budget_self`, `team_budget_others`, `composer_cost`, `agentic_sessions`, `non_agentic_sessions`, `tool_calls_total`, `tool_completed`, `tool_errored`, `tool_cancelled`, `tool_success_rate`, `composer_files_created`, `composer_files_removed`.
 
-### 5. GaugePriority update
+## Core Type Additions
 
-In Cursor's widget config, replace `"plan_spend"` with `"team_budget"` in the GaugePriority list:
+| Type/Field | File | Purpose |
+|------------|------|---------|
+| `DashboardWidget.ClientCompositionHeading` | `core/widget.go` | Override heading for client composition section |
+| `DashboardWidget.ClientCompositionIncludeInterfaces` | `core/widget.go` | Fold `interface_` metrics into client composition |
+| `DashboardWidget.ShowActualToolUsage` | `core/widget.go` | Enable tool usage section |
+| `DashboardWidget.ShowLanguageComposition` | `core/widget.go` | Enable language breakdown section |
+| `DashboardWidget.ShowCodeStatsComposition` | `core/widget.go` | Enable code statistics section |
+| `CodeStatsConfig` | `core/widget.go` | Maps code stat metric keys to rendering slots |
+| `DashboardSectionActualToolUsage` | `core/widget.go` | Standard section constant for ordering |
+| `DashboardSectionLanguageBurn` | `core/widget.go` | Standard section constant for ordering |
+| `DashboardSectionCodeStats` | `core/widget.go` | Standard section constant for ordering |
 
-```go
-cfg.GaugePriority = []string{
-    "spend_limit", "team_budget", "plan_percent_used",
-    "plan_auto_percent_used", "plan_api_percent_used",
-}
-```
+## Impact Summary
 
-### 6. Fallback behavior
+| File | Changes |
+|------|---------|
+| `internal/providers/cursor/cursor.go` | `readToolUsage`, `normalizeToolName`, enhanced `readComposerSessions`/`readScoredCommits`, `readTrackingLanguageBreakdown`, billing cycle progress |
+| `internal/providers/cursor/widget.go` | Full widget config for all new sections, hide keys/prefixes |
+| `internal/core/widget.go` | New fields, section constants, `CodeStatsConfig` type |
+| `internal/tui/tiles.go` | `buildActualToolUsageLines`, `collectInterfaceAsClients`, `buildProviderCodeStatsLines`, `buildProviderClientCompositionLinesWithWidget`, updated `prettifyClientName` |
+| `internal/tui/gauge.go` | `RenderStackedUsageGauge` fix for segment rounding |
+| `internal/core/widget_test.go` | Updated section order expectations |
+| `internal/tui/tiles_normalization_test.go` | Added actual_tool section check, interface_ metric fixtures |
+| `internal/providers/cursor/cursor_test.go` | Updated to expect `interface_` metrics |
+| `cmd/demo/main.go` | Comprehensive cursor-ide demo snapshot with all sections (98 tools, 26 languages, code stats, interface breakdown) |
+| `cmd/demo/main_test.go` | Updated assertions for new metric keys |
 
-When `PooledLimit <= 0` (solo account, no team budget), `team_budget` metric is not created. The GaugePriority allowlist falls through to `plan_percent_used` as the second gauge, which is the existing behavior for non-team accounts.
+## Demo Representation
 
-### 7. Summary text update
-
-The summary text below gauges in `model.go` (`computeDisplayInfo`) already reads `spend_limit` first — it shows "$488 / $3600 spent" and "$3112 remaining". Add the self-spend detail: "$200 by you · $288 by team".
-
-## Impact Analysis
-
-| File | Change |
-|------|--------|
-| `internal/providers/cursor/cursor.go` | Add `team_budget` metric + Raw segment values |
-| `internal/providers/cursor/widget.go` | Update GaugePriority, add StackedGaugeKeys config |
-| `internal/core/widget.go` | Add `StackedGaugeKeys` field + `StackedGaugeConfig` type |
-| `internal/tui/gauge.go` | Add `GaugeSegment` type + `RenderStackedUsageGauge` function |
-| `internal/tui/tiles.go` | Integrate stacked gauge in `buildTileGaugeLines` |
-| `internal/tui/model.go` | Update summary text to show self vs team detail |
-| `internal/providers/cursor/cursor_test.go` | Test new metric creation |
-| `internal/tui/gauge_test.go` | Test stacked gauge rendering |
-
-## Implementation Tasks
-
-### Task 1: Add StackedGaugeConfig types to core/widget.go
-
-Files: `internal/core/widget.go`
-Depends on: none
-Description: Add `GaugeSegment` struct (not TUI-specific, just the config), `StackedGaugeConfig` struct, and `StackedGaugeKeys map[string]StackedGaugeConfig` field to `DashboardWidget`. Initialize to empty map in `DefaultDashboardWidget()`.
-Tests: None needed (type-only change).
-
-### Task 2: Add RenderStackedUsageGauge to gauge.go
-
-Files: `internal/tui/gauge.go`, `internal/tui/gauge_test.go`
-Depends on: none
-Description: Add the `GaugeSegment` type (with Percent + Color fields) and `RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, width int)` function. The function divides bar width proportionally across segments, renders each with its color, fills empty track, and appends total percentage. Use the same Unicode block char approach as `RenderUsageGauge`.
-Tests: Test with 2 segments at various percentages; test edge cases (0%, 100%, single segment, empty segments).
-
-### Task 3: Create team_budget metric in Cursor provider
-
-Files: `internal/providers/cursor/cursor.go`, `internal/providers/cursor/cursor_test.go`
-Depends on: none
-Description: In the Fetch function, when `su.PooledLimit > 0`, create `snap.Metrics["team_budget"]` with Limit=pooledLimit and Used=pooledUsed (both in USD). Store `team_budget_self` and `team_budget_others` in `snap.Raw` as formatted dollar strings. Also add `team_budget` to the metric label override in gaugeLabel.
-Tests: Extend existing test that verifies metric creation to check `team_budget` metric and Raw values.
-
-### Task 4: Configure Cursor widget for stacked gauge
-
-Files: `internal/providers/cursor/widget.go`
-Depends on: Task 1
-Description: Replace `"plan_spend"` with `"team_budget"` in `GaugePriority`. Add `StackedGaugeKeys` configuration mapping `"team_budget"` to its segment Raw keys, labels, and colors.
-Tests: None needed (configuration-only change verified by integration).
-
-### Task 5: Integrate stacked gauge in tile renderer
-
-Files: `internal/tui/tiles.go`
-Depends on: Task 1, Task 2
-Description: In `buildTileGaugeLines()`, before calling `RenderUsageGauge`, check if the metric key exists in `widget.StackedGaugeKeys`. If so, parse segment values from `snap.Raw`, compute each segment's percentage against the metric's Limit, build `GaugeSegment` slices with the configured colors, and call `RenderStackedUsageGauge`. Add "Team Budget" to the `gaugeLabel` overrides.
-Tests: Covered by integration (visual rendering — difficult to unit test meaningfully).
-
-### Task 6: Update summary text in model.go
-
-Files: `internal/tui/model.go`
-Depends on: Task 3
-Description: In `computeDisplayInfo`, when `spend_limit` is found and `individual_spend` is also present, update the detail line to show "you $X · team $Y" breakdown. The summary line ("$488 / $3600 spent") stays the same.
-Tests: Covered by existing display info tests (extend with individual_spend case).
-
-### Dependency Graph
-
-- Tasks 1, 2, 3: parallel group (no mutual dependencies)
-- Task 4: depends on Task 1
-- Task 5: depends on Tasks 1, 2
-- Task 6: depends on Task 3
-- After all: build + manual visual verification
+The demo snapshot (`cmd/demo/main.go:buildCursorDemoSnapshot`) produces a 1:1 structural replica of a real Cursor provider tile with:
+- 8 models (5 visible + 3 more)
+- 4 client interfaces (Composer, CLI Agents, Human, Tab Completion)
+- 98 tool entries (6 visible + 92 more) including MCP tools
+- 26 language entries (6 visible + 20 more)
+- Full code statistics, billing, team, and activity compact rows
+- Anonymized account data, numbers randomized per run via `randomizeDemoSnapshots`
