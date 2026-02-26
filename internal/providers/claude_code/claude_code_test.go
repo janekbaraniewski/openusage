@@ -666,3 +666,61 @@ func TestReadConversationJSONL_DedupesRequestUsageAndToolCalls(t *testing.T) {
 		t.Fatalf("expected tool_bash=1, got %+v", m)
 	}
 }
+
+func TestReadConversationJSONL_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "projects", "repo-a")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	now := time.Now().UTC()
+	line := fmt.Sprintf(`{"type":"assistant","sessionId":"sess-lang","requestId":"req-lang-1","timestamp":"%s","cwd":"/tmp/openusage","message":{"id":"msg-lang-1","model":"claude-sonnet-4-5","role":"assistant","content":[{"type":"tool_use","id":"tool-edit","name":"Edit","input":{"file_path":"internal/providers/claude_code/claude_code.go","old_string":"one\ntwo","new_string":"one\ntwo\nthree"}},{"type":"tool_use","id":"tool-write","name":"Write","input":{"path":"docs/notes.md","content":"alpha\nbeta"}},{"type":"tool_use","id":"tool-bash","name":"Bash","input":{"command":"git commit -m \"track metrics\""}}],"usage":{"input_tokens":200,"output_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+		now.Format(time.RFC3339),
+	)
+
+	fpath := filepath.Join(projectDir, "session.jsonl")
+	if err := os.WriteFile(fpath, []byte(line+"\n"), 0644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	p := New()
+	snap := core.UsageSnapshot{
+		ProviderID:  p.ID(),
+		AccountID:   "lang-code-stats-test",
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	if err := p.readConversationJSONL(filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
+		t.Fatalf("readConversationJSONL failed: %v", err)
+	}
+
+	if m := snap.Metrics["lang_go"]; m.Used == nil || *m.Used < 1 {
+		t.Fatalf("expected lang_go metric, got %+v", m)
+	}
+	if m := snap.Metrics["lang_markdown"]; m.Used == nil || *m.Used < 1 {
+		t.Fatalf("expected lang_markdown metric, got %+v", m)
+	}
+	if m := snap.Metrics["composer_files_changed"]; m.Used == nil || *m.Used < 2 {
+		t.Fatalf("expected composer_files_changed>=2, got %+v", m)
+	}
+	if m := snap.Metrics["composer_lines_added"]; m.Used == nil || *m.Used < 1 {
+		t.Fatalf("expected composer_lines_added metric, got %+v", m)
+	}
+	if m := snap.Metrics["composer_lines_removed"]; m.Used == nil || *m.Used < 1 {
+		t.Fatalf("expected composer_lines_removed metric, got %+v", m)
+	}
+	if m := snap.Metrics["scored_commits"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected scored_commits=1, got %+v", m)
+	}
+	if m := snap.Metrics["total_prompts"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("expected total_prompts=1, got %+v", m)
+	}
+	if m := snap.Metrics["tool_calls_total"]; m.Used == nil || *m.Used != 3 {
+		t.Fatalf("expected tool_calls_total=3, got %+v", m)
+	}
+}
