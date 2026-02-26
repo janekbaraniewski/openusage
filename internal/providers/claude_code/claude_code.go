@@ -166,9 +166,10 @@ type jsonlMsg struct {
 }
 
 type jsonlContent struct {
-	Type string `json:"type"`
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type  string `json:"type"`
+	ID    string `json:"id,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Input any    `json:"input,omitempty"`
 }
 
 type jsonlUsage struct {
@@ -297,10 +298,11 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 		Sections: []core.DetailSection{
 			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
 			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Spending", Order: 3, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 4, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 5, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 6, Style: core.DetailSectionStyleActivity},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
 		},
 	}
 }
@@ -859,6 +861,9 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	serviceTierTotals := make(map[string]float64)
 	inferenceGeoTotals := make(map[string]float64)
 	toolUsageCounts := make(map[string]int)
+	languageUsageCounts := make(map[string]int)
+	changedFiles := make(map[string]bool)
+	seenCommitCommands := make(map[string]bool)
 	clientSessions := make(map[string]map[string]bool)
 	projectSessions := make(map[string]map[string]bool)
 	agentSessions := make(map[string]map[string]bool)
@@ -896,6 +901,9 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		allTimeToolCalls     int
 		allTimeWebSearch     int
 		allTimeWebFetch      int
+		allTimeLinesAdded    int
+		allTimeLinesRemoved  int
+		allTimeCommitCount   int
 	)
 
 	ensureTotals := func(m map[string]*modelUsageTotals, key string) *modelUsageTotals {
@@ -1040,6 +1048,27 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			}
 			toolUsageCounts[toolName]++
 			allTimeToolCalls++
+
+			pathCandidates := extractToolPathCandidates(item.Input)
+			for _, candidate := range pathCandidates {
+				if lang := inferLanguageFromPath(candidate); lang != "" {
+					languageUsageCounts[lang]++
+				}
+				if isMutatingTool(toolName) {
+					changedFiles[candidate] = true
+				}
+			}
+			if isMutatingTool(toolName) {
+				added, removed := estimateToolLineDelta(toolName, item.Input)
+				allTimeLinesAdded += added
+				allTimeLinesRemoved += removed
+			}
+			if cmd := extractToolCommand(item.Input); cmd != "" && strings.Contains(strings.ToLower(cmd), "git commit") {
+				if !seenCommitCommands[cmd] {
+					seenCommitCommands[cmd] = true
+					allTimeCommitCount++
+				}
+			}
 
 			if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
 				todayToolCalls++
@@ -1578,6 +1607,41 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 	if allTimeToolCalls > 0 {
 		setMetricMax(snap, "all_time_tool_calls", float64(allTimeToolCalls), "calls", "all-time estimate")
+		setMetricMax(snap, "tool_calls_total", float64(allTimeToolCalls), "calls", "all-time estimate")
+		setMetricMax(snap, "tool_completed", float64(allTimeToolCalls), "calls", "all-time estimate")
+		setMetricMax(snap, "tool_success_rate", 100.0, "%", "all-time estimate")
+	}
+	if len(seenUsageKeys) > 0 {
+		setMetricMax(snap, "total_prompts", float64(len(seenUsageKeys)), "prompts", "all-time estimate")
+	}
+	if len(changedFiles) > 0 {
+		setMetricMax(snap, "composer_files_changed", float64(len(changedFiles)), "files", "all-time estimate")
+	}
+	if allTimeLinesAdded > 0 {
+		setMetricMax(snap, "composer_lines_added", float64(allTimeLinesAdded), "lines", "all-time estimate")
+	}
+	if allTimeLinesRemoved > 0 {
+		setMetricMax(snap, "composer_lines_removed", float64(allTimeLinesRemoved), "lines", "all-time estimate")
+	}
+	if allTimeCommitCount > 0 {
+		setMetricMax(snap, "scored_commits", float64(allTimeCommitCount), "commits", "all-time estimate")
+	}
+	if allTimeLinesAdded > 0 || allTimeLinesRemoved > 0 {
+		hundred := 100.0
+		zero := 0.0
+		snap.Metrics["ai_code_percentage"] = core.Metric{
+			Used:      &hundred,
+			Remaining: &zero,
+			Limit:     &hundred,
+			Unit:      "%",
+			Window:    "all-time estimate",
+		}
+	}
+	for lang, count := range languageUsageCounts {
+		if count <= 0 {
+			continue
+		}
+		setMetricMax(snap, "lang_"+sanitizeModelName(lang), float64(count), "requests", "all-time estimate")
 	}
 	for toolName, count := range toolUsageCounts {
 		if count <= 0 {
@@ -1593,6 +1657,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	}
 
 	snap.Raw["tool_usage"] = summarizeCountMap(toolUsageCounts, 6)
+	snap.Raw["language_usage"] = summarizeCountMap(languageUsageCounts, 8)
 	snap.Raw["project_usage"] = summarizeTotalsMap(projectTotals, true, 6)
 	snap.Raw["agent_usage"] = summarizeTotalsMap(agentTotals, false, 4)
 	snap.Raw["service_tier_usage"] = summarizeFloatMap(serviceTierTotals, "tok", 4)
@@ -1622,6 +1687,248 @@ func parseJSONLTimestamp(raw string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+func isMutatingTool(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	return strings.Contains(n, "edit") ||
+		strings.Contains(n, "write") ||
+		strings.Contains(n, "create") ||
+		strings.Contains(n, "delete") ||
+		strings.Contains(n, "rename") ||
+		strings.Contains(n, "move")
+}
+
+func extractToolCommand(input any) string {
+	var command string
+	var walk func(value any)
+	walk = func(value any) {
+		if command != "" || value == nil {
+			return
+		}
+		switch v := value.(type) {
+		case map[string]any:
+			for key, child := range v {
+				k := strings.ToLower(strings.TrimSpace(key))
+				if k == "command" || k == "cmd" || k == "script" || k == "shell_command" {
+					if s, ok := child.(string); ok {
+						command = strings.TrimSpace(s)
+						return
+					}
+				}
+			}
+			for _, child := range v {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+				if command != "" {
+					return
+				}
+			}
+		}
+	}
+	walk(input)
+	return command
+}
+
+func estimateToolLineDelta(toolName string, input any) (added int, removed int) {
+	lineCount := func(text string) int {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return 0
+		}
+		return strings.Count(text, "\n") + 1
+	}
+	lowerTool := strings.ToLower(strings.TrimSpace(toolName))
+	var walk func(value any)
+	walk = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			oldKeys := []string{"old_string", "old_text", "from", "replace"}
+			newKeys := []string{"new_string", "new_text", "to", "with"}
+			var oldText string
+			var newText string
+			for _, key := range oldKeys {
+				if raw, ok := v[key]; ok {
+					if s, ok := raw.(string); ok {
+						oldText = s
+						break
+					}
+				}
+			}
+			for _, key := range newKeys {
+				if raw, ok := v[key]; ok {
+					if s, ok := raw.(string); ok {
+						newText = s
+						break
+					}
+				}
+			}
+			if oldText != "" || newText != "" {
+				removed += lineCount(oldText)
+				added += lineCount(newText)
+			}
+			if strings.Contains(lowerTool, "write") || strings.Contains(lowerTool, "create") {
+				if raw, ok := v["content"]; ok {
+					if s, ok := raw.(string); ok {
+						added += lineCount(s)
+					}
+				}
+			}
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	walk(input)
+	return added, removed
+}
+
+func extractToolPathCandidates(input any) []string {
+	pathKeyHints := map[string]bool{
+		"path": true, "paths": true, "file": true, "files": true, "filepath": true, "file_path": true,
+		"cwd": true, "directory": true, "dir": true, "glob": true, "pattern": true, "target": true,
+		"from": true, "to": true, "include": true, "exclude": true,
+	}
+
+	candidates := make(map[string]bool)
+	var walk func(value any, hinted bool)
+	walk = func(value any, hinted bool) {
+		switch v := value.(type) {
+		case map[string]any:
+			for key, child := range v {
+				k := strings.ToLower(strings.TrimSpace(key))
+				childHinted := hinted || pathKeyHints[k] || strings.Contains(k, "path") || strings.Contains(k, "file")
+				walk(child, childHinted)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child, hinted)
+			}
+		case string:
+			if !hinted {
+				return
+			}
+			for _, token := range extractPathTokens(v) {
+				candidates[token] = true
+			}
+		}
+	}
+	walk(input, false)
+
+	out := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		out = append(out, candidate)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func extractPathTokens(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		fields = []string{raw}
+	}
+	var out []string
+	for _, field := range fields {
+		token := strings.Trim(field, "\"'`()[]{}<>,:;")
+		if token == "" {
+			continue
+		}
+		lower := strings.ToLower(token)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "file://") {
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			continue
+		}
+		if !strings.Contains(token, "/") && !strings.Contains(token, "\\") && !strings.Contains(token, ".") {
+			continue
+		}
+		token = strings.TrimPrefix(token, "./")
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return lo.Uniq(out)
+}
+
+func inferLanguageFromPath(path string) string {
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(p))
+	switch base {
+	case "dockerfile":
+		return "docker"
+	case "makefile":
+		return "make"
+	}
+	ext := strings.ToLower(filepath.Ext(p))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".tf", ".tfvars", ".hcl":
+		return "terraform"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "shell"
+	case ".md", ".mdx":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".yml", ".yaml":
+		return "yaml"
+	case ".sql":
+		return "sql"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cc", ".cpp", ".cxx", ".hpp":
+		return "cpp"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".swift":
+		return "swift"
+	case ".vue":
+		return "vue"
+	case ".svelte":
+		return "svelte"
+	case ".toml":
+		return "toml"
+	case ".xml":
+		return "xml"
+	}
+	return ""
 }
 
 func dedupeStringSlice(items []string) []string {
