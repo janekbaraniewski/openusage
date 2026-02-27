@@ -23,18 +23,23 @@ func TestNew_AppliesAPIKeyAuthDefaults(t *testing.T) {
 	if spec.Setup.DocsURL != "https://example.com/docs" {
 		t.Fatalf("setup docs = %q, want %q", spec.Setup.DocsURL, "https://example.com/docs")
 	}
-	if got := base.DashboardWidget().APIKeyEnv; got != "SAMPLE_API_KEY" {
-		t.Fatalf("dashboard APIKeyEnv = %q, want %q", got, "SAMPLE_API_KEY")
+	// Auth metadata lives in Spec().Auth, not in DashboardWidget.
+	if got := spec.Auth.APIKeyEnv; got != "SAMPLE_API_KEY" {
+		t.Fatalf("spec auth APIKeyEnv = %q, want %q", got, "SAMPLE_API_KEY")
 	}
-	if got := base.DashboardWidget().DefaultAccountID; got != "sample" {
-		t.Fatalf("default account ID = %q, want %q", got, "sample")
+	// DashboardWidget should NOT have auth fields copied into it.
+	if got := base.DashboardWidget().APIKeyEnv; got != "" {
+		t.Fatalf("dashboard APIKeyEnv = %q, want empty (auth data should not be copied)", got)
+	}
+	if got := base.DashboardWidget().DefaultAccountID; got != "" {
+		t.Fatalf("dashboard DefaultAccountID = %q, want empty (auth data should not be copied)", got)
 	}
 	if len(base.DetailWidget().Sections) == 0 {
 		t.Fatal("detail sections should have default sections")
 	}
 }
 
-func TestNew_RespectsExplicitDashboardAuthFields(t *testing.T) {
+func TestNew_AuthMetadataInSpecNotWidget(t *testing.T) {
 	base := New(core.ProviderSpec{
 		ID: "sample",
 		Info: core.ProviderInfo{
@@ -46,6 +51,8 @@ func TestNew_RespectsExplicitDashboardAuthFields(t *testing.T) {
 			DefaultAccountID: "sample-auth",
 		},
 		Dashboard: core.DashboardWidget{
+			// Legacy fields still exist on the struct but should not be
+			// the source of truth. TUI reads from Spec().Auth instead.
 			APIKeyEnv:        "CUSTOM_API_KEY",
 			DefaultAccountID: "sample-widget",
 		},
@@ -53,11 +60,17 @@ func TestNew_RespectsExplicitDashboardAuthFields(t *testing.T) {
 	})
 
 	spec := base.Spec()
-	if got := base.DashboardWidget().APIKeyEnv; got != "CUSTOM_API_KEY" {
-		t.Fatalf("dashboard APIKeyEnv = %q, want %q", got, "CUSTOM_API_KEY")
+	// The canonical source for auth metadata is Spec().Auth.
+	if got := spec.Auth.APIKeyEnv; got != "SAMPLE_API_KEY" {
+		t.Fatalf("spec auth APIKeyEnv = %q, want %q", got, "SAMPLE_API_KEY")
 	}
-	if got := base.DashboardWidget().DefaultAccountID; got != "sample-widget" {
-		t.Fatalf("default account ID = %q, want %q", got, "sample-widget")
+	if got := spec.Auth.DefaultAccountID; got != "sample-auth" {
+		t.Fatalf("spec auth DefaultAccountID = %q, want %q", got, "sample-auth")
+	}
+	// DashboardWidget preserves whatever was set explicitly on spec.Dashboard
+	// (no copy logic from Auth), but TUI code should not read auth from here.
+	if got := base.DashboardWidget().APIKeyEnv; got != "CUSTOM_API_KEY" {
+		t.Fatalf("dashboard APIKeyEnv = %q, want %q (explicit value preserved)", got, "CUSTOM_API_KEY")
 	}
 	if spec.Dashboard.APIKeyEnv != "CUSTOM_API_KEY" {
 		t.Fatalf("spec dashboard APIKeyEnv = %q, want %q", spec.Dashboard.APIKeyEnv, "CUSTOM_API_KEY")
