@@ -67,18 +67,11 @@ func apiKeyProviderEntries() []apiKeyProviderEntry {
 		if spec.Auth.Type != core.ProviderAuthTypeAPIKey {
 			continue
 		}
-		widget := dashboardWidget(id)
 		envVar := spec.Auth.APIKeyEnv
-		if envVar == "" {
-			envVar = widget.APIKeyEnv
-		}
 		if envVar == "" {
 			continue
 		}
 		accountID := spec.Auth.DefaultAccountID
-		if accountID == "" {
-			accountID = widget.DefaultAccountID
-		}
 		if accountID == "" {
 			accountID = id
 		}
@@ -97,10 +90,7 @@ func isAPIKeyProvider(providerID string) bool {
 	if !ok {
 		return false
 	}
-	if spec.Auth.Type == core.ProviderAuthTypeAPIKey && spec.Auth.APIKeyEnv != "" {
-		return true
-	}
-	return dashboardWidget(providerID).APIKeyEnv != ""
+	return spec.Auth.Type == core.ProviderAuthTypeAPIKey && spec.Auth.APIKeyEnv != ""
 }
 
 func envVarForProvider(providerID string) string {
@@ -109,8 +99,5 @@ func envVarForProvider(providerID string) string {
 	if !ok {
 		return ""
 	}
-	if spec.Auth.APIKeyEnv != "" {
-		return spec.Auth.APIKeyEnv
-	}
-	return dashboardWidget(providerID).APIKeyEnv
+	return spec.Auth.APIKeyEnv
 }

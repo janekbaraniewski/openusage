@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
-const (
-	IntegrationVersion = "2026-02-23.1"
-)
+var IntegrationVersion = version.Version
 
 type ID string
 

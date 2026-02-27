@@ -1,6 +1,9 @@
 package providerbase
 
-import "github.com/janekbaraniewski/openusage/internal/core"
+import (
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+)
 
 // Base centralizes provider metadata and widget/detail configuration.
 // Provider-specific packages embed this and implement only Fetch().
@@ -39,18 +42,6 @@ func (b Base) DashboardWidget() core.DashboardWidget {
 	cfg := b.spec.Dashboard
 	if isZeroDashboardWidget(cfg) {
 		cfg = core.DefaultDashboardWidget()
-	}
-	if b.spec.Auth.Type == core.ProviderAuthTypeAPIKey {
-		if cfg.APIKeyEnv == "" {
-			cfg.APIKeyEnv = b.spec.Auth.APIKeyEnv
-		}
-		if cfg.DefaultAccountID == "" {
-			if b.spec.Auth.DefaultAccountID != "" {
-				cfg.DefaultAccountID = b.spec.Auth.DefaultAccountID
-			} else {
-				cfg.DefaultAccountID = b.spec.ID
-			}
-		}
 	}
 	return cfg
 }
@@ -105,4 +96,101 @@ func WithColorRole(role core.DashboardColorRole) DashboardOption {
 	return func(cfg *core.DashboardWidget) {
 		cfg.ColorRole = role
 	}
+}
+
+func WithGaugePriority(keys ...string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.GaugePriority = keys
+	}
+}
+
+func WithGaugeMaxLines(n int) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.GaugeMaxLines = n
+	}
+}
+
+func WithCompactRows(rows ...core.DashboardCompactRow) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.CompactRows = rows
+	}
+}
+
+func WithHideMetricPrefixes(prefixes ...string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, prefixes...)
+	}
+}
+
+func WithHideMetricKeys(keys ...string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.HideMetricKeys = append(cfg.HideMetricKeys, keys...)
+	}
+}
+
+func WithSectionOrder(sections ...core.DashboardStandardSection) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.StandardSectionOrder = sections
+	}
+}
+
+func WithMetricLabels(labels map[string]string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		for k, v := range labels {
+			cfg.MetricLabelOverrides[k] = v
+		}
+	}
+}
+
+func WithCompactLabels(labels map[string]string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		for k, v := range labels {
+			cfg.CompactMetricLabelOverrides[k] = v
+		}
+	}
+}
+
+func WithRawGroups(groups ...core.DashboardRawGroup) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.RawGroups = append(cfg.RawGroups, groups...)
+	}
+}
+
+func WithSuppressZeroMetricKeys(keys ...string) DashboardOption {
+	return func(cfg *core.DashboardWidget) {
+		cfg.SuppressZeroMetricKeys = keys
+	}
+}
+
+// CodingToolDashboard returns a DashboardWidget pre-configured for coding-tool
+// providers (Cursor, Claude Code, Codex, Copilot, Gemini CLI). It enables client/
+// language/code-stats composition panels, applies standard hidden prefixes and
+// section ordering, and merges shared code-stats metric labels.
+func CodingToolDashboard(options ...DashboardOption) core.DashboardWidget {
+	cfg := core.DefaultDashboardWidget()
+
+	cfg.ShowClientComposition = true
+	cfg.ClientCompositionHeading = "Clients"
+	cfg.ShowToolComposition = false
+	cfg.ShowActualToolUsage = true
+	cfg.ShowLanguageComposition = true
+	cfg.ShowCodeStatsComposition = true
+	cfg.CodeStatsMetrics = shared.DefaultCodeStatsConfig()
+	cfg.StandardSectionOrder = shared.CodingToolSectionOrder()
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, shared.CodingToolHidePrefixes()...)
+
+	// Merge shared code-stats labels.
+	for k, v := range shared.CodeStatsMetricLabels {
+		cfg.MetricLabelOverrides[k] = v
+	}
+	for k, v := range shared.CodeStatsCompactLabels {
+		cfg.CompactMetricLabelOverrides[k] = v
+	}
+
+	for _, opt := range options {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return cfg
 }

@@ -198,14 +198,14 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		"claude_code": {
 			metrics: []string{
 				"tool_bash_calls",
-				"client_skynet_labs_total_tokens",
+				"client_webshop_total_tokens",
 			},
 			raw: []string{
 				"block_start",
 				"block_end",
 			},
 			series: []string{
-				"tokens_client_skynet_labs",
+				"tokens_client_webshop",
 			},
 		},
 		"codex": {
@@ -221,7 +221,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 			metrics: []string{
 				"analytics_7d_tokens",
 				"model_qwen_qwen3-coder-flash_cost_usd",
-				"client_openai_total_tokens",
+				"client_recipe_blog_total_tokens",
 				"lang_code",
 				"tool_calls_total",
 			},
@@ -232,7 +232,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 			},
 			series: []string{
 				"analytics_tokens",
-				"tokens_client_openai",
+				"tokens_client_recipe_blog",
 			},
 		},
 		"copilot": {
@@ -240,7 +240,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"gh_core_rpm",
 				"gh_graphql_rpm",
 				"model_claude_haiku_4_5_input_tokens",
-				"client_skynet_labs_total_tokens",
+				"client_vscode_total_tokens",
 				"tool_calls_total",
 				"tool_success_rate",
 				"composer_lines_added",
@@ -254,7 +254,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"gh_core_rpm_reset",
 			},
 			series: []string{
-				"tokens_client_skynet_labs",
+				"tokens_client_vscode",
 			},
 		},
 	}
