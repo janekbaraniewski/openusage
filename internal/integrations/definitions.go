@@ -137,26 +137,44 @@ func patchClaudeCodeConfig(configData []byte, targetFile string, install bool) (
 	}
 	cfg["hooks"] = hooks
 
-	events := []string{"Stop", "SubagentStop", "PostToolUse"}
+	syncEvents := []string{"Stop", "SubagentStop"}
+	asyncEvents := []string{"PostToolUse"}
+
+	hookEntry := func(async bool) map[string]any {
+		h := map[string]any{
+			"type":    "command",
+			"command": targetFile,
+			"timeout": 30,
+		}
+		if async {
+			h["async"] = true
+		}
+		return h
+	}
+
+	allEvents := append(syncEvents, asyncEvents...)
 
 	if install {
-		for _, event := range events {
+		for _, event := range syncEvents {
 			entries, _ := hooks[event].([]any)
-			if !entriesContainCommand(entries, targetFile) {
-				entries = append(entries, map[string]any{
-					"matcher": "*",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": targetFile,
-						},
-					},
-				})
-			}
+			entries = removeCommandEntries(entries, targetFile)
+			entries = append(entries, map[string]any{
+				"matcher": "*",
+				"hooks":   []any{hookEntry(false)},
+			})
+			hooks[event] = entries
+		}
+		for _, event := range asyncEvents {
+			entries, _ := hooks[event].([]any)
+			entries = removeCommandEntries(entries, targetFile)
+			entries = append(entries, map[string]any{
+				"matcher": "*",
+				"hooks":   []any{hookEntry(true)},
+			})
 			hooks[event] = entries
 		}
 	} else {
-		for _, event := range events {
+		for _, event := range allEvents {
 			entries, _ := hooks[event].([]any)
 			hooks[event] = removeCommandEntries(entries, targetFile)
 		}

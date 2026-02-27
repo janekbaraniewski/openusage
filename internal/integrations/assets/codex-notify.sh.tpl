@@ -25,7 +25,16 @@ fi
 
 payload="${1:-}"
 if [[ -z "${payload//[[:space:]]/}" ]]; then
-  payload="$(cat || true)"
+  # Read stdin via perl to avoid busy-spinning. Node.js parents may leave
+  # stdin in O_NONBLOCK mode, which causes cat/read to spin at 100% CPU.
+  # Perl's buffered I/O handles this correctly after clearing the flag.
+  payload="$(perl -MFcntl -e '
+    fcntl(STDIN, F_SETFL, fcntl(STDIN, F_GETFL, 0) & ~O_NONBLOCK);
+    alarm(30);
+    local $/;
+    my $d = <STDIN>;
+    print $d if defined $d;
+  ' 2>/dev/null)" || true
 fi
 if [[ -z "${payload//[[:space:]]/}" ]]; then
   exit 0

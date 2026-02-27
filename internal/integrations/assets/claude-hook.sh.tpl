@@ -23,7 +23,19 @@ if ! parse_bool "${OPENUSAGE_TELEMETRY_ENABLED:-true}" "true"; then
   exit 0
 fi
 
-payload="$(cat || true)"
+# Read stdin via perl to avoid busy-spinning. Node.js parents (Claude Code,
+# Cursor) may leave stdin in O_NONBLOCK mode, which causes cat/read to
+# spin at 100% CPU instead of blocking for input. Perl's buffered I/O
+# handles this correctly after clearing the flag, and alarm() provides a
+# hard timeout without background processes.
+payload="$(perl -MFcntl -e '
+  fcntl(STDIN, F_SETFL, fcntl(STDIN, F_GETFL, 0) & ~O_NONBLOCK);
+  alarm(30);
+  local $/;
+  my $d = <STDIN>;
+  print $d if defined $d;
+' 2>/dev/null)" || true
+
 if [[ -z "${payload//[[:space:]]/}" ]]; then
   exit 0
 fi
