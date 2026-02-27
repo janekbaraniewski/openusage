@@ -245,3 +245,42 @@ func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
 		t.Fatal("expected hasData=true after first snapshots frame")
 	}
 }
+
+func TestUpdate_AppUpdateMsgStoresNotice(t *testing.T) {
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+
+	updated, _ := m.Update(AppUpdateMsg{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		UpgradeHint:    "brew upgrade janekbaraniewski/tap/openusage",
+	})
+	got, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model type = %T, want tui.Model", updated)
+	}
+	if got.appUpdateCurrent != "v0.4.0" {
+		t.Fatalf("appUpdateCurrent = %q, want v0.4.0", got.appUpdateCurrent)
+	}
+	if got.appUpdateLatest != "v0.5.0" {
+		t.Fatalf("appUpdateLatest = %q, want v0.5.0", got.appUpdateLatest)
+	}
+	if got.appUpdateHint != "brew upgrade janekbaraniewski/tap/openusage" {
+		t.Fatalf("appUpdateHint = %q", got.appUpdateHint)
+	}
+}
+
+func TestRenderFooterStatusLine_ShowsAppUpdateWhenIdle(t *testing.T) {
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.appUpdateCurrent = "v0.4.0"
+	m.appUpdateLatest = "v0.5.0"
+	m.appUpdateHint = "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest"
+
+	line := m.renderFooterStatusLine(180)
+
+	if !strings.Contains(line, "Update available: v0.4.0 -> v0.5.0") {
+		t.Fatalf("footer line missing update versions, got: %q", line)
+	}
+	if !strings.Contains(line, "Run: go install github.com/janekbaraniewski/openusage/cmd/openusage@latest") {
+		t.Fatalf("footer line missing update command, got: %q", line)
+	}
+}

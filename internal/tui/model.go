@@ -68,6 +68,12 @@ type DaemonStatusMsg struct {
 	InstallHint string
 }
 
+type AppUpdateMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	UpgradeHint    string
+}
+
 type daemonInstallResultMsg struct {
 	err error
 }
@@ -107,6 +113,9 @@ type Model struct {
 	daemonMessage     string
 	daemonInstalling  bool
 	daemonInstallDone bool // true after a successful install in this session
+	appUpdateCurrent  string
+	appUpdateLatest   string
+	appUpdateHint     string
 
 	providerOrder       []string
 	providerEnabled     map[string]bool
@@ -318,6 +327,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Status == DaemonRunning {
 			m.daemonInstalling = false
 		}
+		return m, nil
+
+	case AppUpdateMsg:
+		m.appUpdateCurrent = strings.TrimSpace(msg.CurrentVersion)
+		m.appUpdateLatest = strings.TrimSpace(msg.LatestVersion)
+		m.appUpdateHint = strings.TrimSpace(msg.UpgradeHint)
 		return m, nil
 
 	case daemonInstallResultMsg:
@@ -1019,11 +1034,11 @@ func (m Model) renderScreenTabs() string {
 
 func (m Model) renderFooter(w int) string {
 	sep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("━", w))
-	statusLine := m.renderFooterStatusLine()
+	statusLine := m.renderFooterStatusLine(w)
 	return sep + "\n" + statusLine
 }
 
-func (m Model) renderFooterStatusLine() string {
+func (m Model) renderFooterStatusLine(w int) string {
 	searchStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 
 	switch {
@@ -1053,7 +1068,37 @@ func (m Model) renderFooterStatusLine() string {
 		}
 	}
 
+	if m.hasAppUpdateNotice() {
+		msg := "Update available: " + m.appUpdateCurrent + " -> " + m.appUpdateLatest
+		if action := m.appUpdateAction(); action != "" {
+			msg += " · " + action
+		}
+		if w > 2 {
+			msg = truncateToWidth(msg, w-2)
+		}
+		return " " + lipgloss.NewStyle().Foreground(colorYellow).Render(msg)
+	}
+
 	return " " + helpStyle.Render("? help")
+}
+
+func (m Model) hasAppUpdateNotice() bool {
+	return strings.TrimSpace(m.appUpdateCurrent) != "" && strings.TrimSpace(m.appUpdateLatest) != ""
+}
+
+func (m Model) appUpdateHeadline() string {
+	if !m.hasAppUpdateNotice() {
+		return ""
+	}
+	return "OpenUsage update available: " + m.appUpdateCurrent + " -> " + m.appUpdateLatest
+}
+
+func (m Model) appUpdateAction() string {
+	hint := strings.TrimSpace(m.appUpdateHint)
+	if hint == "" {
+		return ""
+	}
+	return "Run: " + hint
 }
 
 func (m Model) renderList(w, h int) string {

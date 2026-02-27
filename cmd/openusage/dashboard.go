@@ -10,10 +10,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/janekbaraniewski/openusage/internal/appupdate"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/tui"
+	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
 func runDashboard(cfg config.Config) {
@@ -77,6 +79,22 @@ func runDashboard(cfg config.Config) {
 
 	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
+	go func() {
+		runStartupUpdateCheck(
+			ctx,
+			strings.TrimSpace(version.Version),
+			1200*time.Millisecond,
+			verbose,
+			appupdate.Check,
+			func(msg tui.AppUpdateMsg) {
+				if program == nil {
+					return
+				}
+				program.Send(msg)
+			},
+		)
+	}()
+
 	daemon.StartBroadcaster(
 		ctx,
 		viewRuntime,
@@ -101,6 +119,41 @@ func runDashboard(cfg config.Config) {
 		log.SetOutput(os.Stderr)
 		log.Fatalf("TUI error: %v", err)
 	}
+}
+
+type appUpdateCheckFunc func(context.Context, appupdate.CheckOptions) (appupdate.Result, error)
+
+func runStartupUpdateCheck(
+	ctx context.Context,
+	currentVersion string,
+	timeout time.Duration,
+	debug bool,
+	checkFn appUpdateCheckFunc,
+	sendFn func(tui.AppUpdateMsg),
+) {
+	if checkFn == nil || sendFn == nil {
+		return
+	}
+
+	result, err := checkFn(ctx, appupdate.CheckOptions{
+		CurrentVersion: strings.TrimSpace(currentVersion),
+		Timeout:        timeout,
+	})
+	if err != nil {
+		if debug {
+			log.Printf("app update check failed: %v", err)
+		}
+		return
+	}
+	if !result.UpdateAvailable {
+		return
+	}
+
+	sendFn(tui.AppUpdateMsg{
+		CurrentVersion: result.CurrentVersion,
+		LatestVersion:  result.LatestVersion,
+		UpgradeHint:    result.UpgradeHint,
+	})
 }
 
 func mapDaemonState(s daemon.DaemonState) tui.DaemonStatusMsg {

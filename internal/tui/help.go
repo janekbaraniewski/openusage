@@ -323,6 +323,14 @@ func (m Model) splashProgressLines() []string {
 		lines = append(lines, "  "+dim.Render("· No providers detected"))
 	}
 
+	if m.hasAppUpdateNotice() {
+		lines = append(lines, "")
+		lines = append(lines, "  "+warn.Render(m.appUpdateHeadline()))
+		if action := m.appUpdateAction(); action != "" {
+			lines = append(lines, "  "+hint.Render("▸ "+action))
+		}
+	}
+
 	// Step 3+: Helper lifecycle — show accumulated progress.
 	switch m.daemonStatus {
 	case DaemonConnecting:
@@ -371,6 +379,7 @@ func (m Model) splashProgressLines() []string {
 		}
 		lines = append(lines, "  "+errStyle.Render("✗")+" "+errStyle.Render(msg))
 		lines = append(lines, "  "+dim.Render("Try: openusage telemetry daemon status"))
+		lines = append(lines, "  "+dim.Render("If needed: openusage telemetry daemon install"))
 
 	default: // DaemonRunning or any other state.
 		if m.daemonInstallDone {

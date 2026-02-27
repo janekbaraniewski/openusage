@@ -219,6 +219,26 @@ func TestSplashProgressNoProviders(t *testing.T) {
 	}
 }
 
+func TestSplashProgressShowsAppUpdateNotice(t *testing.T) {
+	m := Model{
+		daemonStatus:     DaemonConnecting,
+		providerOrder:    []string{"openai"},
+		appUpdateCurrent: "v0.4.0",
+		appUpdateLatest:  "v0.5.0",
+		appUpdateHint:    "brew upgrade janekbaraniewski/tap/openusage",
+		animFrame:        0,
+	}
+	lines := m.splashProgressLines()
+	combined := joinLines(lines)
+
+	if !strings.Contains(combined, "OpenUsage update available: v0.4.0 -> v0.5.0") {
+		t.Error("expected app update headline in splash output")
+	}
+	if !strings.Contains(combined, "Run: brew upgrade janekbaraniewski/tap/openusage") {
+		t.Error("expected install-specific update action in splash output")
+	}
+}
+
 func TestSplashProgressStartingAfterInstall(t *testing.T) {
 	m := Model{
 		daemonStatus:      DaemonStarting,
