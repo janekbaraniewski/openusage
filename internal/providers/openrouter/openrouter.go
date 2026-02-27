@@ -2146,7 +2146,6 @@ func isLikelyRouterClientProviderName(name string) bool {
 	return strings.Contains(clean, "openrouter") || strings.Contains(clean, "openusage")
 }
 
-
 func (p *Provider) enrichGenerationProviderMetadata(ctx context.Context, baseURL, apiKey string, rows []generationEntry) (int, int) {
 	attempts := 0
 	hits := 0
