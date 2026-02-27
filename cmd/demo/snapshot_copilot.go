@@ -1,0 +1,218 @@
+package main
+
+import (
+	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
+)
+
+func buildCopilotDemoSnapshot(now time.Time) core.UsageSnapshot {
+	return core.UsageSnapshot{
+		ProviderID: "copilot",
+		AccountID:  "copilot",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"chat_quota": {
+				Limit: ptr(300), Remaining: ptr(182), Used: ptr(118),
+				Unit: "messages", Window: "month",
+			},
+			"completions_quota": {
+				Limit: ptr(300), Remaining: ptr(228), Used: ptr(72),
+				Unit: "completions", Window: "month",
+			},
+			"premium_interactions_quota": {
+				Limit: ptr(50), Remaining: ptr(27), Used: ptr(23),
+				Unit: "requests", Window: "month",
+			},
+			"context_window": {
+				Limit: ptr(128000), Used: ptr(95300), Remaining: ptr(32700),
+				Unit: "tokens", Window: "session",
+			},
+			"messages_today":      {Used: ptr(15), Unit: "messages", Window: "today"},
+			"7d_messages":         {Used: ptr(18), Unit: "messages", Window: "7d"},
+			"sessions_today":      {Used: ptr(8), Unit: "sessions", Window: "today"},
+			"tool_calls_today":    {Used: ptr(149), Unit: "calls", Window: "today"},
+			"total_messages":      {Used: ptr(1820), Unit: "messages", Window: "all-time"},
+			"tokens_today":        {Used: ptr(28400), Unit: "tokens", Window: "today"},
+			"7d_tokens":           {Used: ptr(302900), Unit: "tokens", Window: "7d"},
+			"cli_messages":        {Used: ptr(2021), Unit: "messages", Window: "all-time"},
+			"cli_turns":           {Used: ptr(3040), Unit: "turns", Window: "all-time"},
+			"cli_total_calls":     {Used: ptr(200), Unit: "calls", Window: "all-time"},
+			"cli_sessions":        {Used: ptr(54), Unit: "sessions", Window: "all-time"},
+			"cli_reasoning_chars": {Used: ptr(1110), Unit: "chars", Window: "7d"},
+			"cli_response_chars":  {Used: ptr(204), Unit: "chars", Window: "7d"},
+			"cli_tokens":          {Used: ptr(51300), Unit: "tokens", Window: "7d"},
+			"cli_input_tokens":    {Used: ptr(11200), Unit: "tokens", Window: "today"},
+			"org_demo_total_seats": {
+				Used: ptr(56), Unit: "seats", Window: "current",
+			},
+			"org_demo_active_seats": {
+				Used: ptr(44), Unit: "seats", Window: "current",
+			},
+			"model_claude_haiku_4_5_input_tokens": {
+				Used: ptr(161200), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_haiku_4_5_output_tokens": {
+				Used: ptr(57200), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_haiku_4_5_messages": {
+				Used: ptr(255), Unit: "messages", Window: "7d",
+			},
+			"model_claude_haiku_4_5_reasoning_chars": {
+				Used: ptr(45), Unit: "chars", Window: "7d",
+			},
+			"model_claude_haiku_4_5_response_chars": {
+				Used: ptr(42), Unit: "chars", Window: "7d",
+			},
+			"model_claude_sonnet_4_6_input_tokens": {
+				Used: ptr(50200), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_sonnet_4_6_output_tokens": {
+				Used: ptr(17200), Unit: "tokens", Window: "7d",
+			},
+			"model_claude_sonnet_4_6_cost_usd": {
+				Used: ptr(9.86), Unit: "USD", Window: "7d",
+			},
+			"model_gpt_5_mini_input_tokens": {
+				Used: ptr(12400), Unit: "tokens", Window: "7d",
+			},
+			"model_gpt_5_mini_output_tokens": {
+				Used: ptr(4800), Unit: "tokens", Window: "7d",
+			},
+			"model_gpt_5_mini_cost_usd":    {Used: ptr(4.20), Unit: "USD", Window: "7d"},
+			"client_vscode_total_tokens":  {Used: ptr(234900), Unit: "tokens", Window: "7d"},
+			"client_vscode_input_tokens":  {Used: ptr(188200), Unit: "tokens", Window: "7d"},
+			"client_vscode_output_tokens": {Used: ptr(46700), Unit: "tokens", Window: "7d"},
+			"client_vscode_sessions":      {Used: ptr(7), Unit: "sessions", Window: "7d"},
+			"client_cli_total_tokens":     {Used: ptr(51300), Unit: "tokens", Window: "7d"},
+			"client_cli_input_tokens":     {Used: ptr(42100), Unit: "tokens", Window: "7d"},
+			"client_cli_output_tokens":    {Used: ptr(9200), Unit: "tokens", Window: "7d"},
+			"client_cli_sessions":         {Used: ptr(1), Unit: "sessions", Window: "7d"},
+			"client_jetbrains_total_tokens":  {Used: ptr(16700), Unit: "tokens", Window: "7d"},
+			"client_jetbrains_input_tokens":  {Used: ptr(13800), Unit: "tokens", Window: "7d"},
+			"client_jetbrains_output_tokens": {Used: ptr(2900), Unit: "tokens", Window: "7d"},
+			"client_jetbrains_sessions":      {Used: ptr(1), Unit: "sessions", Window: "7d"},
+			"gh_core_rpm": {
+				Limit: ptr(5000), Remaining: ptr(4833), Used: ptr(167),
+				Unit: "requests", Window: "1h",
+			},
+			"gh_graphql_rpm": {
+				Limit: ptr(5000), Remaining: ptr(4989), Used: ptr(11),
+				Unit: "requests", Window: "1h",
+			},
+			"gh_search_rpm": {
+				Limit: ptr(30), Remaining: ptr(30), Used: ptr(0),
+				Unit: "requests", Window: "1h",
+			},
+			"tool_bash_calls":      {Used: ptr(70), Unit: "calls", Window: "7d"},
+			"tool_view_calls":      {Used: ptr(19), Unit: "calls", Window: "7d"},
+			"tool_web_fetch_calls": {Used: ptr(19), Unit: "calls", Window: "7d"},
+			"tool_edit_calls":      {Used: ptr(14), Unit: "calls", Window: "7d"},
+			"tool_glob_calls":      {Used: ptr(11), Unit: "calls", Window: "7d"},
+			"tool_grep_calls":      {Used: ptr(8), Unit: "calls", Window: "7d"},
+			"tool_write_calls":     {Used: ptr(5), Unit: "calls", Window: "7d"},
+			"tool_task_calls":      {Used: ptr(3), Unit: "calls", Window: "7d"},
+			"tool_bash":            {Used: ptr(70), Unit: "calls", Window: "7d"},
+			"tool_view":            {Used: ptr(19), Unit: "calls", Window: "7d"},
+			"tool_web_fetch":       {Used: ptr(19), Unit: "calls", Window: "7d"},
+			"tool_edit":            {Used: ptr(14), Unit: "calls", Window: "7d"},
+			"tool_glob":            {Used: ptr(11), Unit: "calls", Window: "7d"},
+			"tool_grep":            {Used: ptr(8), Unit: "calls", Window: "7d"},
+			"tool_write":           {Used: ptr(5), Unit: "calls", Window: "7d"},
+			"tool_task":            {Used: ptr(3), Unit: "calls", Window: "7d"},
+			"tool_calls_total":     {Used: ptr(149), Unit: "calls", Window: "7d"},
+			"tool_completed":       {Used: ptr(133), Unit: "calls", Window: "7d"},
+			"tool_errored":         {Used: ptr(11), Unit: "calls", Window: "7d"},
+			"tool_cancelled":       {Used: ptr(5), Unit: "calls", Window: "7d"},
+			"tool_success_rate":    {Used: ptr(89.3), Unit: "%", Window: "7d"},
+			"total_prompts":        {Used: ptr(1820), Unit: "prompts", Window: "all-time"},
+			"composer_lines_added": {Used: ptr(1920), Unit: "lines", Window: "7d"},
+			"composer_lines_removed": {
+				Used: ptr(645), Unit: "lines", Window: "7d",
+			},
+			"composer_files_changed": {Used: ptr(94), Unit: "files", Window: "7d"},
+			"scored_commits":         {Used: ptr(14), Unit: "commits", Window: "7d"},
+			"ai_code_percentage": {
+				Used: ptr(100), Limit: ptr(100), Remaining: ptr(0), Unit: "%", Window: "7d",
+			},
+			"lang_go":         {Used: ptr(122), Unit: "requests", Window: "7d"},
+			"lang_typescript": {Used: ptr(67), Unit: "requests", Window: "7d"},
+			"lang_yaml":       {Used: ptr(31), Unit: "requests", Window: "7d"},
+			"lang_sql":        {Used: ptr(16), Unit: "requests", Window: "7d"},
+		},
+		Resets: map[string]time.Time{
+			"gh_core_rpm_reset":    now.Add(27 * time.Minute),
+			"gh_graphql_rpm_reset": now.Add(54 * time.Minute),
+			"gh_search_rpm_reset":  now.Add(47 * time.Second),
+			"quota_reset":          now.Add(21*24*time.Hour + 1*time.Hour),
+		},
+		Attributes: map[string]string{
+			"github_login": "demo-user",
+			"copilot_plan": "business",
+			"access_type":  "business",
+		},
+		Raw: map[string]string{
+			"github_login":    "demo-user",
+			"access_type_sku": "business",
+			"copilot_plan":    "business",
+			"premium_interactions_quota_overage_permitted": "true",
+			"model_usage":      "claude-haiku-4-5: 72%, claude-sonnet-4.6: 22%, gpt-5-mini: 6%",
+			"client_usage":     "vscode 78%, cli 17%, jetbrains 5%",
+			"model_turns":      "claude-haiku-4-5: 730, claude-sonnet-4.6: 410, gpt-5-mini: 120",
+			"model_sessions":   "claude-haiku-4-5: 28, claude-sonnet-4.6: 17, gpt-5-mini: 9",
+			"model_tool_calls": "claude-haiku-4-5: 112, claude-sonnet-4.6: 49",
+			"tool_usage":       "bash: 70 calls, view: 19 calls, web_fetch: 19 calls, edit: 14 calls",
+			"language_usage":   "go: 122 req, typescript: 67 req, yaml: 31 req, sql: 16 req",
+		},
+		ModelUsage: []core.ModelUsageRecord{
+			{
+				RawModelID:       "claude-haiku-4-5",
+				Canonical:        "claude-haiku-4-5",
+				CanonicalFamily:  "claude",
+				CanonicalVariant: "haiku",
+				CanonicalVendor:  "anthropic",
+				InputTokens:      ptr(161200),
+				OutputTokens:     ptr(57200),
+				CostUSD:          ptr(5.12),
+				Requests:         ptr(255),
+				Window:           "7d",
+				Confidence:       1.0,
+			},
+			{
+				RawModelID:       "claude-sonnet-4.6",
+				Canonical:        "claude-sonnet-4.6",
+				CanonicalFamily:  "claude",
+				CanonicalVariant: "sonnet",
+				CanonicalVendor:  "anthropic",
+				InputTokens:      ptr(50200),
+				OutputTokens:     ptr(17200),
+				CostUSD:          ptr(9.86),
+				Requests:         ptr(118),
+				Window:           "7d",
+				Confidence:       1.0,
+			},
+			{
+				RawModelID:       "gpt-5-mini",
+				Canonical:        "gpt-5-mini",
+				CanonicalFamily:  "gpt",
+				CanonicalVariant: "mini",
+				CanonicalVendor:  "openai",
+				InputTokens:      ptr(12400),
+				OutputTokens:     ptr(4800),
+				CostUSD:          ptr(4.20),
+				Requests:         ptr(72),
+				Window:           "7d",
+				Confidence:       1.0,
+			},
+		},
+		DailySeries: map[string][]core.TimePoint{
+			"tokens_client_vscode":    demoSeries(now, 8300, 9200, 11100, 12400, 13800, 15700, 17700),
+			"tokens_client_cli":       demoSeries(now, 2100, 2400, 2900, 3300, 3800, 4100, 4600),
+			"tokens_client_jetbrains": demoSeries(now, 900, 1200, 1400, 1700, 1800, 2200, 2500),
+			"analytics_tokens":             demoSeries(now, 11500, 12800, 15400, 17400, 19400, 22100, 24800),
+			"analytics_requests":           demoSeries(now, 29, 31, 36, 34, 40, 42, 45),
+		},
+		Message: "",
+	}
+}
