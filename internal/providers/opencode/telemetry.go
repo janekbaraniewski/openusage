@@ -375,6 +375,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				turnID := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"parentID"}), firstPathString(messagePayload, []string{"turnID"}))
 				providerID := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"providerID"}), firstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
 				modelRaw := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"modelID"}), firstPathString(messagePayload, []string{"model", "modelID"}))
+				upstreamProvider := extractUpstreamProviderFromMaps(partPayload, messagePayload)
 
 				occurredAt := shared.UnixAuto(timeUpdated)
 				if timeCreated > 0 {
@@ -430,7 +431,18 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 							"time_created": timeCreated,
 							"time_updated": timeUpdated,
 						},
-						"context": contextSummary,
+						"message": map[string]any{
+							"provider_id": providerID,
+							"model_id":    modelRaw,
+							"mode":        firstPathString(messagePayload, []string{"mode"}),
+							"finish":      firstPathString(messagePayload, []string{"finish"}),
+						},
+						"step": map[string]any{
+							"type":   firstPathString(partPayload, []string{"type"}),
+							"reason": firstPathString(partPayload, []string{"reason"}),
+						},
+						"upstream_provider": upstreamProvider,
+						"context":           contextSummary,
 					},
 				})
 				seenMessages[messageID] = true
@@ -486,6 +498,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 
 			providerID := shared.FirstNonEmpty(firstPathString(payload, []string{"providerID"}), firstPathString(payload, []string{"model", "providerID"}), "opencode")
 			modelRaw := shared.FirstNonEmpty(firstPathString(payload, []string{"modelID"}), firstPathString(payload, []string{"model", "modelID"}))
+			upstreamProvider := extractUpstreamProviderFromMaps(payload)
 			sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDRaw), firstPathString(payload, []string{"sessionID"}))
 			turnID := shared.FirstNonEmpty(firstPathString(payload, []string{"parentID"}), firstPathString(payload, []string{"turnID"}))
 
@@ -553,7 +566,16 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 						"time_created": timeCreated,
 						"time_updated": timeUpdated,
 					},
-					"context": contextSummary,
+					"message": map[string]any{
+						"provider_id": providerID,
+						"model_id":    modelRaw,
+						"role":        firstPathString(payload, []string{"role"}),
+						"mode":        firstPathString(payload, []string{"mode"}),
+						"finish":      firstPathString(payload, []string{"finish"}),
+						"error_name":  firstPathString(payload, []string{"error", "name"}),
+					},
+					"upstream_provider": upstreamProvider,
+					"context":           contextSummary,
 				},
 			})
 			seenMessages[messageID] = true
@@ -617,6 +639,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDDB), firstPathString(partPayload, []string{"messageID"}), firstPathString(messagePayload, []string{"id"}))
 		providerID := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"providerID"}), firstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
 		modelRaw := shared.FirstNonEmpty(firstPathString(messagePayload, []string{"modelID"}), firstPathString(messagePayload, []string{"model", "modelID"}))
+		upstreamProvider := extractUpstreamProviderFromMaps(partPayload, messagePayload)
 
 		occurredAt := shared.UnixAuto(timeUpdated)
 		if ts := ptrInt64FromFloat(firstPathNumber(partPayload,
@@ -662,7 +685,13 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 					"time_created": timeCreated,
 					"time_updated": timeUpdated,
 				},
-				"status": statusRaw,
+				"message": map[string]any{
+					"provider_id": providerID,
+					"model_id":    modelRaw,
+					"mode":        firstPathString(messagePayload, []string{"mode"}),
+				},
+				"upstream_provider": upstreamProvider,
+				"status":            statusRaw,
 			},
 		})
 	}
@@ -908,10 +937,64 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 		providerID = shared.FirstNonEmpty(outputProviderID, input.Model.ProviderID, "opencode")
 		modelRaw = shared.FirstNonEmpty(outputModelID, strings.TrimSpace(input.Model.ModelID))
 	}
+	upstreamProvider := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+		firstPathString(outputMap,
+			[]string{"upstream_provider"},
+			[]string{"upstreamProvider"},
+			[]string{"route", "provider_name"},
+			[]string{"route", "providerName"},
+			[]string{"route", "provider"},
+			[]string{"router", "provider_name"},
+			[]string{"router", "providerName"},
+			[]string{"router", "provider"},
+			[]string{"routing", "provider_name"},
+			[]string{"routing", "providerName"},
+			[]string{"routing", "provider"},
+			[]string{"endpoint", "provider_name"},
+			[]string{"endpoint", "providerName"},
+			[]string{"endpoint", "provider"},
+			[]string{"provider_name"},
+			[]string{"providerName"},
+			[]string{"provider"},
+			[]string{"message", "provider_name"},
+			[]string{"message", "providerName"},
+			[]string{"message", "provider"},
+			[]string{"message", "info", "provider_name"},
+			[]string{"message", "info", "providerName"},
+			[]string{"message", "info", "provider"},
+		),
+	))
+	if upstreamProvider == "" {
+		modelProviderHint := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+			firstPathString(outputMap,
+				[]string{"message", "model", "provider"},
+				[]string{"message", "model", "provider_name"},
+				[]string{"message", "model", "providerName"},
+				[]string{"model", "provider"},
+				[]string{"model", "provider_name"},
+				[]string{"model", "providerName"},
+			),
+			outputProviderID,
+		))
+		if modelProviderHint != "" {
+			upstreamProvider = modelProviderHint
+		}
+	}
 	contextSummary := extractContextSummary(outputMap)
 
 	if turnID == "" && sessionID == "" {
 		return []shared.TelemetryEvent{buildRawEnvelope(rawPayload, telemetryHookSchema, "chat.message")}, nil
+	}
+
+	normalized := map[string]any{
+		"hook":        "chat.message",
+		"agent":       strings.TrimSpace(input.Agent),
+		"variant":     strings.TrimSpace(input.Variant),
+		"parts_count": output.PartsCount,
+		"context":     contextSummary,
+	}
+	if upstreamProvider != "" {
+		normalized["upstream_provider"] = upstreamProvider
 	}
 
 	return []shared.TelemetryEvent{{
@@ -935,14 +1018,93 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 		CostUSD:          u.CostUSD,
 		Requests:         shared.Int64Ptr(1),
 		Status:           shared.TelemetryStatusOK,
-		Payload: mergePayload(rawPayload, map[string]any{
-			"hook":        "chat.message",
-			"agent":       strings.TrimSpace(input.Agent),
-			"variant":     strings.TrimSpace(input.Variant),
-			"parts_count": output.PartsCount,
-			"context":     contextSummary,
-		}),
+		Payload:          mergePayload(rawPayload, normalized),
 	}}, nil
+}
+
+func sanitizeUpstreamProviderCandidate(value string) string {
+	name := strings.TrimSpace(value)
+	if name == "" {
+		return ""
+	}
+	clean := strings.ToLower(name)
+	switch clean {
+	case "openrouter", "openusage", "opencode", "unknown":
+		return ""
+	}
+	return clean
+}
+
+func extractUpstreamProviderFromMaps(payloads ...map[string]any) string {
+	for _, payload := range payloads {
+		if len(payload) == 0 {
+			continue
+		}
+		candidate := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+			firstPathString(payload,
+				[]string{"upstream_provider"},
+				[]string{"upstreamProvider"},
+				[]string{"route", "provider_name"},
+				[]string{"route", "providerName"},
+				[]string{"route", "provider"},
+				[]string{"router", "provider_name"},
+				[]string{"router", "providerName"},
+				[]string{"router", "provider"},
+				[]string{"routing", "provider_name"},
+				[]string{"routing", "providerName"},
+				[]string{"routing", "provider"},
+				[]string{"endpoint", "provider_name"},
+				[]string{"endpoint", "providerName"},
+				[]string{"endpoint", "provider"},
+				[]string{"provider_name"},
+				[]string{"providerName"},
+				[]string{"provider"},
+				[]string{"message", "provider_name"},
+				[]string{"message", "providerName"},
+				[]string{"message", "provider"},
+				[]string{"message", "info", "provider_name"},
+				[]string{"message", "info", "providerName"},
+				[]string{"message", "info", "provider"},
+			),
+			firstPathString(payload,
+				[]string{"message", "model", "provider"},
+				[]string{"message", "model", "provider_name"},
+				[]string{"message", "model", "providerName"},
+				[]string{"model", "provider"},
+				[]string{"model", "provider_name"},
+				[]string{"model", "providerName"},
+				[]string{"model", "providerID"},
+			),
+		))
+		if candidate != "" {
+			return candidate
+		}
+
+		rawResponseBody := shared.FirstNonEmpty(
+			firstPathString(payload, []string{"error", "data", "responseBody"}),
+			firstPathString(payload, []string{"error", "responseBody"}),
+		)
+		if rawResponseBody == "" {
+			continue
+		}
+		responseBodyPayload := decodeJSONMap([]byte(rawResponseBody))
+		candidate = sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+			firstPathString(responseBodyPayload,
+				[]string{"error", "metadata", "provider_name"},
+				[]string{"error", "metadata", "providerName"},
+				[]string{"metadata", "provider_name"},
+				[]string{"metadata", "providerName"},
+				[]string{"metadata", "provider"},
+				[]string{"provider_name"},
+				[]string{"providerName"},
+				[]string{"provider"},
+			),
+		))
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func buildRawEnvelope(rawPayload map[string]any, schemaVersion, detectedType string) shared.TelemetryEvent {

@@ -393,6 +393,25 @@ func TestCompositionBars_AreStableAcrossCollapsedAndExpanded(t *testing.T) {
 	}
 }
 
+func TestSortToolMixEntries_BreaksTiesAlphabetically(t *testing.T) {
+	tools := []toolMixEntry{
+		{name: "read_today", count: 1},
+		{name: "glob", count: 1},
+		{name: "read", count: 2},
+		{name: "alpha", count: 1},
+	}
+
+	sortToolMixEntries(tools)
+
+	got := []string{tools[0].name, tools[1].name, tools[2].name, tools[3].name}
+	want := []string{"read", "alpha", "glob", "read_today"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tool order[%d] = %q, want %q (full order: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestBuildModelColorMap_AssignsDistinctColorsForVisibleModels(t *testing.T) {
 	models := []modelMixEntry{
 		{name: "claude-opus"},

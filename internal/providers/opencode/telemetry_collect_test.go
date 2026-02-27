@@ -254,3 +254,76 @@ func TestCollectTelemetryFromSQLite_UsesStepFinishUsage(t *testing.T) {
 		t.Fatalf("requests = %+v, want 1", ev.Requests)
 	}
 }
+
+func TestCollectTelemetryFromSQLite_ExtractsUpstreamProvider(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "opencode.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	stmts := []string{
+		`CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL);`,
+		`CREATE TABLE message (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			time_created INTEGER NOT NULL,
+			time_updated INTEGER NOT NULL,
+			data TEXT NOT NULL
+		);`,
+		`CREATE TABLE part (
+			id TEXT PRIMARY KEY,
+			message_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			time_created INTEGER NOT NULL,
+			time_updated INTEGER NOT NULL,
+			data TEXT NOT NULL
+		);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec schema stmt: %v", err)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO session (id, directory) VALUES (?, ?)`, "sess-upstream", "/tmp/work-upstream"); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	messageData := `{
+		"role":"assistant",
+		"time":{"created":1771754400000,"completed":1771754405000},
+		"parentID":"turn-upstream",
+		"modelID":"openai/gpt-oss-20b",
+		"providerID":"openrouter",
+		"route":{"provider_name":"DeepInfra"},
+		"path":{"cwd":"/tmp/work-upstream"},
+		"cost":0.012,
+		"tokens":{"total":177,"input":120,"output":40}
+	}`
+	if _, err := db.Exec(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`,
+		"msg-upstream", "sess-upstream", int64(1771754400000), int64(1771754405000), messageData,
+	); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	events, err := CollectTelemetryFromSQLite(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("collect sqlite: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.EventType != shared.TelemetryEventTypeMessageUsage {
+		t.Fatalf("event_type = %q, want %q", ev.EventType, shared.TelemetryEventTypeMessageUsage)
+	}
+	if ev.ProviderID != "openrouter" {
+		t.Fatalf("provider = %q, want openrouter", ev.ProviderID)
+	}
+	if got := ev.Payload["upstream_provider"]; got != "deepinfra" {
+		t.Fatalf("payload.upstream_provider = %#v, want deepinfra", got)
+	}
+}

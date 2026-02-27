@@ -345,6 +345,43 @@ func TestFetch_PerModelBreakdown(t *testing.T) {
 	if got := snap.Raw["provider_openai_requests"]; got != "1" {
 		t.Errorf("provider openai requests = %q, want 1", got)
 	}
+
+	clientAnthropic, ok := snap.Metrics["client_anthropic_total_tokens"]
+	if !ok || clientAnthropic.Used == nil {
+		t.Fatal("missing client_anthropic_total_tokens metric")
+	}
+	if *clientAnthropic.Used != 4300 {
+		t.Errorf("client_anthropic_total_tokens = %v, want 4300", *clientAnthropic.Used)
+	}
+	clientOpenAIReq, ok := snap.Metrics["client_openai_requests"]
+	if !ok || clientOpenAIReq.Used == nil {
+		t.Fatal("missing client_openai_requests metric")
+	}
+	if *clientOpenAIReq.Used != 1 {
+		t.Errorf("client_openai_requests = %v, want 1", *clientOpenAIReq.Used)
+	}
+	langGeneral, ok := snap.Metrics["lang_general"]
+	if !ok || langGeneral.Used == nil {
+		t.Fatal("missing lang_general metric")
+	}
+	if *langGeneral.Used != 3 {
+		t.Errorf("lang_general = %v, want 3", *langGeneral.Used)
+	}
+	if got := snap.Raw["language_usage_source"]; got != "inferred_from_model_ids" {
+		t.Errorf("language_usage_source = %q, want inferred_from_model_ids", got)
+	}
+	if got := snap.Raw["client_usage"]; !strings.Contains(got, "anthropic") {
+		t.Errorf("client_usage = %q, expected anthropic share", got)
+	}
+	if got := snap.Raw["model_usage"]; !strings.Contains(got, "anthropic claude-3.5-sonnet") {
+		t.Errorf("model_usage = %q, expected model summary", got)
+	}
+	if series, ok := snap.DailySeries["tokens_client_anthropic"]; !ok || len(series) == 0 {
+		t.Errorf("missing tokens_client_anthropic daily series")
+	}
+	if series, ok := snap.DailySeries["usage_client_openai"]; !ok || len(series) == 0 {
+		t.Errorf("missing usage_client_openai daily series")
+	}
 }
 
 func TestFetch_RateLimitHeaders(t *testing.T) {
@@ -756,6 +793,13 @@ func TestFetch_AnalyticsTotalTokensOnly_TracksModelAndNormalizesName(t *testing.
 	}
 	if !foundQwenRecord {
 		t.Fatal("expected normalized qwen model_usage record")
+	}
+
+	if m, ok := snap.Metrics["lang_code"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("lang_code = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["lang_general"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("lang_general = %v, want 1", m.Used)
 	}
 }
 
@@ -1841,6 +1885,233 @@ func TestFetch_ActivityDateTimeFormat(t *testing.T) {
 	}
 }
 
+func TestResolveGenerationHostingProvider_PrefersUpstreamResponses(t *testing.T) {
+	ok200 := 200
+	fail503 := 503
+
+	tests := []struct {
+		name string
+		gen  generationEntry
+		want string
+	}{
+		{
+			name: "prefers successful provider response",
+			gen: generationEntry{
+				Model:        "moonshotai/kimi-k2.5",
+				ProviderName: "Openusage",
+				ProviderResponses: []generationProviderResponse{
+					{ProviderName: "Openusage", Status: &fail503},
+					{ProviderName: "Novita", Status: &ok200},
+				},
+			},
+			want: "Novita",
+		},
+		{
+			name: "falls back to provider_name when responses missing",
+			gen: generationEntry{
+				Model:        "openai/gpt-4o",
+				ProviderName: "OpenAI",
+			},
+			want: "OpenAI",
+		},
+		{
+			name: "falls back to model vendor prefix",
+			gen: generationEntry{
+				Model: "z-ai/glm-5",
+			},
+			want: "z-ai",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveGenerationHostingProvider(tc.gen); got != tc.want {
+				t.Fatalf("resolveGenerationHostingProvider() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFetch_GenerationUsesUpstreamProviderResponsesForProviderBreakdown(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"gen-provider","usage":0.3,"limit":100.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":100.0,"total_usage":0.3}}`))
+		case "/activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		case "/generation":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{
+					"id":"gen-1",
+					"model":"moonshotai/kimi-k2.5",
+					"total_cost":0.2,
+					"tokens_prompt":1200,
+					"tokens_completion":800,
+					"created_at":"%s",
+					"provider_name":"Openusage",
+					"provider_responses":[
+						{"provider_name":"Openusage","status":503},
+						{"provider_name":"Novita","status":200}
+					]
+				},
+				{
+					"id":"gen-2",
+					"model":"z-ai/glm-5",
+					"total_cost":0.1,
+					"tokens_prompt":100,
+					"tokens_completion":50,
+					"created_at":"%s"
+				}
+			]}`, now, now)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_GEN_PROVIDER_RESPONSES", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_GEN_PROVIDER_RESPONSES")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-gen-provider-responses",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_GEN_PROVIDER_RESPONSES",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := snap.Raw["provider_novita_requests"]; got != "1" {
+		t.Fatalf("provider_novita_requests = %q, want 1", got)
+	}
+	if got := snap.Raw["provider_z-ai_requests"]; got != "1" {
+		t.Fatalf("provider_z-ai_requests = %q, want 1", got)
+	}
+	if _, ok := snap.Metrics["provider_openusage_requests"]; ok {
+		t.Fatal("provider_openusage_requests should not be emitted when upstream provider_responses are present")
+	}
+	if got := snap.Raw["model_moonshotai_kimi-k2.5_providers"]; got != "Novita" {
+		t.Fatalf("model_moonshotai_kimi-k2.5_providers = %q, want Novita", got)
+	}
+}
+
+func TestResolveGenerationHostingProvider_TreatsOpenusageAsNonHostProvider(t *testing.T) {
+	gen := generationEntry{
+		Model:        "moonshotai-kimi-k2.5",
+		ProviderName: "Openusage",
+	}
+	if got := resolveGenerationHostingProvider(gen); got != "moonshotai" {
+		t.Fatalf("resolveGenerationHostingProvider() = %q, want moonshotai", got)
+	}
+}
+
+func TestResolveGenerationHostingProvider_UsesAlternativeEntryFields(t *testing.T) {
+	gen := generationEntry{
+		Model:                "moonshotai-kimi-k2.5",
+		ProviderName:         "Openusage",
+		UpstreamProvider:     "Novita",
+		UpstreamProviderName: "",
+	}
+	if got := resolveGenerationHostingProvider(gen); got != "Novita" {
+		t.Fatalf("resolveGenerationHostingProvider() = %q, want Novita", got)
+	}
+}
+
+func TestFetch_GenerationProviderDetailEnrichmentForGenericProviderLabel(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/key":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"label":"gen-detail","usage":0.1,"limit":100.0,"is_free_tier":false,"rate_limit":{"requests":100,"interval":"10s"}}}`))
+		case "/credits":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":{"total_credits":100.0,"total_usage":0.1}}`))
+		case "/activity":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+		case "/generation":
+			if r.URL.Query().Get("id") == "gen-1" {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"data":{
+					"id":"gen-1",
+					"model":"moonshotai/kimi-k2.5",
+					"total_cost":0.1,
+					"tokens_prompt":1000,
+					"tokens_completion":500,
+					"provider_name":"Openusage",
+					"provider_responses":[
+						{"provider_name":"Openusage","status":503},
+						{"provider_name":"Novita","status":200}
+					]
+				}}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"data":[
+				{
+					"id":"gen-1",
+					"model":"moonshotai/kimi-k2.5",
+					"total_cost":0.1,
+					"tokens_prompt":1000,
+					"tokens_completion":500,
+					"created_at":"%s",
+					"provider_name":"Openusage"
+				}
+			]}`, now)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("TEST_OR_KEY_GEN_DETAIL_ENRICH", "test-key")
+	defer os.Unsetenv("TEST_OR_KEY_GEN_DETAIL_ENRICH")
+
+	p := New()
+	acct := core.AccountConfig{
+		ID:        "test-gen-detail-enrich",
+		Provider:  "openrouter",
+		APIKeyEnv: "TEST_OR_KEY_GEN_DETAIL_ENRICH",
+		BaseURL:   server.URL,
+	}
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := snap.Raw["generation_provider_detail_lookups"]; got != "1" {
+		t.Fatalf("generation_provider_detail_lookups = %q, want 1", got)
+	}
+	if got := snap.Raw["generation_provider_detail_hits"]; got != "1" {
+		t.Fatalf("generation_provider_detail_hits = %q, want 1", got)
+	}
+	if got := snap.Raw["provider_novita_requests"]; got != "1" {
+		t.Fatalf("provider_novita_requests = %q, want 1", got)
+	}
+	if _, ok := snap.Metrics["provider_openusage_requests"]; ok {
+		t.Fatal("provider_openusage_requests should not be emitted after detail enrichment")
+	}
+}
+
 func TestFetch_GenerationExtendedMetrics(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -1942,6 +2213,11 @@ func TestFetch_GenerationExtendedMetrics(t *testing.T) {
 	check("today_byok_cost", 0.07)
 	check("7d_byok_cost", 0.07)
 	check("30d_byok_cost", 0.07)
+	check("tool_openai_gpt-4o", 1)
+	check("tool_calls_total", 1)
+	check("tool_completed", 0)
+	check("tool_cancelled", 1)
+	check("tool_success_rate", 0)
 	check("model_openai_gpt-4o_reasoning_tokens", 120)
 	check("model_openai_gpt-4o_cached_tokens", 80)
 	check("model_openai_gpt-4o_image_tokens", 5)
@@ -1957,6 +2233,12 @@ func TestFetch_GenerationExtendedMetrics(t *testing.T) {
 	}
 	if got := snap.Raw["today_routers"]; !strings.Contains(got, "openrouter/auto=1") {
 		t.Fatalf("today_routers = %q, want openrouter/auto=1", got)
+	}
+	if got := snap.Raw["tool_usage_source"]; got != "inferred_from_model_requests" {
+		t.Fatalf("tool_usage_source = %q, want inferred_from_model_requests", got)
+	}
+	if got := snap.Raw["tool_usage"]; !strings.Contains(got, "openai/gpt-4o: 1 calls") {
+		t.Fatalf("tool_usage = %q, want model-based usage summary", got)
 	}
 }
 

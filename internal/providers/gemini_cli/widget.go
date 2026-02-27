@@ -28,7 +28,11 @@ func dashboardWidget() core.DashboardWidget {
 		{Label: "Usage", Keys: []string{"quota", "quota_models_exhausted", "quota_models_low", "quota_models_tracked"}, MaxSegments: 4},
 		{Label: "Activity", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "total_conversations"}, MaxSegments: 4},
 		{Label: "Tokens", Keys: []string{"tokens_today", "7d_tokens", "today_input_tokens", "today_output_tokens"}, MaxSegments: 4},
+		{Label: "Today Tok", Keys: []string{"today_cached_tokens", "today_reasoning_tokens", "today_tool_tokens"}, MaxSegments: 3},
+		{Label: "7d Tok", Keys: []string{"7d_input_tokens", "7d_output_tokens", "7d_cached_tokens", "7d_reasoning_tokens", "7d_tool_tokens"}, MaxSegments: 5},
+		{Label: "Totals", Keys: []string{"total_input_tokens", "total_output_tokens", "total_cached_tokens", "total_reasoning_tokens", "total_tool_tokens", "total_tokens"}, MaxSegments: 6},
 		{Label: "Tools", Keys: []string{"tool_calls_total", "tool_completed", "tool_errored", "tool_cancelled", "tool_success_rate"}, MaxSegments: 5},
+		{Label: "Efficiency", Keys: []string{"cache_efficiency", "reasoning_share", "tool_token_share", "avg_tokens_per_turn", "avg_tools_per_session"}, MaxSegments: 5},
 		{Label: "Lines", Keys: []string{"composer_lines_added", "composer_lines_removed", "composer_files_changed", "scored_commits", "total_prompts"}, MaxSegments: 5},
 	}
 	cfg.StandardSectionOrder = []core.DashboardStandardSection{
@@ -39,6 +43,7 @@ func dashboardWidget() core.DashboardWidget {
 		core.DashboardSectionActualToolUsage,
 		core.DashboardSectionLanguageBurn,
 		core.DashboardSectionCodeStats,
+		core.DashboardSectionDailyUsage,
 		core.DashboardSectionOtherData,
 	}
 	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes,
@@ -67,6 +72,25 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.CompactMetricLabelOverrides["quota_flash"] = "flash"
 	cfg.CompactMetricLabelOverrides["today_input_tokens"] = "in"
 	cfg.CompactMetricLabelOverrides["today_output_tokens"] = "out"
+	cfg.CompactMetricLabelOverrides["today_cached_tokens"] = "cached"
+	cfg.CompactMetricLabelOverrides["today_reasoning_tokens"] = "reason"
+	cfg.CompactMetricLabelOverrides["today_tool_tokens"] = "tools"
+	cfg.CompactMetricLabelOverrides["7d_input_tokens"] = "in"
+	cfg.CompactMetricLabelOverrides["7d_output_tokens"] = "out"
+	cfg.CompactMetricLabelOverrides["7d_cached_tokens"] = "cached"
+	cfg.CompactMetricLabelOverrides["7d_reasoning_tokens"] = "reason"
+	cfg.CompactMetricLabelOverrides["7d_tool_tokens"] = "tools"
+	cfg.CompactMetricLabelOverrides["total_input_tokens"] = "in"
+	cfg.CompactMetricLabelOverrides["total_output_tokens"] = "out"
+	cfg.CompactMetricLabelOverrides["total_cached_tokens"] = "cached"
+	cfg.CompactMetricLabelOverrides["total_reasoning_tokens"] = "reason"
+	cfg.CompactMetricLabelOverrides["total_tool_tokens"] = "tools"
+	cfg.CompactMetricLabelOverrides["total_tokens"] = "all"
+	cfg.CompactMetricLabelOverrides["avg_tokens_per_turn"] = "tok/turn"
+	cfg.CompactMetricLabelOverrides["avg_tools_per_session"] = "tools/sess"
+	cfg.CompactMetricLabelOverrides["cache_efficiency"] = "cache %"
+	cfg.CompactMetricLabelOverrides["reasoning_share"] = "reason %"
+	cfg.CompactMetricLabelOverrides["tool_token_share"] = "tool %"
 	cfg.CompactMetricLabelOverrides["quota_models_exhausted"] = "exhausted"
 	cfg.CompactMetricLabelOverrides["tool_calls_total"] = "all"
 	cfg.CompactMetricLabelOverrides["tool_completed"] = "ok"

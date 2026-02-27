@@ -98,8 +98,9 @@ const (
 	DashboardSectionLanguageBurn     DashboardStandardSection = "language_burn"
 	DashboardSectionCodeStats        DashboardStandardSection = "code_stats"
 	DashboardSectionDailyUsage       DashboardStandardSection = "daily_usage"
-	DashboardSectionProviderBurn     DashboardStandardSection = "provider_burn"
-	DashboardSectionOtherData        DashboardStandardSection = "other_data"
+	DashboardSectionProviderBurn        DashboardStandardSection = "provider_burn"
+	DashboardSectionUpstreamProviders   DashboardStandardSection = "upstream_providers"
+	DashboardSectionOtherData           DashboardStandardSection = "other_data"
 )
 
 func defaultDashboardSectionOrder() []DashboardStandardSection {
@@ -114,6 +115,7 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
+		DashboardSectionUpstreamProviders,
 		DashboardSectionOtherData,
 	}
 }
@@ -130,6 +132,7 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
+		DashboardSectionUpstreamProviders,
 		DashboardSectionOtherData:
 		return true
 	default:

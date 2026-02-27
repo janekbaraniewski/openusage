@@ -6,27 +6,42 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleRosewater
 	cfg.DisplayStyle = core.DashboardDisplayStyleDetailedCredits
+	cfg.ShowClientComposition = true
+	cfg.ClientCompositionHeading = "Projects"
+	cfg.ShowToolComposition = false
+	cfg.ShowActualToolUsage = true
+	cfg.ShowLanguageComposition = true
 	cfg.GaugePriority = []string{
-		"credit_balance", "credits",
-		"usage_daily", "usage_weekly", "usage_monthly",
-		"byok_daily", "byok_weekly", "byok_monthly",
-		"today_byok_cost", "7d_byok_cost", "30d_byok_cost",
-		"analytics_7d_byok_cost", "analytics_30d_byok_cost",
+		"credit_balance", "credits", "usage_daily", "usage_weekly", "usage_monthly",
 		"today_cost", "7d_api_cost", "30d_api_cost",
-		"analytics_7d_cost", "analytics_30d_cost",
 		"today_requests", "today_input_tokens", "today_output_tokens",
-		"today_reasoning_tokens", "today_cached_tokens", "today_image_tokens", "today_native_input_tokens", "today_native_output_tokens",
-		"recent_requests", "burn_rate", "daily_projected", "limit_remaining",
+		"analytics_7d_cost", "analytics_30d_cost",
+		"analytics_7d_requests", "analytics_30d_requests",
+		"analytics_7d_tokens", "analytics_30d_tokens",
+		"limit_remaining", "burn_rate", "daily_projected",
 	}
 	cfg.GaugeMaxLines = 1
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{Label: "Credits", Keys: []string{"credit_balance", "usage_daily", "usage_weekly", "usage_monthly", "limit_remaining"}, MaxSegments: 5},
 		{Label: "Spend", Keys: []string{"today_cost", "7d_api_cost", "30d_api_cost", "today_byok_cost", "7d_byok_cost", "30d_byok_cost"}, MaxSegments: 5},
-		{Label: "Activity", Keys: []string{"today_requests", "analytics_7d_requests", "analytics_30d_requests", "recent_requests", "keys_active", "keys_disabled"}, MaxSegments: 5},
+		{Label: "Activity", Keys: []string{"today_requests", "analytics_7d_requests", "analytics_30d_requests", "recent_requests", "keys_active", "keys_disabled"}, MaxSegments: 6},
 		{Label: "Tokens", Keys: []string{"today_input_tokens", "today_output_tokens", "today_reasoning_tokens", "today_cached_tokens", "analytics_7d_tokens"}, MaxSegments: 5},
 		{Label: "Perf", Keys: []string{"today_avg_latency", "today_avg_generation_time", "today_avg_moderation_latency", "today_streamed_percent", "burn_rate"}, MaxSegments: 5},
 	}
-	cfg.HideMetricPrefixes = []string{"model_", "provider_", "endpoint_", "analytics_", "keys_", "today_", "7d_", "30d_", "byok_", "usage_"}
+	cfg.StandardSectionOrder = []core.DashboardStandardSection{
+		core.DashboardSectionHeader,
+		core.DashboardSectionTopUsageProgress,
+		core.DashboardSectionModelBurn,
+		core.DashboardSectionClientBurn,
+		core.DashboardSectionUpstreamProviders,
+		core.DashboardSectionActualToolUsage,
+		core.DashboardSectionLanguageBurn,
+		core.DashboardSectionDailyUsage,
+		core.DashboardSectionOtherData,
+	}
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes,
+		"model_", "client_", "lang_", "tool_", "provider_", "endpoint_", "analytics_", "keys_", "today_", "7d_", "30d_", "byok_", "usage_", "upstream_",
+	)
 	cfg.HideCreditsWhenBalancePresent = true
 	cfg.SuppressZeroMetricKeys = []string{
 		"usage_daily", "usage_weekly", "usage_monthly",
@@ -36,6 +51,9 @@ func dashboardWidget() core.DashboardWidget {
 		"today_streamed_percent",
 	}
 	cfg.SuppressZeroNonUsageMetrics = true
+	cfg.HideMetricKeys = append(cfg.HideMetricKeys,
+		"model_usage_unit",
+	)
 	cfg.MetricLabelOverrides["usage_daily"] = "Today Usage"
 	cfg.MetricLabelOverrides["usage_weekly"] = "This Week"
 	cfg.MetricLabelOverrides["usage_monthly"] = "This Month"
@@ -86,47 +104,6 @@ func dashboardWidget() core.DashboardWidget {
 	cfg.MetricLabelOverrides["limit_remaining"] = "Limit Remaining"
 	cfg.MetricLabelOverrides["recent_requests"] = "Recent Requests"
 
-	cfg.MetricGroupOverrides["usage_daily"] = core.DashboardMetricGroupOverride{Group: "Usage", Label: "Today Usage", Order: 1}
-	cfg.MetricGroupOverrides["usage_weekly"] = core.DashboardMetricGroupOverride{Group: "Usage", Label: "This Week", Order: 1}
-	cfg.MetricGroupOverrides["usage_monthly"] = core.DashboardMetricGroupOverride{Group: "Usage", Label: "This Month", Order: 1}
-	cfg.MetricGroupOverrides["byok_usage"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "BYOK Total", Order: 2}
-	cfg.MetricGroupOverrides["byok_daily"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "BYOK Today", Order: 2}
-	cfg.MetricGroupOverrides["byok_weekly"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "BYOK This Week", Order: 2}
-	cfg.MetricGroupOverrides["byok_monthly"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "BYOK This Month", Order: 2}
-	cfg.MetricGroupOverrides["today_byok_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "Today BYOK Cost", Order: 2}
-	cfg.MetricGroupOverrides["7d_byok_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "7-Day BYOK Cost", Order: 2}
-	cfg.MetricGroupOverrides["30d_byok_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "30-Day BYOK Cost", Order: 2}
-	cfg.MetricGroupOverrides["analytics_7d_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "7-Day Analytics Cost", Order: 2}
-	cfg.MetricGroupOverrides["analytics_30d_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "30-Day Analytics Cost", Order: 2}
-	cfg.MetricGroupOverrides["analytics_7d_byok_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "7-Day Analytics BYOK", Order: 2}
-	cfg.MetricGroupOverrides["analytics_30d_byok_cost"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "30-Day Analytics BYOK", Order: 2}
-	cfg.MetricGroupOverrides["burn_rate"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "Burn Rate", Order: 2}
-	cfg.MetricGroupOverrides["daily_projected"] = core.DashboardMetricGroupOverride{Group: "Spending", Label: "Daily Projected", Order: 2}
-	cfg.MetricGroupOverrides["today_native_input_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "Today Native Input", Order: 3}
-	cfg.MetricGroupOverrides["today_native_output_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "Today Native Output", Order: 3}
-	cfg.MetricGroupOverrides["analytics_7d_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "7-Day Analytics Tokens", Order: 3}
-	cfg.MetricGroupOverrides["analytics_30d_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "30-Day Analytics Tokens", Order: 3}
-	cfg.MetricGroupOverrides["analytics_7d_input_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "7-Day Analytics Input", Order: 3}
-	cfg.MetricGroupOverrides["analytics_30d_input_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "30-Day Analytics Input", Order: 3}
-	cfg.MetricGroupOverrides["analytics_7d_output_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "7-Day Analytics Output", Order: 3}
-	cfg.MetricGroupOverrides["analytics_30d_output_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "30-Day Analytics Output", Order: 3}
-	cfg.MetricGroupOverrides["analytics_7d_reasoning_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "7-Day Analytics Reasoning", Order: 3}
-	cfg.MetricGroupOverrides["analytics_30d_reasoning_tokens"] = core.DashboardMetricGroupOverride{Group: "Tokens", Label: "30-Day Analytics Reasoning", Order: 3}
-	cfg.MetricGroupOverrides["recent_requests"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Recent Requests", Order: 4}
-	cfg.MetricGroupOverrides["today_streamed_percent"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Streamed Share", Order: 4}
-	cfg.MetricGroupOverrides["today_streamed_requests"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Today Streamed", Order: 4}
-	cfg.MetricGroupOverrides["today_avg_generation_time"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Avg Generation Time", Order: 4}
-	cfg.MetricGroupOverrides["today_avg_moderation_latency"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Avg Moderation Time", Order: 4}
-	cfg.MetricGroupOverrides["analytics_7d_requests"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "7-Day Analytics Requests", Order: 4}
-	cfg.MetricGroupOverrides["analytics_30d_requests"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "30-Day Analytics Requests", Order: 4}
-	cfg.MetricGroupOverrides["analytics_active_days"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Analytics Active Days", Order: 4}
-	cfg.MetricGroupOverrides["analytics_models"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Analytics Models", Order: 4}
-	cfg.MetricGroupOverrides["analytics_providers"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Analytics Providers", Order: 4}
-	cfg.MetricGroupOverrides["analytics_endpoints"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Analytics Endpoints", Order: 4}
-	cfg.MetricGroupOverrides["keys_total"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Keys Total", Order: 4}
-	cfg.MetricGroupOverrides["keys_active"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Keys Active", Order: 4}
-	cfg.MetricGroupOverrides["keys_disabled"] = core.DashboardMetricGroupOverride{Group: "Activity", Label: "Keys Disabled", Order: 4}
-
 	cfg.CompactMetricLabelOverrides["today_cost"] = "today"
 	cfg.CompactMetricLabelOverrides["7d_api_cost"] = "7d"
 	cfg.CompactMetricLabelOverrides["30d_api_cost"] = "30d"
@@ -149,6 +126,12 @@ func dashboardWidget() core.DashboardWidget {
 
 	cfg.RawGroups = append(cfg.RawGroups,
 		core.DashboardRawGroup{
+			Label: "Usage Split",
+			Keys: []string{
+				"model_usage", "model_usage_window", "client_usage", "tool_usage", "tool_usage_source", "language_usage", "language_usage_source", "model_mix_source",
+			},
+		},
+		core.DashboardRawGroup{
 			Label: "API Key",
 			Keys: []string{
 				"key_label", "key_name", "key_type", "key_disabled", "tier", "is_free_tier", "is_management_key", "is_provisioning_key",
@@ -167,7 +150,8 @@ func dashboardWidget() core.DashboardWidget {
 		core.DashboardRawGroup{
 			Label: "Generation",
 			Keys: []string{
-				"generation_note", "today_finish_reasons", "today_origins", "today_routers",
+				"generation_note", "today_finish_reasons", "today_origins", "today_routers", "generations_fetched",
+				"generation_provider_detail_lookups", "generation_provider_detail_hits", "provider_resolution",
 			},
 		},
 	)

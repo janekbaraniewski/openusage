@@ -62,7 +62,7 @@ func TestBuildDemoSnapshots_WidgetCoverage(t *testing.T) {
 		"codex":       {hasModelBurnData: true, hasClientMixData: true},
 		"copilot":     {hasModelBurnData: true, hasClientMixData: true},
 		"gemini_cli":  {hasModelBurnData: true, hasClientMixData: true},
-		"openrouter":  {hasModelBurnData: true},
+		"openrouter":  {hasModelBurnData: true, hasClientMixData: true},
 	}
 
 	for providerID, exp := range want {
@@ -221,9 +221,18 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 			metrics: []string{
 				"analytics_7d_tokens",
 				"model_qwen_qwen3-coder-flash_cost_usd",
+				"client_openai_total_tokens",
+				"lang_code",
+				"tool_calls_total",
+			},
+			raw: []string{
+				"client_usage",
+				"tool_usage",
+				"language_usage",
 			},
 			series: []string{
 				"analytics_tokens",
+				"tokens_client_openai",
 			},
 		},
 		"copilot": {
