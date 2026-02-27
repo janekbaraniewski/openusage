@@ -198,14 +198,14 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		"claude_code": {
 			metrics: []string{
 				"tool_bash_calls",
-				"client_skynet_labs_total_tokens",
+				"client_vcluster_total_tokens",
 			},
 			raw: []string{
 				"block_start",
 				"block_end",
 			},
 			series: []string{
-				"tokens_client_skynet_labs",
+				"tokens_client_vcluster",
 			},
 		},
 		"codex": {
@@ -240,7 +240,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"gh_core_rpm",
 				"gh_graphql_rpm",
 				"model_claude_haiku_4_5_input_tokens",
-				"client_skynet_labs_total_tokens",
+				"client_vcluster_total_tokens",
 				"tool_calls_total",
 				"tool_success_rate",
 				"composer_lines_added",
@@ -254,7 +254,7 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"gh_core_rpm_reset",
 			},
 			series: []string{
-				"tokens_client_skynet_labs",
+				"tokens_client_vcluster",
 			},
 		},
 	}
