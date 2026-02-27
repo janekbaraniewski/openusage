@@ -563,19 +563,23 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 
 func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProviderAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	// Extract the vendor prefix from model_raw (e.g. "qwen" from "qwen/qwen3-coder-flash")
-	// when the model ID contains a "/". This provides upstream hosting provider
-	// distribution for aggregator platforms like OpenRouter, where provider_id is
-	// just "openrouter" for all events but the model ID encodes the actual vendor.
+	// Provider resolution order:
+	// 1) hook-enriched upstream provider from source payload (if present),
+	// 2) fallback to provider_id.
+	//
+	// Provider hosting names must come from real payload fields, not inferred
+	// model-id heuristics.
 	query := usageCTE + `
 		SELECT
 			COALESCE(
 				NULLIF(TRIM(
-					CASE
-						WHEN INSTR(model_raw, '/') > 0
-						THEN LOWER(SUBSTR(model_raw, 1, INSTR(model_raw, '/') - 1))
-						ELSE ''
-					END
+					COALESCE(
+						json_extract(source_payload, '$._normalized.upstream_provider'),
+						json_extract(source_payload, '$.upstream_provider'),
+						json_extract(source_payload, '$.payload._normalized.upstream_provider'),
+						json_extract(source_payload, '$.payload.upstream_provider'),
+						''
+					)
 				), ''),
 				COALESCE(NULLIF(TRIM(provider_id), ''), 'unknown')
 			) AS provider_name,
@@ -772,7 +776,8 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 			SELECT
 				e.*,
 				COALESCE(r.source_system, '') AS source_system,
-				COALESCE(r.source_channel, '') AS source_channel
+				COALESCE(r.source_channel, '') AS source_channel,
+				COALESCE(r.source_payload, '{}') AS source_payload
 			FROM usage_events e
 			JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
 			WHERE %s

@@ -434,6 +434,11 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 		TotalTokens:   int64Ptr(160),
 		CostUSD:       float64Ptr(0.012),
 		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"_normalized": map[string]any{
+				"upstream_provider": "deepinfra",
+			},
+		},
 	}); err != nil {
 		t.Fatalf("ingest message event: %v", err)
 	}
@@ -450,7 +455,7 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 				"model_moonshot_cost_usd":       {Used: &modelA, Unit: "USD"},
 				"model_qwen_cost_usd":           {Used: &modelB, Unit: "USD"},
 				"provider_alibaba_cost_usd":     {Used: &providerA, Unit: "USD"},
-				"provider_deepinfra_cost_usd":   {Used: &providerB, Unit: "USD"},
+				"provider_hyperbolic_cost_usd":  {Used: &providerB, Unit: "USD"},
 				"source_opencode_requests":      {Used: float64Ptr(999), Unit: "requests"},
 				"credit_balance":                {Used: float64Ptr(8.28), Unit: "USD"},
 				"model_qwen_input_tokens":       {Used: float64Ptr(777), Unit: "tokens"},
@@ -477,27 +482,80 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 		t.Fatal("model_moonshot_cost_usd should be cleared by telemetry overwrite")
 	}
 	// Native provider_* metrics are cleared and replaced by telemetry-derived
-	// vendor breakdown extracted from model_raw prefixes (e.g. "qwen" from
-	// "qwen/qwen3-coder-flash")
+	// upstream hosting providers from hook payload enrichment.
 	if _, ok := snap.Metrics["provider_alibaba_cost_usd"]; ok {
 		t.Fatal("provider_alibaba_cost_usd should be cleared by telemetry overwrite")
 	}
-	if _, ok := snap.Metrics["provider_deepinfra_cost_usd"]; ok {
-		t.Fatal("provider_deepinfra_cost_usd should be cleared by telemetry overwrite")
+	if _, ok := snap.Metrics["provider_hyperbolic_cost_usd"]; ok {
+		t.Fatal("provider_hyperbolic_cost_usd should be cleared by telemetry overwrite")
 	}
-	// Provider breakdown now derived from model_raw vendor prefix ("qwen/..." -> "qwen")
-	if got := metricUsed(snap.Metrics["provider_qwen_cost_usd"]); got != 0.012 {
-		t.Fatalf("provider_qwen_cost_usd = %v, want 0.012 from telemetry vendor extraction", got)
+	if got := metricUsed(snap.Metrics["provider_deepinfra_cost_usd"]); got != 0.012 {
+		t.Fatalf(
+			"provider_deepinfra_cost_usd = %v, want 0.012 from telemetry upstream provider (provider_openrouter_cost_usd=%v)",
+			got,
+			metricUsed(snap.Metrics["provider_openrouter_cost_usd"]),
+		)
 	}
-	// The old provider_id grouping ("openrouter") should not appear
+	// Provider ID grouping should not be used when upstream provider exists.
 	if _, ok := snap.Metrics["provider_openrouter_cost_usd"]; ok {
-		t.Fatal("provider_openrouter_cost_usd should not exist — vendor prefix should be used instead")
+		t.Fatal("provider_openrouter_cost_usd should not exist when upstream provider is available")
 	}
 	if _, ok := snap.Attributes["provider_legacy_cost"]; ok {
 		t.Fatal("stale provider_* attribute should be cleared")
 	}
 	if got := metricUsed(snap.Metrics["client_opencode_requests"]); got != 1 {
 		t.Fatalf("client_opencode_requests = %v, want 1 from canonical telemetry", got)
+	}
+}
+
+func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissing(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Date(2026, 2, 23, 10, 30, 0, 0, time.UTC)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "openrouter",
+		AccountID:     "openrouter",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		ModelRaw:      "qwen-qwen3-coder-flash",
+		InputTokens:   int64Ptr(120),
+		OutputTokens:  int64Ptr(40),
+		TotalTokens:   int64Ptr(160),
+		CostUSD:       float64Ptr(0.012),
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest message event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["openrouter"]
+
+	if got := metricUsed(snap.Metrics["provider_openrouter_cost_usd"]); got != 0.012 {
+		t.Fatalf("provider_openrouter_cost_usd = %v, want 0.012 from provider_id fallback", got)
+	}
+	if _, ok := snap.Metrics["provider_qwen_cost_usd"]; ok {
+		t.Fatal("provider_qwen_cost_usd should not exist without explicit upstream provider")
 	}
 }
 

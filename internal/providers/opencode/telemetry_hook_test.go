@@ -182,3 +182,27 @@ func TestParseTelemetryHookPayload_ChatMessageHook_DoesNotForceInputModelWhenOut
 		t.Fatalf("provider_id = %q, want openrouter", ev.ProviderID)
 	}
 }
+
+func TestParseTelemetryHookPayload_ChatMessageHook_ExtractsUpstreamProvider(t *testing.T) {
+	payload := []byte(`{"hook":"chat.message","timestamp":"2026-02-22T10:00:00Z","input":{"sessionID":"sess-1","agent":"main","messageID":"turn-1","variant":"default","model":{"providerID":"openrouter","modelID":"anthropic/claude-sonnet-4.5"}},"output":{"message":{"id":"msg-2","sessionID":"sess-1","role":"assistant"},"route":{"provider_name":"DeepInfra"},"usage":{"input_tokens":10,"output_tokens":5}}}`)
+
+	events, err := ParseTelemetryHookPayload(payload)
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	ev := events[0]
+	if ev.ProviderID != "openrouter" {
+		t.Fatalf("provider_id = %q, want openrouter", ev.ProviderID)
+	}
+	normalized, ok := ev.Payload["_normalized"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing _normalized payload")
+	}
+	if got := normalized["upstream_provider"]; got != "deepinfra" {
+		t.Fatalf("_normalized.upstream_provider = %#v, want deepinfra", got)
+	}
+}

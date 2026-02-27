@@ -16,6 +16,7 @@ func TestDefaultDashboardWidget_StandardSectionOrder(t *testing.T) {
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
+		DashboardSectionUpstreamProviders,
 		DashboardSectionOtherData,
 	}
 

@@ -440,6 +440,12 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		sectionsByID[core.DashboardSectionDailyUsage] = section{withSectionPadding(dailyUsageLines)}
 	}
 
+	upstreamProviderLines, upstreamProviderKeys := buildUpstreamProviderCompositionLines(snap, innerW, modelMixExpanded)
+	if len(upstreamProviderLines) > 0 {
+		sectionsByID[core.DashboardSectionUpstreamProviders] = section{withSectionPadding(upstreamProviderLines)}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, upstreamProviderKeys)
+
 	providerBurnLines, providerBurnKeys := buildProviderVendorCompositionLines(snap, innerW, modelMixExpanded)
 	if len(providerBurnLines) > 0 {
 		sectionsByID[core.DashboardSectionProviderBurn] = section{withSectionPadding(providerBurnLines)}
@@ -2340,6 +2346,179 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 	return providers, usedKeys
 }
 
+func buildUpstreamProviderCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allProviders, usedKeys := collectUpstreamProviderMix(snap)
+	if len(allProviders) == 0 {
+		return nil, nil
+	}
+	providers, hiddenCount := limitProviderMix(allProviders, expanded, 4)
+	providerColors := buildProviderColorMap(allProviders, snap.AccountID)
+
+	totalCost := float64(0)
+	totalTokens := float64(0)
+	totalRequests := float64(0)
+	for _, p := range allProviders {
+		totalCost += p.cost
+		totalTokens += p.input + p.output
+		totalRequests += p.requests
+	}
+
+	mode, total := selectBurnMode(totalTokens, totalCost, totalRequests)
+	if total <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	heading := "Hosting Providers (tokens)"
+	if mode == "cost" {
+		heading = "Hosting Providers (credits)"
+	} else if mode == "requests" {
+		heading = "Hosting Providers (requests)"
+	}
+
+	providerClients := make([]clientMixEntry, 0, len(allProviders))
+	for _, p := range allProviders {
+		value := p.requests
+		if mode == "cost" {
+			value = p.cost
+		} else if mode == "tokens" {
+			value = p.input + p.output
+		}
+		if value <= 0 {
+			continue
+		}
+		providerClients = append(providerClients, clientMixEntry{name: p.name, total: value})
+	}
+	if len(providerClients) == 0 {
+		return nil, nil
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		"  " + renderClientMixBar(providerClients, total, barW, providerColors, "tokens"),
+	}
+
+	for idx, provider := range providers {
+		value := provider.requests
+		if mode == "cost" {
+			value = provider.cost
+		} else if mode == "tokens" {
+			value = provider.input + provider.output
+		}
+		if value <= 0 {
+			continue
+		}
+		pct := value / total * 100
+		label := prettifyModelName(provider.name)
+		colorDot := lipgloss.NewStyle().Foreground(providerColors[provider.name]).Render("■")
+
+		maxLabelLen := tableLabelMaxLen(innerW)
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+
+		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(provider.requests))
+		if mode == "tokens" {
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req",
+				pct,
+				shortCompact(provider.input+provider.output),
+				shortCompact(provider.requests),
+			)
+			if provider.cost > 0 {
+				valueStr += fmt.Sprintf(" · %s", formatUSD(provider.cost))
+			}
+		} else if mode == "cost" {
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req · %s",
+				pct,
+				shortCompact(provider.input+provider.output),
+				shortCompact(provider.requests),
+				formatUSD(provider.cost),
+			)
+		}
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more providers (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+func collectUpstreamProviderMix(snap core.UsageSnapshot) ([]providerMixEntry, map[string]bool) {
+	type agg struct {
+		cost     float64
+		input    float64
+		output   float64
+		requests float64
+	}
+	byProvider := make(map[string]*agg)
+	usedKeys := make(map[string]bool)
+
+	ensure := func(name string) *agg {
+		if _, ok := byProvider[name]; !ok {
+			byProvider[name] = &agg{}
+		}
+		return byProvider[name]
+	}
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil || !strings.HasPrefix(key, "upstream_") {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "_cost_usd"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_cost_usd")
+			ensure(name).cost += *met.Used
+			usedKeys[key] = true
+		case strings.HasSuffix(key, "_input_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_input_tokens")
+			ensure(name).input += *met.Used
+			usedKeys[key] = true
+		case strings.HasSuffix(key, "_output_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_output_tokens")
+			ensure(name).output += *met.Used
+			usedKeys[key] = true
+		case strings.HasSuffix(key, "_requests"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_requests")
+			ensure(name).requests += *met.Used
+			usedKeys[key] = true
+		}
+	}
+
+	if len(byProvider) == 0 {
+		return nil, nil
+	}
+
+	result := make([]providerMixEntry, 0, len(byProvider))
+	for name, a := range byProvider {
+		result = append(result, providerMixEntry{
+			name:     name,
+			cost:     a.cost,
+			input:    a.input,
+			output:   a.output,
+			requests: a.requests,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		ti := result[i].input + result[i].output
+		tj := result[j].input + result[j].output
+		if ti != tj {
+			return ti > tj
+		}
+		return result[i].requests > result[j].requests
+	})
+
+	return result, usedKeys
+}
+
 func limitProviderMix(providers []providerMixEntry, expanded bool, maxVisible int) ([]providerMixEntry, int) {
 	if expanded || maxVisible <= 0 || len(providers) <= maxVisible {
 		return providers, 0
@@ -3752,14 +3931,18 @@ func collectProviderToolMix(snap core.UsageSnapshot) ([]toolMixEntry, map[string
 		tools = append(tools, toolMixEntry{name: name, count: count})
 	}
 
+	sortToolMixEntries(tools)
+
+	return tools, usedKeys
+}
+
+func sortToolMixEntries(tools []toolMixEntry) {
 	sort.Slice(tools, func(i, j int) bool {
 		if tools[i].count == tools[j].count {
 			return tools[i].name < tools[j].name
 		}
 		return tools[i].count > tools[j].count
 	})
-
-	return tools, usedKeys
 }
 
 func limitToolMix(tools []toolMixEntry, expanded bool, maxVisible int) ([]toolMixEntry, int) {
@@ -4097,9 +4280,7 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 		return nil, nil
 	}
 
-	sort.Slice(allTools, func(i, j int) bool {
-		return allTools[i].count > allTools[j].count
-	})
+	sortToolMixEntries(allTools)
 
 	displayLimit := 6
 	if expanded {

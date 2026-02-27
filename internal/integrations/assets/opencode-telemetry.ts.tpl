@@ -66,6 +66,41 @@ function pickInt(...values: unknown[]): number {
   return 0
 }
 
+function pickPathString(root: unknown, ...paths: string[][]): string {
+  for (const path of paths) {
+    let current: unknown = root
+    let found = true
+    for (const key of path) {
+      const rec = asRecord(current)
+      if (!rec || !(key in rec)) {
+        found = false
+        break
+      }
+      current = rec[key]
+    }
+    if (!found) {
+      continue
+    }
+    const resolved = pickString(current)
+    if (resolved !== "") {
+      return resolved
+    }
+  }
+  return ""
+}
+
+function sanitizeUpstreamProvider(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed === "") {
+    return ""
+  }
+  const normalized = trimmed.toLowerCase()
+  if (normalized === "openrouter" || normalized === "openusage" || normalized === "opencode" || normalized === "unknown") {
+    return ""
+  }
+  return trimmed
+}
+
 function normalizeAgentName(value: unknown): string {
   if (typeof value === "string" && value.trim() !== "") {
     return value.trim()
@@ -232,6 +267,42 @@ function normalizeChatPayload(input: unknown, output: unknown): { input: AnyReco
 
   const outputUsage = asRecord(outputRec.usage) || asRecord(outputMessage?.usage) || {}
   const partsCount = pickInt(outputRec.parts_count, Array.isArray(outputRec.parts) ? outputRec.parts.length : 0)
+  const upstreamProvider = sanitizeUpstreamProvider(pickString(
+    pickPathString(outputRec,
+      ["upstream_provider"],
+      ["upstreamProvider"],
+      ["route", "provider_name"],
+      ["route", "providerName"],
+      ["route", "provider"],
+      ["routing", "provider_name"],
+      ["routing", "providerName"],
+      ["routing", "provider"],
+      ["router", "provider_name"],
+      ["router", "providerName"],
+      ["router", "provider"],
+      ["endpoint", "provider_name"],
+      ["endpoint", "providerName"],
+      ["endpoint", "provider"],
+      ["provider_name"],
+      ["providerName"],
+      ["provider"],
+    ),
+    pickPathString(outputMessage,
+      ["upstream_provider"],
+      ["upstreamProvider"],
+      ["provider_name"],
+      ["providerName"],
+      ["provider"],
+      ["info", "provider_name"],
+      ["info", "providerName"],
+      ["info", "provider"],
+    ),
+    pickPathString(outputRec,
+      ["model", "provider"],
+      ["model", "provider_name"],
+      ["model", "providerName"],
+    ),
+  ))
 
   const normalizedOutput: AnyRecord = {
     message: {
@@ -249,6 +320,9 @@ function normalizeChatPayload(input: unknown, output: unknown): { input: AnyReco
       parts_by_type: summarizeParts(outputRec.parts),
     },
     parts_count: partsCount,
+  }
+  if (upstreamProvider !== "") {
+    normalizedOutput.upstream_provider = upstreamProvider
   }
 
   return { input: normalizedInput, output: normalizedOutput }

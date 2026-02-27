@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +25,9 @@ const (
 	maxGenerationsToFetch = 500
 	generationPageSize    = 100
 	generationMaxAge      = 30 * 24 * time.Hour
+	// Keep enrichment bounded: only a subset of ambiguous rows are upgraded
+	// via /generation?id=<id> to recover upstream hosting providers.
+	maxGenerationProviderDetailLookups = 20
 )
 
 var errGenerationListUnsupported = errors.New("generation list endpoint unsupported")
@@ -95,43 +100,88 @@ type keyListEntry struct {
 }
 
 type generationEntry struct {
-	ID                     string   `json:"id"`
-	Model                  string   `json:"model"`
-	TotalCost              float64  `json:"total_cost"`
-	Usage                  float64  `json:"usage"`
-	IsByok                 bool     `json:"is_byok"`
-	UpstreamInferenceCost  *float64 `json:"upstream_inference_cost"`
-	Cancelled              bool     `json:"cancelled"`
-	PromptTokens           int      `json:"tokens_prompt"`
-	CompletionTokens       int      `json:"tokens_completion"`
-	NativePromptTokens     *int     `json:"native_tokens_prompt"`
-	NativeCompletionTokens *int     `json:"native_tokens_completion"`
-	NativeReasoningTokens  *int     `json:"native_tokens_reasoning"`
-	NativeCachedTokens     *int     `json:"native_tokens_cached"`
-	NativeImageTokens      *int     `json:"native_tokens_completion_images"`
-	CreatedAt              string   `json:"created_at"`
-	Streamed               bool     `json:"streamed"`
-	GenerationTime         *int     `json:"generation_time"`
-	Latency                *int     `json:"latency"`
-	ProviderName           string   `json:"provider_name"`
-	CacheDiscount          *float64 `json:"cache_discount"`
-	Origin                 string   `json:"origin"`
-	AppID                  *int     `json:"app_id"`
-	NumMediaPrompt         *int     `json:"num_media_prompt"`
-	NumMediaCompletion     *int     `json:"num_media_completion"`
-	NumInputAudioPrompt    *int     `json:"num_input_audio_prompt"`
-	NumSearchResults       *int     `json:"num_search_results"`
-	Finish                 string   `json:"finish_reason"`
-	NativeFinish           string   `json:"native_finish_reason"`
-	UpstreamID             string   `json:"upstream_id"`
-	ModerationLatency      *int     `json:"moderation_latency"`
-	ExternalUser           string   `json:"external_user"`
-	APIType                string   `json:"api_type"`
-	Router                 string   `json:"router"`
+	ID                     string                       `json:"id"`
+	Model                  string                       `json:"model"`
+	TotalCost              float64                      `json:"total_cost"`
+	Usage                  float64                      `json:"usage"`
+	IsByok                 bool                         `json:"is_byok"`
+	UpstreamInferenceCost  *float64                     `json:"upstream_inference_cost"`
+	Cancelled              bool                         `json:"cancelled"`
+	PromptTokens           int                          `json:"tokens_prompt"`
+	CompletionTokens       int                          `json:"tokens_completion"`
+	NativePromptTokens     *int                         `json:"native_tokens_prompt"`
+	NativeCompletionTokens *int                         `json:"native_tokens_completion"`
+	NativeReasoningTokens  *int                         `json:"native_tokens_reasoning"`
+	NativeCachedTokens     *int                         `json:"native_tokens_cached"`
+	NativeImageTokens      *int                         `json:"native_tokens_completion_images"`
+	CreatedAt              string                       `json:"created_at"`
+	Streamed               bool                         `json:"streamed"`
+	GenerationTime         *int                         `json:"generation_time"`
+	Latency                *int                         `json:"latency"`
+	ProviderName           string                       `json:"provider_name"`
+	Provider               string                       `json:"provider"`
+	ProviderID             string                       `json:"provider_id"`
+	ProviderSlug           string                       `json:"provider_slug"`
+	UpstreamProvider       string                       `json:"upstream_provider"`
+	UpstreamProviderName   string                       `json:"upstream_provider_name"`
+	CacheDiscount          *float64                     `json:"cache_discount"`
+	Origin                 string                       `json:"origin"`
+	AppID                  *int                         `json:"app_id"`
+	NumMediaPrompt         *int                         `json:"num_media_prompt"`
+	NumMediaCompletion     *int                         `json:"num_media_completion"`
+	NumInputAudioPrompt    *int                         `json:"num_input_audio_prompt"`
+	NumSearchResults       *int                         `json:"num_search_results"`
+	Finish                 string                       `json:"finish_reason"`
+	NativeFinish           string                       `json:"native_finish_reason"`
+	UpstreamID             string                       `json:"upstream_id"`
+	ModerationLatency      *int                         `json:"moderation_latency"`
+	ExternalUser           string                       `json:"external_user"`
+	APIType                string                       `json:"api_type"`
+	Router                 string                       `json:"router"`
+	ProviderResponses      []generationProviderResponse `json:"provider_responses"`
+}
+
+type generationProviderResponse struct {
+	ProviderName string `json:"provider_name"`
+	Provider     string `json:"provider"`
+	ProviderID   string `json:"provider_id"`
+	Status       *int   `json:"status"`
 }
 
 type generationStatsResponse struct {
 	Data []generationEntry `json:"data"`
+}
+
+type generationDetailResponse struct {
+	Data generationEntry `json:"data"`
+}
+
+type providerResolutionSource string
+
+const (
+	providerSourceResponses     providerResolutionSource = "responses"
+	providerSourceEntryField    providerResolutionSource = "entry_field"
+	providerSourceUpstreamID    providerResolutionSource = "upstream_id"
+	providerSourceProviderName  providerResolutionSource = "provider_name"
+	providerSourceModelPrefix   providerResolutionSource = "model_prefix"
+	providerSourceFallbackLabel providerResolutionSource = "fallback_label"
+)
+
+var knownModelVendorPrefixes = []string{
+	"black-forest-labs",
+	"meta-llama",
+	"moonshotai",
+	"deepseek",
+	"nvidia",
+	"openai",
+	"anthropic",
+	"google",
+	"mistral",
+	"qwen",
+	"z-ai",
+	"x-ai",
+	"xai",
+	"alibaba",
 }
 
 type analyticsEntry struct {
@@ -245,10 +295,11 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 		Sections: []core.DetailSection{
 			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
 			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Spending", Order: 3, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 4, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 5, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 6, Style: core.DetailSectionStyleActivity},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
 		},
 	}
 }
@@ -287,6 +338,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if err := p.fetchGenerationStats(ctx, baseURL, apiKey, &snap); err != nil {
 		snap.Raw["generation_error"] = err.Error()
 	}
+	enrichDashboardRepresentations(&snap)
 
 	return snap, nil
 }
@@ -628,6 +680,43 @@ func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, sn
 		snap.Raw["key_hash_prefix"] = hash
 	}
 
+	// For management keys, aggregate usage from all sub-keys.
+	// The /auth/key endpoint reports $0 for the management key itself;
+	// the real spend is spread across the provisioned sub-keys.
+	if snap.Raw["is_management_key"] == "true" {
+		var totalUsage, daily, weekly, monthly float64
+		for _, k := range allKeys {
+			totalUsage += k.Usage
+			daily += k.UsageDaily
+			weekly += k.UsageWeekly
+			monthly += k.UsageMonthly
+		}
+		if totalUsage > 0 {
+			snap.Metrics["credits"] = core.Metric{
+				Used:   &totalUsage,
+				Unit:   "USD",
+				Window: "lifetime",
+			}
+			if lim := snap.Metrics["credits"].Limit; lim != nil {
+				snap.Metrics["credits"] = core.Metric{
+					Limit:  lim,
+					Used:   &totalUsage,
+					Unit:   "USD",
+					Window: "lifetime",
+				}
+			}
+		}
+		if daily > 0 {
+			snap.Metrics["usage_daily"] = core.Metric{Used: &daily, Unit: "USD", Window: "1d"}
+		}
+		if weekly > 0 {
+			snap.Metrics["usage_weekly"] = core.Metric{Used: &weekly, Unit: "USD", Window: "7d"}
+		}
+		if monthly > 0 {
+			snap.Metrics["usage_monthly"] = core.Metric{Used: &monthly, Unit: "USD", Window: "30d"}
+		}
+	}
+
 	return nil
 }
 
@@ -712,6 +801,8 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	byokCostByDate := make(map[string]float64)
 	reasoningTokensByDate := make(map[string]float64)
 	cachedTokensByDate := make(map[string]float64)
+	providerTokensByDate := make(map[string]map[string]float64)
+	providerRequestsByDate := make(map[string]map[string]float64)
 	modelCost := make(map[string]float64)
 	modelByokCost := make(map[string]float64)
 	modelInputTokens := make(map[string]float64)
@@ -803,6 +894,15 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		providerOutputTokens[providerName] += outputTokens
 		providerReasoningTokens[providerName] += reasoningTokens
 		providerRequests[providerName] += requests
+		providerClientKey := sanitizeName(strings.ToLower(providerName))
+		if providerTokensByDate[providerClientKey] == nil {
+			providerTokensByDate[providerClientKey] = make(map[string]float64)
+		}
+		providerTokensByDate[providerClientKey][date] += inputTokens + outputTokens + reasoningTokens
+		if providerRequestsByDate[providerClientKey] == nil {
+			providerRequestsByDate[providerClientKey] = make(map[string]float64)
+		}
+		providerRequestsByDate[providerClientKey][date] += requests
 
 		es, ok := endpointStatsMap[endpointID]
 		if !ok {
@@ -976,8 +1076,22 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	}
 
 	emitAnalyticsPerModelMetrics(snap, modelCost, modelByokCost, modelInputTokens, modelOutputTokens, modelReasoningTokens, modelCachedTokens, modelTotalTokens, modelRequests, modelByokRequests)
+	filterRouterClientProviders(providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
 	emitAnalyticsPerProviderMetrics(snap, providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
+	emitUpstreamProviderMetrics(snap, providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests)
 	emitAnalyticsEndpointMetrics(snap, endpointStatsMap)
+	for name := range providerTokensByDate {
+		if isLikelyRouterClientProviderName(name) {
+			delete(providerTokensByDate, name)
+		}
+	}
+	for name := range providerRequestsByDate {
+		if isLikelyRouterClientProviderName(name) {
+			delete(providerRequestsByDate, name)
+		}
+	}
+	emitClientDailySeries(snap, providerTokensByDate, providerRequestsByDate)
+	emitModelDerivedToolUsageMetrics(snap, modelRequests, "30d inferred", "inferred_from_model_requests")
 
 	if todayByok > 0 {
 		snap.Metrics["today_byok_cost"] = core.Metric{Used: &todayByok, Unit: "USD", Window: "1d"}
@@ -1152,6 +1266,21 @@ func emitAnalyticsPerModelMetrics(
 	}
 }
 
+// filterRouterClientProviders removes entries keyed by router/client app names
+// (e.g. "Openusage", "OpenRouter") from analytics provider maps. The /activity
+// endpoint sometimes returns the app/key name instead of the actual upstream
+// hosting provider. Removing these avoids polluting the "Providers" breakdown
+// with client names; real hosting provider data comes from /generations.
+func filterRouterClientProviders(maps ...map[string]float64) {
+	for _, m := range maps {
+		for name := range m {
+			if isLikelyRouterClientProviderName(name) {
+				delete(m, name)
+			}
+		}
+	}
+}
+
 func emitAnalyticsPerProviderMetrics(
 	snap *core.UsageSnapshot,
 	providerCost, providerByokCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
@@ -1206,6 +1335,47 @@ func emitAnalyticsPerProviderMetrics(
 		snap.Raw[prefix+"_completion_tokens"] = fmt.Sprintf("%.0f", providerOutputTokens[provider])
 		if providerReasoningTokens[provider] > 0 {
 			snap.Raw[prefix+"_reasoning_tokens"] = fmt.Sprintf("%.0f", providerReasoningTokens[provider])
+		}
+	}
+}
+
+func emitUpstreamProviderMetrics(
+	snap *core.UsageSnapshot,
+	providerCost, providerInputTokens, providerOutputTokens, providerReasoningTokens, providerRequests map[string]float64,
+) {
+	providerSet := make(map[string]struct{})
+	for p := range providerCost {
+		providerSet[p] = struct{}{}
+	}
+	for p := range providerInputTokens {
+		providerSet[p] = struct{}{}
+	}
+	for p := range providerOutputTokens {
+		providerSet[p] = struct{}{}
+	}
+	for p := range providerReasoningTokens {
+		providerSet[p] = struct{}{}
+	}
+	for p := range providerRequests {
+		providerSet[p] = struct{}{}
+	}
+
+	for provider := range providerSet {
+		prefix := "upstream_" + sanitizeName(strings.ToLower(provider))
+		if v := providerCost[provider]; v > 0 {
+			snap.Metrics[prefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: "activity"}
+		}
+		if v := providerInputTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerOutputTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerReasoningTokens[provider]; v > 0 {
+			snap.Metrics[prefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "activity"}
+		}
+		if v := providerRequests[provider]; v > 0 {
+			snap.Metrics[prefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "activity"}
 		}
 	}
 }
@@ -1300,6 +1470,12 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		return nil
 	}
 
+	detailLookups, detailHits := p.enrichGenerationProviderMetadata(ctx, baseURL, apiKey, allGenerations)
+	if detailLookups > 0 {
+		snap.Raw["generation_provider_detail_lookups"] = fmt.Sprintf("%d", detailLookups)
+		snap.Raw["generation_provider_detail_hits"] = fmt.Sprintf("%d", detailHits)
+	}
+
 	snap.Raw["generations_fetched"] = fmt.Sprintf("%d", len(allGenerations))
 
 	now := time.Now().UTC()
@@ -1320,7 +1496,8 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	var todayGenerationMs, todayGenerationCount int
 	var todayModerationMs, todayModerationCount int
 	var totalRequests int
-	apiTypeCounts := make(map[string]int)
+	totalCancelled := 0
+	apiTypeCountsToday := make(map[string]int)
 	finishReasonCounts := make(map[string]int)
 	originCounts := make(map[string]int)
 	routerCounts := make(map[string]int)
@@ -1330,13 +1507,20 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 
 	dailyCost := make(map[string]float64)
 	dailyRequests := make(map[string]float64)
+	dailyProviderTokens := make(map[string]map[string]float64)
+	dailyProviderRequests := make(map[string]map[string]float64)
 	dailyModelTokens := make(map[string]map[string]float64) // model -> date -> tokens
+	providerResolutionCounts := make(map[providerResolutionSource]int)
 
 	for _, g := range allGenerations {
 		totalRequests++
 		generationCost := g.TotalCost
 		if generationCost == 0 && g.Usage > 0 {
 			generationCost = g.Usage
+		}
+
+		if g.Cancelled {
+			totalCancelled++
 		}
 
 		ts, err := time.Parse(time.RFC3339, g.CreatedAt)
@@ -1416,14 +1600,30 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		if g.CacheDiscount != nil && *g.CacheDiscount > 0 {
 			ms.CacheDiscountUSD += *g.CacheDiscount
 		}
-		if g.ProviderName != "" {
-			ms.Providers[g.ProviderName]++
+		hostingProvider, source := resolveGenerationHostingProviderWithSource(g)
+		providerResolutionCounts[source]++
+		if hostingProvider != "" {
+			ms.Providers[hostingProvider]++
 		}
 
-		provKey := g.ProviderName
+		provKey := hostingProvider
 		if provKey == "" {
 			provKey = "unknown"
 		}
+		providerClientKey := sanitizeName(strings.ToLower(provKey))
+		if dailyProviderTokens[providerClientKey] == nil {
+			dailyProviderTokens[providerClientKey] = make(map[string]float64)
+		}
+		requestTokens := float64(g.PromptTokens + g.CompletionTokens)
+		if g.NativeReasoningTokens != nil {
+			requestTokens += float64(*g.NativeReasoningTokens)
+		}
+		dailyProviderTokens[providerClientKey][dateKey] += requestTokens
+		if dailyProviderRequests[providerClientKey] == nil {
+			dailyProviderRequests[providerClientKey] = make(map[string]float64)
+		}
+		dailyProviderRequests[providerClientKey][dateKey]++
+
 		ps, ok := providerStatsMap[provKey]
 		if !ok {
 			ps = &providerStats{Models: make(map[string]int)}
@@ -1495,7 +1695,7 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 			todayModerationCount++
 		}
 		if g.APIType != "" {
-			apiTypeCounts[g.APIType]++
+			apiTypeCountsToday[g.APIType]++
 		}
 		if g.Finish != "" {
 			finishReasonCounts[g.Finish]++
@@ -1584,7 +1784,7 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		}
 	}
 
-	for apiType, count := range apiTypeCounts {
+	for apiType, count := range apiTypeCountsToday {
 		if count <= 0 {
 			continue
 		}
@@ -1627,6 +1827,7 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	// DailySeries: cost, requests, and per-model tokens
 	snap.DailySeries["cost"] = mapToSortedTimePoints(dailyCost)
 	snap.DailySeries["requests"] = mapToSortedTimePoints(dailyRequests)
+	emitClientDailySeries(snap, dailyProviderTokens, dailyProviderRequests)
 
 	// Per-model token series (top 5 models by total tokens)
 	type modelTokenTotal struct {
@@ -1667,6 +1868,27 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 	emitPerModelMetrics(modelStatsMap, snap)
 	emitPerProviderMetrics(providerStatsMap, snap)
 	snap.Raw["model_mix_source"] = "generation_live"
+	if len(providerResolutionCounts) > 0 {
+		summary := make(map[string]int, len(providerResolutionCounts))
+		for k, v := range providerResolutionCounts {
+			if v <= 0 {
+				continue
+			}
+			summary[string(k)] = v
+		}
+		if txt := summarizeTopCounts(summary, 8); txt != "" {
+			snap.Raw["provider_resolution"] = txt
+		}
+	}
+	modelRequests := make(map[string]float64, len(modelStatsMap))
+	for model, stats := range modelStatsMap {
+		if stats == nil || stats.Requests <= 0 {
+			continue
+		}
+		modelRequests[model] = float64(stats.Requests)
+	}
+	emitModelDerivedToolUsageMetrics(snap, modelRequests, "30d inferred", "inferred_from_model_requests")
+	emitToolOutcomeMetrics(snap, totalRequests, totalCancelled, "30d")
 
 	return nil
 }
@@ -1780,6 +2002,218 @@ func generationByokCost(g generationEntry) float64 {
 		return g.TotalCost
 	}
 	return g.Usage
+}
+
+func resolveGenerationHostingProvider(g generationEntry) string {
+	name, _ := resolveGenerationHostingProviderWithSource(g)
+	return name
+}
+
+func resolveGenerationHostingProviderWithSource(g generationEntry) (string, providerResolutionSource) {
+	if name := providerNameFromResponses(g.ProviderResponses); name != "" {
+		return name, providerSourceResponses
+	}
+	if name := providerNameFromGenerationEntry(g); name != "" {
+		return name, providerSourceEntryField
+	}
+	if name := providerNameFromUpstreamID(g.UpstreamID); name != "" {
+		return name, providerSourceUpstreamID
+	}
+	if name := strings.TrimSpace(g.ProviderName); name != "" && !isLikelyRouterClientProviderName(name) {
+		return name, providerSourceProviderName
+	}
+	// Final fallback keeps provider splits stable when generation payloads
+	// omit upstream provider metadata but model IDs still include vendor prefix.
+	if name := providerNameFromModel(g.Model); name != "" {
+		return name, providerSourceModelPrefix
+	}
+	// Last-resort fallback: keep whatever the API returned.
+	return strings.TrimSpace(g.ProviderName), providerSourceFallbackLabel
+}
+
+func providerNameFromResponses(responses []generationProviderResponse) string {
+	if len(responses) == 0 {
+		return ""
+	}
+	// Prefer the last successful upstream response (final selected hoster).
+	for i := len(responses) - 1; i >= 0; i-- {
+		name := generationProviderResponseName(responses[i])
+		if name == "" {
+			continue
+		}
+		if responses[i].Status != nil && *responses[i].Status >= 200 && *responses[i].Status < 300 {
+			return name
+		}
+	}
+	// Fall back to the last named upstream response when statuses are absent.
+	for i := len(responses) - 1; i >= 0; i-- {
+		name := generationProviderResponseName(responses[i])
+		if name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func generationProviderResponseName(resp generationProviderResponse) string {
+	for _, candidate := range []string{
+		resp.ProviderName,
+		resp.Provider,
+		resp.ProviderID,
+	} {
+		name := strings.TrimSpace(candidate)
+		if name != "" && !isLikelyRouterClientProviderName(name) {
+			return name
+		}
+	}
+	return ""
+}
+
+func providerNameFromGenerationEntry(g generationEntry) string {
+	for _, candidate := range []string{
+		g.UpstreamProviderName,
+		g.UpstreamProvider,
+		g.ProviderSlug,
+		g.ProviderID,
+		g.Provider,
+	} {
+		name := strings.TrimSpace(candidate)
+		if name != "" && !isLikelyRouterClientProviderName(name) {
+			return name
+		}
+	}
+	return ""
+}
+
+func providerNameFromModel(model string) string {
+	norm := normalizeModelName(model)
+	if norm == "" {
+		return ""
+	}
+	slash := strings.IndexByte(norm, '/')
+	if slash <= 0 {
+		for _, prefix := range knownModelVendorPrefixes {
+			if norm == prefix || strings.HasPrefix(norm, prefix+"-") || strings.HasPrefix(norm, prefix+"_") {
+				return prefix
+			}
+		}
+		return ""
+	}
+	return norm[:slash]
+}
+
+func providerNameFromUpstreamID(upstreamID string) string {
+	id := strings.TrimSpace(upstreamID)
+	if id == "" {
+		return ""
+	}
+	for _, sep := range []string{"/", ":", "|"} {
+		if idx := strings.Index(id, sep); idx > 0 {
+			candidate := strings.TrimSpace(id[:idx])
+			if isLikelyProviderSlug(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func isLikelyProviderSlug(candidate string) bool {
+	if candidate == "" {
+		return false
+	}
+	slug := strings.ToLower(sanitizeName(candidate))
+	if slug == "" || slug == "unknown" {
+		return false
+	}
+	switch slug {
+	case "chatcmpl", "msg", "resp", "response", "gen", "cmpl", "request", "req", "run", "completion":
+		return false
+	}
+	return true
+}
+
+func isLikelyRouterClientProviderName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return true
+	}
+	clean := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "").Replace(n)
+	switch clean {
+	case "unknown", "openrouter", "openrouterauto", "openusage":
+		return true
+	}
+	return strings.Contains(clean, "openrouter") || strings.Contains(clean, "openusage")
+}
+
+func (p *Provider) enrichGenerationProviderMetadata(ctx context.Context, baseURL, apiKey string, rows []generationEntry) (int, int) {
+	attempts := 0
+	hits := 0
+	for i := range rows {
+		if attempts >= maxGenerationProviderDetailLookups {
+			break
+		}
+		if rows[i].ID == "" {
+			continue
+		}
+		if providerNameFromResponses(rows[i].ProviderResponses) != "" {
+			continue
+		}
+		if !isLikelyRouterClientProviderName(rows[i].ProviderName) && strings.TrimSpace(rows[i].ProviderName) != "" {
+			continue
+		}
+
+		attempts++
+		detail, err := p.fetchGenerationDetail(ctx, baseURL, apiKey, rows[i].ID)
+		if err != nil {
+			continue
+		}
+		resolvedBefore := resolveGenerationHostingProvider(rows[i])
+		if len(detail.ProviderResponses) > 0 {
+			rows[i].ProviderResponses = detail.ProviderResponses
+		}
+		if providerName := strings.TrimSpace(detail.ProviderName); providerName != "" {
+			rows[i].ProviderName = providerName
+		}
+		if upstream := strings.TrimSpace(detail.UpstreamID); upstream != "" {
+			rows[i].UpstreamID = upstream
+		}
+		if resolvedAfter := resolveGenerationHostingProvider(rows[i]); resolvedAfter != "" && resolvedAfter != resolvedBefore {
+			hits++
+		}
+	}
+	return attempts, hits
+}
+
+func (p *Provider) fetchGenerationDetail(ctx context.Context, baseURL, apiKey, generationID string) (generationEntry, error) {
+	if strings.TrimSpace(generationID) == "" {
+		return generationEntry{}, fmt.Errorf("missing generation id")
+	}
+	endpoint := fmt.Sprintf("%s/generation?id=%s", baseURL, url.QueryEscape(generationID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return generationEntry{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return generationEntry{}, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return generationEntry{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return generationEntry{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var detail generationDetailResponse
+	if err := json.Unmarshal(body, &detail); err != nil {
+		return generationEntry{}, err
+	}
+	return detail.Data, nil
 }
 
 func parseAPIErrorMessage(body []byte) string {
@@ -1943,6 +2377,410 @@ func emitPerProviderMetrics(providerStatsMap map[string]*providerStats, snap *co
 			snap.Raw[prefix+"_reasoning_tokens"] = fmt.Sprintf("%d", e.stats.ReasoningTokens)
 		}
 	}
+}
+
+func emitClientDailySeries(snap *core.UsageSnapshot, tokensByClient, requestsByClient map[string]map[string]float64) {
+	if snap.DailySeries == nil {
+		snap.DailySeries = make(map[string][]core.TimePoint)
+	}
+	for client, byDate := range tokensByClient {
+		if client == "" || len(byDate) == 0 {
+			continue
+		}
+		snap.DailySeries["tokens_client_"+client] = mapToSortedTimePoints(byDate)
+	}
+	for client, byDate := range requestsByClient {
+		if client == "" || len(byDate) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_client_"+client] = mapToSortedTimePoints(byDate)
+	}
+}
+
+type providerClientAggregate struct {
+	InputTokens     float64
+	OutputTokens    float64
+	ReasoningTokens float64
+	Requests        float64
+	CostUSD         float64
+	Window          string
+}
+
+type modelUsageCount struct {
+	name  string
+	count float64
+}
+
+func enrichDashboardRepresentations(snap *core.UsageSnapshot) {
+	if snap == nil || len(snap.Metrics) == 0 {
+		return
+	}
+	synthesizeClientMetricsFromProviderMetrics(snap)
+	synthesizeLanguageMetricsFromModelRequests(snap)
+	synthesizeUsageSummaries(snap)
+}
+
+func synthesizeClientMetricsFromProviderMetrics(snap *core.UsageSnapshot) {
+	byClient := make(map[string]*providerClientAggregate)
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil {
+			continue
+		}
+		client, field, ok := parseProviderMetricKey(key)
+		if !ok || client == "" {
+			continue
+		}
+		agg, exists := byClient[client]
+		if !exists {
+			agg = &providerClientAggregate{}
+			byClient[client] = agg
+		}
+		if agg.Window == "" && metric.Window != "" {
+			agg.Window = metric.Window
+		}
+		switch field {
+		case "input_tokens":
+			agg.InputTokens = *metric.Used
+		case "output_tokens":
+			agg.OutputTokens = *metric.Used
+		case "reasoning_tokens":
+			agg.ReasoningTokens = *metric.Used
+		case "requests":
+			agg.Requests = *metric.Used
+		case "cost_usd":
+			agg.CostUSD = *metric.Used
+		}
+	}
+
+	for client, agg := range byClient {
+		window := strings.TrimSpace(agg.Window)
+		if window == "" {
+			window = "30d"
+		}
+		clientPrefix := "client_" + client
+
+		if agg.InputTokens > 0 {
+			v := agg.InputTokens
+			snap.Metrics[clientPrefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+		}
+		if agg.OutputTokens > 0 {
+			v := agg.OutputTokens
+			snap.Metrics[clientPrefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+		}
+		if agg.ReasoningTokens > 0 {
+			v := agg.ReasoningTokens
+			snap.Metrics[clientPrefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+		}
+		totalTokens := agg.InputTokens + agg.OutputTokens + agg.ReasoningTokens
+		if totalTokens > 0 {
+			v := totalTokens
+			snap.Metrics[clientPrefix+"_total_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+		}
+		if agg.Requests > 0 {
+			v := agg.Requests
+			snap.Metrics[clientPrefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: window}
+		}
+		if agg.CostUSD > 0 {
+			v := agg.CostUSD
+			snap.Metrics[clientPrefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: window}
+		}
+	}
+}
+
+func parseProviderMetricKey(key string) (name, field string, ok bool) {
+	const prefix = "provider_"
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	for _, suffix := range []string{
+		"_input_tokens",
+		"_output_tokens",
+		"_reasoning_tokens",
+		"_requests",
+		"_cost_usd",
+	} {
+		if strings.HasSuffix(rest, suffix) {
+			return strings.TrimSuffix(rest, suffix), strings.TrimPrefix(suffix, "_"), true
+		}
+	}
+	return "", "", false
+}
+
+func synthesizeLanguageMetricsFromModelRequests(snap *core.UsageSnapshot) {
+	byLanguage := make(map[string]float64)
+	window := ""
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil {
+			continue
+		}
+		model, field, ok := parseModelMetricKey(key)
+		if !ok || field != "requests" {
+			continue
+		}
+		if window == "" && strings.TrimSpace(metric.Window) != "" {
+			window = strings.TrimSpace(metric.Window)
+		}
+		lang := inferModelWorkloadLanguage(model)
+		byLanguage[lang] += *metric.Used
+	}
+	if len(byLanguage) == 0 {
+		return
+	}
+	if window == "" {
+		window = "30d inferred"
+	}
+	for lang, count := range byLanguage {
+		if count <= 0 {
+			continue
+		}
+		v := count
+		snap.Metrics["lang_"+sanitizeName(lang)] = core.Metric{Used: &v, Unit: "requests", Window: window}
+	}
+	if summary := summarizeCountUsage(byLanguage, "req", 6); summary != "" {
+		snap.Raw["language_usage"] = summary
+		snap.Raw["language_usage_source"] = "inferred_from_model_ids"
+	}
+}
+
+func parseModelMetricKey(key string) (name, field string, ok bool) {
+	const prefix = "model_"
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	for _, suffix := range []string{"_requests"} {
+		if strings.HasSuffix(rest, suffix) {
+			return strings.TrimSuffix(rest, suffix), strings.TrimPrefix(suffix, "_"), true
+		}
+	}
+	return "", "", false
+}
+
+func inferModelWorkloadLanguage(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return "general"
+	}
+	switch {
+	case strings.Contains(model, "coder"), strings.Contains(model, "codestral"), strings.Contains(model, "devstral"), strings.Contains(model, "code"):
+		return "code"
+	case strings.Contains(model, "vision"), strings.Contains(model, "image"), strings.Contains(model, "multimodal"), strings.Contains(model, "omni"), strings.Contains(model, "vl"):
+		return "multimodal"
+	case strings.Contains(model, "audio"), strings.Contains(model, "speech"), strings.Contains(model, "voice"), strings.Contains(model, "whisper"), strings.Contains(model, "tts"), strings.Contains(model, "stt"):
+		return "audio"
+	case strings.Contains(model, "reason"), strings.Contains(model, "thinking"):
+		return "reasoning"
+	default:
+		return "general"
+	}
+}
+
+func synthesizeUsageSummaries(snap *core.UsageSnapshot) {
+	modelTotals := make(map[string]float64)
+	modelWindow := ""
+	modelUnit := "tok"
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil || !strings.HasPrefix(key, "model_") {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "_total_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_total_tokens")
+			modelTotals[name] = *metric.Used
+			if modelWindow == "" && strings.TrimSpace(metric.Window) != "" {
+				modelWindow = strings.TrimSpace(metric.Window)
+			}
+		case strings.HasSuffix(key, "_cost_usd"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd")
+			if _, ok := modelTotals[name]; !ok {
+				modelTotals[name] = *metric.Used
+				modelUnit = "usd"
+				if modelWindow == "" && strings.TrimSpace(metric.Window) != "" {
+					modelWindow = strings.TrimSpace(metric.Window)
+				}
+			}
+		}
+	}
+	if summary := summarizeShareUsage(modelTotals, 6); summary != "" {
+		snap.Raw["model_usage"] = summary
+		if modelWindow != "" {
+			snap.Raw["model_usage_window"] = modelWindow
+		}
+		snap.Raw["model_usage_unit"] = modelUnit
+	}
+
+	clientTotals := make(map[string]float64)
+	for key, metric := range snap.Metrics {
+		if metric.Used == nil || !strings.HasPrefix(key, "client_") {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "_total_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "client_"), "_total_tokens")
+			clientTotals[name] = *metric.Used
+		case strings.HasSuffix(key, "_requests"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "client_"), "_requests")
+			if _, ok := clientTotals[name]; !ok {
+				clientTotals[name] = *metric.Used
+			}
+		}
+	}
+	if summary := summarizeShareUsage(clientTotals, 6); summary != "" {
+		snap.Raw["client_usage"] = summary
+	}
+}
+
+func summarizeShareUsage(values map[string]float64, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	list := make([]item, 0, len(values))
+	total := 0.0
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+		total += value
+	}
+	if len(list) == 0 || total <= 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f%%", normalizeUsageLabel(entry.name), entry.value/total*100))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func summarizeCountUsage(values map[string]float64, unit string, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	list := make([]item, 0, len(values))
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f %s", normalizeUsageLabel(entry.name), entry.value, unit))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func normalizeUsageLabel(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "unknown"
+	}
+	name = strings.ReplaceAll(name, "_", " ")
+	return name
+}
+
+func emitModelDerivedToolUsageMetrics(snap *core.UsageSnapshot, modelRequests map[string]float64, window, source string) {
+	if snap == nil || len(modelRequests) == 0 {
+		return
+	}
+	if strings.TrimSpace(window) == "" {
+		window = "30d inferred"
+	}
+	counts := make(map[string]int, len(modelRequests))
+	rows := make([]modelUsageCount, 0, len(modelRequests))
+	totalCalls := 0.0
+	for model, requests := range modelRequests {
+		if requests <= 0 {
+			continue
+		}
+		key := "tool_" + sanitizeName(model)
+		v := requests
+		snap.Metrics[key] = core.Metric{Used: &v, Unit: "calls", Window: window}
+		totalCalls += requests
+		counts[model] = int(math.Round(requests))
+		rows = append(rows, modelUsageCount{name: model, count: requests})
+	}
+	if totalCalls <= 0 {
+		return
+	}
+	if source != "" {
+		snap.Raw["tool_usage_source"] = source
+	}
+	if summary := summarizeModelCountUsage(rows, 6); summary != "" {
+		snap.Raw["tool_usage"] = summary
+	} else {
+		snap.Raw["tool_usage"] = summarizeTopCounts(counts, 6)
+	}
+	totalV := totalCalls
+	snap.Metrics["tool_calls_total"] = core.Metric{Used: &totalV, Unit: "calls", Window: "30d"}
+}
+
+func emitToolOutcomeMetrics(snap *core.UsageSnapshot, totalRequests, totalCancelled int, window string) {
+	if snap == nil || totalRequests <= 0 {
+		return
+	}
+	if strings.TrimSpace(window) == "" {
+		window = "30d"
+	}
+	totalV := float64(totalRequests)
+	snap.Metrics["tool_calls_total"] = core.Metric{Used: &totalV, Unit: "calls", Window: window}
+	completed := totalRequests - totalCancelled
+	if completed < 0 {
+		completed = 0
+	}
+	completedV := float64(completed)
+	snap.Metrics["tool_completed"] = core.Metric{Used: &completedV, Unit: "calls", Window: window}
+	if totalCancelled > 0 {
+		cancelledV := float64(totalCancelled)
+		snap.Metrics["tool_cancelled"] = core.Metric{Used: &cancelledV, Unit: "calls", Window: window}
+	}
+	successRate := completedV / totalV * 100
+	snap.Metrics["tool_success_rate"] = core.Metric{Used: &successRate, Unit: "%", Window: window}
+}
+
+func summarizeModelCountUsage(rows []modelUsageCount, limit int) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return rows[i].name < rows[j].name
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		parts = append(parts, fmt.Sprintf("%s: %.0f calls", row.name, row.count))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func summarizeTopCounts(counts map[string]int, limit int) string {

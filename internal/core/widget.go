@@ -89,17 +89,18 @@ type WidgetDataSpec struct {
 type DashboardStandardSection string
 
 const (
-	DashboardSectionHeader           DashboardStandardSection = "header"
-	DashboardSectionTopUsageProgress DashboardStandardSection = "top_usage_progress"
-	DashboardSectionModelBurn        DashboardStandardSection = "model_burn"
-	DashboardSectionClientBurn       DashboardStandardSection = "client_burn"
-	DashboardSectionToolUsage        DashboardStandardSection = "tool_usage"
-	DashboardSectionActualToolUsage  DashboardStandardSection = "actual_tool_usage"
-	DashboardSectionLanguageBurn     DashboardStandardSection = "language_burn"
-	DashboardSectionCodeStats        DashboardStandardSection = "code_stats"
-	DashboardSectionDailyUsage       DashboardStandardSection = "daily_usage"
-	DashboardSectionProviderBurn     DashboardStandardSection = "provider_burn"
-	DashboardSectionOtherData        DashboardStandardSection = "other_data"
+	DashboardSectionHeader            DashboardStandardSection = "header"
+	DashboardSectionTopUsageProgress  DashboardStandardSection = "top_usage_progress"
+	DashboardSectionModelBurn         DashboardStandardSection = "model_burn"
+	DashboardSectionClientBurn        DashboardStandardSection = "client_burn"
+	DashboardSectionToolUsage         DashboardStandardSection = "tool_usage"
+	DashboardSectionActualToolUsage   DashboardStandardSection = "actual_tool_usage"
+	DashboardSectionLanguageBurn      DashboardStandardSection = "language_burn"
+	DashboardSectionCodeStats         DashboardStandardSection = "code_stats"
+	DashboardSectionDailyUsage        DashboardStandardSection = "daily_usage"
+	DashboardSectionProviderBurn      DashboardStandardSection = "provider_burn"
+	DashboardSectionUpstreamProviders DashboardStandardSection = "upstream_providers"
+	DashboardSectionOtherData         DashboardStandardSection = "other_data"
 )
 
 func defaultDashboardSectionOrder() []DashboardStandardSection {
@@ -114,6 +115,7 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
+		DashboardSectionUpstreamProviders,
 		DashboardSectionOtherData,
 	}
 }
@@ -130,6 +132,7 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
+		DashboardSectionUpstreamProviders,
 		DashboardSectionOtherData:
 		return true
 	default:
