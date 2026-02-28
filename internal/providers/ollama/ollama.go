@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -63,6 +64,20 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
+	}
+}
+
+func (p *Provider) DetailWidget() core.DetailWidget {
+	return core.DetailWidget{
+		Sections: []core.DetailSection{
+			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
+			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
+			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
+		},
 	}
 }
 
@@ -195,11 +210,17 @@ func (p *Provider) fetchLocalAPI(ctx context.Context, baseURL string, snap *core
 	}
 	hasData = hasData || meOK
 
-	tagsOK, err := p.fetchLocalTags(ctx, baseURL, snap)
+	models, tagsOK, err := p.fetchLocalTags(ctx, baseURL, snap)
 	if err != nil {
 		return hasData, err
 	}
 	hasData = hasData || tagsOK
+
+	if len(models) > 0 {
+		if err := p.fetchModelDetails(ctx, baseURL, models, snap); err != nil {
+			snap.SetDiagnostic("model_details_error", err.Error())
+		}
+	}
 
 	psOK, err := p.fetchLocalPS(ctx, baseURL, snap)
 	if err != nil {
@@ -285,11 +306,11 @@ func (p *Provider) fetchLocalMe(ctx context.Context, baseURL string, snap *core.
 	}
 }
 
-func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
+func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *core.UsageSnapshot) ([]tagModel, bool, error) {
 	var resp tagsResponse
 	code, headers, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/tags", "", &resp)
 	if err != nil {
-		return false, fmt.Errorf("ollama: local tags request failed: %w", err)
+		return nil, false, fmt.Errorf("ollama: local tags request failed: %w", err)
 	}
 	for k, v := range parsers.RedactHeaders(headers) {
 		if strings.EqualFold(k, "X-Request-Id") {
@@ -297,7 +318,7 @@ func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *cor
 		}
 	}
 	if code != http.StatusOK {
-		return false, fmt.Errorf("ollama: local tags endpoint returned HTTP %d", code)
+		return nil, false, fmt.Errorf("ollama: local tags endpoint returned HTTP %d", code)
 	}
 
 	totalModels := float64(len(resp.Models))
@@ -329,7 +350,7 @@ func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *cor
 		snap.Raw["models_top"] = summarizeModels(resp.Models, 6)
 	}
 
-	return true, nil
+	return resp.Models, true, nil
 }
 
 func (p *Provider) fetchLocalPS(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
@@ -376,6 +397,135 @@ func (p *Provider) fetchLocalPS(ctx context.Context, baseURL string, snap *core.
 	}
 
 	return true, nil
+}
+
+func (p *Provider) fetchModelDetails(ctx context.Context, baseURL string, models []tagModel, snap *core.UsageSnapshot) error {
+	var toolsCount, visionCount, thinkingCount int
+	var maxCtx int64
+	var totalParams float64
+
+	for _, model := range models {
+		name := normalizeModelName(model.Name)
+		if name == "" {
+			continue
+		}
+
+		var show showResponse
+		code, err := doJSONPostRequest(ctx, baseURL+"/api/show", map[string]string{"name": model.Name}, &show)
+		if err != nil || code != http.StatusOK {
+			continue
+		}
+
+		prefix := "model_" + sanitizeMetricPart(name)
+
+		capSet := make(map[string]bool, len(show.Capabilities))
+		for _, cap := range show.Capabilities {
+			capSet[strings.TrimSpace(strings.ToLower(cap))] = true
+		}
+		if capSet["tools"] {
+			toolsCount++
+			snap.SetAttribute(prefix+"_capability_tools", "true")
+		}
+		if capSet["vision"] {
+			visionCount++
+			snap.SetAttribute(prefix+"_capability_vision", "true")
+		}
+		if capSet["thinking"] {
+			thinkingCount++
+			snap.SetAttribute(prefix+"_capability_thinking", "true")
+		}
+
+		if show.Details.QuantizationLevel != "" {
+			snap.SetAttribute(prefix+"_quantization", show.Details.QuantizationLevel)
+		}
+
+		// Extract context length from model_info.
+		if ctxVal, ok := extractContextLength(show.ModelInfo); ok && ctxVal > 0 {
+			setValueMetric(snap, prefix+"_context_length", float64(ctxVal), "tokens", "current")
+			if ctxVal > maxCtx {
+				maxCtx = ctxVal
+			}
+		}
+
+		// Parse parameter size for aggregation.
+		if ps := parseParameterSize(show.Details.ParameterSize); ps > 0 {
+			totalParams += ps
+		}
+
+		// Add model usage record with capability dimensions.
+		rec := core.ModelUsageRecord{
+			RawModelID: name,
+			RawSource:  "api_show",
+			Window:     "current",
+		}
+		rec.SetDimension("provider", "ollama")
+		if capSet["tools"] {
+			rec.SetDimension("capability_tools", "true")
+		}
+		if capSet["vision"] {
+			rec.SetDimension("capability_vision", "true")
+		}
+		if capSet["thinking"] {
+			rec.SetDimension("capability_thinking", "true")
+		}
+		core.AppendModelUsageRecord(snap, rec)
+	}
+
+	setValueMetric(snap, "models_with_tools", float64(toolsCount), "models", "current")
+	setValueMetric(snap, "models_with_vision", float64(visionCount), "models", "current")
+	setValueMetric(snap, "models_with_thinking", float64(thinkingCount), "models", "current")
+	if maxCtx > 0 {
+		setValueMetric(snap, "max_context_length", float64(maxCtx), "tokens", "current")
+	}
+	if totalParams > 0 {
+		setValueMetric(snap, "total_parameters", totalParams, "params", "current")
+	}
+
+	return nil
+}
+
+func extractContextLength(modelInfo map[string]any) (int64, bool) {
+	if len(modelInfo) == 0 {
+		return 0, false
+	}
+	for k, v := range modelInfo {
+		if !strings.HasSuffix(strings.ToLower(k), ".context_length") {
+			continue
+		}
+		switch val := v.(type) {
+		case float64:
+			return int64(val), true
+		case int64:
+			return val, true
+		case json.Number:
+			n, err := val.Int64()
+			if err == nil {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func parseParameterSize(s string) float64 {
+	s = strings.TrimSpace(strings.ToUpper(s))
+	if s == "" {
+		return 0
+	}
+	multiplier := 1.0
+	if strings.HasSuffix(s, "B") {
+		s = strings.TrimSuffix(s, "B")
+		multiplier = 1e9
+	}
+	if strings.HasSuffix(s, "M") {
+		s = strings.TrimSuffix(s, "M")
+		multiplier = 1e6
+	}
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return val * multiplier
 }
 
 func (p *Provider) fetchDesktopDB(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) (bool, error) {
@@ -525,6 +675,10 @@ func (p *Provider) fetchDesktopDB(ctx context.Context, acct core.AccountConfig, 
 
 	if err := populateDailySeriesFromDB(ctx, db, snap); err != nil {
 		snap.SetDiagnostic("desktop_daily_series_error", err.Error())
+	}
+
+	if err := populateThinkingMetricsFromDB(ctx, db, snap); err != nil {
+		snap.SetDiagnostic("desktop_thinking_error", err.Error())
 	}
 
 	if err := populateSettingsFromDB(ctx, db, snap); err != nil {
@@ -946,6 +1100,19 @@ func finalizeUsageWindows(snap *core.UsageSnapshot) {
 			snap.SetAttribute("block_end", blockEnd.Format(time.RFC3339))
 		}
 	}
+
+	// Ensure percentage metrics have Limit=100 and Remaining for proper gauge rendering.
+	hundred := 100.0
+	for _, key := range []string{"usage_five_hour", "usage_weekly", "usage_one_day"} {
+		if m, ok := snap.Metrics[key]; ok && m.Unit == "%" && m.Limit == nil {
+			m.Limit = core.Float64Ptr(hundred)
+			if m.Used != nil && m.Remaining == nil {
+				rem := hundred - *m.Used
+				m.Remaining = core.Float64Ptr(rem)
+			}
+			snap.Metrics[key] = m
+		}
+	}
 }
 
 func currentFiveHourBlock(now time.Time) (time.Time, time.Time) {
@@ -1093,6 +1260,72 @@ func tableHasColumn(ctx context.Context, db *sql.DB, table, column string) (bool
 	return count > 0, nil
 }
 
+func populateThinkingMetricsFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
+	hasStart, _ := tableHasColumn(ctx, db, "messages", "thinking_time_start")
+	hasEnd, _ := tableHasColumn(ctx, db, "messages", "thinking_time_end")
+	if !hasStart || !hasEnd {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT model_name,
+			COUNT(*) as think_count,
+			SUM(CAST((julianday(thinking_time_end) - julianday(thinking_time_start)) * 86400 AS REAL)) as total_think_seconds,
+			AVG(CAST((julianday(thinking_time_end) - julianday(thinking_time_start)) * 86400 AS REAL)) as avg_think_seconds
+		FROM messages
+		WHERE thinking_time_start IS NOT NULL AND thinking_time_end IS NOT NULL
+			AND thinking_time_start != '' AND thinking_time_end != ''
+		GROUP BY model_name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var totalThinkRequests int64
+	var totalThinkSeconds float64
+	var totalAvgCount int
+
+	for rows.Next() {
+		var rawModel sql.NullString
+		var thinkCount int64
+		var totalSec sql.NullFloat64
+		var avgSec sql.NullFloat64
+
+		if err := rows.Scan(&rawModel, &thinkCount, &totalSec, &avgSec); err != nil {
+			return err
+		}
+
+		totalThinkRequests += thinkCount
+		if totalSec.Valid {
+			totalThinkSeconds += totalSec.Float64
+		}
+		totalAvgCount++
+
+		if rawModel.Valid && strings.TrimSpace(rawModel.String) != "" {
+			model := normalizeModelName(rawModel.String)
+			if model != "" {
+				prefix := "model_" + sanitizeMetricPart(model)
+				if totalSec.Valid {
+					setValueMetric(snap, prefix+"_thinking_seconds", totalSec.Float64, "seconds", "all-time")
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if totalThinkRequests > 0 {
+		setValueMetric(snap, "thinking_requests", float64(totalThinkRequests), "requests", "all-time")
+		setValueMetric(snap, "total_thinking_seconds", totalThinkSeconds, "seconds", "all-time")
+		if totalAvgCount > 0 {
+			setValueMetric(snap, "avg_thinking_seconds", totalThinkSeconds/float64(totalThinkRequests), "seconds", "all-time")
+		}
+	}
+
+	return nil
+}
+
 func populateSettingsFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
 	var selectedModel sql.NullString
 	var contextLength sql.NullInt64
@@ -1110,6 +1343,36 @@ func populateSettingsFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSna
 	if contextLength.Valid && contextLength.Int64 > 0 {
 		setValueMetric(snap, "configured_context_length", float64(contextLength.Int64), "tokens", "current")
 	}
+
+	// Read additional settings columns if they exist.
+	type settingsCol struct {
+		column string
+		attr   string
+	}
+	extraCols := []settingsCol{
+		{"websearch_enabled", "websearch_enabled"},
+		{"turbo_enabled", "turbo_enabled"},
+		{"agent", "agent_mode"},
+		{"tools", "tools_enabled"},
+		{"think_enabled", "think_enabled"},
+		{"airplane_mode", "airplane_mode"},
+		{"device_id", "device_id"},
+	}
+	for _, col := range extraCols {
+		has, _ := tableHasColumn(ctx, db, "settings", col.column)
+		if !has {
+			continue
+		}
+		var val sql.NullString
+		query := fmt.Sprintf(`SELECT CAST(%s AS TEXT) FROM settings LIMIT 1`, col.column)
+		if err := db.QueryRowContext(ctx, query).Scan(&val); err != nil {
+			continue
+		}
+		if val.Valid && strings.TrimSpace(val.String) != "" {
+			snap.SetAttribute(col.attr, val.String)
+		}
+	}
+
 	return nil
 }
 
@@ -1914,6 +2177,42 @@ func doJSONRequest(ctx context.Context, method, url, apiKey string, out any) (in
 	return resp.StatusCode, resp.Header, nil
 }
 
+func doJSONPostRequest(ctx context.Context, url string, body any, out any) (int, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if out == nil {
+		io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, nil
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	if len(respBody) == 0 {
+		return resp.StatusCode, nil
+	}
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
+}
+
 func mapToSortedTimePoints(values map[string]float64) []core.TimePoint {
 	if len(values) == 0 {
 		return nil
@@ -2289,6 +2588,16 @@ type tagModel struct {
 
 type tagsResponse struct {
 	Models []tagModel `json:"models"`
+}
+
+type showResponse struct {
+	Capabilities []string       `json:"capabilities"`
+	Details      modelDetails   `json:"details"`
+	ModelInfo    map[string]any `json:"model_info"`
+	RemoteModel  string         `json:"remote_model"`
+	RemoteHost   string         `json:"remote_host"`
+	Template     string         `json:"template"`
+	ModifiedAt   string         `json:"modified_at"`
 }
 
 type processModel struct {

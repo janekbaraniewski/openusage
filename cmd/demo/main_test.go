@@ -197,15 +197,20 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		},
 		"claude_code": {
 			metrics: []string{
-				"tool_bash_calls",
-				"client_webshop_total_tokens",
+				"tool_bash",
+				"client_webapp_total_tokens",
+				"lang_go",
+				"composer_lines_added",
+				"total_prompts",
 			},
 			raw: []string{
 				"block_start",
 				"block_end",
+				"language_usage",
 			},
 			series: []string{
-				"tokens_client_webshop",
+				"tokens_client_webapp",
+				"usage_model_claude-sonnet-4-6",
 			},
 		},
 		"codex": {

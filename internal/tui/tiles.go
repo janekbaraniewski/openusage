@@ -628,8 +628,22 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 
 	// Gauges expected but not yet renderable (metrics exist but none are
 	// gauge-eligible yet, e.g. local data loaded but API billing data hasn't).
+	// Only shimmer if at least one gauge-priority metric EXISTS in the snapshot
+	// (meaning the data source reports it but it's not yet gauge-eligible).
+	// If none of the priority keys exist, the provider simply doesn't supply
+	// gauge data (e.g. free-plan accounts) — skip the gauge area entirely.
 	if len(lines) == 0 {
-		return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
+		anyPriorityPresent := false
+		for _, k := range widget.GaugePriority {
+			if _, ok := snap.Metrics[k]; ok {
+				anyPriorityPresent = true
+				break
+			}
+		}
+		if anyPriorityPresent {
+			return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
+		}
+		return nil
 	}
 	return lines
 }

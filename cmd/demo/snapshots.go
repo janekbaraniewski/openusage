@@ -18,6 +18,7 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 		"claude-code": buildClaudeCodeDemoSnapshot(now),
 		"codex-cli":   buildCodexDemoSnapshot(now),
 		"openrouter":  buildOpenRouterDemoSnapshot(now),
+		"ollama":      buildOllamaDemoSnapshot(now),
 	}
 
 	randomizeDemoSnapshots(snaps, now, rng)
