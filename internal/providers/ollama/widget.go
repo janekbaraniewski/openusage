@@ -6,9 +6,12 @@ import (
 )
 
 func dashboardWidget() core.DashboardWidget {
-	cfg := providerbase.DefaultDashboard(
+	cfg := providerbase.CodingToolDashboard(
 		providerbase.WithColorRole(core.DashboardColorRoleAuto),
-		providerbase.WithGaugePriority("usage_five_hour", "usage_weekly", "usage_one_day", "requests_today", "messages_today", "models_total", "loaded_models"),
+		providerbase.WithGaugeMaxLines(3),
+		providerbase.WithGaugePriority(
+			"usage_five_hour", "usage_weekly", "usage_one_day",
+		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{
 				Label:       "Models",
@@ -16,13 +19,13 @@ func dashboardWidget() core.DashboardWidget {
 				MaxSegments: 4,
 			},
 			core.DashboardCompactRow{
-				Label:       "Source",
-				Keys:        []string{"source_local_requests", "source_cloud_requests", "source_unknown_requests"},
-				MaxSegments: 3,
+				Label:       "Capabilities",
+				Keys:        []string{"models_with_tools", "models_with_vision", "models_with_thinking", "max_context_length"},
+				MaxSegments: 4,
 			},
 			core.DashboardCompactRow{
 				Label:       "Usage",
-				Keys:        []string{"usage_five_hour", "usage_weekly", "usage_one_day", "requests_5h", "requests_1d"},
+				Keys:        []string{"requests_5h", "requests_1d", "requests_today", "requests_7d"},
 				MaxSegments: 4,
 			},
 			core.DashboardCompactRow{
@@ -37,11 +40,31 @@ func dashboardWidget() core.DashboardWidget {
 			},
 			core.DashboardCompactRow{
 				Label:       "Realtime",
-				Keys:        []string{"requests_today", "chat_requests_today", "generate_requests_today", "avg_latency_ms_today"},
+				Keys:        []string{"chat_requests_today", "generate_requests_today", "avg_latency_ms_today", "thinking_requests"},
 				MaxSegments: 4,
 			},
 		),
-		providerbase.WithHideMetricPrefixes("model_", "source_", "client_", "provider_", "tool_"),
+		providerbase.WithHideMetricPrefixes(
+			"model_", "source_", "client_", "provider_", "tool_",
+			"total_", "http_", "avg_latency_",
+			"chat_requests_", "generate_requests_",
+		),
+		providerbase.WithHideMetricKeys(
+			"total_parameters",
+			"attachments_today", "cloud_model_stub_bytes",
+			"configured_context_length", "last_24h_requests",
+			"today_sessions", "messages_today", "messages_5h", "messages_1d",
+			"requests_5h", "requests_1d", "requests_today",
+			"tokens_5h", "tokens_1d", "tokens_today",
+			"sessions_5h", "sessions_1d", "sessions_today",
+			"tool_calls_5h", "tool_calls_1d",
+			"loaded_model_bytes", "loaded_vram_bytes", "context_window",
+			"recent_requests", "requests_7d", "7d_tokens",
+			"usage_five_hour", "usage_weekly", "usage_one_day",
+			"models_with_tools", "models_with_vision", "models_with_thinking",
+			"max_context_length", "thinking_requests",
+			"avg_thinking_seconds", "total_thinking_seconds",
+		),
 		providerbase.WithSuppressZeroMetricKeys("http_4xx_today", "http_5xx_today", "tool_calls_today"),
 		providerbase.WithMetricLabels(map[string]string{
 			"models_total":            "All Models",
@@ -49,6 +72,7 @@ func dashboardWidget() core.DashboardWidget {
 			"models_cloud":            "Cloud Models",
 			"loaded_models":           "Loaded Models",
 			"loaded_vram_bytes":       "Loaded VRAM",
+			"loaded_model_bytes":      "Loaded Size",
 			"model_storage_bytes":     "Local Storage",
 			"usage_five_hour":         "Usage 5h",
 			"usage_weekly":            "Usage Weekly",
@@ -67,12 +91,18 @@ func dashboardWidget() core.DashboardWidget {
 			"7d_tokens":               "7d Tokens (est)",
 			"requests_today":          "Today Requests",
 			"recent_requests":         "Last 24h Requests",
-			"source_local_requests":   "Local Requests",
-			"source_cloud_requests":   "Cloud Requests",
-			"source_unknown_requests": "Unknown Requests",
-			"avg_latency_ms_today":    "Avg Latency (Today)",
-			"avg_latency_ms_5h":       "Avg Latency (5h)",
-			"avg_latency_ms_1d":       "Avg Latency (1d)",
+			"requests_7d":             "7d Requests",
+			"avg_latency_ms_today":    "Avg Latency",
+			"models_with_tools":       "Tool-capable",
+			"models_with_vision":      "Vision-capable",
+			"models_with_thinking":    "Think-capable",
+			"max_context_length":      "Max Context",
+			"thinking_requests":       "Think Requests",
+			"avg_thinking_seconds":    "Avg Think Time",
+			"total_thinking_seconds":  "Total Think Time",
+			"context_window":          "Context Window",
+			"chat_requests_today":     "Chat Requests",
+			"generate_requests_today": "Generate Requests",
 		}),
 		providerbase.WithCompactLabels(map[string]string{
 			"usage_five_hour":         "5h",
@@ -82,15 +112,10 @@ func dashboardWidget() core.DashboardWidget {
 			"models_local":            "local",
 			"models_cloud":            "cloud",
 			"loaded_models":           "loaded",
-			"source_local_requests":   "local",
-			"source_cloud_requests":   "cloud",
-			"source_unknown_requests": "other",
 			"requests_5h":             "5h req",
-			"messages_5h":             "5h msg",
 			"sessions_5h":             "5h sess",
 			"tool_calls_5h":           "5h tools",
 			"requests_1d":             "1d req",
-			"messages_1d":             "1d msg",
 			"sessions_1d":             "1d sess",
 			"tool_calls_1d":           "1d tools",
 			"tokens_5h":               "5h tok",
@@ -98,12 +123,15 @@ func dashboardWidget() core.DashboardWidget {
 			"tokens_today":            "today tok",
 			"7d_tokens":               "7d tok",
 			"requests_today":          "req",
+			"requests_7d":             "7d req",
 			"chat_requests_today":     "chat",
 			"generate_requests_today": "gen",
-			"messages_today":          "msgs",
-			"sessions_today":          "sess",
-			"tool_calls_today":        "tools",
 			"avg_latency_ms_today":    "lat",
+			"models_with_tools":       "tools",
+			"models_with_vision":      "vision",
+			"models_with_thinking":    "think",
+			"max_context_length":      "max ctx",
+			"thinking_requests":       "think reqs",
 		}),
 		providerbase.WithRawGroups(core.DashboardRawGroup{
 			Label: "Ollama",
@@ -115,8 +143,7 @@ func dashboardWidget() core.DashboardWidget {
 		}),
 	)
 
-	cfg.ShowClientComposition = true
-	cfg.ShowToolComposition = true
+	cfg.ClientCompositionIncludeInterfaces = true
 
 	return cfg
 }

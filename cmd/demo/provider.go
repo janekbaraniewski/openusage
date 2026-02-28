@@ -15,6 +15,7 @@ var demoProviderIDs = map[string]bool{
 	"claude_code": true,
 	"codex":       true,
 	"openrouter":  true,
+	"ollama":      true,
 }
 
 type demoProvider struct {
@@ -125,6 +126,8 @@ func demoAccountID(providerID string) string {
 		return "openrouter"
 	case "copilot":
 		return "copilot"
+	case "ollama":
+		return "ollama"
 	default:
 		return providerID
 	}
