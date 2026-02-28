@@ -30,3 +30,11 @@ Thumbs.db
 # Debug / temp
 *.har
 *.prof
+
+# Frontend (website)
+website/node_modules/
+website/dist/
+website/.vite/
+website/.eslintcache
+website/coverage/
+website/*.tsbuildinfo
