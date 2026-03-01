@@ -687,7 +687,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 						AccountID:  a.ID,
 						Timestamp:  time.Now().UTC(),
 						Status:     core.StatusError,
-						Message:    fmt.Sprintf("no provider adapter registered for %q", a.Provider),
+						Message:    fmt.Sprintf("no provider adapter registered for %q (restart/reinstall telemetry daemon if recently added)", a.Provider),
 					},
 				}
 				return
@@ -841,10 +841,11 @@ func EnsureSocketPathAvailable(socketPath string) error {
 
 func (s *Service) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":              "ok",
-		"daemon_version":      strings.TrimSpace(version.Version),
-		"api_version":         APIVersion,
-		"integration_version": integrations.IntegrationVersion,
+		"status":                 "ok",
+		"daemon_version":         strings.TrimSpace(version.Version),
+		"api_version":            APIVersion,
+		"integration_version":    integrations.IntegrationVersion,
+		"provider_registry_hash": ProviderRegistryHash(),
 	})
 }
 

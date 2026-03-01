@@ -33,6 +33,7 @@ func AutoDetect() Result {
 	detectCursor(&result)
 	detectClaudeCode(&result)
 	detectCodex(&result)
+	detectZAICodingHelper(&result)
 	detectOllama(&result)
 	detectAider(&result)
 	detectGHCopilot(&result)
@@ -336,6 +337,8 @@ var envKeyMapping = []struct {
 	{"MISTRAL_API_KEY", "mistral", "mistral"},
 	{"DEEPSEEK_API_KEY", "deepseek", "deepseek"},
 	{"XAI_API_KEY", "xai", "xai"},
+	{"ZAI_API_KEY", "zai", "zai"},
+	{"ZHIPUAI_API_KEY", "zai", "zhipuai-auto"},
 	{"ZEN_API_KEY", "opencode", "opencode"},
 	{"OPENCODE_API_KEY", "opencode", "opencode"},
 	{"GEMINI_API_KEY", "gemini_api", "gemini-api"},

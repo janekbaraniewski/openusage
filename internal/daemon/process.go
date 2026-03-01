@@ -143,14 +143,34 @@ func HealthVersion(health HealthResponse) string {
 func HealthCurrent(health HealthResponse) bool {
 	expected := strings.TrimSpace(version.Version)
 	if expected == "" || strings.EqualFold(expected, "dev") || !IsReleaseSemver(expected) {
-		return HealthAPICompatible(health)
+		return HealthAPICompatible(health) && HealthProviderRegistryCompatible(health)
 	}
-	return strings.TrimSpace(health.DaemonVersion) == expected && HealthAPICompatible(health)
+	return strings.TrimSpace(health.DaemonVersion) == expected &&
+		HealthAPICompatible(health) &&
+		HealthProviderRegistryCompatible(health)
 }
 
 func HealthAPICompatible(health HealthResponse) bool {
 	apiVersion := strings.TrimSpace(health.APIVersion)
 	return apiVersion == "" || apiVersion == APIVersion
+}
+
+func HealthProviderRegistryCompatible(health HealthResponse) bool {
+	expected := ProviderRegistryHash()
+	if expected == "" {
+		return true
+	}
+	got := strings.TrimSpace(health.ProviderRegistry)
+	if got == "" {
+		current := strings.TrimSpace(version.Version)
+		// Backward-compatible for local/dev snapshots so `go run` workflows don't
+		// force service reinstalls against transient executable paths.
+		if current == "" || strings.EqualFold(current, "dev") || !IsReleaseSemver(current) {
+			return true
+		}
+		return false
+	}
+	return strings.EqualFold(got, expected)
 }
 
 func IsReleaseSemver(value string) bool {

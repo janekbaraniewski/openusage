@@ -1,6 +1,6 @@
 # Providers
 
-OpenUsage ships with 16 provider integrations covering coding agents, API platforms, and local tools. All providers are auto-detected when available — no manual config needed.
+OpenUsage ships with 17 provider integrations covering coding agents, API platforms, and local tools. All providers are auto-detected when available — no manual config needed.
 
 ## Coding agents & IDEs
 
@@ -101,6 +101,12 @@ Tracks rate limits and account balance.
 **Detection:** `XAI_API_KEY` environment variable
 
 Tracks rate limits and API key info.
+
+### Z.AI Coding Plan
+
+**Detection:** `ZAI_API_KEY` / `ZHIPUAI_API_KEY` environment variable, or `~/.chelper/config.yaml`
+
+Tracks coding-plan quota limits, model/tool usage, daily trend series, and optional credit balance metadata.
 
 ### Google Gemini API
 

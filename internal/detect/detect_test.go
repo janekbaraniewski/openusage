@@ -73,6 +73,84 @@ func TestDetectEnvKeys_FindsOpenCodeKey(t *testing.T) {
 	}
 }
 
+func TestDetectEnvKeys_FindsZAIKeys(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-test-key-123456")
+	t.Setenv("ZHIPUAI_API_KEY", "zhipuai-test-key-123456")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	foundZAI := false
+	foundZhipu := false
+	for _, acct := range result.Accounts {
+		if acct.Provider != "zai" {
+			continue
+		}
+		if acct.ID == "zai" && acct.APIKeyEnv == "ZAI_API_KEY" {
+			foundZAI = true
+		}
+		if acct.ID == "zhipuai-auto" && acct.APIKeyEnv == "ZHIPUAI_API_KEY" {
+			foundZhipu = true
+		}
+	}
+	if !foundZAI {
+		t.Fatal("expected ZAI_API_KEY mapping to zai")
+	}
+	if !foundZhipu {
+		t.Fatal("expected ZHIPUAI_API_KEY mapping to zhipuai-auto")
+	}
+}
+
+func TestProviderForStoredCredential_ZAI(t *testing.T) {
+	if got := providerForStoredCredential("zai"); got != "zai" {
+		t.Fatalf("providerForStoredCredential(zai) = %q, want zai", got)
+	}
+}
+
+func TestDetectZAICodingHelper_Config(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".chelper")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", configDir, err)
+	}
+	configFile := filepath.Join(configDir, "config.yaml")
+	content := `lang: en_US
+plan: glm_coding_plan_china
+api_key: test-zai-token
+`
+	if err := os.WriteFile(configFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
+
+	var result Result
+	detectZAICodingHelper(&result)
+
+	if len(result.Accounts) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(result.Accounts))
+	}
+
+	acct := result.Accounts[0]
+	if acct.ID != "zai-coding-plan-auto" {
+		t.Fatalf("account ID = %q, want zai-coding-plan-auto", acct.ID)
+	}
+	if acct.Provider != "zai" {
+		t.Fatalf("provider = %q, want zai", acct.Provider)
+	}
+	if acct.Token != "test-zai-token" {
+		t.Fatalf("token = %q, want test-zai-token", acct.Token)
+	}
+	if acct.ExtraData == nil || acct.ExtraData["plan_type"] != "glm_coding_plan_china" {
+		t.Fatalf("plan_type = %q, want glm_coding_plan_china", acct.ExtraData["plan_type"])
+	}
+	if acct.ExtraData["source"] != "chelper" {
+		t.Fatalf("source = %q, want chelper", acct.ExtraData["source"])
+	}
+}
+
 func TestDetectEnvKeys_SkipsEmpty(t *testing.T) {
 	os.Unsetenv("OPENAI_API_KEY")
 

@@ -34,10 +34,15 @@ func TestHealthCurrent(t *testing.T) {
 	t.Cleanup(func() {
 		version.Version = origVersion
 	})
+	registryHash := ProviderRegistryHash()
 
 	t.Run("release requires exact daemon version", func(t *testing.T) {
 		version.Version = "v0.4.0"
-		health := HealthResponse{DaemonVersion: "dev", APIVersion: APIVersion}
+		health := HealthResponse{
+			DaemonVersion:    "dev",
+			APIVersion:       APIVersion,
+			ProviderRegistry: registryHash,
+		}
 		if HealthCurrent(health) {
 			t.Fatal("HealthCurrent() = true, want false")
 		}
@@ -45,7 +50,11 @@ func TestHealthCurrent(t *testing.T) {
 
 	t.Run("release accepts exact daemon version", func(t *testing.T) {
 		version.Version = "v0.4.0"
-		health := HealthResponse{DaemonVersion: "v0.4.0", APIVersion: APIVersion}
+		health := HealthResponse{
+			DaemonVersion:    "v0.4.0",
+			APIVersion:       APIVersion,
+			ProviderRegistry: registryHash,
+		}
 		if !HealthCurrent(health) {
 			t.Fatal("HealthCurrent() = false, want true")
 		}
@@ -53,7 +62,11 @@ func TestHealthCurrent(t *testing.T) {
 
 	t.Run("local snapshot accepts running dev daemon", func(t *testing.T) {
 		version.Version = "v0.4.0-11-g0aa98a4-dirty"
-		health := HealthResponse{DaemonVersion: "dev", APIVersion: APIVersion}
+		health := HealthResponse{
+			DaemonVersion:    "dev",
+			APIVersion:       APIVersion,
+			ProviderRegistry: registryHash,
+		}
 		if !HealthCurrent(health) {
 			t.Fatal("HealthCurrent() = false, want true")
 		}
@@ -61,9 +74,35 @@ func TestHealthCurrent(t *testing.T) {
 
 	t.Run("api mismatch stays incompatible", func(t *testing.T) {
 		version.Version = "v0.4.0-11-g0aa98a4-dirty"
-		health := HealthResponse{DaemonVersion: "dev", APIVersion: "v2"}
+		health := HealthResponse{
+			DaemonVersion:    "dev",
+			APIVersion:       "v2",
+			ProviderRegistry: registryHash,
+		}
 		if HealthCurrent(health) {
 			t.Fatal("HealthCurrent() = true, want false")
+		}
+	})
+
+	t.Run("missing provider registry hash is incompatible for release builds", func(t *testing.T) {
+		version.Version = "v0.4.0"
+		health := HealthResponse{
+			DaemonVersion: "v0.4.0",
+			APIVersion:    APIVersion,
+		}
+		if HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = true, want false")
+		}
+	})
+
+	t.Run("missing provider registry hash is tolerated for local snapshots", func(t *testing.T) {
+		version.Version = "v0.4.0-11-g0aa98a4-dirty"
+		health := HealthResponse{
+			DaemonVersion: "dev",
+			APIVersion:    APIVersion,
+		}
+		if !HealthCurrent(health) {
+			t.Fatal("HealthCurrent() = false, want true")
 		}
 	})
 }
