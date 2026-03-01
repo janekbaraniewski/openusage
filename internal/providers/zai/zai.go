@@ -69,6 +69,12 @@ type apiError struct {
 type usageSample struct {
 	Name      string
 	Date      string
+	Client    string
+	Source    string
+	Provider  string
+	Interface string
+	Endpoint  string
+	Language  string
 	Requests  float64
 	Input     float64
 	Output    float64
@@ -84,6 +90,14 @@ type usageRollup struct {
 	Reasoning float64
 	Total     float64
 	CostUSD   float64
+}
+
+type payloadNumericStat struct {
+	Count int
+	Sum   float64
+	Last  float64
+	Min   float64
+	Max   float64
 }
 
 func New() *Provider {
@@ -183,6 +197,7 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 	if err != nil {
 		return fmt.Errorf("zai: reading models response: %w", err)
 	}
+	captureEndpointPayload(snap, "models", body)
 	for k, v := range parsers.RedactHeaders(resp.Header) {
 		snap.Raw[k] = v
 	}
@@ -255,6 +270,7 @@ func (p *Provider) fetchQuotaLimit(ctx context.Context, monitorBase, apiKey stri
 	if err != nil {
 		return fmt.Errorf("zai: quota limit request failed: %w", err)
 	}
+	captureEndpointPayload(snap, "quota_limit", body)
 
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return fmt.Errorf("HTTP %d", status)
@@ -312,6 +328,7 @@ func (p *Provider) fetchModelUsage(ctx context.Context, monitorBase, apiKey stri
 	if err != nil {
 		return fmt.Errorf("zai: model usage request failed: %w", err)
 	}
+	captureEndpointPayload(snap, "model_usage", body)
 
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return fmt.Errorf("HTTP %d", status)
@@ -364,6 +381,7 @@ func (p *Provider) fetchToolUsage(ctx context.Context, monitorBase, apiKey strin
 	if err != nil {
 		return fmt.Errorf("zai: tool usage request failed: %w", err)
 	}
+	captureEndpointPayload(snap, "tool_usage", body)
 
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return fmt.Errorf("HTTP %d", status)
@@ -416,6 +434,7 @@ func (p *Provider) fetchCredits(ctx context.Context, monitorBase, apiKey string,
 	if err != nil {
 		return fmt.Errorf("zai: credits request failed: %w", err)
 	}
+	captureEndpointPayload(snap, "credits", body)
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return nil
 	}
@@ -433,32 +452,196 @@ func (p *Provider) fetchCredits(ctx context.Context, monitorBase, apiKey string,
 		return nil
 	}
 
-	data := root
-	if nested, ok := root["data"].(map[string]any); ok {
-		data = nested
+	available, hasAvailable := parseNumberFromMap(root,
+		"total_available", "totalAvailable",
+		"remaining_balance", "remainingBalance",
+		"available_balance", "availableBalance",
+		"available", "balance", "remaining")
+	used, hasUsed := parseNumberFromMap(root,
+		"total_used", "totalUsed", "usage", "total_usage",
+		"used_balance", "usedBalance", "spent_balance", "spentBalance",
+		"spent", "consumed")
+	limit, hasLimit := parseNumberFromMap(root,
+		"total_granted", "totalGranted", "total_credits", "totalCredits",
+		"credit_limit", "creditLimit", "limit")
+
+	data := firstAnyFromMap(root, "data", "credit_grants", "creditGrants", "grants")
+	if nested, ok := data.(map[string]any); ok {
+		if !hasAvailable {
+			available, hasAvailable = parseNumberFromMap(nested,
+				"total_available", "totalAvailable",
+				"remaining_balance", "remainingBalance",
+				"available_balance", "availableBalance",
+				"available", "balance", "remaining")
+		}
+		if !hasUsed {
+			used, hasUsed = parseNumberFromMap(nested,
+				"total_used", "totalUsed", "usage", "total_usage",
+				"used_balance", "usedBalance", "spent_balance", "spentBalance",
+				"spent", "consumed")
+		}
+		if !hasLimit {
+			limit, hasLimit = parseNumberFromMap(nested,
+				"total_granted", "totalGranted", "total_credits", "totalCredits",
+				"credit_limit", "creditLimit", "limit")
+		}
 	}
 
-	available, okAvailable := parseNumberFromMap(data,
-		"total_available", "totalAvailable", "remaining_balance", "remainingBalance")
-	used, okUsed := parseNumberFromMap(data, "total_used", "totalUsed", "usage", "total_usage")
-	limit, okLimit := parseNumberFromMap(data, "total_granted", "totalGranted", "total_credits", "totalCredits")
+	grantRows := extractCreditGrantRows(root)
+	if len(grantRows) > 0 {
+		grantLimitTotal := 0.0
+		grantUsedTotal := 0.0
+		grantAvailableTotal := 0.0
+		hasGrantLimit := false
+		hasGrantUsed := false
+		hasGrantAvailable := false
+		activeGrants := 0
+		expiringSoon := 0
+		now := time.Now().UTC()
 
-	if okAvailable {
-		credit := core.Metric{Remaining: core.Float64Ptr(available), Unit: "USD", Window: "current"}
-		if okUsed {
-			credit.Used = core.Float64Ptr(used)
+		for _, grant := range grantRows {
+			grantLimit, okLimitGrant := parseNumberFromMap(grant,
+				"grant_amount", "grantAmount",
+				"total_granted", "totalGranted",
+				"amount", "total_amount", "totalAmount")
+			grantUsed, okUsedGrant := parseNumberFromMap(grant,
+				"used_amount", "usedAmount",
+				"used", "usage", "spent")
+			grantAvailable, okAvailableGrant := parseNumberFromMap(grant,
+				"available_amount", "availableAmount",
+				"remaining_amount", "remainingAmount",
+				"remaining_balance", "remainingBalance",
+				"available_balance", "availableBalance",
+				"available", "remaining")
+
+			if !okAvailableGrant && okLimitGrant && okUsedGrant {
+				grantAvailable = math.Max(grantLimit-grantUsed, 0)
+				okAvailableGrant = true
+			}
+			if !okUsedGrant && okLimitGrant && okAvailableGrant {
+				grantUsed = math.Max(grantLimit-grantAvailable, 0)
+				okUsedGrant = true
+			}
+			if !okLimitGrant && okAvailableGrant && okUsedGrant {
+				grantLimit = grantAvailable + grantUsed
+				okLimitGrant = true
+			}
+
+			if okLimitGrant {
+				grantLimitTotal += grantLimit
+				hasGrantLimit = true
+			}
+			if okUsedGrant {
+				grantUsedTotal += grantUsed
+				hasGrantUsed = true
+			}
+			if okAvailableGrant {
+				grantAvailableTotal += grantAvailable
+				hasGrantAvailable = true
+				if grantAvailable > 0 {
+					activeGrants++
+				}
+			}
+
+			if exp, ok := parseCreditGrantExpiry(grant); ok &&
+				exp.After(now) && exp.Before(now.Add(30*24*time.Hour)) && okAvailableGrant && grantAvailable > 0 {
+				expiringSoon++
+			}
 		}
-		if okLimit {
-			credit.Limit = core.Float64Ptr(limit)
+
+		if !hasAvailable && hasGrantAvailable {
+			available = grantAvailableTotal
+			hasAvailable = true
 		}
-		snap.Metrics["credit_balance"] = credit
-		snap.Metrics["credits"] = credit
-		snap.Raw["credits_api"] = "ok"
-		state.hasUsageData = true
+		if !hasUsed && hasGrantUsed {
+			used = grantUsedTotal
+			hasUsed = true
+		}
+		if !hasLimit && hasGrantLimit {
+			limit = grantLimitTotal
+			hasLimit = true
+		}
+
+		snap.Raw["credit_grants_count"] = strconv.Itoa(len(grantRows))
+		setUsedMetric(snap, "credit_grants_count", float64(len(grantRows)), "grants", "current")
+		if activeGrants > 0 {
+			snap.Raw["credit_active_grants"] = strconv.Itoa(activeGrants)
+			snap.SetAttribute("credit_active_grants", strconv.Itoa(activeGrants))
+			setUsedMetric(snap, "credit_active_grants", float64(activeGrants), "grants", "current")
+		}
+		if expiringSoon > 0 {
+			snap.Raw["credit_expiring_30d"] = strconv.Itoa(expiringSoon)
+			setUsedMetric(snap, "credit_expiring_30d", float64(expiringSoon), "grants", "30d")
+		}
+	}
+
+	if !hasAvailable && hasLimit && hasUsed {
+		available = math.Max(limit-used, 0)
+		hasAvailable = true
+	}
+	if !hasUsed && hasLimit && hasAvailable {
+		used = math.Max(limit-available, 0)
+		hasUsed = true
+	}
+	if !hasLimit && hasAvailable && hasUsed {
+		limit = available + used
+		hasLimit = true
+	}
+
+	if !hasAvailable && !hasUsed && !hasLimit {
+		snap.Raw["credits_api"] = "empty"
 		return nil
 	}
 
-	snap.Raw["credits_api"] = "empty"
+	credit := core.Metric{Unit: "USD", Window: "current"}
+	if hasAvailable {
+		credit.Remaining = core.Float64Ptr(available)
+		setUsedMetric(snap, "available_balance", available, "USD", "current")
+		setUsedMetric(snap, "limit_remaining", available, "USD", "current")
+	}
+	if hasUsed {
+		credit.Used = core.Float64Ptr(used)
+	}
+	if hasLimit {
+		credit.Limit = core.Float64Ptr(limit)
+	}
+	if hasLimit && hasUsed && credit.Remaining == nil {
+		credit.Remaining = core.Float64Ptr(math.Max(limit-used, 0))
+	}
+
+	snap.Metrics["credit_balance"] = credit
+	snap.Metrics["credits"] = credit
+
+	if hasLimit && hasUsed {
+		remaining := math.Max(limit-used, 0)
+		snap.Metrics["spend_limit"] = core.Metric{
+			Limit:     core.Float64Ptr(limit),
+			Used:      core.Float64Ptr(used),
+			Remaining: core.Float64Ptr(remaining),
+			Unit:      "USD",
+			Window:    "current",
+		}
+		snap.Metrics["plan_spend"] = core.Metric{
+			Limit:     core.Float64Ptr(limit),
+			Used:      core.Float64Ptr(used),
+			Remaining: core.Float64Ptr(remaining),
+			Unit:      "USD",
+			Window:    "current",
+		}
+		pct := 0.0
+		if limit > 0 {
+			pct = clamp((used/limit)*100, 0, 100)
+		}
+		snap.Metrics["plan_percent_used"] = core.Metric{
+			Used:   core.Float64Ptr(pct),
+			Limit:  core.Float64Ptr(100),
+			Unit:   "%",
+			Window: "current",
+		}
+	}
+
+	snap.Raw["credits_api"] = "ok"
+	state.hasUsageData = true
 	return nil
 }
 
@@ -705,58 +888,128 @@ func applyQuotaData(raw json.RawMessage, snap *core.UsageSnapshot, state *provid
 
 func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	today := time.Now().UTC().Format("2006-01-02")
+	hasNamedModelRows := false
+	for _, sample := range samples {
+		if strings.TrimSpace(sample.Name) != "" {
+			hasNamedModelRows = true
+			break
+		}
+	}
 
 	total := usageRollup{}
 	todayRollup := usageRollup{}
 	modelTotals := make(map[string]*usageRollup)
+	clientTotals := make(map[string]*usageRollup)
+	sourceTotals := make(map[string]*usageRollup)
+	providerTotals := make(map[string]*usageRollup)
+	interfaceTotals := make(map[string]*usageRollup)
+	endpointTotals := make(map[string]*usageRollup)
+	languageTotals := make(map[string]*usageRollup)
 	dailyCost := make(map[string]float64)
 	dailyReq := make(map[string]float64)
 	dailyTokens := make(map[string]float64)
 	modelDailyTokens := make(map[string]map[string]float64)
+	clientDailyReq := make(map[string]map[string]float64)
+	sourceDailyReq := make(map[string]map[string]float64)
+	sourceTodayReq := make(map[string]float64)
 
 	for _, sample := range samples {
-		key := sample.Name
-		if key == "" {
-			key = "unknown"
+		modelName := strings.TrimSpace(sample.Name)
+		useRow := !hasNamedModelRows || modelName != ""
+		if !useRow {
+			lang := normalizeUsageDimension(sample.Language)
+			if lang != "" {
+				accumulateUsageRollup(languageTotals, lang, sample)
+			}
+			if client := normalizeUsageDimension(sample.Client); client != "" {
+				accumulateUsageRollup(clientTotals, client, sample)
+				if sample.Date != "" {
+					if _, ok := clientDailyReq[client]; !ok {
+						clientDailyReq[client] = make(map[string]float64)
+					}
+					clientDailyReq[client][sample.Date] += sample.Requests
+				}
+			}
+			if source := normalizeUsageDimension(sample.Source); source != "" {
+				accumulateUsageRollup(sourceTotals, source, sample)
+				if sample.Date == today {
+					sourceTodayReq[source] += sample.Requests
+				}
+				if sample.Date != "" {
+					if _, ok := sourceDailyReq[source]; !ok {
+						sourceDailyReq[source] = make(map[string]float64)
+					}
+					sourceDailyReq[source][sample.Date] += sample.Requests
+				}
+			}
+			if provider := normalizeUsageDimension(sample.Provider); provider != "" {
+				accumulateUsageRollup(providerTotals, provider, sample)
+			}
+			if iface := normalizeUsageDimension(sample.Interface); iface != "" {
+				accumulateUsageRollup(interfaceTotals, iface, sample)
+			}
+			if endpoint := normalizeUsageDimension(sample.Endpoint); endpoint != "" {
+				accumulateUsageRollup(endpointTotals, endpoint, sample)
+			}
+			continue
 		}
-
-		acc, ok := modelTotals[key]
-		if !ok {
-			acc = &usageRollup{}
-			modelTotals[key] = acc
+		accumulateRollupValues(&total, sample)
+		if modelName != "" {
+			accumulateUsageRollup(modelTotals, modelName, sample)
 		}
-
-		acc.Requests += sample.Requests
-		acc.Input += sample.Input
-		acc.Output += sample.Output
-		acc.Reasoning += sample.Reasoning
-		acc.Total += sample.Total
-		acc.CostUSD += sample.CostUSD
-
-		total.Requests += sample.Requests
-		total.Input += sample.Input
-		total.Output += sample.Output
-		total.Reasoning += sample.Reasoning
-		total.Total += sample.Total
-		total.CostUSD += sample.CostUSD
 
 		if sample.Date == today {
-			todayRollup.Requests += sample.Requests
-			todayRollup.Input += sample.Input
-			todayRollup.Output += sample.Output
-			todayRollup.Reasoning += sample.Reasoning
-			todayRollup.Total += sample.Total
-			todayRollup.CostUSD += sample.CostUSD
+			accumulateRollupValues(&todayRollup, sample)
 		}
 
-		if sample.Date != "" {
+		if sample.Date != "" && modelName != "" {
 			dailyCost[sample.Date] += sample.CostUSD
 			dailyReq[sample.Date] += sample.Requests
 			dailyTokens[sample.Date] += sample.Total
-			if _, ok := modelDailyTokens[key]; !ok {
-				modelDailyTokens[key] = make(map[string]float64)
+			if _, ok := modelDailyTokens[modelName]; !ok {
+				modelDailyTokens[modelName] = make(map[string]float64)
 			}
-			modelDailyTokens[key][sample.Date] += sample.Total
+			modelDailyTokens[modelName][sample.Date] += sample.Total
+		}
+
+		if client := normalizeUsageDimension(sample.Client); client != "" {
+			accumulateUsageRollup(clientTotals, client, sample)
+			if sample.Date != "" {
+				if _, ok := clientDailyReq[client]; !ok {
+					clientDailyReq[client] = make(map[string]float64)
+				}
+				clientDailyReq[client][sample.Date] += sample.Requests
+			}
+		}
+
+		if source := normalizeUsageDimension(sample.Source); source != "" {
+			accumulateUsageRollup(sourceTotals, source, sample)
+			if sample.Date == today {
+				sourceTodayReq[source] += sample.Requests
+			}
+			if sample.Date != "" {
+				if _, ok := sourceDailyReq[source]; !ok {
+					sourceDailyReq[source] = make(map[string]float64)
+				}
+				sourceDailyReq[source][sample.Date] += sample.Requests
+			}
+		}
+
+		if provider := normalizeUsageDimension(sample.Provider); provider != "" {
+			accumulateUsageRollup(providerTotals, provider, sample)
+		}
+		if iface := normalizeUsageDimension(sample.Interface); iface != "" {
+			accumulateUsageRollup(interfaceTotals, iface, sample)
+		}
+		if endpoint := normalizeUsageDimension(sample.Endpoint); endpoint != "" {
+			accumulateUsageRollup(endpointTotals, endpoint, sample)
+		}
+		lang := normalizeUsageDimension(sample.Language)
+		if lang == "" {
+			lang = inferModelUsageLanguage(modelName)
+		}
+		if lang != "" {
+			accumulateUsageRollup(languageTotals, lang, sample)
 		}
 	}
 
@@ -772,9 +1025,14 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	setUsedMetric(snap, "7d_requests", total.Requests, "requests", "7d")
 	setUsedMetric(snap, "7d_tokens", total.Total, "tokens", "7d")
 	setUsedMetric(snap, "7d_api_cost", total.CostUSD, "USD", "7d")
+	setUsedMetric(snap, "window_requests", total.Requests, "requests", "7d")
+	setUsedMetric(snap, "window_tokens", total.Total, "tokens", "7d")
+	setUsedMetric(snap, "window_cost", total.CostUSD, "USD", "7d")
 
 	setUsedMetric(snap, "active_models", float64(len(modelTotals)), "models", "7d")
 	snap.Raw["model_usage_window"] = "7d"
+	snap.Raw["activity_models"] = strconv.Itoa(len(modelTotals))
+	snap.SetAttribute("activity_models", strconv.Itoa(len(modelTotals)))
 
 	modelKeys := make([]string, 0, len(modelTotals))
 	for k := range modelTotals {
@@ -818,6 +1076,68 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		snap.AppendModelUsage(rec)
 	}
 
+	clientKeys := sortedUsageRollupKeys(clientTotals)
+	for _, client := range clientKeys {
+		stats := clientTotals[client]
+		slug := sanitizeMetricSlug(client)
+		setUsedMetric(snap, "client_"+slug+"_total_tokens", stats.Total, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_input_tokens", stats.Input, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_output_tokens", stats.Output, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_reasoning_tokens", stats.Reasoning, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_requests", stats.Requests, "requests", "7d")
+		snap.Raw["client_"+slug+"_name"] = client
+	}
+
+	sourceKeys := sortedUsageRollupKeys(sourceTotals)
+	for _, source := range sourceKeys {
+		stats := sourceTotals[source]
+		slug := sanitizeMetricSlug(source)
+		setUsedMetric(snap, "source_"+slug+"_requests", stats.Requests, "requests", "7d")
+		if reqToday := sourceTodayReq[source]; reqToday > 0 {
+			setUsedMetric(snap, "source_"+slug+"_requests_today", reqToday, "requests", "1d")
+		}
+	}
+
+	providerKeys := sortedUsageRollupKeys(providerTotals)
+	for _, provider := range providerKeys {
+		stats := providerTotals[provider]
+		slug := sanitizeMetricSlug(provider)
+		setUsedMetric(snap, "provider_"+slug+"_cost_usd", stats.CostUSD, "USD", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_requests", stats.Requests, "requests", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_input_tokens", stats.Input, "tokens", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_output_tokens", stats.Output, "tokens", "7d")
+		snap.Raw["provider_"+slug+"_name"] = provider
+	}
+
+	interfaceKeys := sortedUsageRollupKeys(interfaceTotals)
+	for _, iface := range interfaceKeys {
+		stats := interfaceTotals[iface]
+		slug := sanitizeMetricSlug(iface)
+		setUsedMetric(snap, "interface_"+slug, stats.Requests, "calls", "7d")
+	}
+
+	endpointKeys := sortedUsageRollupKeys(endpointTotals)
+	for _, endpoint := range endpointKeys {
+		stats := endpointTotals[endpoint]
+		slug := sanitizeMetricSlug(endpoint)
+		setUsedMetric(snap, "endpoint_"+slug+"_requests", stats.Requests, "requests", "7d")
+	}
+
+	languageKeys := sortedUsageRollupKeys(languageTotals)
+	languageReqSummary := make(map[string]float64, len(languageKeys))
+	for _, lang := range languageKeys {
+		stats := languageTotals[lang]
+		slug := sanitizeMetricSlug(lang)
+		value := stats.Requests
+		if value <= 0 {
+			value = stats.Total
+		}
+		setUsedMetric(snap, "lang_"+slug, value, "requests", "7d")
+		languageReqSummary[lang] = stats.Requests
+	}
+	setUsedMetric(snap, "active_languages", float64(len(languageTotals)), "languages", "7d")
+	setUsedMetric(snap, "activity_providers", float64(len(providerTotals)), "providers", "7d")
+
 	snap.DailySeries["cost"] = mapToSeries(dailyCost)
 	snap.DailySeries["requests"] = mapToSeries(dailyReq)
 	snap.DailySeries["tokens"] = mapToSeries(dailyTokens)
@@ -840,6 +1160,83 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 			snap.DailySeries[key] = mapToSeries(dayMap)
 		}
 	}
+
+	for client, dayMap := range clientDailyReq {
+		if len(dayMap) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_client_"+sanitizeMetricSlug(client)] = mapToSeries(dayMap)
+	}
+	for source, dayMap := range sourceDailyReq {
+		if len(dayMap) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_source_"+sanitizeMetricSlug(source)] = mapToSeries(dayMap)
+	}
+
+	modelShare := make(map[string]float64, len(modelTotals))
+	modelUnit := "tok"
+	for model, stats := range modelTotals {
+		if stats.Total > 0 {
+			modelShare[model] = stats.Total
+			continue
+		}
+		if stats.Requests > 0 {
+			modelShare[model] = stats.Requests
+			modelUnit = "req"
+		}
+	}
+	if summary := summarizeShareUsage(modelShare, 6); summary != "" {
+		snap.Raw["model_usage"] = summary
+		snap.Raw["model_usage_unit"] = modelUnit
+	}
+	clientShare := make(map[string]float64, len(clientTotals))
+	for client, stats := range clientTotals {
+		if stats.Total > 0 {
+			clientShare[client] = stats.Total
+		} else if stats.Requests > 0 {
+			clientShare[client] = stats.Requests
+		}
+	}
+	if summary := summarizeShareUsage(clientShare, 6); summary != "" {
+		snap.Raw["client_usage"] = summary
+	}
+	sourceShare := make(map[string]float64, len(sourceTotals))
+	for source, stats := range sourceTotals {
+		if stats.Requests > 0 {
+			sourceShare[source] = stats.Requests
+		}
+	}
+	if summary := summarizeCountUsage(sourceShare, "req", 6); summary != "" {
+		snap.Raw["source_usage"] = summary
+	}
+	providerShare := make(map[string]float64, len(providerTotals))
+	for provider, stats := range providerTotals {
+		if stats.CostUSD > 0 {
+			providerShare[provider] = stats.CostUSD
+		} else if stats.Requests > 0 {
+			providerShare[provider] = stats.Requests
+		}
+	}
+	if summary := summarizeShareUsage(providerShare, 6); summary != "" {
+		snap.Raw["provider_usage"] = summary
+	}
+	if summary := summarizeCountUsage(languageReqSummary, "req", 8); summary != "" {
+		snap.Raw["language_usage"] = summary
+	}
+
+	snap.Raw["activity_days"] = strconv.Itoa(len(dailyReq))
+	snap.Raw["activity_clients"] = strconv.Itoa(len(clientTotals))
+	snap.Raw["activity_sources"] = strconv.Itoa(len(sourceTotals))
+	snap.Raw["activity_providers"] = strconv.Itoa(len(providerTotals))
+	snap.Raw["activity_languages"] = strconv.Itoa(len(languageTotals))
+	snap.Raw["activity_endpoints"] = strconv.Itoa(len(endpointTotals))
+	snap.SetAttribute("activity_days", snap.Raw["activity_days"])
+	snap.SetAttribute("activity_clients", snap.Raw["activity_clients"])
+	snap.SetAttribute("activity_sources", snap.Raw["activity_sources"])
+	snap.SetAttribute("activity_providers", snap.Raw["activity_providers"])
+	snap.SetAttribute("activity_languages", snap.Raw["activity_languages"])
+	snap.SetAttribute("activity_endpoints", snap.Raw["activity_endpoints"])
 }
 
 func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
@@ -884,13 +1281,23 @@ func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	for _, tool := range keys {
 		stats := toolTotals[tool]
 		slug := sanitizeMetricSlug(tool)
-		setUsedMetric(snap, "tool_"+slug+"_calls", stats.Requests, "calls", "7d")
-		setUsedMetric(snap, "tool_"+slug+"_cost_usd", stats.CostUSD, "USD", "7d")
+		setUsedMetric(snap, "tool_"+slug, stats.Requests, "calls", "7d")
+		setUsedMetric(snap, "toolcost_"+slug+"_usd", stats.CostUSD, "USD", "7d")
 		snap.Raw["tool_"+slug+"_name"] = tool
 	}
 
 	if len(dailyCalls) > 0 {
 		snap.DailySeries["tool_calls"] = mapToSeries(dailyCalls)
+	}
+
+	toolSummary := make(map[string]float64, len(toolTotals))
+	for tool, stats := range toolTotals {
+		if stats.Requests > 0 {
+			toolSummary[tool] = stats.Requests
+		}
+	}
+	if summary := summarizeCountUsage(toolSummary, "calls", 8); summary != "" {
+		snap.Raw["tool_usage"] = summary
 	}
 }
 
@@ -910,47 +1317,213 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 	}
 
 	samples := make([]usageSample, 0, len(rows))
-	namedRows := 0
 	for _, row := range rows {
 		sample := usageSample{
-			Date: normalizeDate(firstAnyFromMap(row, "date", "day", "time", "timestamp", "created_at", "createdAt")),
+			Date: normalizeDate(firstAnyByPaths(row,
+				[]string{"date"},
+				[]string{"day"},
+				[]string{"time"},
+				[]string{"timestamp"},
+				[]string{"created_at"},
+				[]string{"createdAt"},
+				[]string{"ts"},
+				[]string{"meta", "date"},
+				[]string{"meta", "timestamp"},
+			)),
 		}
 
 		if kind == "model" {
-			sample.Name = firstStringFromMap(row, "model", "model_id", "modelId", "model_name", "modelName")
+			sample.Name = firstStringByPaths(row,
+				[]string{"model"},
+				[]string{"model_id"},
+				[]string{"modelId"},
+				[]string{"model_name"},
+				[]string{"modelName"},
+				[]string{"name"},
+				[]string{"model", "id"},
+				[]string{"model", "name"},
+				[]string{"model", "modelId"},
+				[]string{"meta", "model"},
+			)
 		} else {
-			sample.Name = firstStringFromMap(row, "tool", "tool_name", "toolName", "name", "tool_id", "toolId")
+			sample.Name = firstStringByPaths(row,
+				[]string{"tool"},
+				[]string{"tool_name"},
+				[]string{"toolName"},
+				[]string{"name"},
+				[]string{"tool_id"},
+				[]string{"toolId"},
+				[]string{"tool", "name"},
+				[]string{"tool", "id"},
+				[]string{"meta", "tool"},
+			)
 		}
-		if sample.Name != "" {
-			namedRows++
+		sample.Client = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"client"},
+			[]string{"client_name"},
+			[]string{"clientName"},
+			[]string{"application"},
+			[]string{"app"},
+			[]string{"sdk"},
+			[]string{"meta", "client"},
+			[]string{"client", "name"},
+			[]string{"context", "client"},
+		))
+		sample.Source = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"source"},
+			[]string{"source_name"},
+			[]string{"sourceName"},
+			[]string{"origin"},
+			[]string{"channel"},
+			[]string{"meta", "source"},
+			[]string{"meta", "origin"},
+		))
+		sample.Provider = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"provider"},
+			[]string{"provider_name"},
+			[]string{"providerName"},
+			[]string{"upstream_provider"},
+			[]string{"upstreamProvider"},
+			[]string{"model", "provider"},
+			[]string{"model", "provider_name"},
+			[]string{"route", "provider_name"},
+		))
+		sample.Interface = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"interface"},
+			[]string{"interface_name"},
+			[]string{"interfaceName"},
+			[]string{"mode"},
+			[]string{"client_type"},
+			[]string{"entrypoint"},
+			[]string{"meta", "interface"},
+		))
+		sample.Endpoint = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"endpoint"},
+			[]string{"endpoint_name"},
+			[]string{"endpointName"},
+			[]string{"route"},
+			[]string{"path"},
+			[]string{"meta", "endpoint"},
+		))
+		sample.Language = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"language"},
+			[]string{"language_name"},
+			[]string{"languageName"},
+			[]string{"lang"},
+			[]string{"programming_language"},
+			[]string{"programmingLanguage"},
+			[]string{"code_language"},
+			[]string{"codeLanguage"},
+			[]string{"input_language"},
+			[]string{"inputLanguage"},
+			[]string{"file_language"},
+			[]string{"meta", "language"},
+		))
+		bucket := strings.ToLower(strings.TrimSpace(firstStringByPaths(row, []string{"__usage_bucket"})))
+		usageKey := normalizeUsageDimension(firstStringByPaths(row, []string{"__usage_key"}))
+
+		if sample.Language == "" && usageKey != "" && strings.Contains(bucket, "language") {
+			sample.Language = usageKey
+		}
+		if sample.Client == "" && usageKey != "" && strings.Contains(bucket, "client") {
+			sample.Client = usageKey
+		}
+		if sample.Source == "" && usageKey != "" && strings.Contains(bucket, "source") {
+			sample.Source = usageKey
+		}
+		if sample.Provider == "" && usageKey != "" && strings.Contains(bucket, "provider") {
+			sample.Provider = usageKey
+		}
+		if sample.Interface == "" && usageKey != "" && strings.Contains(bucket, "interface") {
+			sample.Interface = usageKey
+		}
+		if sample.Endpoint == "" && usageKey != "" && strings.Contains(bucket, "endpoint") {
+			sample.Endpoint = usageKey
+		}
+		if kind == "model" && sample.Name == "" && usageKey != "" && (strings.Contains(bucket, "model") || bucket == "") {
+			sample.Name = usageKey
+		}
+		if kind == "tool" && sample.Name == "" && usageKey != "" && (strings.Contains(bucket, "tool") || bucket == "") {
+			sample.Name = usageKey
 		}
 
-		sample.Requests, _ = parseNumberFromMap(row, "requests", "request_count", "requestCount", "calls", "count", "usageCount")
-		sample.Input, _ = parseNumberFromMap(row, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
-		sample.Output, _ = parseNumberFromMap(row, "output_tokens", "outputTokens", "completion_tokens", "completionTokens")
-		sample.Reasoning, _ = parseNumberFromMap(row, "reasoning_tokens", "reasoningTokens")
-		sample.Total, _ = parseNumberFromMap(row, "total_tokens", "totalTokens", "tokens")
+		if sample.Source == "" && sample.Client != "" {
+			sample.Source = sample.Client
+		}
+		if sample.Client == "" && sample.Source != "" {
+			sample.Client = sample.Source
+		}
+
+		if sample.Provider == "" {
+			modelProviderHint := normalizeUsageDimension(firstStringByPaths(row,
+				[]string{"model", "provider"},
+				[]string{"model", "provider_name"},
+				[]string{"model", "vendor"},
+			))
+			if modelProviderHint != "" {
+				sample.Provider = modelProviderHint
+			}
+		}
+
+		sample.Requests, _ = firstNumberByPaths(row,
+			[]string{"requests"},
+			[]string{"request_count"},
+			[]string{"requestCount"},
+			[]string{"request_num"},
+			[]string{"requestNum"},
+			[]string{"calls"},
+			[]string{"count"},
+			[]string{"usageCount"},
+			[]string{"usage", "requests"},
+			[]string{"stats", "requests"},
+		)
+		sample.Input, _ = firstNumberByPaths(row,
+			[]string{"input_tokens"},
+			[]string{"inputTokens"},
+			[]string{"input_token_count"},
+			[]string{"prompt_tokens"},
+			[]string{"promptTokens"},
+			[]string{"usage", "input_tokens"},
+			[]string{"usage", "inputTokens"},
+		)
+		sample.Output, _ = firstNumberByPaths(row,
+			[]string{"output_tokens"},
+			[]string{"outputTokens"},
+			[]string{"completion_tokens"},
+			[]string{"completionTokens"},
+			[]string{"usage", "output_tokens"},
+			[]string{"usage", "outputTokens"},
+		)
+		sample.Reasoning, _ = firstNumberByPaths(row,
+			[]string{"reasoning_tokens"},
+			[]string{"reasoningTokens"},
+			[]string{"thinking_tokens"},
+			[]string{"thinkingTokens"},
+			[]string{"usage", "reasoning_tokens"},
+		)
+		sample.Total, _ = firstNumberByPaths(row,
+			[]string{"total_tokens"},
+			[]string{"totalTokens"},
+			[]string{"tokens"},
+			[]string{"token_count"},
+			[]string{"tokenCount"},
+			[]string{"usage", "total_tokens"},
+			[]string{"usage", "totalTokens"},
+		)
 		if sample.Total == 0 {
 			sample.Total = sample.Input + sample.Output + sample.Reasoning
 		}
 		sample.CostUSD = parseCostUSD(row)
+		if kind == "model" && sample.Language == "" {
+			sample.Language = inferModelUsageLanguage(sample.Name)
+		}
 
 		if sample.Requests > 0 || sample.Total > 0 || sample.CostUSD > 0 || sample.Name != "" {
 			samples = append(samples, sample)
 		}
 	}
 
-	if namedRows == 0 {
-		return samples
-	}
-
-	filtered := make([]usageSample, 0, len(samples))
-	for _, sample := range samples {
-		if strings.TrimSpace(sample.Name) != "" {
-			filtered = append(filtered, sample)
-		}
-	}
-	return filtered
+	return samples
 }
 
 func extractUsageRows(v any) []map[string]any {
@@ -971,25 +1544,65 @@ func extractUsageRows(v any) []map[string]any {
 		}
 
 		keys := []string{
-			"data", "items", "list", "rows", "records", "usage", "model_usage", "tool_usage", "result",
+			"data", "items", "list", "rows", "records", "usage",
+			"model_usage", "modelUsage",
+			"tool_usage", "toolUsage",
+			"language_usage", "languageUsage",
+			"client_usage", "clientUsage",
+			"source_usage", "sourceUsage",
+			"provider_usage", "providerUsage",
+			"endpoint_usage", "endpointUsage",
+			"result",
 		}
+		var combined []map[string]any
 		for _, key := range keys {
-			if nested, ok := value[key]; ok {
+			if nested, ok := mapValue(value, key); ok {
 				rows := extractUsageRows(nested)
 				if len(rows) > 0 {
-					return rows
+					for _, row := range rows {
+						tagged := row
+						if firstStringFromMap(row, "__usage_bucket") == "" {
+							tagged = cloneStringAnyMap(row)
+							tagged["__usage_bucket"] = key
+						}
+						combined = append(combined, tagged)
+					}
 				}
 			}
 		}
+		if len(combined) > 0 {
+			return combined
+		}
 
-		var best []map[string]any
-		for _, nested := range value {
+		mapKeys := make([]string, 0, len(value))
+		for key := range value {
+			mapKeys = append(mapKeys, key)
+		}
+		sort.Strings(mapKeys)
+
+		var all []map[string]any
+		for _, key := range mapKeys {
+			nested := value[key]
 			rows := extractUsageRows(nested)
-			if len(rows) > len(best) {
-				best = rows
+			if len(rows) > 0 {
+				for _, row := range rows {
+					tagged := row
+					if firstStringFromMap(row, "__usage_key") == "" {
+						tagged = cloneStringAnyMap(row)
+						tagged["__usage_key"] = key
+					}
+					all = append(all, tagged)
+				}
+				continue
+			}
+			if numeric, ok := parseFloat(nested); ok {
+				all = append(all, map[string]any{
+					"requests":    numeric,
+					"__usage_key": key,
+				})
 			}
 		}
-		return best
+		return all
 	default:
 		return nil
 	}
@@ -1022,6 +1635,83 @@ func extractLimitRows(v any) []map[string]any {
 	}
 }
 
+func extractCreditGrantRows(v any) []map[string]any {
+	switch value := v.(type) {
+	case []any:
+		var rows []map[string]any
+		for _, item := range value {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if looksLikeCreditGrantRow(row) {
+				rows = append(rows, row)
+				continue
+			}
+			rows = append(rows, extractCreditGrantRows(row)...)
+		}
+		return rows
+	case map[string]any:
+		if looksLikeCreditGrantRow(value) {
+			return []map[string]any{value}
+		}
+
+		var rows []map[string]any
+		for _, key := range []string{"credit_grants", "creditGrants", "grants", "items", "list", "data"} {
+			nested, ok := mapValue(value, key)
+			if !ok {
+				continue
+			}
+			rows = append(rows, extractCreditGrantRows(nested)...)
+		}
+		if len(rows) > 0 {
+			return rows
+		}
+
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			rows = append(rows, extractCreditGrantRows(value[key])...)
+		}
+		return rows
+	default:
+		return nil
+	}
+}
+
+func looksLikeCreditGrantRow(row map[string]any) bool {
+	if row == nil {
+		return false
+	}
+	_, hasAmount := parseNumberFromMap(row,
+		"grant_amount", "grantAmount",
+		"total_granted", "totalGranted",
+		"amount", "total_amount", "totalAmount")
+	_, hasUsed := parseNumberFromMap(row,
+		"used_amount", "usedAmount",
+		"used", "usage", "spent")
+	_, hasAvailable := parseNumberFromMap(row,
+		"available_amount", "availableAmount",
+		"remaining_amount", "remainingAmount",
+		"remaining_balance", "remainingBalance",
+		"available_balance", "availableBalance",
+		"available", "remaining")
+	return hasAmount || hasUsed || hasAvailable
+}
+
+func parseCreditGrantExpiry(row map[string]any) (time.Time, bool) {
+	raw := firstAnyFromMap(row,
+		"expires_at", "expiresAt", "expiry_time", "expiryTime",
+		"expire_at", "expireAt", "expiration_time", "expirationTime")
+	if raw == nil {
+		return time.Time{}, false
+	}
+	return parseTimeValue(raw)
+}
+
 func mapsFromArray(values []any) []map[string]any {
 	rows := make([]map[string]any, 0, len(values))
 	for _, item := range values {
@@ -1034,18 +1724,208 @@ func mapsFromArray(values []any) []map[string]any {
 	return rows
 }
 
+func cloneStringAnyMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in)+2)
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 func looksLikeUsageRow(row map[string]any) bool {
 	if row == nil {
 		return false
 	}
-	hasName := firstStringFromMap(row, "model", "model_id", "modelName", "tool", "tool_name", "name") != ""
+	hasName := firstStringByPaths(row,
+		[]string{"model"},
+		[]string{"model_id"},
+		[]string{"modelName"},
+		[]string{"tool"},
+		[]string{"tool_name"},
+		[]string{"name"},
+		[]string{"model", "name"},
+		[]string{"tool", "name"},
+	) != ""
 	if hasName {
 		return true
 	}
-	_, hasReq := parseNumberFromMap(row, "requests", "request_count", "calls", "count")
-	_, hasTokens := parseNumberFromMap(row, "total_tokens", "tokens", "input_tokens", "output_tokens")
-	_, hasCost := parseNumberFromMap(row, "cost", "total_cost", "cost_usd", "total_cost_usd")
+	_, hasReq := firstNumberByPaths(row, []string{"requests"}, []string{"request_count"}, []string{"calls"}, []string{"count"}, []string{"usage", "requests"})
+	_, hasTokens := firstNumberByPaths(row, []string{"total_tokens"}, []string{"tokens"}, []string{"input_tokens"}, []string{"output_tokens"}, []string{"usage", "total_tokens"})
+	_, hasCost := firstNumberByPaths(row, []string{"cost"}, []string{"total_cost"}, []string{"cost_usd"}, []string{"total_cost_usd"}, []string{"usage", "cost_usd"})
 	return hasReq || hasTokens || hasCost
+}
+
+func captureEndpointPayload(snap *core.UsageSnapshot, endpoint string, body []byte) {
+	if snap == nil {
+		return
+	}
+	endpointSlug := sanitizeMetricSlug(endpoint)
+	if endpointSlug == "" {
+		endpointSlug = "unknown"
+	}
+	prefix := "api_" + endpointSlug
+
+	if len(body) == 0 {
+		return
+	}
+	setUsedMetric(snap, prefix+"_payload_bytes", float64(len(body)), "bytes", "current")
+
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		snap.Raw[prefix+"_parse"] = "non_json"
+		return
+	}
+	snap.Raw[prefix+"_parse"] = "json"
+
+	numericByPath := make(map[string]*payloadNumericStat)
+	leafCount := 0
+	objectCount := 0
+	arrayCount := 0
+	walkPayloadStats("", payload, numericByPath, &leafCount, &objectCount, &arrayCount)
+
+	setUsedMetric(snap, prefix+"_field_count", float64(leafCount), "fields", "current")
+	setUsedMetric(snap, prefix+"_object_nodes", float64(objectCount), "objects", "current")
+	setUsedMetric(snap, prefix+"_array_nodes", float64(arrayCount), "arrays", "current")
+	setUsedMetric(snap, prefix+"_numeric_count", float64(len(numericByPath)), "fields", "current")
+
+	type numericEntry struct {
+		path string
+		stat *payloadNumericStat
+	}
+	entries := make([]numericEntry, 0, len(numericByPath))
+	for path, stat := range numericByPath {
+		if stat == nil {
+			continue
+		}
+		entries = append(entries, numericEntry{path: path, stat: stat})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		left := math.Abs(entries[i].stat.Sum)
+		right := math.Abs(entries[j].stat.Sum)
+		if left != right {
+			return left > right
+		}
+		return entries[i].path < entries[j].path
+	})
+
+	if len(entries) > 0 {
+		top := entries
+		if len(top) > 8 {
+			top = top[:8]
+		}
+		parts := make([]string, 0, len(top))
+		for _, entry := range top {
+			value := entry.stat.Last
+			if entry.stat.Count > 1 {
+				value = entry.stat.Sum
+			}
+			path := strings.TrimSpace(entry.path)
+			if path == "" {
+				path = "root"
+			}
+			parts = append(parts, fmt.Sprintf("%s=%s", path, formatPayloadValue(value)))
+		}
+		snap.Raw[prefix+"_numeric_top"] = strings.Join(parts, ", ")
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].path < entries[j].path
+	})
+	emitted := 0
+	maxDynamicMetrics := 96
+	for _, entry := range entries {
+		if emitted >= maxDynamicMetrics {
+			break
+		}
+		pathSlug := sanitizeMetricSlug(strings.Trim(entry.path, "._"))
+		if pathSlug == "" {
+			pathSlug = "root"
+		}
+		metricKey := prefix + "_" + pathSlug
+		if _, exists := snap.Metrics[metricKey]; exists {
+			continue
+		}
+		value := entry.stat.Last
+		if entry.stat.Count > 1 {
+			value = entry.stat.Sum
+		}
+		setUsedMetric(snap, metricKey, value, "value", "current")
+		emitted++
+	}
+	if len(entries) > emitted {
+		snap.Raw[prefix+"_numeric_omitted"] = strconv.Itoa(len(entries) - emitted)
+	}
+}
+
+func walkPayloadStats(path string, v any, numericByPath map[string]*payloadNumericStat, leafCount, objectCount, arrayCount *int) {
+	switch value := v.(type) {
+	case map[string]any:
+		if objectCount != nil {
+			*objectCount = *objectCount + 1
+		}
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			next := appendPayloadPath(path, key)
+			walkPayloadStats(next, value[key], numericByPath, leafCount, objectCount, arrayCount)
+		}
+	case []any:
+		if arrayCount != nil {
+			*arrayCount = *arrayCount + 1
+		}
+		next := appendPayloadPath(path, "items")
+		for _, item := range value {
+			walkPayloadStats(next, item, numericByPath, leafCount, objectCount, arrayCount)
+		}
+	default:
+		if leafCount != nil {
+			*leafCount = *leafCount + 1
+		}
+		if numericByPath == nil {
+			return
+		}
+		numeric, ok := parseFloat(v)
+		if !ok {
+			return
+		}
+		key := strings.TrimSpace(path)
+		if key == "" {
+			key = "root"
+		}
+		stat := numericByPath[key]
+		if stat == nil {
+			stat = &payloadNumericStat{Min: numeric, Max: numeric}
+			numericByPath[key] = stat
+		}
+		stat.Count++
+		stat.Sum += numeric
+		stat.Last = numeric
+		if numeric < stat.Min {
+			stat.Min = numeric
+		}
+		if numeric > stat.Max {
+			stat.Max = numeric
+		}
+	}
+}
+
+func appendPayloadPath(path, segment string) string {
+	path = strings.TrimSpace(path)
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return path
+	}
+	if path == "" {
+		return segment
+	}
+	return path + "." + segment
+}
+
+func formatPayloadValue(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 func applyUsageRange(reqURL string) (string, error) {
@@ -1103,20 +1983,46 @@ func parseAPIError(body []byte) (code, msg string) {
 }
 
 func parseCostUSD(row map[string]any) float64 {
-	value, key, ok := firstNumberWithKey(row,
-		"cost_usd", "costUSD", "total_cost_usd", "totalCostUSD",
-		"total_cost", "totalCost", "api_cost", "apiCost",
-		"cost", "amount", "total_amount", "totalAmount",
-		"cost_cents", "costCents", "total_cost_cents", "totalCostCents",
+	if cents, ok := firstNumberByPaths(row,
+		[]string{"cost_cents"},
+		[]string{"costCents"},
+		[]string{"total_cost_cents"},
+		[]string{"totalCostCents"},
+		[]string{"usage", "cost_cents"},
+	); ok {
+		return cents / 100
+	}
+
+	if micros, ok := firstNumberByPaths(row,
+		[]string{"cost_micros"},
+		[]string{"costMicros"},
+		[]string{"total_cost_micros"},
+		[]string{"totalCostMicros"},
+	); ok {
+		return micros / 1_000_000
+	}
+
+	value, ok := firstNumberByPaths(row,
+		[]string{"cost_usd"},
+		[]string{"costUSD"},
+		[]string{"total_cost_usd"},
+		[]string{"totalCostUSD"},
+		[]string{"total_cost"},
+		[]string{"totalCost"},
+		[]string{"api_cost"},
+		[]string{"apiCost"},
+		[]string{"cost"},
+		[]string{"amount"},
+		[]string{"total_amount"},
+		[]string{"totalAmount"},
+		[]string{"usage", "cost_usd"},
+		[]string{"usage", "costUSD"},
+		[]string{"usage", "cost"},
 	)
-	if !ok {
-		return 0
+	if ok {
+		return value
 	}
-	lowerKey := strings.ToLower(key)
-	if strings.Contains(lowerKey, "cent") {
-		return value / 100
-	}
-	return value
+	return 0
 }
 
 func parseNumberFromMap(row map[string]any, keys ...string) (float64, bool) {
@@ -1126,7 +2032,7 @@ func parseNumberFromMap(row map[string]any, keys ...string) (float64, bool) {
 
 func firstNumberWithKey(row map[string]any, keys ...string) (float64, string, bool) {
 	for _, key := range keys {
-		raw, ok := row[key]
+		raw, ok := mapValue(row, key)
 		if !ok {
 			continue
 		}
@@ -1183,7 +2089,7 @@ func parseFloat(v any) (float64, bool) {
 
 func firstStringFromMap(row map[string]any, keys ...string) string {
 	for _, key := range keys {
-		raw, ok := row[key]
+		raw, ok := mapValue(row, key)
 		if !ok || raw == nil {
 			continue
 		}
@@ -1197,11 +2103,224 @@ func firstStringFromMap(row map[string]any, keys ...string) string {
 
 func firstAnyFromMap(row map[string]any, keys ...string) any {
 	for _, key := range keys {
-		if raw, ok := row[key]; ok {
+		if raw, ok := mapValue(row, key); ok {
 			return raw
 		}
 	}
 	return nil
+}
+
+func mapValue(row map[string]any, key string) (any, bool) {
+	if row == nil {
+		return nil, false
+	}
+	if raw, ok := row[key]; ok {
+		return raw, true
+	}
+	for candidate, raw := range row {
+		if strings.EqualFold(candidate, key) {
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
+func valueAtPath(row map[string]any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+
+	var current any = row
+	for _, segment := range path {
+		node, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := mapValue(node, segment)
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func firstAnyByPaths(row map[string]any, paths ...[]string) any {
+	for _, path := range paths {
+		if raw, ok := valueAtPath(row, path); ok {
+			return raw
+		}
+	}
+	return nil
+}
+
+func firstStringByPaths(row map[string]any, paths ...[]string) string {
+	for _, path := range paths {
+		raw, ok := valueAtPath(row, path)
+		if !ok || raw == nil {
+			continue
+		}
+		text := strings.TrimSpace(anyToString(raw))
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func firstNumberByPaths(row map[string]any, paths ...[]string) (float64, bool) {
+	for _, path := range paths {
+		raw, ok := valueAtPath(row, path)
+		if !ok {
+			continue
+		}
+		if parsed, ok := parseFloat(raw); ok {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func normalizeUsageDimension(raw string) string {
+	value := strings.TrimSpace(raw)
+	value = strings.Trim(value, "\"'")
+	if value == "" {
+		return ""
+	}
+	switch strings.ToLower(value) {
+	case "null", "nil", "n/a", "na", "unknown":
+		return ""
+	default:
+		return value
+	}
+}
+
+func accumulateRollupValues(acc *usageRollup, sample usageSample) {
+	if acc == nil {
+		return
+	}
+	acc.Requests += sample.Requests
+	acc.Input += sample.Input
+	acc.Output += sample.Output
+	acc.Reasoning += sample.Reasoning
+	acc.Total += sample.Total
+	acc.CostUSD += sample.CostUSD
+}
+
+func accumulateUsageRollup(target map[string]*usageRollup, key string, sample usageSample) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	acc, ok := target[key]
+	if !ok {
+		acc = &usageRollup{}
+		target[key] = acc
+	}
+	accumulateRollupValues(acc, sample)
+}
+
+func sortedUsageRollupKeys(values map[string]*usageRollup) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func summarizeShareUsage(values map[string]float64, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	var (
+		list  []item
+		total float64
+	)
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+		total += value
+	}
+	if len(list) == 0 || total <= 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f%%", normalizeUsageLabel(entry.name), entry.value/total*100))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func summarizeCountUsage(values map[string]float64, unit string, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	var list []item
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f %s", normalizeUsageLabel(entry.name), entry.value, unit))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func normalizeUsageLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	replacer := strings.NewReplacer("_", " ", "-", " ")
+	return replacer.Replace(value)
+}
+
+func inferModelUsageLanguage(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(model, "coder"), strings.Contains(model, "code"), strings.Contains(model, "codestral"), strings.Contains(model, "devstral"):
+		return "code"
+	case strings.Contains(model, "vision"), strings.Contains(model, "image"), strings.Contains(model, "multimodal"), strings.Contains(model, "omni"), strings.Contains(model, "vl"):
+		return "multimodal"
+	case strings.Contains(model, "audio"), strings.Contains(model, "speech"), strings.Contains(model, "voice"), strings.Contains(model, "whisper"), strings.Contains(model, "tts"), strings.Contains(model, "stt"):
+		return "audio"
+	case strings.Contains(model, "reason"), strings.Contains(model, "thinking"):
+		return "reasoning"
+	default:
+		return "general"
+	}
 }
 
 func anyToString(v any) string {
