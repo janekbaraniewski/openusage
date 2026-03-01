@@ -27,6 +27,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Experimental.Analytics {
 		t.Error("expected experimental analytics to be false by default")
 	}
+	if cfg.Dashboard.View != DashboardViewGrid {
+		t.Errorf("default dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
+	}
 	if !cfg.AutoDetect {
 		t.Error("expected auto_detect to be true by default")
 	}
@@ -419,6 +422,7 @@ func TestLoadFrom_DashboardProviders(t *testing.T) {
 
 	content := `{
   "dashboard": {
+    "view": "STACKED",
     "providers": [
       {"account_id": "openai-personal"},
       {"account_id": "anthropic-work", "enabled": false},
@@ -455,6 +459,9 @@ func TestLoadFrom_DashboardProviders(t *testing.T) {
 	if second.Enabled {
 		t.Error("expected anthropic-work enabled=false")
 	}
+	if cfg.Dashboard.View != DashboardViewStacked {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewStacked)
+	}
 }
 
 func TestSaveDashboardProvidersTo(t *testing.T) {
@@ -462,6 +469,7 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.Theme = "Nord"
+	cfg.Dashboard.View = DashboardViewSplit
 	if err := SaveTo(path, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -497,6 +505,85 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 	}
 	if loaded.Dashboard.Providers[1].Enabled {
 		t.Error("expected anthropic-work enabled=false")
+	}
+	if loaded.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view should be preserved, got %q", loaded.Dashboard.View)
+	}
+}
+
+func TestLoadFrom_DashboardViewDefaultsToGrid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"unknown"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dashboard.View != DashboardViewGrid {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
+	}
+}
+
+func TestSaveDashboardViewTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	cfg.Dashboard.Providers = []DashboardProviderConfig{
+		{AccountID: "openai-personal", Enabled: true},
+	}
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveDashboardViewTo(path, DashboardViewSplit); err != nil {
+		t.Fatalf("SaveDashboardViewTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+	if loaded.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view = %q, want %q", loaded.Dashboard.View, DashboardViewSplit)
+	}
+	if len(loaded.Dashboard.Providers) != 1 || loaded.Dashboard.Providers[0].AccountID != "openai-personal" {
+		t.Errorf("dashboard.providers should be preserved, got %#v", loaded.Dashboard.Providers)
+	}
+}
+
+func TestLoadFrom_DashboardViewTabs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"tabs"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dashboard.View != DashboardViewTabs {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewTabs)
+	}
+}
+
+func TestLoadFrom_DashboardLegacyListMapsToSplit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"list"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
 	}
 }
 

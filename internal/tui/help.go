@@ -125,8 +125,9 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	actionKeys := []struct{ key, desc string }{
 		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
-		{"Mouse wheel", "Scroll (single-column tiles/detail)"},
-		{"PgUp/PgDn", "Scroll selected tile"},
+		{"v / Shift+V", "Cycle dashboard view"},
+		{"Mouse wheel", "Scroll panels/details/widgets"},
+		{"PgUp/PgDn", "Scroll panel or selected widget"},
 		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
 		{"Ctrl+O", "Expand/collapse usage breakdowns"},
 		{"[ ]", "Switch detail tabs"},

@@ -36,7 +36,7 @@ func TestMouseWheelScrollsTilesInSingleColumn(t *testing.T) {
 	}
 }
 
-func TestMouseWheelDoesNotScrollTilesInMultiColumn(t *testing.T) {
+func TestMouseWheelScrollsSelectedWidgetInMultiColumn(t *testing.T) {
 	m := Model{
 		width:     220,
 		height:    40,
@@ -49,8 +49,8 @@ func TestMouseWheelDoesNotScrollTilesInMultiColumn(t *testing.T) {
 		Button: tea.MouseButtonWheelDown,
 	})
 	got := updated.(Model).tileOffset
-	if got != 0 {
-		t.Fatalf("tileOffset = %d, want 0", got)
+	if got <= 0 {
+		t.Fatalf("tileOffset = %d, want > 0", got)
 	}
 }
 
@@ -70,5 +70,24 @@ func TestMouseWheelUpClampsTileOffsetAtZero(t *testing.T) {
 	got := updated.(Model).tileOffset
 	if got != 0 {
 		t.Fatalf("tileOffset = %d, want 0", got)
+	}
+}
+
+func TestMouseWheelScrollsWidgetInSplitView(t *testing.T) {
+	m := Model{
+		width:         220,
+		height:        40,
+		dashboardView: dashboardViewSplit,
+		sortedIDs:     []string{"a", "b", "c"},
+		snapshots:     testSnapshots("a", "b", "c"),
+	}
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	got := updated.(Model).tileOffset
+	if got <= 0 {
+		t.Fatalf("tileOffset = %d, want > 0", got)
 	}
 }
