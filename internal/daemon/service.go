@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
@@ -104,6 +105,13 @@ func (m ServiceManager) InstallHint() string {
 }
 
 func (m ServiceManager) Install() error {
+	if isTransientExecutablePath(m.exePath) {
+		return fmt.Errorf(
+			"refusing to install telemetry daemon service from transient executable %q (likely from `go run`); build a stable binary first, then run `./bin/openusage telemetry daemon install`",
+			m.exePath,
+		)
+	}
+
 	switch m.Kind {
 	case "darwin":
 		return m.installLaunchd()
@@ -353,28 +361,136 @@ func UninstallService(socketPath string) error {
 }
 
 func ServiceStatus(socketPath string) error {
+	socketPath = strings.TrimSpace(socketPath)
 	manager, err := NewServiceManager(socketPath)
 	if err != nil {
 		return err
 	}
-	client := NewClient(socketPath)
-	health, healthErr := client.HealthInfo(context.Background())
 
-	fmt.Printf("daemon kind=%s installed=%t running=%t socket=%s\n",
+	fmt.Printf(
+		"daemon kind=%s supported=%t installed=%t socket=%s\n",
 		manager.Kind,
+		manager.IsSupported(),
 		manager.IsInstalled(),
-		healthErr == nil,
 		socketPath,
 	)
-	if healthErr != nil {
-		fmt.Printf("daemon health_error=%v\n", healthErr)
+	fmt.Printf("daemon unit_path=%s\n", strings.TrimSpace(manager.unitPath))
+	fmt.Printf("daemon executable=%s transient=%t\n", strings.TrimSpace(manager.exePath), isTransientExecutablePath(manager.exePath))
+	if _, statErr := os.Stat(strings.TrimSpace(manager.exePath)); statErr == nil {
+		fmt.Println("daemon executable_exists=true")
 	} else {
+		fmt.Printf("daemon executable_exists=false err=%v\n", statErr)
+	}
+
+	client := NewClient(socketPath)
+	healthCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	health, healthErr := client.HealthInfo(healthCtx)
+
+	if healthErr != nil {
+		fmt.Println("daemon running=false")
+		fmt.Printf("daemon health_error=%v\n", healthErr)
+		if owner := SocketOwnerSummary(socketPath); strings.TrimSpace(owner) != "" {
+			fmt.Printf("daemon socket_owner=%q\n", owner)
+		}
+		fmt.Println("daemon diagnostics_begin")
+		fmt.Println(StartupDiagnostics(manager, socketPath))
+		fmt.Println("daemon diagnostics_end")
+	} else {
+		fmt.Println("daemon running=true")
 		fmt.Printf(
-			"daemon version=%s api=%s integration=%s\n",
+			"daemon version=%s api=%s integration=%s provider_registry=%s\n",
 			strings.TrimSpace(health.DaemonVersion),
 			strings.TrimSpace(health.APIVersion),
 			strings.TrimSpace(health.IntegrationVersion),
+			strings.TrimSpace(health.ProviderRegistry),
+		)
+		fmt.Printf(
+			"daemon compatible=%t api_compatible=%t provider_registry_compatible=%t\n",
+			HealthCurrent(health),
+			HealthAPICompatible(health),
+			HealthProviderRegistryCompatible(health),
 		)
 	}
 	return nil
+}
+
+func SocketOwnerSummary(socketPath string) string {
+	socketPath = strings.TrimSpace(socketPath)
+	if socketPath == "" {
+		return ""
+	}
+	if _, err := os.Stat(socketPath); err != nil {
+		return ""
+	}
+	out, err := RunCommand("lsof", "-n", "-Fpcn", socketPath)
+	if err == nil {
+		if summary := parseLSOFFirstRecord(out); summary != "" {
+			return summary
+		}
+	}
+
+	out, err = RunCommand("lsof", "-n", socketPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(TailTextLines(out, 2))
+}
+
+func isTransientExecutablePath(path string) bool {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return true
+	}
+	normalized := filepath.ToSlash(strings.ToLower(filepath.Clean(p)))
+	if strings.Contains(normalized, "/go-build") && strings.Contains(normalized, "/exe/") {
+		return true
+	}
+	tmpRoot := filepath.ToSlash(strings.ToLower(filepath.Clean(os.TempDir())))
+	if tmpRoot == "" || tmpRoot == "." {
+		return false
+	}
+	return strings.HasPrefix(normalized, tmpRoot+"/go-build")
+}
+
+func parseLSOFFirstRecord(out string) string {
+	var (
+		pid  string
+		cmd  string
+		name string
+	)
+	for _, rawLine := range strings.Split(out, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		switch line[0] {
+		case 'p':
+			if pid == "" {
+				pid = strings.TrimSpace(line[1:])
+			}
+		case 'c':
+			if cmd == "" {
+				cmd = strings.TrimSpace(line[1:])
+			}
+		case 'n':
+			if name == "" {
+				name = strings.TrimSpace(line[1:])
+			}
+		}
+		if pid != "" && cmd != "" && name != "" {
+			break
+		}
+	}
+	var parts []string
+	if pid != "" {
+		parts = append(parts, "pid="+pid)
+	}
+	if cmd != "" {
+		parts = append(parts, "command="+cmd)
+	}
+	if name != "" {
+		parts = append(parts, "socket="+name)
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
