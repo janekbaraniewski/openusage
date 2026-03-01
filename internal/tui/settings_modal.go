@@ -40,8 +40,9 @@ func (m *Model) openSettingsModal() {
 	if len(m.providerOrder) > 0 {
 		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
 	}
-	if len(Themes) > 0 {
-		m.settingsThemeCursor = clamp(ActiveThemeIdx, 0, len(Themes)-1)
+	themes := AvailableThemes()
+	if len(themes) > 0 {
+		m.settingsThemeCursor = clamp(ActiveThemeIndex(), 0, len(themes)-1)
 	} else {
 		m.settingsThemeCursor = 0
 	}
@@ -158,21 +159,22 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.persistDashboardPrefsCmd()
 		}
 	case settingsTabTheme:
+		themes := AvailableThemes()
 		switch msg.String() {
 		case "up", "k":
 			if m.settingsThemeCursor > 0 {
 				m.settingsThemeCursor--
 			}
 		case "down", "j":
-			if m.settingsThemeCursor < len(Themes)-1 {
+			if m.settingsThemeCursor < len(themes)-1 {
 				m.settingsThemeCursor++
 			}
 		case " ", "enter":
-			if len(Themes) == 0 {
+			if len(themes) == 0 {
 				return m, nil
 			}
-			m.settingsThemeCursor = clamp(m.settingsThemeCursor, 0, len(Themes)-1)
-			name := Themes[m.settingsThemeCursor].Name
+			m.settingsThemeCursor = clamp(m.settingsThemeCursor, 0, len(themes)-1)
+			name := themes[m.settingsThemeCursor].Name
 			if SetThemeByName(name) {
 				m.settingsStatus = "saving theme..."
 				return m, m.persistThemeCmd(name)
@@ -466,23 +468,25 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 }
 
 func (m Model) renderSettingsThemeBody(w, h int) string {
-	if len(Themes) == 0 {
+	themes := AvailableThemes()
+	if len(themes) == 0 {
 		return padToSize(dimStyle.Render("No themes available."), w, h)
 	}
 
-	cursor := clamp(m.settingsThemeCursor, 0, len(Themes)-1)
-	start, end := listWindow(len(Themes), cursor, h)
+	cursor := clamp(m.settingsThemeCursor, 0, len(themes)-1)
+	start, end := listWindow(len(themes), cursor, h)
+	activeThemeIdx := ActiveThemeIndex()
 	lines := make([]string, 0, h)
 
 	for i := start; i < end; i++ {
-		theme := Themes[i]
+		theme := themes[i]
 		prefix := "  "
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
 		current := "  "
-		if i == ActiveThemeIdx {
+		if i == activeThemeIdx {
 			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
 		}
 		lines = append(lines, fmt.Sprintf("%s%s%s %s", prefix, current, theme.Icon, theme.Name))

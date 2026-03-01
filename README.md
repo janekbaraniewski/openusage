@@ -60,15 +60,15 @@ Auto-detection picks up local tools and common API key env vars. No config neede
 
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, and per-model usage at a glance
-- **16 providers** — covers coding agents (Claude Code, Cursor, Copilot, Codex, Gemini CLI), API platforms (OpenAI, Anthropic, OpenRouter, and more), and local tools (Ollama)
+- **17 providers** — covers coding agents (Claude Code, Cursor, Copilot, Codex, Gemini CLI), API platforms (OpenAI, Anthropic, OpenRouter, and more), and local tools (Ollama)
 - **Background tracking** — collects data continuously, even when the dashboard is closed
 - **Deep cost insights** — combine providers like OpenCode + OpenRouter for breakdowns by model, tool, and hosting provider
 - **Tool integrations** — optional hooks for Claude Code, Codex CLI, and OpenCode provide richer, real-time usage data
-- **Customizable** — 7 themes, adjustable time windows, configurable thresholds, provider reordering
+- **Customizable** — 15+ built-in themes, adjustable time windows, configurable thresholds, provider reordering, plus external theme files
 
 ## Supported providers
 
-16 provider integrations covering coding agents, API platforms, and local tools. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
+17 provider integrations covering coding agents, API platforms, and local tools. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
 
 ### Claude Code
 
@@ -111,6 +111,7 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **Mistral AI** | `MISTRAL_API_KEY` | Subscription, usage endpoints |
 | **DeepSeek** | `DEEPSEEK_API_KEY` | Rate limits, account balance |
 | **xAI (Grok)** | `XAI_API_KEY` | Rate limits, API key info |
+| **Z.AI Coding Plan** | `ZAI_API_KEY` / `ZHIPUAI_API_KEY` | Coding plan quotas, model/tool usage, daily trends |
 | **Google Gemini API** | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Rate limits, model limits |
 | **Alibaba Cloud** | `ALIBABA_CLOUD_API_KEY` | Quotas, credits, per-model tracking |
 
@@ -137,6 +138,21 @@ No config file needed — auto-detection handles everything. Override or extend 
 ```
 
 Full reference: [`configs/example_settings.json`](configs/example_settings.json)
+
+### External themes
+
+You can define custom themes as JSON files loaded at startup from:
+
+- `~/.config/openusage/themes/*.json` (macOS/Linux)
+- `%APPDATA%\\openusage\\themes\\*.json` (Windows)
+- Any extra directory in `OPENUSAGE_THEME_DIR` (path-list separated)
+
+Theme files use the same color token fields as built-ins. See the full grayscale example:
+[`configs/themes/grayscale.json`](configs/themes/grayscale.json)
+
+Companion presets matched to official upstream palettes:
+- OpenCode companion: `OpenCode Official` ([configs/themes/slate_opencode.json](configs/themes/slate_opencode.json))
+- Claude Code companion: `Claude Code Dark` ([configs/themes/warm_claude.json](configs/themes/warm_claude.json))
 
 ## Daemon
 
