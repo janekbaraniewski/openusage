@@ -285,6 +285,12 @@ func TestFetch_ParsesModelAndToolUsage(t *testing.T) {
 	if metric, ok := snap.Metrics["credit_balance"]; !ok || metric.Remaining == nil || *metric.Remaining != 72.5 {
 		t.Fatalf("credit_balance metric missing or invalid: %+v", metric)
 	}
+	if metric, ok := snap.Metrics["spend_limit"]; !ok || metric.Used == nil || metric.Limit == nil || *metric.Used != 27.5 || *metric.Limit != 100 {
+		t.Fatalf("spend_limit metric missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["plan_percent_used"]; !ok || metric.Used == nil || *metric.Used < 27.49 || *metric.Used > 27.51 {
+		t.Fatalf("plan_percent_used metric missing or invalid: %+v", metric)
+	}
 	if len(snap.ModelUsage) != 2 {
 		t.Fatalf("ModelUsage records = %d, want 2", len(snap.ModelUsage))
 	}
@@ -293,6 +299,133 @@ func TestFetch_ParsesModelAndToolUsage(t *testing.T) {
 	}
 	if got := snap.Raw["model_usage_api"]; got != "ok" {
 		t.Fatalf("model_usage_api = %q, want ok", got)
+	}
+}
+
+func TestFetch_EnrichesUsageDimensionsAndSummaries(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/coding/paas/v4/models":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"object":"list","data":[{"id":"glm-4.5"},{"id":"glm-5"}]}`))
+		case "/api/monitor/usage/quota/limit":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":20,"usage":1000,"currentValue":200}]}}`))
+		case "/api/monitor/usage/model-usage":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{
+				"success": true,
+				"data": {
+					"items": [
+						{
+							"date": "%s",
+							"model": {"name":"glm-4.5"},
+							"client": "openusage",
+							"source": "openusage",
+							"provider": "z-ai",
+							"interface": "cli",
+							"language": "go",
+							"requestCount": 3,
+							"inputTokens": 100,
+							"outputTokens": 40,
+							"reasoningTokens": 10,
+							"totalCostUSD": 0.20
+						},
+						{
+							"date": "%s",
+							"modelName": "glm-5",
+							"clientName": "openusage",
+							"source_name": "openusage",
+							"provider_name": "z-ai",
+							"interface_name": "cli",
+							"programming_language": "go",
+							"requests": 1,
+							"total_tokens": 500,
+							"cost_cents": 12
+						}
+					]
+				}
+			}`, today, today)))
+		case "/api/monitor/usage/tool-usage":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{
+				"success": true,
+				"data": {
+					"rows": [
+						{"date":"%s","tool_name":"read","calls":4},
+						{"date":"%s","tool":{"name":"bash"},"request_count":2}
+					]
+				}
+			}`, today, today)))
+		case "/api/paas/v4/user/credit_grants":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"total_granted":20,"total_used":1.32,"total_available":18.68}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("TEST_ZAI_KEY", "test-zai-key")
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), testAccount(server.URL))
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %v, want %v", snap.Status, core.StatusOK)
+	}
+
+	if metric, ok := snap.Metrics["client_openusage_total_tokens"]; !ok || metric.Used == nil || *metric.Used != 650 {
+		t.Fatalf("client_openusage_total_tokens missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["client_openusage_requests"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("client_openusage_requests missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["source_openusage_requests_today"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("source_openusage_requests_today missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["provider_z-ai_requests"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("provider_z-ai_requests missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["interface_cli"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("interface_cli missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["lang_go"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("lang_go missing or invalid: %+v", metric)
+	}
+
+	if metric, ok := snap.Metrics["tool_read"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("tool_read missing or invalid: %+v", metric)
+	}
+	if _, ok := snap.Metrics["tool_read_calls"]; ok {
+		t.Fatalf("tool_read_calls should not be emitted anymore")
+	}
+	if metric, ok := snap.Metrics["window_requests"]; !ok || metric.Used == nil || *metric.Used != 4 {
+		t.Fatalf("window_requests missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["window_tokens"]; !ok || metric.Used == nil || *metric.Used != 650 {
+		t.Fatalf("window_tokens missing or invalid: %+v", metric)
+	}
+	if metric, ok := snap.Metrics["window_cost"]; !ok || metric.Used == nil || *metric.Used != 0.32 {
+		t.Fatalf("window_cost missing or invalid: %+v", metric)
+	}
+
+	for _, key := range []string{"model_usage", "client_usage", "tool_usage", "language_usage", "provider_usage"} {
+		if strings.TrimSpace(snap.Raw[key]) == "" {
+			t.Fatalf("raw summary %q should be populated", key)
+		}
+	}
+	for _, key := range []string{"activity_days", "activity_models", "activity_clients", "activity_sources", "activity_providers"} {
+		if strings.TrimSpace(snap.Raw[key]) == "" {
+			t.Fatalf("raw activity key %q should be populated", key)
+		}
+	}
+	if !strings.Contains(snap.Raw["tool_usage"], "read") {
+		t.Fatalf("tool_usage = %q, expected read", snap.Raw["tool_usage"])
 	}
 }
 

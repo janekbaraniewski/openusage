@@ -69,6 +69,12 @@ type apiError struct {
 type usageSample struct {
 	Name      string
 	Date      string
+	Client    string
+	Source    string
+	Provider  string
+	Interface string
+	Endpoint  string
+	Language  string
 	Requests  float64
 	Input     float64
 	Output    float64
@@ -453,6 +459,33 @@ func (p *Provider) fetchCredits(ctx context.Context, monitorBase, apiKey string,
 		}
 		snap.Metrics["credit_balance"] = credit
 		snap.Metrics["credits"] = credit
+		if okLimit && okUsed {
+			snap.Metrics["spend_limit"] = core.Metric{
+				Limit:     core.Float64Ptr(limit),
+				Used:      core.Float64Ptr(used),
+				Remaining: core.Float64Ptr(math.Max(limit-used, 0)),
+				Unit:      "USD",
+				Window:    "current",
+			}
+			snap.Metrics["plan_spend"] = core.Metric{
+				Limit:     core.Float64Ptr(limit),
+				Used:      core.Float64Ptr(used),
+				Remaining: core.Float64Ptr(math.Max(limit-used, 0)),
+				Unit:      "USD",
+				Window:    "current",
+			}
+			pct := 0.0
+			if limit > 0 {
+				pct = clamp((used/limit)*100, 0, 100)
+			}
+			snap.Metrics["plan_percent_used"] = core.Metric{
+				Used:   core.Float64Ptr(pct),
+				Limit:  core.Float64Ptr(100),
+				Unit:   "%",
+				Window: "current",
+			}
+		}
+		setUsedMetric(snap, "limit_remaining", available, "USD", "current")
 		snap.Raw["credits_api"] = "ok"
 		state.hasUsageData = true
 		return nil
@@ -709,54 +742,80 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	total := usageRollup{}
 	todayRollup := usageRollup{}
 	modelTotals := make(map[string]*usageRollup)
+	clientTotals := make(map[string]*usageRollup)
+	sourceTotals := make(map[string]*usageRollup)
+	providerTotals := make(map[string]*usageRollup)
+	interfaceTotals := make(map[string]*usageRollup)
+	endpointTotals := make(map[string]*usageRollup)
+	languageTotals := make(map[string]*usageRollup)
 	dailyCost := make(map[string]float64)
 	dailyReq := make(map[string]float64)
 	dailyTokens := make(map[string]float64)
 	modelDailyTokens := make(map[string]map[string]float64)
+	clientDailyReq := make(map[string]map[string]float64)
+	sourceDailyReq := make(map[string]map[string]float64)
+	sourceTodayReq := make(map[string]float64)
 
 	for _, sample := range samples {
-		key := sample.Name
-		if key == "" {
-			key = "unknown"
+		modelName := strings.TrimSpace(sample.Name)
+		if modelName == "" {
+			modelName = "unknown"
 		}
-
-		acc, ok := modelTotals[key]
-		if !ok {
-			acc = &usageRollup{}
-			modelTotals[key] = acc
-		}
-
-		acc.Requests += sample.Requests
-		acc.Input += sample.Input
-		acc.Output += sample.Output
-		acc.Reasoning += sample.Reasoning
-		acc.Total += sample.Total
-		acc.CostUSD += sample.CostUSD
-
-		total.Requests += sample.Requests
-		total.Input += sample.Input
-		total.Output += sample.Output
-		total.Reasoning += sample.Reasoning
-		total.Total += sample.Total
-		total.CostUSD += sample.CostUSD
+		accumulateUsageRollup(modelTotals, modelName, sample)
+		accumulateRollupValues(&total, sample)
 
 		if sample.Date == today {
-			todayRollup.Requests += sample.Requests
-			todayRollup.Input += sample.Input
-			todayRollup.Output += sample.Output
-			todayRollup.Reasoning += sample.Reasoning
-			todayRollup.Total += sample.Total
-			todayRollup.CostUSD += sample.CostUSD
+			accumulateRollupValues(&todayRollup, sample)
 		}
 
 		if sample.Date != "" {
 			dailyCost[sample.Date] += sample.CostUSD
 			dailyReq[sample.Date] += sample.Requests
 			dailyTokens[sample.Date] += sample.Total
-			if _, ok := modelDailyTokens[key]; !ok {
-				modelDailyTokens[key] = make(map[string]float64)
+			if _, ok := modelDailyTokens[modelName]; !ok {
+				modelDailyTokens[modelName] = make(map[string]float64)
 			}
-			modelDailyTokens[key][sample.Date] += sample.Total
+			modelDailyTokens[modelName][sample.Date] += sample.Total
+		}
+
+		if client := normalizeUsageDimension(sample.Client); client != "" {
+			accumulateUsageRollup(clientTotals, client, sample)
+			if sample.Date != "" {
+				if _, ok := clientDailyReq[client]; !ok {
+					clientDailyReq[client] = make(map[string]float64)
+				}
+				clientDailyReq[client][sample.Date] += sample.Requests
+			}
+		}
+
+		if source := normalizeUsageDimension(sample.Source); source != "" {
+			accumulateUsageRollup(sourceTotals, source, sample)
+			if sample.Date == today {
+				sourceTodayReq[source] += sample.Requests
+			}
+			if sample.Date != "" {
+				if _, ok := sourceDailyReq[source]; !ok {
+					sourceDailyReq[source] = make(map[string]float64)
+				}
+				sourceDailyReq[source][sample.Date] += sample.Requests
+			}
+		}
+
+		if provider := normalizeUsageDimension(sample.Provider); provider != "" {
+			accumulateUsageRollup(providerTotals, provider, sample)
+		}
+		if iface := normalizeUsageDimension(sample.Interface); iface != "" {
+			accumulateUsageRollup(interfaceTotals, iface, sample)
+		}
+		if endpoint := normalizeUsageDimension(sample.Endpoint); endpoint != "" {
+			accumulateUsageRollup(endpointTotals, endpoint, sample)
+		}
+		lang := normalizeUsageDimension(sample.Language)
+		if lang == "" {
+			lang = inferModelUsageLanguage(modelName)
+		}
+		if lang != "" {
+			accumulateUsageRollup(languageTotals, lang, sample)
 		}
 	}
 
@@ -772,9 +831,14 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	setUsedMetric(snap, "7d_requests", total.Requests, "requests", "7d")
 	setUsedMetric(snap, "7d_tokens", total.Total, "tokens", "7d")
 	setUsedMetric(snap, "7d_api_cost", total.CostUSD, "USD", "7d")
+	setUsedMetric(snap, "window_requests", total.Requests, "requests", "7d")
+	setUsedMetric(snap, "window_tokens", total.Total, "tokens", "7d")
+	setUsedMetric(snap, "window_cost", total.CostUSD, "USD", "7d")
 
 	setUsedMetric(snap, "active_models", float64(len(modelTotals)), "models", "7d")
 	snap.Raw["model_usage_window"] = "7d"
+	snap.Raw["activity_models"] = strconv.Itoa(len(modelTotals))
+	snap.SetAttribute("activity_models", strconv.Itoa(len(modelTotals)))
 
 	modelKeys := make([]string, 0, len(modelTotals))
 	for k := range modelTotals {
@@ -818,6 +882,67 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		snap.AppendModelUsage(rec)
 	}
 
+	clientKeys := sortedUsageRollupKeys(clientTotals)
+	for _, client := range clientKeys {
+		stats := clientTotals[client]
+		slug := sanitizeMetricSlug(client)
+		setUsedMetric(snap, "client_"+slug+"_total_tokens", stats.Total, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_input_tokens", stats.Input, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_output_tokens", stats.Output, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_reasoning_tokens", stats.Reasoning, "tokens", "7d")
+		setUsedMetric(snap, "client_"+slug+"_requests", stats.Requests, "requests", "7d")
+		snap.Raw["client_"+slug+"_name"] = client
+	}
+
+	sourceKeys := sortedUsageRollupKeys(sourceTotals)
+	for _, source := range sourceKeys {
+		stats := sourceTotals[source]
+		slug := sanitizeMetricSlug(source)
+		setUsedMetric(snap, "source_"+slug+"_requests", stats.Requests, "requests", "7d")
+		if reqToday := sourceTodayReq[source]; reqToday > 0 {
+			setUsedMetric(snap, "source_"+slug+"_requests_today", reqToday, "requests", "1d")
+		}
+	}
+
+	providerKeys := sortedUsageRollupKeys(providerTotals)
+	for _, provider := range providerKeys {
+		stats := providerTotals[provider]
+		slug := sanitizeMetricSlug(provider)
+		setUsedMetric(snap, "provider_"+slug+"_cost_usd", stats.CostUSD, "USD", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_requests", stats.Requests, "requests", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_input_tokens", stats.Input, "tokens", "7d")
+		setUsedMetric(snap, "provider_"+slug+"_output_tokens", stats.Output, "tokens", "7d")
+		snap.Raw["provider_"+slug+"_name"] = provider
+	}
+
+	interfaceKeys := sortedUsageRollupKeys(interfaceTotals)
+	for _, iface := range interfaceKeys {
+		stats := interfaceTotals[iface]
+		slug := sanitizeMetricSlug(iface)
+		setUsedMetric(snap, "interface_"+slug, stats.Requests, "calls", "7d")
+	}
+
+	endpointKeys := sortedUsageRollupKeys(endpointTotals)
+	for _, endpoint := range endpointKeys {
+		stats := endpointTotals[endpoint]
+		slug := sanitizeMetricSlug(endpoint)
+		setUsedMetric(snap, "endpoint_"+slug+"_requests", stats.Requests, "requests", "7d")
+	}
+
+	languageKeys := sortedUsageRollupKeys(languageTotals)
+	languageReqSummary := make(map[string]float64, len(languageKeys))
+	for _, lang := range languageKeys {
+		stats := languageTotals[lang]
+		slug := sanitizeMetricSlug(lang)
+		value := stats.Requests
+		if value <= 0 {
+			value = stats.Total
+		}
+		setUsedMetric(snap, "lang_"+slug, value, "requests", "7d")
+		languageReqSummary[lang] = stats.Requests
+	}
+	setUsedMetric(snap, "activity_providers", float64(len(providerTotals)), "providers", "7d")
+
 	snap.DailySeries["cost"] = mapToSeries(dailyCost)
 	snap.DailySeries["requests"] = mapToSeries(dailyReq)
 	snap.DailySeries["tokens"] = mapToSeries(dailyTokens)
@@ -840,6 +965,81 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 			snap.DailySeries[key] = mapToSeries(dayMap)
 		}
 	}
+
+	for client, dayMap := range clientDailyReq {
+		if len(dayMap) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_client_"+sanitizeMetricSlug(client)] = mapToSeries(dayMap)
+	}
+	for source, dayMap := range sourceDailyReq {
+		if len(dayMap) == 0 {
+			continue
+		}
+		snap.DailySeries["usage_source_"+sanitizeMetricSlug(source)] = mapToSeries(dayMap)
+	}
+
+	modelShare := make(map[string]float64, len(modelTotals))
+	modelUnit := "tok"
+	for model, stats := range modelTotals {
+		if stats.Total > 0 {
+			modelShare[model] = stats.Total
+			continue
+		}
+		if stats.Requests > 0 {
+			modelShare[model] = stats.Requests
+			modelUnit = "req"
+		}
+	}
+	if summary := summarizeShareUsage(modelShare, 6); summary != "" {
+		snap.Raw["model_usage"] = summary
+		snap.Raw["model_usage_unit"] = modelUnit
+	}
+	clientShare := make(map[string]float64, len(clientTotals))
+	for client, stats := range clientTotals {
+		if stats.Total > 0 {
+			clientShare[client] = stats.Total
+		} else if stats.Requests > 0 {
+			clientShare[client] = stats.Requests
+		}
+	}
+	if summary := summarizeShareUsage(clientShare, 6); summary != "" {
+		snap.Raw["client_usage"] = summary
+	}
+	sourceShare := make(map[string]float64, len(sourceTotals))
+	for source, stats := range sourceTotals {
+		if stats.Requests > 0 {
+			sourceShare[source] = stats.Requests
+		}
+	}
+	if summary := summarizeCountUsage(sourceShare, "req", 6); summary != "" {
+		snap.Raw["source_usage"] = summary
+	}
+	providerShare := make(map[string]float64, len(providerTotals))
+	for provider, stats := range providerTotals {
+		if stats.CostUSD > 0 {
+			providerShare[provider] = stats.CostUSD
+		} else if stats.Requests > 0 {
+			providerShare[provider] = stats.Requests
+		}
+	}
+	if summary := summarizeShareUsage(providerShare, 6); summary != "" {
+		snap.Raw["provider_usage"] = summary
+	}
+	if summary := summarizeCountUsage(languageReqSummary, "req", 8); summary != "" {
+		snap.Raw["language_usage"] = summary
+	}
+
+	snap.Raw["activity_days"] = strconv.Itoa(len(dailyReq))
+	snap.Raw["activity_clients"] = strconv.Itoa(len(clientTotals))
+	snap.Raw["activity_sources"] = strconv.Itoa(len(sourceTotals))
+	snap.Raw["activity_providers"] = strconv.Itoa(len(providerTotals))
+	snap.Raw["activity_endpoints"] = strconv.Itoa(len(endpointTotals))
+	snap.SetAttribute("activity_days", snap.Raw["activity_days"])
+	snap.SetAttribute("activity_clients", snap.Raw["activity_clients"])
+	snap.SetAttribute("activity_sources", snap.Raw["activity_sources"])
+	snap.SetAttribute("activity_providers", snap.Raw["activity_providers"])
+	snap.SetAttribute("activity_endpoints", snap.Raw["activity_endpoints"])
 }
 
 func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
@@ -884,13 +1084,23 @@ func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	for _, tool := range keys {
 		stats := toolTotals[tool]
 		slug := sanitizeMetricSlug(tool)
-		setUsedMetric(snap, "tool_"+slug+"_calls", stats.Requests, "calls", "7d")
-		setUsedMetric(snap, "tool_"+slug+"_cost_usd", stats.CostUSD, "USD", "7d")
+		setUsedMetric(snap, "tool_"+slug, stats.Requests, "calls", "7d")
+		setUsedMetric(snap, "toolcost_"+slug+"_usd", stats.CostUSD, "USD", "7d")
 		snap.Raw["tool_"+slug+"_name"] = tool
 	}
 
 	if len(dailyCalls) > 0 {
 		snap.DailySeries["tool_calls"] = mapToSeries(dailyCalls)
+	}
+
+	toolSummary := make(map[string]float64, len(toolTotals))
+	for tool, stats := range toolTotals {
+		if stats.Requests > 0 {
+			toolSummary[tool] = stats.Requests
+		}
+	}
+	if summary := summarizeCountUsage(toolSummary, "calls", 8); summary != "" {
+		snap.Raw["tool_usage"] = summary
 	}
 }
 
@@ -913,27 +1123,175 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 	namedRows := 0
 	for _, row := range rows {
 		sample := usageSample{
-			Date: normalizeDate(firstAnyFromMap(row, "date", "day", "time", "timestamp", "created_at", "createdAt")),
+			Date: normalizeDate(firstAnyByPaths(row,
+				[]string{"date"},
+				[]string{"day"},
+				[]string{"time"},
+				[]string{"timestamp"},
+				[]string{"created_at"},
+				[]string{"createdAt"},
+				[]string{"ts"},
+				[]string{"meta", "date"},
+				[]string{"meta", "timestamp"},
+			)),
 		}
 
 		if kind == "model" {
-			sample.Name = firstStringFromMap(row, "model", "model_id", "modelId", "model_name", "modelName")
+			sample.Name = firstStringByPaths(row,
+				[]string{"model"},
+				[]string{"model_id"},
+				[]string{"modelId"},
+				[]string{"model_name"},
+				[]string{"modelName"},
+				[]string{"name"},
+				[]string{"model", "id"},
+				[]string{"model", "name"},
+				[]string{"model", "modelId"},
+				[]string{"meta", "model"},
+			)
 		} else {
-			sample.Name = firstStringFromMap(row, "tool", "tool_name", "toolName", "name", "tool_id", "toolId")
+			sample.Name = firstStringByPaths(row,
+				[]string{"tool"},
+				[]string{"tool_name"},
+				[]string{"toolName"},
+				[]string{"name"},
+				[]string{"tool_id"},
+				[]string{"toolId"},
+				[]string{"tool", "name"},
+				[]string{"tool", "id"},
+				[]string{"meta", "tool"},
+			)
 		}
 		if sample.Name != "" {
 			namedRows++
 		}
 
-		sample.Requests, _ = parseNumberFromMap(row, "requests", "request_count", "requestCount", "calls", "count", "usageCount")
-		sample.Input, _ = parseNumberFromMap(row, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
-		sample.Output, _ = parseNumberFromMap(row, "output_tokens", "outputTokens", "completion_tokens", "completionTokens")
-		sample.Reasoning, _ = parseNumberFromMap(row, "reasoning_tokens", "reasoningTokens")
-		sample.Total, _ = parseNumberFromMap(row, "total_tokens", "totalTokens", "tokens")
+		sample.Client = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"client"},
+			[]string{"client_name"},
+			[]string{"clientName"},
+			[]string{"application"},
+			[]string{"app"},
+			[]string{"sdk"},
+			[]string{"meta", "client"},
+			[]string{"client", "name"},
+			[]string{"context", "client"},
+		))
+		sample.Source = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"source"},
+			[]string{"source_name"},
+			[]string{"sourceName"},
+			[]string{"origin"},
+			[]string{"channel"},
+			[]string{"meta", "source"},
+			[]string{"meta", "origin"},
+		))
+		sample.Provider = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"provider"},
+			[]string{"provider_name"},
+			[]string{"providerName"},
+			[]string{"upstream_provider"},
+			[]string{"upstreamProvider"},
+			[]string{"model", "provider"},
+			[]string{"model", "provider_name"},
+			[]string{"route", "provider_name"},
+		))
+		sample.Interface = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"interface"},
+			[]string{"interface_name"},
+			[]string{"interfaceName"},
+			[]string{"mode"},
+			[]string{"client_type"},
+			[]string{"entrypoint"},
+			[]string{"meta", "interface"},
+		))
+		sample.Endpoint = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"endpoint"},
+			[]string{"endpoint_name"},
+			[]string{"endpointName"},
+			[]string{"route"},
+			[]string{"path"},
+			[]string{"meta", "endpoint"},
+		))
+		sample.Language = normalizeUsageDimension(firstStringByPaths(row,
+			[]string{"language"},
+			[]string{"lang"},
+			[]string{"programming_language"},
+			[]string{"programmingLanguage"},
+			[]string{"file_language"},
+			[]string{"meta", "language"},
+		))
+
+		if sample.Source == "" && sample.Client != "" {
+			sample.Source = sample.Client
+		}
+		if sample.Client == "" && sample.Source != "" {
+			sample.Client = sample.Source
+		}
+
+		if sample.Provider == "" {
+			modelProviderHint := normalizeUsageDimension(firstStringByPaths(row,
+				[]string{"model", "provider"},
+				[]string{"model", "provider_name"},
+				[]string{"model", "vendor"},
+			))
+			if modelProviderHint != "" {
+				sample.Provider = modelProviderHint
+			}
+		}
+
+		sample.Requests, _ = firstNumberByPaths(row,
+			[]string{"requests"},
+			[]string{"request_count"},
+			[]string{"requestCount"},
+			[]string{"request_num"},
+			[]string{"requestNum"},
+			[]string{"calls"},
+			[]string{"count"},
+			[]string{"usageCount"},
+			[]string{"usage", "requests"},
+			[]string{"stats", "requests"},
+		)
+		sample.Input, _ = firstNumberByPaths(row,
+			[]string{"input_tokens"},
+			[]string{"inputTokens"},
+			[]string{"input_token_count"},
+			[]string{"prompt_tokens"},
+			[]string{"promptTokens"},
+			[]string{"usage", "input_tokens"},
+			[]string{"usage", "inputTokens"},
+		)
+		sample.Output, _ = firstNumberByPaths(row,
+			[]string{"output_tokens"},
+			[]string{"outputTokens"},
+			[]string{"completion_tokens"},
+			[]string{"completionTokens"},
+			[]string{"usage", "output_tokens"},
+			[]string{"usage", "outputTokens"},
+		)
+		sample.Reasoning, _ = firstNumberByPaths(row,
+			[]string{"reasoning_tokens"},
+			[]string{"reasoningTokens"},
+			[]string{"thinking_tokens"},
+			[]string{"thinkingTokens"},
+			[]string{"usage", "reasoning_tokens"},
+		)
+		sample.Total, _ = firstNumberByPaths(row,
+			[]string{"total_tokens"},
+			[]string{"totalTokens"},
+			[]string{"tokens"},
+			[]string{"token_count"},
+			[]string{"tokenCount"},
+			[]string{"usage", "total_tokens"},
+			[]string{"usage", "totalTokens"},
+		)
 		if sample.Total == 0 {
 			sample.Total = sample.Input + sample.Output + sample.Reasoning
 		}
 		sample.CostUSD = parseCostUSD(row)
+		if kind == "model" && sample.Language == "" {
+			sample.Language = inferModelUsageLanguage(sample.Name)
+		}
 
 		if sample.Requests > 0 || sample.Total > 0 || sample.CostUSD > 0 || sample.Name != "" {
 			samples = append(samples, sample)
@@ -971,10 +1329,10 @@ func extractUsageRows(v any) []map[string]any {
 		}
 
 		keys := []string{
-			"data", "items", "list", "rows", "records", "usage", "model_usage", "tool_usage", "result",
+			"data", "items", "list", "rows", "records", "usage", "model_usage", "modelUsage", "tool_usage", "toolUsage", "result",
 		}
 		for _, key := range keys {
-			if nested, ok := value[key]; ok {
+			if nested, ok := mapValue(value, key); ok {
 				rows := extractUsageRows(nested)
 				if len(rows) > 0 {
 					return rows
@@ -1038,13 +1396,22 @@ func looksLikeUsageRow(row map[string]any) bool {
 	if row == nil {
 		return false
 	}
-	hasName := firstStringFromMap(row, "model", "model_id", "modelName", "tool", "tool_name", "name") != ""
+	hasName := firstStringByPaths(row,
+		[]string{"model"},
+		[]string{"model_id"},
+		[]string{"modelName"},
+		[]string{"tool"},
+		[]string{"tool_name"},
+		[]string{"name"},
+		[]string{"model", "name"},
+		[]string{"tool", "name"},
+	) != ""
 	if hasName {
 		return true
 	}
-	_, hasReq := parseNumberFromMap(row, "requests", "request_count", "calls", "count")
-	_, hasTokens := parseNumberFromMap(row, "total_tokens", "tokens", "input_tokens", "output_tokens")
-	_, hasCost := parseNumberFromMap(row, "cost", "total_cost", "cost_usd", "total_cost_usd")
+	_, hasReq := firstNumberByPaths(row, []string{"requests"}, []string{"request_count"}, []string{"calls"}, []string{"count"}, []string{"usage", "requests"})
+	_, hasTokens := firstNumberByPaths(row, []string{"total_tokens"}, []string{"tokens"}, []string{"input_tokens"}, []string{"output_tokens"}, []string{"usage", "total_tokens"})
+	_, hasCost := firstNumberByPaths(row, []string{"cost"}, []string{"total_cost"}, []string{"cost_usd"}, []string{"total_cost_usd"}, []string{"usage", "cost_usd"})
 	return hasReq || hasTokens || hasCost
 }
 
@@ -1103,20 +1470,46 @@ func parseAPIError(body []byte) (code, msg string) {
 }
 
 func parseCostUSD(row map[string]any) float64 {
-	value, key, ok := firstNumberWithKey(row,
-		"cost_usd", "costUSD", "total_cost_usd", "totalCostUSD",
-		"total_cost", "totalCost", "api_cost", "apiCost",
-		"cost", "amount", "total_amount", "totalAmount",
-		"cost_cents", "costCents", "total_cost_cents", "totalCostCents",
+	if cents, ok := firstNumberByPaths(row,
+		[]string{"cost_cents"},
+		[]string{"costCents"},
+		[]string{"total_cost_cents"},
+		[]string{"totalCostCents"},
+		[]string{"usage", "cost_cents"},
+	); ok {
+		return cents / 100
+	}
+
+	if micros, ok := firstNumberByPaths(row,
+		[]string{"cost_micros"},
+		[]string{"costMicros"},
+		[]string{"total_cost_micros"},
+		[]string{"totalCostMicros"},
+	); ok {
+		return micros / 1_000_000
+	}
+
+	value, ok := firstNumberByPaths(row,
+		[]string{"cost_usd"},
+		[]string{"costUSD"},
+		[]string{"total_cost_usd"},
+		[]string{"totalCostUSD"},
+		[]string{"total_cost"},
+		[]string{"totalCost"},
+		[]string{"api_cost"},
+		[]string{"apiCost"},
+		[]string{"cost"},
+		[]string{"amount"},
+		[]string{"total_amount"},
+		[]string{"totalAmount"},
+		[]string{"usage", "cost_usd"},
+		[]string{"usage", "costUSD"},
+		[]string{"usage", "cost"},
 	)
-	if !ok {
-		return 0
+	if ok {
+		return value
 	}
-	lowerKey := strings.ToLower(key)
-	if strings.Contains(lowerKey, "cent") {
-		return value / 100
-	}
-	return value
+	return 0
 }
 
 func parseNumberFromMap(row map[string]any, keys ...string) (float64, bool) {
@@ -1126,7 +1519,7 @@ func parseNumberFromMap(row map[string]any, keys ...string) (float64, bool) {
 
 func firstNumberWithKey(row map[string]any, keys ...string) (float64, string, bool) {
 	for _, key := range keys {
-		raw, ok := row[key]
+		raw, ok := mapValue(row, key)
 		if !ok {
 			continue
 		}
@@ -1183,7 +1576,7 @@ func parseFloat(v any) (float64, bool) {
 
 func firstStringFromMap(row map[string]any, keys ...string) string {
 	for _, key := range keys {
-		raw, ok := row[key]
+		raw, ok := mapValue(row, key)
 		if !ok || raw == nil {
 			continue
 		}
@@ -1197,11 +1590,224 @@ func firstStringFromMap(row map[string]any, keys ...string) string {
 
 func firstAnyFromMap(row map[string]any, keys ...string) any {
 	for _, key := range keys {
-		if raw, ok := row[key]; ok {
+		if raw, ok := mapValue(row, key); ok {
 			return raw
 		}
 	}
 	return nil
+}
+
+func mapValue(row map[string]any, key string) (any, bool) {
+	if row == nil {
+		return nil, false
+	}
+	if raw, ok := row[key]; ok {
+		return raw, true
+	}
+	for candidate, raw := range row {
+		if strings.EqualFold(candidate, key) {
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
+func valueAtPath(row map[string]any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+
+	var current any = row
+	for _, segment := range path {
+		node, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := mapValue(node, segment)
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func firstAnyByPaths(row map[string]any, paths ...[]string) any {
+	for _, path := range paths {
+		if raw, ok := valueAtPath(row, path); ok {
+			return raw
+		}
+	}
+	return nil
+}
+
+func firstStringByPaths(row map[string]any, paths ...[]string) string {
+	for _, path := range paths {
+		raw, ok := valueAtPath(row, path)
+		if !ok || raw == nil {
+			continue
+		}
+		text := strings.TrimSpace(anyToString(raw))
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func firstNumberByPaths(row map[string]any, paths ...[]string) (float64, bool) {
+	for _, path := range paths {
+		raw, ok := valueAtPath(row, path)
+		if !ok {
+			continue
+		}
+		if parsed, ok := parseFloat(raw); ok {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func normalizeUsageDimension(raw string) string {
+	value := strings.TrimSpace(raw)
+	value = strings.Trim(value, "\"'")
+	if value == "" {
+		return ""
+	}
+	switch strings.ToLower(value) {
+	case "null", "nil", "n/a", "na", "unknown":
+		return ""
+	default:
+		return value
+	}
+}
+
+func accumulateRollupValues(acc *usageRollup, sample usageSample) {
+	if acc == nil {
+		return
+	}
+	acc.Requests += sample.Requests
+	acc.Input += sample.Input
+	acc.Output += sample.Output
+	acc.Reasoning += sample.Reasoning
+	acc.Total += sample.Total
+	acc.CostUSD += sample.CostUSD
+}
+
+func accumulateUsageRollup(target map[string]*usageRollup, key string, sample usageSample) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	acc, ok := target[key]
+	if !ok {
+		acc = &usageRollup{}
+		target[key] = acc
+	}
+	accumulateRollupValues(acc, sample)
+}
+
+func sortedUsageRollupKeys(values map[string]*usageRollup) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func summarizeShareUsage(values map[string]float64, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	var (
+		list  []item
+		total float64
+	)
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+		total += value
+	}
+	if len(list) == 0 || total <= 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f%%", normalizeUsageLabel(entry.name), entry.value/total*100))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func summarizeCountUsage(values map[string]float64, unit string, maxItems int) string {
+	type item struct {
+		name  string
+		value float64
+	}
+	var list []item
+	for name, value := range values {
+		if value <= 0 {
+			continue
+		}
+		list = append(list, item{name: name, value: value})
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].value != list[j].value {
+			return list[i].value > list[j].value
+		}
+		return list[i].name < list[j].name
+	})
+	if maxItems > 0 && len(list) > maxItems {
+		list = list[:maxItems]
+	}
+	parts := make([]string, 0, len(list))
+	for _, entry := range list {
+		parts = append(parts, fmt.Sprintf("%s: %.0f %s", normalizeUsageLabel(entry.name), entry.value, unit))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func normalizeUsageLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	replacer := strings.NewReplacer("_", " ", "-", " ")
+	return replacer.Replace(value)
+}
+
+func inferModelUsageLanguage(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(model, "coder"), strings.Contains(model, "code"), strings.Contains(model, "codestral"), strings.Contains(model, "devstral"):
+		return "code"
+	case strings.Contains(model, "vision"), strings.Contains(model, "image"), strings.Contains(model, "multimodal"), strings.Contains(model, "omni"), strings.Contains(model, "vl"):
+		return "multimodal"
+	case strings.Contains(model, "audio"), strings.Contains(model, "speech"), strings.Contains(model, "voice"), strings.Contains(model, "whisper"), strings.Contains(model, "tts"), strings.Contains(model, "stt"):
+		return "audio"
+	case strings.Contains(model, "reason"), strings.Contains(model, "thinking"):
+		return "reasoning"
+	default:
+		return "general"
+	}
 }
 
 func anyToString(v any) string {
