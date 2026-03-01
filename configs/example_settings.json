@@ -80,6 +80,11 @@
       "api_key_env": "XAI_API_KEY"
     },
     {
+      "id": "zai",
+      "provider": "zai",
+      "api_key_env": "ZAI_API_KEY"
+    },
+    {
       "id": "ollama-local",
       "provider": "ollama",
       "base_url": "http://127.0.0.1:11434",

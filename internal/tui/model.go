@@ -99,6 +99,8 @@ type Model struct {
 
 	screen screenTab
 
+	dashboardView dashboardViewMode
+
 	analyticsFilter    string
 	analyticsFiltering bool
 	analyticsSortBy    int // 0=cost↓, 1=name↑, 2=tokens↓
@@ -125,6 +127,7 @@ type Model struct {
 	settingsCursor      int
 	settingsBodyOffset  int
 	settingsThemeCursor int
+	settingsViewCursor  int
 	settingsStatus      string
 	integrationStatuses []integrations.Status
 
@@ -189,6 +192,9 @@ type themePersistedMsg struct {
 type dashboardPrefsPersistedMsg struct {
 	err error
 }
+type dashboardViewPersistedMsg struct {
+	err error
+}
 type timeWindowPersistedMsg struct {
 	err error
 }
@@ -233,6 +239,17 @@ func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 			log.Printf("dashboard settings persist: %v", err)
 		}
 		return dashboardPrefsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardViewCmd() tea.Cmd {
+	view := string(m.configuredDashboardView())
+	return func() tea.Msg {
+		err := config.SaveDashboardView(view)
+		if err != nil {
+			log.Printf("dashboard view persist: %v", err)
+		}
+		return dashboardViewPersistedMsg{err: err}
 	}
 }
 
@@ -362,6 +379,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsStatus = "save failed"
 		} else {
 			m.settingsStatus = "saved"
+		}
+		return m, nil
+
+	case dashboardViewPersistedMsg:
+		if msg.err != nil {
+			m.settingsStatus = "view save failed"
+		} else {
+			m.settingsStatus = "view saved"
 		}
 		return m, nil
 
@@ -505,11 +530,39 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.mode == modeList && m.tileCols() == 1 {
+	if m.mode == modeList && m.shouldUseWidgetScroll() {
 		m.tileOffset += scroll
 		if m.tileOffset < 0 {
 			m.tileOffset = 0
 		}
+		return m, nil
+	}
+
+	if m.mode == modeList && m.shouldUsePanelScroll() {
+		m.tileOffset += scroll
+		if m.tileOffset < 0 {
+			m.tileOffset = 0
+		}
+		return m, nil
+	}
+
+	if m.mode == modeList && m.activeDashboardView() == dashboardViewSplit {
+		step := 1
+		if scroll < 0 {
+			step = -1
+		}
+		next := m.cursor + step
+		ids := m.filteredIDs()
+		if next < 0 {
+			next = 0
+		}
+		if next >= len(ids) {
+			next = len(ids) - 1
+		}
+		if next < 0 {
+			next = 0
+		}
+		m.cursor = next
 	}
 
 	return m, nil
@@ -551,6 +604,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.persistThemeCmd(name)
 		case "w":
 			return m.cycleTimeWindow()
+		case "v":
+			if m.screen == screenDashboard {
+				m.setDashboardView(m.nextDashboardView(1))
+				return m, m.persistDashboardViewCmd()
+			}
+		case "V":
+			if m.screen == screenDashboard {
+				m.setDashboardView(m.nextDashboardView(-1))
+				return m, m.persistDashboardViewCmd()
+			}
 		}
 	}
 
@@ -568,6 +631,9 @@ func (m Model) handleDashboardTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeDetail {
 		return m.handleDetailKey(msg)
+	}
+	if m.activeDashboardView() == dashboardViewSplit {
+		return m.handleListKey(msg)
 	}
 	return m.handleTilesKey(msg)
 }
@@ -644,6 +710,7 @@ func (m Model) nextScreen(step int) screenTab {
 
 func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ids := m.filteredIDs()
+	pageStep := m.listPageStep()
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -660,6 +727,14 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 			m.detailTab = 0
 			m.tileOffset = 0
+		}
+	case "pgdown", "ctrl+d":
+		if len(ids) > 0 {
+			m.cursor = clamp(m.cursor+pageStep, 0, len(ids)-1)
+		}
+	case "pgup", "ctrl+u":
+		if len(ids) > 0 {
+			m.cursor = clamp(m.cursor-pageStep, 0, len(ids)-1)
 		}
 	case "enter", "right", "l":
 		m.mode = modeDetail
@@ -731,6 +806,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ids := m.filteredIDs()
 	cols := m.tileCols()
+	scrollModeWidget := m.shouldUseWidgetScroll()
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -755,9 +831,17 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "pgdown", "ctrl+d":
-		m.tileOffset += m.tileScrollStep()
+		if scrollModeWidget {
+			m.tileOffset += m.widgetScrollStep()
+		} else {
+			m.tileOffset += m.tileScrollStep()
+		}
 	case "pgup", "ctrl+u":
-		m.tileOffset -= m.tileScrollStep()
+		if scrollModeWidget {
+			m.tileOffset -= m.widgetScrollStep()
+		} else {
+			m.tileOffset -= m.tileScrollStep()
+		}
 		if m.tileOffset < 0 {
 			m.tileOffset = 0
 		}
@@ -826,12 +910,55 @@ func (m Model) tileScrollStep() int {
 	return step
 }
 
+func (m Model) widgetScrollStep() int {
+	step := m.height / 8
+	if step < 2 {
+		step = 2
+	}
+	return step
+}
+
 func (m Model) mouseScrollStep() int {
 	step := m.height / 10
 	if step < 3 {
 		step = 3
 	}
 	return step
+}
+
+func (m Model) listPageStep() int {
+	step := m.height / 6
+	if step < 3 {
+		step = 3
+	}
+	return step
+}
+
+func (m Model) shouldUseWidgetScroll() bool {
+	if m.screen != screenDashboard || m.mode != modeList {
+		return false
+	}
+	switch m.activeDashboardView() {
+	case dashboardViewTabs, dashboardViewCompare, dashboardViewSplit:
+		return true
+	case dashboardViewGrid:
+		return m.tileCols() > 1
+	default:
+		return false
+	}
+}
+
+func (m Model) shouldUsePanelScroll() bool {
+	if m.screen != screenDashboard || m.mode != modeList {
+		return false
+	}
+	if m.shouldUseWidgetScroll() {
+		return false
+	}
+	if m.activeDashboardView() == dashboardViewSplit {
+		return false
+	}
+	return m.tileCols() == 1
 }
 
 func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
@@ -911,7 +1038,18 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 	if m.mode == modeDetail {
 		return m.renderDetailPanel(w, contentH)
 	}
-	return m.renderTiles(w, contentH)
+	switch m.activeDashboardView() {
+	case dashboardViewTabs:
+		return m.renderTilesTabs(w, contentH)
+	case dashboardViewSplit:
+		return m.renderSplitPanes(w, contentH)
+	case dashboardViewCompare:
+		return m.renderComparePanes(w, contentH)
+	case dashboardViewStacked:
+		return m.renderTilesSingleColumn(w, contentH)
+	default:
+		return m.renderTiles(w, contentH)
+	}
 }
 
 func (m Model) renderHeader(w int) string {
@@ -962,6 +1100,7 @@ func (m Model) renderHeader(w int) string {
 			if m.filter != "" {
 				info += " (filtered)"
 			}
+			info += " · " + m.dashboardViewStatusLabel()
 		}
 	}
 	if !m.showSettingsModal {
@@ -1063,7 +1202,19 @@ func (m Model) renderFooterStatusLine(w int) string {
 		if m.filter != "" {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter)
 		}
-		if m.mode == modeList && m.tileOffset > 0 {
+		if m.activeDashboardView() == dashboardViewTabs && m.mode == modeList {
+			return " " + dimStyle.Render("tabs view · \u2190/\u2192 switch tab · PgUp/PgDn scroll widget · Enter detail")
+		}
+		if m.activeDashboardView() == dashboardViewSplit && m.mode == modeList {
+			return " " + dimStyle.Render("split view · \u2191/\u2193 select provider · PgUp/PgDn scroll pane · Enter detail")
+		}
+		if m.activeDashboardView() == dashboardViewCompare && m.mode == modeList {
+			return " " + dimStyle.Render("compare view · \u2190/\u2192 switch provider · PgUp/PgDn scroll active pane")
+		}
+		if m.mode == modeList && m.shouldUseWidgetScroll() && m.tileOffset > 0 {
+			return " " + dimStyle.Render("widget scroll active · PgUp/PgDn · Ctrl+U/Ctrl+D")
+		}
+		if m.mode == modeList && m.shouldUsePanelScroll() && m.tileOffset > 0 {
 			return " " + dimStyle.Render("panel scroll active · PgUp/PgDn · Home/End")
 		}
 	}
@@ -1151,7 +1302,96 @@ func (m Model) renderList(w, h int) string {
 	}
 
 	content := strings.Join(lines, "\n")
-	return padToSize(content, w, h)
+	out := padToSize(content, w, h)
+	if len(ids) > visibleItems && h > 0 {
+		rendered := strings.Split(out, "\n")
+		if len(rendered) > 0 {
+			rendered[len(rendered)-1] = renderVerticalScrollBarLine(w, scrollStart, visibleItems, len(ids))
+			out = strings.Join(rendered, "\n")
+		}
+	}
+	return out
+}
+
+func (m Model) renderSplitPanes(w, h int) string {
+	if w < 70 {
+		return m.renderTilesTabs(w, h)
+	}
+
+	leftW := w / 3
+	if leftW < minLeftWidth {
+		leftW = minLeftWidth
+	}
+	if leftW > maxLeftWidth {
+		leftW = maxLeftWidth
+	}
+	if leftW > w-34 {
+		leftW = w - 34
+	}
+	if leftW < minLeftWidth || w-leftW-1 < 30 {
+		return m.renderTilesTabs(w, h)
+	}
+
+	left := m.renderList(leftW, h)
+	rightW := w - leftW - 1
+	right := m.renderWidgetPanelByIndex(m.cursor, rightW, h, m.tileOffset, true)
+	sep := renderVerticalSep(h)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, sep, right)
+}
+
+func (m Model) renderComparePanes(w, h int) string {
+	ids := m.filteredIDs()
+	if len(ids) == 0 {
+		return m.renderTiles(w, h)
+	}
+	if len(ids) == 1 || w < 72 {
+		return m.renderWidgetPanelByIndex(m.cursor, w, h, m.tileOffset, true)
+	}
+
+	gapW := tileGapH
+	colW := (w - gapW) / 2
+	if colW < 30 {
+		return m.renderWidgetPanelByIndex(m.cursor, w, h, m.tileOffset, true)
+	}
+
+	primary := clamp(m.cursor, 0, len(ids)-1)
+	secondary := primary + 1
+	if secondary >= len(ids) {
+		secondary = primary - 1
+	}
+	if secondary < 0 {
+		secondary = primary
+	}
+
+	left := m.renderWidgetPanelByIndex(primary, colW, h, m.tileOffset, true)
+	right := m.renderWidgetPanelByIndex(secondary, colW, h, 0, false)
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gapW), right)
+	return padToSize(row, w, h)
+}
+
+func (m Model) renderWidgetPanelByIndex(index, w, h, bodyOffset int, selected bool) string {
+	ids := m.filteredIDs()
+	if len(ids) == 0 || index < 0 || index >= len(ids) {
+		return padToSize("", w, h)
+	}
+
+	id := ids[index]
+	snap := m.snapshots[id]
+	modelMixExpanded := index == m.cursor && m.expandedModelMixTiles[id]
+
+	tileW := w - 2 - tileBorderH
+	if tileW < tileMinWidth {
+		tileW = tileMinWidth
+	}
+	contentH := h - tileBorderV
+	if contentH < tileMinHeight {
+		contentH = tileMinHeight
+	}
+
+	rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, contentH, bodyOffset)
+	return normalizeAnsiBlock(rendered, w, h)
 }
 
 func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) string {
@@ -1797,9 +2037,13 @@ func (m Model) renderDetailPanel(w, h int) string {
 			arrow := lipgloss.NewStyle().Foreground(colorAccent).Render("  ▲ scroll up")
 			rlines[0] = arrow
 		}
-		if end < totalLines && len(rlines) > 1 {
-			arrow := lipgloss.NewStyle().Foreground(colorAccent).Render("  ▼ more below")
-			rlines[len(rlines)-1] = arrow
+		if len(rlines) > 1 {
+			if bar := renderVerticalScrollBarLine(w-2, offset, h, totalLines); bar != "" {
+				rlines[len(rlines)-1] = bar
+			} else if end < totalLines {
+				arrow := lipgloss.NewStyle().Foreground(colorAccent).Render("  ▼ more below")
+				rlines[len(rlines)-1] = arrow
+			}
 		}
 		result = strings.Join(rlines, "\n")
 	}
@@ -1817,6 +2061,8 @@ func renderVerticalSep(h int) string {
 }
 
 func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accounts []core.AccountConfig) {
+	m.dashboardView = normalizeDashboardViewMode(dashboardCfg.View)
+
 	accountOrder := make([]string, 0, len(accounts))
 	seenAccounts := make(map[string]bool, len(accounts))
 

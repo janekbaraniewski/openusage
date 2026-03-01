@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/samber/lo"
 )
@@ -86,6 +87,11 @@ func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight i
 }
 
 func (m Model) tileCols() int {
+	switch m.activeDashboardView() {
+	case dashboardViewStacked, dashboardViewTabs, dashboardViewSplit, dashboardViewCompare:
+		return 1
+	}
+
 	n := len(m.filteredIDs())
 	contentH := m.height - 3
 	if contentH < 5 {
@@ -103,6 +109,14 @@ func tableLabelMaxLen(innerW int) int {
 }
 
 func (m Model) renderTiles(w, h int) string {
+	return m.renderTilesWithColumns(w, h, 0)
+}
+
+func (m Model) renderTilesSingleColumn(w, h int) string {
+	return m.renderTilesWithColumns(w, h, 1)
+}
+
+func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 	ids := m.filteredIDs()
 	if len(ids) == 0 {
 		empty := []string{
@@ -115,13 +129,25 @@ func (m Model) renderTiles(w, h int) string {
 	}
 
 	cols, tileW, tileMaxHeight := m.tileGrid(w, h, len(ids))
+	if forcedCols == 1 {
+		cols = 1
+		tileMaxHeight = 0
+		tileW = w - 2 - tileBorderH
+		if tileW < tileMinWidth {
+			tileW = tileMinWidth
+		}
+	}
 
 	var tiles [][]string
 	for i, id := range ids {
 		snap := m.snapshots[id]
 		selected := i == m.cursor
 		modelMixExpanded := selected && m.expandedModelMixTiles[id]
-		rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, tileMaxHeight)
+		bodyOffset := 0
+		if selected && m.activeDashboardView() == dashboardViewGrid && cols > 1 {
+			bodyOffset = m.tileOffset
+		}
+		rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, tileMaxHeight, bodyOffset)
 		tiles = append(tiles, strings.Split(rendered, "\n"))
 	}
 
@@ -191,7 +217,11 @@ func (m Model) renderTiles(w, h int) string {
 		cursorRow = 0
 	}
 
-	scrollLine := rowOffsets[cursorRow] + m.tileOffset
+	rowScrollOffset := 0
+	if cols == 1 {
+		rowScrollOffset = m.tileOffset
+	}
+	scrollLine := rowOffsets[cursorRow] + rowScrollOffset
 	if scrollLine > totalLines-h {
 		scrollLine = totalLines - h
 	}
@@ -209,14 +239,143 @@ func (m Model) renderTiles(w, h int) string {
 	if scrollLine > 0 {
 		visible[0] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ more above")
 	}
-	if endLine < totalLines {
+	if bar := renderVerticalScrollBarLine(w, scrollLine, h, totalLines); bar != "" && len(visible) > 0 {
+		visible[len(visible)-1] = bar
+	} else if endLine < totalLines {
 		visible[len(visible)-1] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ more below")
 	}
 
 	return padToSize(strings.Join(visible, "\n"), w, h)
 }
 
-func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bool, tileW, tileContentH int) string {
+func (m Model) renderTilesTabs(w, h int) string {
+	ids := m.filteredIDs()
+	if len(ids) == 0 {
+		empty := []string{
+			"",
+			dimStyle.Render("  Loading providers…"),
+			"",
+			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
+		}
+		return padToSize(strings.Join(empty, "\n"), w, h)
+	}
+
+	if h < 3 {
+		return m.renderTilesSingleColumn(w, h)
+	}
+
+	tabsH := 2
+	bodyH := h - tabsH
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	var tabItems []string
+	tabWidths := make([]int, 0, len(ids))
+	for i, id := range ids {
+		tabLabel := truncateToWidth(id, 20)
+		tabText := " " + tabLabel + " "
+		tabStyle := screenTabInactiveStyle
+		if i == m.cursor {
+			tabStyle = screenTabActiveStyle
+		}
+		rendered := tabStyle.Render(tabText)
+		tabItems = append(tabItems, rendered)
+		tabWidths = append(tabWidths, lipgloss.Width(rendered))
+	}
+
+	sepGap := " "
+	tabsStrip := lipgloss.JoinHorizontal(lipgloss.Top, intersperse(tabItems, sepGap)...)
+
+	tabStarts := make([]int, len(tabWidths))
+	acc := 0
+	for i, tw := range tabWidths {
+		tabStarts[i] = acc
+		acc += tw
+		if i < len(tabWidths)-1 {
+			acc += lipgloss.Width(sepGap)
+		}
+	}
+
+	scrollX := 0
+	active := clamp(m.cursor, 0, len(ids)-1)
+	activeStart := tabStarts[active]
+	activeEnd := activeStart + tabWidths[active]
+	if activeEnd-scrollX > w {
+		scrollX = activeEnd - w
+	}
+	if activeStart < scrollX {
+		scrollX = activeStart
+	}
+
+	totalW := lipgloss.Width(tabsStrip)
+	maxScroll := totalW - w
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scrollX > maxScroll {
+		scrollX = maxScroll
+	}
+
+	visibleTabs := cropAnsiLine(tabsStrip, scrollX, w)
+	window := m.renderWidgetPanelByIndex(m.cursor, w, bodyH, m.tileOffset, true)
+	sep := renderHorizontalScrollBarLine(w, scrollX, w, totalW)
+	if sep == "" && len(ids) > 1 {
+		// Even when all tab labels fit, tabs view still supports horizontal pane
+		// navigation; keep the affordance visible.
+		sep = renderHorizontalScrollBarLine(w, clamp(m.cursor, 0, len(ids)-1), 1, len(ids))
+	}
+	if sep == "" {
+		sep = lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w))
+	}
+
+	return padToSize(visibleTabs+"\n"+sep+"\n"+window, w, h)
+}
+
+func normalizeAnsiBlock(block string, width, height int) string {
+	lines := strings.Split(block, "\n")
+	if height > 0 && len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		lines[i] = cropAnsiLine(line, 0, width)
+	}
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func cropAnsiBlock(block string, left, width, height int) string {
+	lines := strings.Split(block, "\n")
+	if height > 0 && len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		lines[i] = cropAnsiLine(line, left, width)
+	}
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func cropAnsiLine(line string, left, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if left < 0 {
+		left = 0
+	}
+	cut := ansi.Cut(line, left, left+width)
+	visualW := lipgloss.Width(cut)
+	if visualW < width {
+		cut += strings.Repeat(" ", width-visualW)
+	}
+	return cut
+}
+
+func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bool, tileW, tileContentH, bodyOffset int) string {
 	innerW := tileW - 2*tilePadH
 	if innerW < 10 {
 		innerW = 10
@@ -495,23 +654,38 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		sections = append(sections, sec)
 	}
 
-	var body []string
+	var fullBody []string
 	for _, sec := range sections {
-		if bodyBudget < 0 {
-			body = append(body, sec.lines...)
-			continue
-		}
+		fullBody = append(fullBody, sec.lines...)
+	}
 
-		if len(body)+len(sec.lines) <= bodyBudget {
-			body = append(body, sec.lines...)
-			continue
-		}
+	if bodyBudget < 0 {
+		return renderWithBody(fullBody)
+	}
 
-		remaining := bodyBudget - len(body)
-		if remaining > 0 {
-			body = append(body, sec.lines[:remaining]...)
+	maxOffset := len(fullBody) - bodyBudget
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	offset := clamp(bodyOffset, 0, maxOffset)
+
+	body := fullBody
+	if offset > 0 && offset < len(fullBody) {
+		body = fullBody[offset:]
+	}
+	if bodyBudget >= 0 && len(body) > bodyBudget {
+		body = body[:bodyBudget]
+	}
+
+	if bodyBudget > 0 && len(fullBody) > bodyBudget && len(body) > 0 {
+		if offset > 0 {
+			body[0] = dimStyle.Render("  ▲ more above")
 		}
-		break
+		if bar := renderVerticalScrollBarLine(innerW, offset, bodyBudget, len(fullBody)); bar != "" {
+			body[len(body)-1] = bar
+		} else if offset+bodyBudget < len(fullBody) {
+			body[len(body)-1] = dimStyle.Render("  ▼ more below")
+		}
 	}
 
 	return renderWithBody(body)
@@ -4192,8 +4366,8 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 
 	if added > 0 || removed > 0 {
 		total := added + removed
-		addedColor := lipgloss.Color("#a6e3a1")
-		removedColor := lipgloss.Color("#f38ba8")
+		addedColor := colorGreen
+		removedColor := colorRed
 		addedW := int(math.Round(added / total * float64(barW)))
 		if addedW < 1 && added > 0 {
 			addedW = 1
@@ -4232,7 +4406,7 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 		if aiEmptyW < 0 {
 			aiEmptyW = 0
 		}
-		aiColor := lipgloss.Color("#89b4fa")
+		aiColor := colorBlue
 		aiBar := lipgloss.NewStyle().Foreground(aiColor).Render(strings.Repeat("█", aiFilledW)) +
 			lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", aiEmptyW))
 		lines = append(lines, "  "+aiBar)

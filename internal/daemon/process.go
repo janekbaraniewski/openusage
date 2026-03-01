@@ -143,14 +143,34 @@ func HealthVersion(health HealthResponse) string {
 func HealthCurrent(health HealthResponse) bool {
 	expected := strings.TrimSpace(version.Version)
 	if expected == "" || strings.EqualFold(expected, "dev") || !IsReleaseSemver(expected) {
-		return HealthAPICompatible(health)
+		return HealthAPICompatible(health) && HealthProviderRegistryCompatible(health)
 	}
-	return strings.TrimSpace(health.DaemonVersion) == expected && HealthAPICompatible(health)
+	return strings.TrimSpace(health.DaemonVersion) == expected &&
+		HealthAPICompatible(health) &&
+		HealthProviderRegistryCompatible(health)
 }
 
 func HealthAPICompatible(health HealthResponse) bool {
 	apiVersion := strings.TrimSpace(health.APIVersion)
 	return apiVersion == "" || apiVersion == APIVersion
+}
+
+func HealthProviderRegistryCompatible(health HealthResponse) bool {
+	expected := ProviderRegistryHash()
+	if expected == "" {
+		return true
+	}
+	got := strings.TrimSpace(health.ProviderRegistry)
+	if got == "" {
+		current := strings.TrimSpace(version.Version)
+		// Backward-compatible for local/dev snapshots so `go run` workflows don't
+		// force service reinstalls against transient executable paths.
+		if current == "" || strings.EqualFold(current, "dev") || !IsReleaseSemver(current) {
+			return true
+		}
+		return false
+	}
+	return strings.EqualFold(got, expected)
 }
 
 func IsReleaseSemver(value string) bool {
@@ -206,10 +226,24 @@ func WaitForHealthInfo(
 
 func StartupDiagnostics(manager ServiceManager, socketPath string) string {
 	lines := []string{
+		fmt.Sprintf("manager_kind=%s", strings.TrimSpace(manager.Kind)),
+		fmt.Sprintf("service_supported=%t", manager.IsSupported()),
+		fmt.Sprintf("service_installed=%t", manager.IsInstalled()),
 		fmt.Sprintf("socket_path=%s", strings.TrimSpace(socketPath)),
+		fmt.Sprintf("unit_path=%s", strings.TrimSpace(manager.unitPath)),
+		fmt.Sprintf("service_executable=%s", strings.TrimSpace(manager.exePath)),
+		fmt.Sprintf("service_executable_transient=%t", isTransientExecutablePath(manager.exePath)),
+	}
+	if _, err := os.Stat(strings.TrimSpace(manager.exePath)); err == nil {
+		lines = append(lines, "service_executable_exists=true")
+	} else {
+		lines = append(lines, fmt.Sprintf("service_executable_exists=false err=%v", err))
 	}
 	if hint := strings.TrimSpace(manager.StatusHint()); hint != "" {
 		lines = append(lines, "status_cmd="+hint)
+	}
+	if owner := SocketOwnerSummary(socketPath); strings.TrimSpace(owner) != "" {
+		lines = append(lines, "socket_owner:\n"+owner)
 	}
 	if stderrPath := strings.TrimSpace(manager.StderrLogPath()); stderrPath != "" {
 		lines = append(lines, "stderr_log="+stderrPath)
@@ -219,12 +253,38 @@ func StartupDiagnostics(manager ServiceManager, socketPath string) string {
 	}
 	if stdoutPath := strings.TrimSpace(manager.StdoutLogPath()); stdoutPath != "" {
 		lines = append(lines, "stdout_log="+stdoutPath)
+		if tail := TailFile(stdoutPath, 30); strings.TrimSpace(tail) != "" {
+			lines = append(lines, "stdout_tail:\n"+tail)
+		}
 	}
 	if manager.Kind == "darwin" {
-		domain := fmt.Sprintf("gui/%d/%s", os.Getuid(), LaunchdDaemonLabel)
-		if out, err := RunCommand("launchctl", "print", domain); err == nil {
+		var launchctlErr error
+		for _, domain := range manager.domainCandidates() {
+			target := domain + "/" + LaunchdDaemonLabel
+			out, err := RunCommand("launchctl", "print", target)
+			if err != nil {
+				launchctlErr = err
+				continue
+			}
 			if tail := TailTextLines(out, 30); strings.TrimSpace(tail) != "" {
-				lines = append(lines, "launchctl_print_tail:\n"+tail)
+				lines = append(lines, "launchctl_print_tail("+target+"):\n"+tail)
+			}
+			launchctlErr = nil
+			break
+		}
+		if launchctlErr != nil {
+			lines = append(lines, fmt.Sprintf("launchctl_print_error=%v", launchctlErr))
+		}
+	}
+	if manager.Kind == "linux" {
+		if out, err := RunCommand("systemctl", "--user", "status", SystemdDaemonUnit, "--no-pager", "-n", "30"); err == nil {
+			if tail := TailTextLines(out, 30); strings.TrimSpace(tail) != "" {
+				lines = append(lines, "systemctl_status_tail:\n"+tail)
+			}
+		}
+		if out, err := RunCommand("journalctl", "--user-unit", SystemdDaemonUnit, "-n", "30", "--no-pager"); err == nil {
+			if tail := TailTextLines(out, 30); strings.TrimSpace(tail) != "" {
+				lines = append(lines, "journalctl_tail:\n"+tail)
 			}
 		}
 	}

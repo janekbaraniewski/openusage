@@ -39,6 +39,15 @@ type DashboardProviderConfig struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+const (
+	DashboardViewGrid    = "grid"
+	DashboardViewStacked = "stacked"
+	DashboardViewList    = "list"
+	DashboardViewTabs    = "tabs"
+	DashboardViewSplit   = "split"
+	DashboardViewCompare = "compare"
+)
+
 func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
 	type rawDashboardProviderConfig struct {
 		AccountID string `json:"account_id"`
@@ -60,6 +69,7 @@ func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
 
 type DashboardConfig struct {
 	Providers []DashboardProviderConfig `json:"providers"`
+	View      string                    `json:"view"`
 }
 
 type IntegrationState struct {
@@ -102,6 +112,7 @@ func DefaultConfig() Config {
 		Data:               DataConfig{TimeWindow: "30d", RetentionDays: 30},
 		Experimental:       ExperimentalConfig{Analytics: false},
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
+		Dashboard:          DashboardConfig{View: DashboardViewGrid},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
 	}
 }
@@ -155,6 +166,7 @@ func LoadFrom(path string) (Config, error) {
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
+	cfg.Dashboard.View = normalizeDashboardView(cfg.Dashboard.View)
 
 	return cfg, nil
 }
@@ -223,6 +235,18 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 	return lo.UniqBy(filtered, func(entry DashboardProviderConfig) string { return entry.AccountID })
 }
 
+func normalizeDashboardView(view string) string {
+	switch strings.ToLower(strings.TrimSpace(view)) {
+	case DashboardViewGrid, DashboardViewStacked, DashboardViewTabs, DashboardViewSplit, DashboardViewCompare:
+		return strings.ToLower(strings.TrimSpace(view))
+	case DashboardViewList:
+		// Legacy view id: map to split navigator/detail layout.
+		return DashboardViewSplit
+	default:
+		return DashboardViewGrid
+	}
+}
+
 // saveMu guards read-modify-write cycles on the config file.
 var saveMu sync.Mutex
 
@@ -279,6 +303,23 @@ func SaveDashboardProvidersTo(path string, providers []DashboardProviderConfig) 
 		cfg = DefaultConfig()
 	}
 	cfg.Dashboard.Providers = normalizeDashboardProviders(providers)
+	return SaveTo(path, cfg)
+}
+
+// SaveDashboardView persists dashboard view preference into the config file (read-modify-write).
+func SaveDashboardView(view string) error {
+	return SaveDashboardViewTo(ConfigPath(), view)
+}
+
+func SaveDashboardViewTo(path string, view string) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	cfg.Dashboard.View = normalizeDashboardView(view)
 	return SaveTo(path, cfg)
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
+	"github.com/janekbaraniewski/openusage/internal/providers/zai"
 )
 
 func AllProviders() []core.UsageProvider {
@@ -33,6 +34,7 @@ func AllProviders() []core.UsageProvider {
 		mistral.New(),
 		deepseek.New(),
 		xai.New(),
+		zai.New(),
 		opencode.New(),
 		gemini_api.New(),
 		gemini_cli.New(),

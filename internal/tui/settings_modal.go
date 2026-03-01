@@ -15,6 +15,7 @@ type settingsModalTab int
 const (
 	settingsTabProviders settingsModalTab = iota
 	settingsTabTheme
+	settingsTabView
 	settingsTabAPIKeys
 	settingsTabTelemetry
 	settingsTabIntegrations
@@ -24,6 +25,7 @@ const (
 var settingsTabNames = []string{
 	"Providers",
 	"Theme",
+	"View",
 	"API Keys",
 	"Telemetry",
 	"Integrations",
@@ -40,11 +42,13 @@ func (m *Model) openSettingsModal() {
 	if len(m.providerOrder) > 0 {
 		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
 	}
-	if len(Themes) > 0 {
-		m.settingsThemeCursor = clamp(ActiveThemeIdx, 0, len(Themes)-1)
+	themes := AvailableThemes()
+	if len(themes) > 0 {
+		m.settingsThemeCursor = clamp(ActiveThemeIndex(), 0, len(themes)-1)
 	} else {
 		m.settingsThemeCursor = 0
 	}
+	m.settingsViewCursor = dashboardViewIndex(m.configuredDashboardView())
 	m.refreshIntegrationStatuses()
 }
 
@@ -158,25 +162,46 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.persistDashboardPrefsCmd()
 		}
 	case settingsTabTheme:
+		themes := AvailableThemes()
 		switch msg.String() {
 		case "up", "k":
 			if m.settingsThemeCursor > 0 {
 				m.settingsThemeCursor--
 			}
 		case "down", "j":
-			if m.settingsThemeCursor < len(Themes)-1 {
+			if m.settingsThemeCursor < len(themes)-1 {
 				m.settingsThemeCursor++
 			}
 		case " ", "enter":
-			if len(Themes) == 0 {
+			if len(themes) == 0 {
 				return m, nil
 			}
-			m.settingsThemeCursor = clamp(m.settingsThemeCursor, 0, len(Themes)-1)
-			name := Themes[m.settingsThemeCursor].Name
+			m.settingsThemeCursor = clamp(m.settingsThemeCursor, 0, len(themes)-1)
+			name := themes[m.settingsThemeCursor].Name
 			if SetThemeByName(name) {
 				m.settingsStatus = "saving theme..."
 				return m, m.persistThemeCmd(name)
 			}
+		}
+	case settingsTabView:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsViewCursor > 0 {
+				m.settingsViewCursor--
+			}
+		case "down", "j":
+			if m.settingsViewCursor < len(dashboardViewOptions)-1 {
+				m.settingsViewCursor++
+			}
+		case " ", "enter":
+			if len(dashboardViewOptions) == 0 {
+				return m, nil
+			}
+			selected := dashboardViewByIndex(m.settingsViewCursor)
+			m.setDashboardView(selected)
+			m.settingsViewCursor = dashboardViewIndex(selected)
+			m.settingsStatus = "saving view..."
+			return m, m.persistDashboardViewCmd()
 		}
 	case settingsTabAPIKeys:
 		switch msg.String() {
@@ -311,6 +336,8 @@ func (m *Model) resetSettingsCursorForTab() {
 	switch m.settingsModalTab {
 	case settingsTabTelemetry:
 		m.settingsCursor = m.currentTimeWindowIndex()
+	case settingsTabView:
+		m.settingsViewCursor = dashboardViewIndex(m.configuredDashboardView())
 	default:
 		m.settingsCursor = 0
 	}
@@ -403,6 +430,8 @@ func (m Model) settingsModalHint() string {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabView:
+		return "Up/Down: select view  ·  Space/Enter: apply  ·  v/Shift+V: cycle outside settings  ·  Esc: close"
 	case settingsTabTelemetry:
 		return "Up/Down: select  ·  Space/Enter: apply time window  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabIntegrations:
@@ -418,6 +447,8 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 		return m.renderSettingsProvidersBody(w, h)
 	case settingsTabAPIKeys:
 		return m.renderSettingsAPIKeysBody(w, h)
+	case settingsTabView:
+		return m.renderSettingsViewBody(w, h)
 	case settingsTabTelemetry:
 		return m.renderSettingsTelemetryBody(w, h)
 	case settingsTabIntegrations:
@@ -466,26 +497,64 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 }
 
 func (m Model) renderSettingsThemeBody(w, h int) string {
-	if len(Themes) == 0 {
+	themes := AvailableThemes()
+	if len(themes) == 0 {
 		return padToSize(dimStyle.Render("No themes available."), w, h)
 	}
 
-	cursor := clamp(m.settingsThemeCursor, 0, len(Themes)-1)
-	start, end := listWindow(len(Themes), cursor, h)
+	cursor := clamp(m.settingsThemeCursor, 0, len(themes)-1)
+	start, end := listWindow(len(themes), cursor, h)
+	activeThemeIdx := ActiveThemeIndex()
 	lines := make([]string, 0, h)
 
 	for i := start; i < end; i++ {
-		theme := Themes[i]
+		theme := themes[i]
 		prefix := "  "
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
 		current := "  "
-		if i == ActiveThemeIdx {
+		if i == activeThemeIdx {
 			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
 		}
 		lines = append(lines, fmt.Sprintf("%s%s%s %s", prefix, current, theme.Icon, theme.Name))
+	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) renderSettingsViewBody(w, h int) string {
+	if len(dashboardViewOptions) == 0 {
+		return padToSize(dimStyle.Render("No dashboard views available."), w, h)
+	}
+
+	cursor := clamp(m.settingsViewCursor, 0, len(dashboardViewOptions)-1)
+	start, end := listWindow(len(dashboardViewOptions), cursor, h)
+	lines := make([]string, 0, h)
+	configured := m.configuredDashboardView()
+	active := m.activeDashboardView()
+
+	for i := start; i < end; i++ {
+		option := dashboardViewOptions[i]
+
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+
+		current := "  "
+		if option.ID == configured {
+			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
+		}
+
+		label := option.Label
+		if option.ID == active && option.ID != configured {
+			label += " (auto)"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s%s%s", prefix, current, label))
+		lines = append(lines, "    "+dimStyle.Render(option.Description))
 	}
 
 	return padToSize(strings.Join(lines, "\n"), w, h)

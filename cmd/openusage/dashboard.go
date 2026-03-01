@@ -19,6 +19,11 @@ import (
 )
 
 func runDashboard(cfg config.Config) {
+	verbose := os.Getenv("OPENUSAGE_DEBUG") != ""
+
+	if err := tui.LoadThemes(config.ConfigDir()); err != nil && verbose {
+		log.Printf("theme load: %v", err)
+	}
 	tui.SetThemeByName(cfg.Theme)
 
 	cachedAccounts := core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
@@ -36,7 +41,6 @@ func runDashboard(cfg config.Config) {
 	)
 
 	socketPath := daemon.ResolveSocketPath()
-	verbose := os.Getenv("OPENUSAGE_DEBUG") != ""
 
 	viewRuntime := daemon.NewViewRuntime(
 		nil,
@@ -53,6 +57,42 @@ func runDashboard(cfg config.Config) {
 	model.SetOnAddAccount(func(acct core.AccountConfig) {
 		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {
 			return
+		}
+
+		cfgNow, err := config.Load()
+		if err != nil {
+			log.Printf("add account: load config failed: %v", err)
+			cfgNow = config.DefaultConfig()
+		}
+
+		accountID := strings.TrimSpace(acct.ID)
+		providerID := strings.TrimSpace(acct.Provider)
+		authType := strings.TrimSpace(acct.Auth)
+
+		found := false
+		for i := range cfgNow.Accounts {
+			if strings.TrimSpace(cfgNow.Accounts[i].ID) != accountID {
+				continue
+			}
+			found = true
+			if strings.TrimSpace(cfgNow.Accounts[i].Provider) == "" {
+				cfgNow.Accounts[i].Provider = providerID
+			}
+			if strings.TrimSpace(cfgNow.Accounts[i].Auth) == "" {
+				cfgNow.Accounts[i].Auth = authType
+			}
+			break
+		}
+		if !found {
+			cfgNow.Accounts = append(cfgNow.Accounts, core.AccountConfig{
+				ID:       accountID,
+				Provider: providerID,
+				Auth:     authType,
+			})
+		}
+
+		if err := config.Save(cfgNow); err != nil {
+			log.Printf("add account: save config failed: %v", err)
 		}
 	})
 

@@ -31,10 +31,12 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		dimHintStyle.Render("press t to cycle"))
 	lines = append(lines, "")
 
+	themes := AvailableThemes()
+	activeThemeIdx := ActiveThemeIndex()
 	var themePills []string
-	for i, t := range Themes {
+	for i, t := range themes {
 		pill := t.Icon + " " + t.Name
-		if i == ActiveThemeIdx {
+		if i == activeThemeIdx {
 			themePills = append(themePills, lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorMantle).
@@ -123,8 +125,9 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	actionKeys := []struct{ key, desc string }{
 		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
-		{"Mouse wheel", "Scroll (single-column tiles/detail)"},
-		{"PgUp/PgDn", "Scroll selected tile"},
+		{"v / Shift+V", "Cycle dashboard view"},
+		{"Mouse wheel", "Scroll panels/details/widgets"},
+		{"PgUp/PgDn", "Scroll panel or selected widget"},
 		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
 		{"Ctrl+O", "Expand/collapse usage breakdowns"},
 		{"[ ]", "Switch detail tabs"},
