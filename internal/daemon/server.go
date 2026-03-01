@@ -830,6 +830,9 @@ func EnsureSocketPathAvailable(socketPath string) error {
 	conn, dialErr := dialer.DialContext(dialCtx, "unix", socketPath)
 	if dialErr == nil {
 		_ = conn.Close()
+		if owner := SocketOwnerSummary(socketPath); strings.TrimSpace(owner) != "" {
+			return fmt.Errorf("telemetry daemon already running on socket %s\nsocket_owner:\n%s", socketPath, owner)
+		}
 		return fmt.Errorf("telemetry daemon already running on socket %s", socketPath)
 	}
 
