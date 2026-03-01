@@ -1,4 +1,4 @@
-import { motion, useReducedMotion, useInView } from "framer-motion";
+import { motion, useInView, useReducedMotion } from "framer-motion";
 import { useRef } from "react";
 
 interface Tile {
@@ -74,16 +74,16 @@ const tiles: Tile[] = [
 ];
 
 function barColor(pct: number): string {
-  if (pct <= 35) return "#9de9bd";
-  if (pct <= 55) return "#f2d28d";
-  if (pct <= 75) return "#f0a870";
-  return "#ff90b2";
+  if (pct <= 35) return "#74f7c5";
+  if (pct <= 55) return "#ffd58c";
+  if (pct <= 75) return "#ffac74";
+  return "#ff89ae";
 }
 
-const statusColor: Record<string, string> = {
-  OK: "#9de9bd",
-  WARN: "#f2d28d",
-  LIMIT: "#ff90b2",
+const statusColor: Record<Tile["status"], string> = {
+  OK: "#74f7c5",
+  WARN: "#ffd58c",
+  LIMIT: "#ff89ae",
 };
 
 export default function DashboardGrid() {
@@ -92,80 +92,61 @@ export default function DashboardGrid() {
   const inView = useInView(ref, { once: true, margin: "-60px" });
 
   return (
-    <div ref={ref} className="border border-[#1e2130] bg-[#0c0e14] text-[11px] font-mono overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#1e2130] text-[10px]">
-        <div className="flex items-center gap-3">
-          <span className="text-text font-medium">OpenUsage</span>
-          <span className="text-dim">Tab: 1 &middot; 6 Compact 6 T providers</span>
+    <div ref={ref} className="dash-grid-shell">
+      <div className="dash-grid-top">
+        <div>
+          <span>OpenUsage</span>
+          <span>Tab: Compact providers</span>
         </div>
-        <div className="flex items-center gap-3 text-dim">
+        <div>
           <span>? help</span>
           <span>q quit</span>
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-x divide-y divide-[#1e2130]">
+      <div className="dash-grid-body">
         {tiles.map((tile, i) => (
-          <motion.div
+          <motion.article
             key={tile.name}
+            className="dash-tile"
             initial={reduced ? false : { opacity: 0 }}
             animate={inView ? { opacity: 1 } : {}}
-            transition={{ duration: 0.4, delay: 0.1 + i * 0.08 }}
-            className="px-3 py-2.5 space-y-1.5 min-h-[140px]"
+            transition={{ duration: 0.35, delay: 0.08 + i * 0.05 }}
           >
-            {/* Tile header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="text-cyan">●</span>
-                <span className="text-text">{tile.name}</span>
+            <div className="dash-tile-head">
+              <div>
+                <span>●</span>
+                <span>{tile.name}</span>
               </div>
-              <span style={{ color: statusColor[tile.status] }} className="text-[10px]">
-                {tile.status}
-              </span>
+              <span style={{ color: statusColor[tile.status] }}>{tile.status}</span>
             </div>
 
-            {/* Gauges */}
             {tile.gauges.map((g) => (
-              <div key={g.label} className="flex items-center gap-2">
-                <span className="text-dim w-10 shrink-0 text-[10px]">{g.label}</span>
-                <div className="flex-1 h-2 bg-[#161822] overflow-hidden">
+              <div key={g.label} className="dash-gauge-row">
+                <span>{g.label}</span>
+                <div>
                   <motion.div
-                    className="h-full"
                     style={{ backgroundColor: barColor(g.pct) }}
                     initial={{ width: 0 }}
                     animate={inView ? { width: `${g.pct}%` } : {}}
-                    transition={{
-                      duration: reduced ? 0 : 0.8,
-                      delay: 0.3 + i * 0.08,
-                      ease: [0.25, 0.46, 0.45, 0.94],
-                    }}
+                    transition={{ duration: reduced ? 0 : 0.8, delay: 0.22 + i * 0.06 }}
                   />
                 </div>
-                <span className="text-dim w-10 text-right tabular-nums text-[10px]">
-                  {g.pct}%
-                </span>
+                <span>{g.pct}%</span>
               </div>
             ))}
 
-            {/* Top model */}
-            <div className="text-[10px] text-dim truncate">
-              <span className="text-[#2a3045]">1</span>{" "}
-              <span className="text-text">{tile.topModel}</span>{" "}
-              <span>{tile.topMetric}</span>
-            </div>
-
-            {/* Stat */}
-            <div className="text-[10px] text-dim">{tile.stat}</div>
-          </motion.div>
+            <p className="dash-model">
+              {tile.topModel} <span>{tile.topMetric}</span>
+            </p>
+            <p className="dash-stat">{tile.stat}</p>
+          </motion.article>
         ))}
       </div>
 
-      {/* Bottom bar */}
-      <div className="flex items-center justify-between px-3 py-1 border-t border-[#1e2130] text-[10px] text-[#2a3045]">
-        <span>Tab switch view &middot; j/k navigate &middot; Enter detail</span>
-        <span>t theme &middot; r refresh</span>
+      <div className="dash-grid-bottom">
+        <span>Tab switch view · j/k navigate · Enter detail</span>
+        <span>t theme · r refresh</span>
       </div>
     </div>
   );

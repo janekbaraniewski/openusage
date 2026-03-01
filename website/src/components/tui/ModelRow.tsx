@@ -17,30 +17,22 @@ const RANK_COLORS = [
 
 export default function ModelRow({ rank, name, pct, metric, color }: Props) {
   const c = color || RANK_COLORS[(rank - 1) % RANK_COLORS.length];
+  const pctStr = `${Math.round(Math.min(pct, 100))}%`;
+  const value = /^\s*\d+%/.test(metric) ? metric : `${pctStr} ${metric}`;
 
   return (
     <div className="flex items-center gap-0 h-[18px] text-[11px] leading-none">
-      {/* Rank */}
-      <span className="w-[14px] text-right text-[#2a3045] shrink-0">{rank}</span>
-      {/* Color indicator */}
+      <span className="w-[14px] text-right text-[#65708a] shrink-0">{rank}</span>
       <span
         className="w-[6px] h-[6px] mx-[5px] shrink-0"
         style={{ backgroundColor: c }}
       />
-      {/* Name */}
-      <span className="text-[#d0d0d0] shrink-0 whitespace-nowrap max-w-[180px] truncate">
+      <span className="text-[#aeb7c8] shrink-0 whitespace-nowrap max-w-[190px] truncate">
         {name}
       </span>
-      {/* Gauge bar - fills remaining space */}
-      <div className="flex-1 h-[5px] bg-[#161822] mx-1.5 min-w-[30px]">
-        <div
-          className="h-full"
-          style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: c }}
-        />
-      </div>
-      {/* Metric */}
-      <span className="text-[#7a829e] tabular-nums text-right shrink-0 whitespace-nowrap">
-        {metric}
+      <div className="flex-1 mx-1.5 border-b border-dotted border-[#293450] translate-y-[1px]" />
+      <span className="text-[#d5db98] tabular-nums text-right shrink-0 whitespace-nowrap">
+        {value}
       </span>
     </div>
   );

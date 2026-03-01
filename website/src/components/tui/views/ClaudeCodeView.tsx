@@ -5,11 +5,16 @@ import ModelRow from "../ModelRow";
 import CodeStats from "../CodeStats";
 import StatLine from "../StatLine";
 
-export default function ClaudeCodeView() {
+interface ViewProps {
+  bodyMinWidth?: number;
+}
+
+export default function ClaudeCodeView({ bodyMinWidth = 580 }: ViewProps) {
   return (
     <Panel
       name="claude-code"
       status="OK"
+      bodyMinWidth={bodyMinWidth}
       tabs={[
         { label: "Usage", active: true },
         { label: "Usage 5h" },
@@ -21,54 +26,47 @@ export default function ClaudeCodeView() {
     >
       <Gauge value={3} label="Usage 5h" suffix="3.0%" />
       <Gauge value={48} label="Usage 7d" suffix="48.0%" />
-      <div className="text-[#7a829e] text-[10px] mt-0.5">
-        5h 3% &middot; 7d 48%
-      </div>
-      <div className="text-[#7a829e] text-[10px]">
-        ~$51.93 today &middot; $651.62/h
-      </div>
+      <div className="text-[#7a829e] text-[10px] mt-0.5">5h 3% · 7d 48%</div>
+      <div className="text-[#7a829e] text-[10px]">~$51.93 today · $651.62/h</div>
 
       <Section title="Model Burn (credits)" />
       <ModelRow rank={1} name="claude-sonnet-4-6" pct={39} metric="39% 16.8M tok · $449.67" />
       <ModelRow rank={2} name="claude-opus-4-6" pct={59} metric="59% 11.4M tok · $691.66" />
       <ModelRow rank={3} name="claude-haiku-4-5-20251001" pct={2} metric="2% 10.4M tok · $22.21" />
-      {/* Mini trend */}
       <div className="flex gap-px items-end h-3 my-1 ml-[25px]">
         {[
-          { h: 60, c: "#ff90b2" }, { h: 45, c: "#ff90b2" }, { h: 80, c: "#f0a870" },
-          { h: 90, c: "#f0a870" }, { h: 30, c: "#f0a870" }, { h: 20, c: "#f2d28d" },
+          { h: 60, c: "#ff90b2" },
+          { h: 45, c: "#ff90b2" },
+          { h: 80, c: "#f0a870" },
+          { h: 90, c: "#f0a870" },
+          { h: 30, c: "#f0a870" },
+          { h: 20, c: "#f2d28d" },
           { h: 15, c: "#f2d28d" },
         ].map((d, i) => (
           <div key={i} className="w-[5px]" style={{ height: `${d.h}%`, backgroundColor: d.c }} />
         ))}
       </div>
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        claude-opus... claude-haiku...
-      </div>
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        › 2 more models (Ctrl+0)
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">claude-opus... claude-haiku...</div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">› 2 more models (Ctrl+0)</div>
 
       <Section title="Clients" />
       <ModelRow rank={1} name="Docs Site" pct={23} metric="23% 8.7M tok · 133 req" />
       <ModelRow rank={2} name="Infra Config" pct={21} metric="21% 7.7M tok · 3.1k req" />
       <ModelRow rank={3} name="Test Suite" pct={21} metric="21% 7.8M tok · 4.5k req" />
       <ModelRow rank={4} name="API Gateway" pct={13} metric="13% 4.1M tok · 1.6k req" />
-      {/* Mini trend */}
       <div className="flex gap-px items-end h-3 my-1 ml-[25px]">
         {[
-          { h: 70, c: "#ff90b2" }, { h: 55, c: "#f0a870" }, { h: 50, c: "#f0a870" },
-          { h: 40, c: "#f2d28d" }, { h: 20, c: "#9de9bd" },
+          { h: 70, c: "#ff90b2" },
+          { h: 55, c: "#f0a870" },
+          { h: 50, c: "#f0a870" },
+          { h: 40, c: "#f2d28d" },
+          { h: 20, c: "#9de9bd" },
         ].map((d, i) => (
           <div key={i} className="w-[5px]" style={{ height: `${d.h}%`, backgroundColor: d.c }} />
         ))}
       </div>
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        Docs Site &middot; Infra Config
-      </div>
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        › 5 more clients (Ctrl+0)
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">Docs Site · Infra Config</div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">› 5 more clients (Ctrl+0)</div>
 
       <Section title="Tool Usage" />
       <ModelRow rank={1} name="todowrite" pct={11} metric="11% 6.0k" />
@@ -77,9 +75,7 @@ export default function ClaudeCodeView() {
       <ModelRow rank={4} name="notebookedit" pct={10} metric="10% 5.6k" />
       <ModelRow rank={5} name="calls_today" pct={10} metric="10% 5.4k" />
       <ModelRow rank={6} name="write" pct={8} metric="8% 4.5k" />
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        › 5 more tools (Ctrl+0)
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">› 5 more tools (Ctrl+0)</div>
 
       <Section title="Language (requests)" />
       <ModelRow rank={1} name="go" pct={61} metric="61% 5.2k req" />
@@ -88,9 +84,7 @@ export default function ClaudeCodeView() {
       <ModelRow rank={4} name="rust" pct={6} metric="6% 3.4k req" />
       <ModelRow rank={5} name="terraform" pct={4} metric="4% 4.5k req" />
       <ModelRow rank={6} name="yaml" pct={11} metric="11% 4.2k req" />
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        › more languages (Ctrl+0)
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">› more languages (Ctrl+0)</div>
 
       <Section title="Code Statistics" />
       <CodeStats

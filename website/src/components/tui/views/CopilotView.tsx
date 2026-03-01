@@ -5,11 +5,16 @@ import ModelRow from "../ModelRow";
 import CodeStats from "../CodeStats";
 import StatLine from "../StatLine";
 
-export default function CopilotView() {
+interface ViewProps {
+  bodyMinWidth?: number;
+}
+
+export default function CopilotView({ bodyMinWidth = 580 }: ViewProps) {
   return (
     <Panel
       name="copilot"
       status="OK"
+      bodyMinWidth={bodyMinWidth}
       tabs={[
         { label: "Usage", active: true },
         { label: "Core 29m" },
@@ -20,9 +25,7 @@ export default function CopilotView() {
     >
       <Gauge value={16.3} label="Chat Quota" suffix="16.3%" />
       <Gauge value={33.7} label="Completions Q." suffix="33.7%" />
-      <div className="text-[#7a829e] text-[10px] mt-0.5">
-        48% usage used &middot; 66.7k / 128.0k tokens
-      </div>
+      <div className="text-[#7a829e] text-[10px] mt-0.5">48% usage used · 66.7k / 128.0k tokens</div>
 
       <Section title="Model Burn (credits)" />
       <ModelRow rank={1} name="claude-sonnet-4-6" pct={59} metric="59% 14.4M tok · $520.22" />
@@ -32,17 +35,16 @@ export default function CopilotView() {
       <ModelRow rank={1} name="Vscode" pct={60} metric="60% 7.6M tok · 4.0k sess" />
       <ModelRow rank={2} name="JetBrains" pct={20} metric="20% 2.5M tok · 4.0k sess" />
       <ModelRow rank={3} name="CLI Agents" pct={20} metric="20% 2.5M tok · 3.2k sess" />
-      {/* Mini trend */}
       <div className="flex gap-px items-end h-3 my-1 ml-[25px]">
         {[
-          { h: 85, c: "#ff90b2" }, { h: 40, c: "#f0a870" }, { h: 35, c: "#f2d28d" },
+          { h: 85, c: "#ff90b2" },
+          { h: 40, c: "#f0a870" },
+          { h: 35, c: "#f2d28d" },
         ].map((d, i) => (
           <div key={i} className="w-[5px]" style={{ height: `${d.h}%`, backgroundColor: d.c }} />
         ))}
       </div>
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        Vscode &middot; JetBrains
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">Vscode · JetBrains</div>
 
       <Section title="Tool Usage" />
       <ModelRow rank={1} name="task" pct={10} metric="10% 5.7k" />
@@ -51,9 +53,7 @@ export default function CopilotView() {
       <ModelRow rank={4} name="bash_calls" pct={9} metric="9% 5.2k" />
       <ModelRow rank={5} name="edit" pct={8} metric="8% 4.8k" />
       <ModelRow rank={6} name="glob_calls" pct={8} metric="8% 4.8k" />
-      <div className="text-[10px] text-[#2a3045] ml-[25px]">
-        › 11 more tools (Ctrl+0)
-      </div>
+      <div className="text-[10px] text-[#2a3045] ml-[25px]">› 11 more tools (Ctrl+0)</div>
 
       <Section title="Language (requests)" />
       <ModelRow rank={1} name="typescript" pct={61} metric="61% 5.2k req" />

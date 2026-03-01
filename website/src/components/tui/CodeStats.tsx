@@ -12,7 +12,6 @@ export default function CodeStats({ added, removed, filesChanged, commits, promp
 
   return (
     <div className="text-[11px] leading-none space-y-[3px]">
-      {/* Add/remove bar */}
       <div className="flex items-center h-[17px] gap-1">
         <span className="text-[#9de9bd] whitespace-nowrap">+{added} added</span>
         <div className="flex-1 h-[6px] flex overflow-hidden">
@@ -22,19 +21,19 @@ export default function CodeStats({ added, removed, filesChanged, commits, promp
         <span className="text-[#ff90b2] whitespace-nowrap">-{removed} removed</span>
       </div>
       <div className="flex items-center h-[17px]">
-        <span className="text-[#7a829e]">Files Changed</span>
-        <span className="flex-1" />
-        <span className="text-[#d0d0d0] tabular-nums">{filesChanged}</span>
+        <span className="text-[#8c96ae]">Files Changed</span>
+        <div className="flex-1 mx-1.5 border-b border-dotted border-[#2a3552] translate-y-[1px]" />
+        <span className="text-[#bcc5d3] tabular-nums">{filesChanged}</span>
       </div>
       <div className="flex items-center h-[17px]">
-        <span className="text-[#7a829e]">Commits</span>
-        <span className="flex-1" />
-        <span className="text-[#d0d0d0] tabular-nums">{commits}</span>
+        <span className="text-[#8c96ae]">Commits</span>
+        <div className="flex-1 mx-1.5 border-b border-dotted border-[#2a3552] translate-y-[1px]" />
+        <span className="text-[#bcc5d3] tabular-nums">{commits}</span>
       </div>
       <div className="flex items-center h-[17px]">
-        <span className="text-[#7a829e]">Prompts</span>
-        <span className="flex-1" />
-        <span className="text-[#d0d0d0] tabular-nums">{prompts}</span>
+        <span className="text-[#8c96ae]">Prompts</span>
+        <div className="flex-1 mx-1.5 border-b border-dotted border-[#2a3552] translate-y-[1px]" />
+        <span className="text-[#bcc5d3] tabular-nums">{prompts}</span>
       </div>
     </div>
   );
