@@ -4192,8 +4192,8 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 
 	if added > 0 || removed > 0 {
 		total := added + removed
-		addedColor := lipgloss.Color("#a6e3a1")
-		removedColor := lipgloss.Color("#f38ba8")
+		addedColor := colorGreen
+		removedColor := colorRed
 		addedW := int(math.Round(added / total * float64(barW)))
 		if addedW < 1 && added > 0 {
 			addedW = 1
@@ -4232,7 +4232,7 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 		if aiEmptyW < 0 {
 			aiEmptyW = 0
 		}
-		aiColor := lipgloss.Color("#89b4fa")
+		aiColor := colorBlue
 		aiBar := lipgloss.NewStyle().Foreground(aiColor).Render(strings.Repeat("█", aiFilledW)) +
 			lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", aiEmptyW))
 		lines = append(lines, "  "+aiBar)

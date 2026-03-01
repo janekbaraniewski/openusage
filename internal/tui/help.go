@@ -31,10 +31,12 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		dimHintStyle.Render("press t to cycle"))
 	lines = append(lines, "")
 
+	themes := AvailableThemes()
+	activeThemeIdx := ActiveThemeIndex()
 	var themePills []string
-	for i, t := range Themes {
+	for i, t := range themes {
 		pill := t.Icon + " " + t.Name
-		if i == ActiveThemeIdx {
+		if i == activeThemeIdx {
 			themePills = append(themePills, lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorMantle).
