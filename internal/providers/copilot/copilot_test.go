@@ -1,9 +1,11 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1624,6 +1626,177 @@ func TestReadSessions_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
 	if m := snap.Metrics["tool_calls_total"]; m.Used == nil || *m.Used != 3 {
 		t.Fatalf("tool_calls_total = %+v, want 3", m)
 	}
+}
+
+func TestDetectCopilotVersion_FallbackToStandalone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses shell scripts")
+	}
+
+	tmp := t.TempDir()
+	ghBin := writeTestExe(t, tmp, "gh", `
+if [ "$1" = "copilot" ] && [ "$2" = "--version" ]; then
+  echo "gh: unknown command copilot" >&2
+  exit 1
+fi
+exit 1
+`)
+	copilotBin := writeTestExe(t, tmp, "copilot", `
+if [ "$1" = "--version" ]; then
+  echo "copilot 1.2.3"
+  exit 0
+fi
+exit 1
+`)
+
+	version, source, err := detectCopilotVersion(context.Background(), ghBin, copilotBin)
+	if err != nil {
+		t.Fatalf("detectCopilotVersion() error: %v", err)
+	}
+	if version != "copilot 1.2.3" {
+		t.Fatalf("version = %q, want %q", version, "copilot 1.2.3")
+	}
+	if source != "copilot" {
+		t.Fatalf("source = %q, want %q", source, "copilot")
+	}
+}
+
+func TestFetch_FallsBackToStandaloneCopilotWhenGHCopilotUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses shell scripts")
+	}
+
+	tmp := t.TempDir()
+	configDir := filepath.Join(t.TempDir(), ".copilot")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	ghBin := writeTestExe(t, tmp, "gh", `
+if [ "$1" = "copilot" ] && [ "$2" = "--version" ]; then
+  echo "gh: unknown command copilot" >&2
+  exit 1
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  echo "Logged in to github.com as octocat"
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  endpoint=""
+  for arg in "$@"; do endpoint="$arg"; done
+  case "$endpoint" in
+    "/user")
+      echo '{"login":"octocat","name":"Octo Cat","plan":{"name":"free"}}'
+      exit 0
+      ;;
+    "/copilot_internal/user")
+      echo '{"login":"octocat","access_type_sku":"copilot_pro","copilot_plan":"individual","chat_enabled":true,"is_mcp_enabled":false,"organization_login_list":[],"organization_list":[]}'
+      exit 0
+      ;;
+    "/rate_limit")
+      echo '{"resources":{"core":{"limit":5000,"remaining":4999,"reset":2000000000,"used":1}}}'
+      exit 0
+      ;;
+  esac
+fi
+echo "unsupported gh args: $*" >&2
+exit 1
+`)
+
+	copilotBin := writeTestExe(t, tmp, "copilot", `
+if [ "$1" = "--version" ]; then
+  echo "copilot 1.2.3"
+  exit 0
+fi
+exit 1
+`)
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "copilot",
+		Provider: "copilot",
+		Auth:     "cli",
+		Binary:   ghBin,
+		ExtraData: map[string]string{
+			"copilot_binary": copilotBin,
+			"config_dir":     configDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status == core.StatusError || snap.Status == core.StatusAuth {
+		t.Fatalf("Status = %q, want non-error/auth fallback", snap.Status)
+	}
+	if snap.Raw["copilot_version"] != "copilot 1.2.3" {
+		t.Fatalf("copilot_version = %q, want %q", snap.Raw["copilot_version"], "copilot 1.2.3")
+	}
+	if snap.Raw["copilot_version_source"] != "copilot" {
+		t.Fatalf("copilot_version_source = %q, want %q", snap.Raw["copilot_version_source"], "copilot")
+	}
+	if !strings.Contains(snap.Raw["auth_status"], "Logged in") {
+		t.Fatalf("auth_status = %q, want GitHub auth output", snap.Raw["auth_status"])
+	}
+	if snap.Raw["github_login"] != "octocat" {
+		t.Fatalf("github_login = %q, want %q", snap.Raw["github_login"], "octocat")
+	}
+}
+
+func TestFetch_StandaloneCopilotWithoutGH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses shell scripts")
+	}
+
+	tmp := t.TempDir()
+	configDir := filepath.Join(t.TempDir(), ".copilot")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	copilotBin := writeTestExe(t, tmp, "copilot", `
+if [ "$1" = "--version" ]; then
+  echo "copilot 2.0.0"
+  exit 0
+fi
+exit 1
+`)
+	t.Setenv("PATH", tmp)
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "copilot",
+		Provider: "copilot",
+		Auth:     "cli",
+		Binary:   copilotBin,
+		ExtraData: map[string]string{
+			"config_dir": configDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("Status = %q, want %q", snap.Status, core.StatusOK)
+	}
+	if snap.Raw["copilot_version"] != "copilot 2.0.0" {
+		t.Fatalf("copilot_version = %q, want %q", snap.Raw["copilot_version"], "copilot 2.0.0")
+	}
+	if snap.Raw["copilot_version_source"] != "copilot" {
+		t.Fatalf("copilot_version_source = %q, want %q", snap.Raw["copilot_version_source"], "copilot")
+	}
+	if !strings.Contains(snap.Raw["auth_status"], "skipped GitHub API checks") {
+		t.Fatalf("auth_status = %q, want skipped GH API message", snap.Raw["auth_status"])
+	}
+}
+
+func writeTestExe(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	script := "#!/bin/sh\n" + strings.TrimSpace(body) + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", name, err)
+	}
+	return path
 }
 
 func unmarshalJSON(s string, v interface{}) error {

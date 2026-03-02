@@ -255,18 +255,18 @@ type logTokenEntry struct {
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	binary := acct.Binary
-	if binary == "" {
-		binary = "gh"
+	configuredBinary := strings.TrimSpace(acct.Binary)
+	if configuredBinary == "" {
+		configuredBinary = "gh"
 	}
-
-	if _, err := exec.LookPath(binary); err != nil {
+	ghBinary, copilotBinary := resolveCopilotBinaries(configuredBinary, acct.ExtraData)
+	if ghBinary == "" && copilotBinary == "" {
 		return core.UsageSnapshot{
 			ProviderID: p.ID(),
 			AccountID:  acct.ID,
 			Timestamp:  time.Now(),
 			Status:     core.StatusError,
-			Message:    fmt.Sprintf("%s binary not found in PATH", binary),
+			Message:    "neither gh nor copilot binary found in PATH",
 		}, nil
 	}
 
@@ -280,40 +280,103 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	if vOut, err := runGH(ctx, binary, "copilot", "--version"); err == nil {
-		snap.Raw["copilot_version"] = strings.TrimSpace(vOut)
-	} else {
+	version, versionSource, err := detectCopilotVersion(ctx, ghBinary, copilotBinary)
+	if err != nil {
 		snap.Status = core.StatusError
-		snap.Message = "gh copilot extension not available"
+		snap.Message = "copilot command not available"
+		if errMsg := strings.TrimSpace(err.Error()); errMsg != "" {
+			snap.Raw["copilot_version_error"] = errMsg
+		}
 		return snap, nil
 	}
+	snap.Raw["copilot_version"] = version
+	snap.Raw["copilot_version_source"] = versionSource
 
-	authOut, authErr := runGH(ctx, binary, "auth", "status")
-	authOutput := authOut
-	if authErr != nil {
+	authOutput := ""
+	if ghBinary != "" {
+		authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
 		authOutput = authOut
+		snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
+
+		if authErr != nil {
+			snap.Status = core.StatusAuth
+			snap.Message = "not authenticated with GitHub"
+			return snap, nil
+		}
+
+		p.fetchUserInfo(ctx, ghBinary, &snap)
+
+		p.fetchCopilotInternalUser(ctx, ghBinary, &snap)
+
+		p.fetchRateLimits(ctx, ghBinary, &snap)
+
+		p.fetchOrgData(ctx, ghBinary, &snap)
+	} else {
+		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
-	snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
-
-	if authErr != nil {
-		snap.Status = core.StatusAuth
-		snap.Message = "not authenticated with GitHub"
-		return snap, nil
-	}
-
-	p.fetchUserInfo(ctx, binary, &snap)
-
-	p.fetchCopilotInternalUser(ctx, binary, &snap)
-
-	p.fetchRateLimits(ctx, binary, &snap)
-
-	p.fetchOrgData(ctx, binary, &snap)
 
 	p.fetchLocalData(acct, &snap)
 
 	p.resolveStatus(&snap, authOutput)
 
 	return snap, nil
+}
+
+func resolveCopilotBinaries(configuredBinary string, extraData map[string]string) (string, string) {
+	ghBinary := ""
+	copilotBinary := ""
+
+	if isGHCliBinary(configuredBinary) {
+		ghBinary = resolveBinaryPath(configuredBinary)
+	} else {
+		copilotBinary = resolveBinaryPath(configuredBinary)
+	}
+
+	if ghBinary == "" {
+		ghBinary = resolveBinaryPath("gh")
+	}
+
+	if copilotBinary == "" && extraData != nil {
+		copilotBinary = resolveBinaryPath(extraData["copilot_binary"])
+	}
+	if copilotBinary == "" {
+		copilotBinary = resolveBinaryPath("copilot")
+	}
+
+	return ghBinary, copilotBinary
+}
+
+func isGHCliBinary(binary string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(binary)))
+	return base == "gh" || base == "gh.exe"
+}
+
+func resolveBinaryPath(binary string) string {
+	binary = strings.TrimSpace(binary)
+	if binary == "" {
+		return ""
+	}
+	path, err := exec.LookPath(binary)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func detectCopilotVersion(ctx context.Context, ghBinary, copilotBinary string) (string, string, error) {
+	if ghBinary != "" {
+		if out, err := runGH(ctx, ghBinary, "copilot", "--version"); err == nil {
+			return strings.TrimSpace(out), "gh copilot", nil
+		}
+	}
+
+	if copilotBinary != "" {
+		if out, err := runGH(ctx, copilotBinary, "--version"); err == nil {
+			return strings.TrimSpace(out), "copilot", nil
+		}
+	}
+
+	return "", "", fmt.Errorf("failed to resolve a working copilot version command")
 }
 
 func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.UsageSnapshot) {
