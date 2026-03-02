@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -268,7 +267,7 @@ func (s *Service) readModelCacheGet(cacheKey string, timeWindow string) (map[str
 	if entry.timeWindow != timeWindow {
 		return nil, time.Time{}, false
 	}
-	return maps.Clone(entry.snapshots), entry.updatedAt, true
+	return core.DeepCloneSnapshots(entry.snapshots), entry.updatedAt, true
 }
 
 func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot, timeWindow string) {
@@ -277,7 +276,7 @@ func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.U
 	}
 	s.readModelMu.Lock()
 	s.readModelCache[cacheKey] = cachedReadModelEntry{
-		snapshots:  maps.Clone(snapshots),
+		snapshots:  core.DeepCloneSnapshots(snapshots),
 		updatedAt:  time.Now().UTC(),
 		timeWindow: timeWindow,
 	}
@@ -953,6 +952,10 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 
 	cacheKey := ReadModelRequestKey(req)
 	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey, req.TimeWindow); ok {
+		core.Tracef("[read_model] cache hit key=%s age=%s providers=%d", cacheKey, time.Since(cachedAt).Round(time.Millisecond), len(cached))
+		for id, snap := range cached {
+			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
+		}
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
 			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)

@@ -284,3 +284,96 @@ func TestRenderFooterStatusLine_ShowsAppUpdateWhenIdle(t *testing.T) {
 		t.Fatalf("footer line missing update command, got: %q", line)
 	}
 }
+
+func TestComputeDisplayInfo_UsageFiveHourBranch(t *testing.T) {
+	fiveHour := 57.0
+	todayCost := 55.57
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"usage_five_hour": {Used: &fiveHour, Unit: "%", Window: "5h"},
+			"today_api_cost":  {Used: &todayCost, Unit: "USD", Window: "1d"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.gaugePercent != 57.0 {
+		t.Fatalf("gaugePercent = %v, want 57.0", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "5h 57%") {
+		t.Fatalf("summary = %q, want '5h 57%%'", got.summary)
+	}
+	if got.reason != "usage_five_hour" {
+		t.Fatalf("reason = %q, want usage_five_hour", got.reason)
+	}
+}
+
+func TestComputeDisplayInfo_TodayApiCostBranchWithoutFiveHour(t *testing.T) {
+	todayCost := 55.57
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "1d"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Credits" {
+		t.Fatalf("tagLabel = %q, want Credits", got.tagLabel)
+	}
+	if got.tagEmoji != "💰" {
+		t.Fatalf("tagEmoji = %q, want 💰", got.tagEmoji)
+	}
+	if got.gaugePercent != -1 {
+		t.Fatalf("gaugePercent = %v, want -1 (no gauge)", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "$55.57 today") {
+		t.Fatalf("summary = %q, want '$55.57 today'", got.summary)
+	}
+	if got.reason != "today_api_cost" {
+		t.Fatalf("reason = %q, want today_api_cost", got.reason)
+	}
+}
+
+func TestComputeDisplayInfo_BillingBlockFallbackClassifiesAsUsage(t *testing.T) {
+	todayCost := 161.85
+	burnRate := 31.42
+	blockCost := 94.93
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "1d"},
+			"burn_rate":      {Used: &burnRate, Unit: "USD/h"},
+			"5h_block_cost":  {Used: &blockCost, Unit: "USD"},
+		},
+		Resets: map[string]time.Time{
+			"billing_block": time.Now().Add(2 * time.Hour),
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.reason != "billing_block_fallback" {
+		t.Fatalf("reason = %q, want billing_block_fallback", got.reason)
+	}
+	if !strings.Contains(got.summary, "$161.85 today") {
+		t.Fatalf("summary = %q, want '$161.85 today'", got.summary)
+	}
+	if !strings.Contains(got.detail, "$94.93 5h block") {
+		t.Fatalf("detail = %q, want '$94.93 5h block'", got.detail)
+	}
+}

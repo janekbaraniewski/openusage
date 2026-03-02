@@ -370,6 +370,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hasData = true
 			m.daemonStatus = DaemonRunning
 		}
+		// Stamp display decision into snapshot diagnostics for the Info tab.
+		for id, snap := range m.snapshots {
+			info := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
+			if info.reason != "" {
+				snap.EnsureMaps()
+				snap.Diagnostics["display_branch"] = info.reason
+				m.snapshots[id] = snap
+			}
+		}
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
 		return m, nil
@@ -1478,6 +1487,7 @@ type providerDisplayInfo struct {
 	summary      string  // Primary summary (e.g. "$4.23 today · $0.82/h")
 	detail       string  // Secondary detail (e.g. "Primary 3% · Secondary 15%")
 	gaugePercent float64 // 0-100 used %. -1 if not applicable.
+	reason       string  // Decision branch name for diagnostics (e.g. "usage_five_hour", "spend_limit")
 }
 
 func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget) providerDisplayInfo {
@@ -1507,6 +1517,7 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 	case core.StatusError:
 		info.tagEmoji = "⚠"
 		info.tagLabel = "Error"
+		info.reason = "status_error"
 		msg := snap.Message
 		if len(msg) > 50 {
 			msg = msg[:47] + "..."
@@ -1515,18 +1526,29 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 			msg = "Error"
 		}
 		info.summary = msg
+		core.Tracef("[display] %s: branch=status_error", snap.ProviderID)
 		return info
 	case core.StatusAuth:
 		info.tagEmoji = "🔑"
 		info.tagLabel = "Auth"
+		info.reason = "status_auth"
 		info.summary = "Authentication required"
+		core.Tracef("[display] %s: branch=status_auth", snap.ProviderID)
 		return info
 	case core.StatusUnsupported:
 		info.tagEmoji = "◇"
 		info.tagLabel = "N/A"
+		info.reason = "status_unsupported"
 		info.summary = "Not supported"
+		core.Tracef("[display] %s: branch=status_unsupported", snap.ProviderID)
 		return info
 	}
+
+	core.Tracef("[display] %s: checking metrics (%d total), has usage_five_hour=%v, has today_api_cost=%v, has spend_limit=%v",
+		snap.ProviderID, len(snap.Metrics),
+		snap.Metrics["usage_five_hour"].Used != nil,
+		snap.Metrics["today_api_cost"].Used != nil,
+		snap.Metrics["spend_limit"].Limit != nil)
 
 	if m, ok := snap.Metrics["spend_limit"]; ok && m.Limit != nil && m.Used != nil {
 		remaining := *m.Limit - *m.Used
@@ -1535,6 +1557,7 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		}
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
+		info.reason = "spend_limit"
 		info.summary = fmt.Sprintf("$%.0f / $%.0f spent", *m.Used, *m.Limit)
 		info.detail = fmt.Sprintf("$%.0f remaining", remaining)
 		// Add self vs team breakdown when individual spend is available
@@ -1548,6 +1571,7 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = 100 - pct
 		}
+		core.Tracef("[display] %s: branch=spend_limit used=%.2f limit=%.2f gauge=%.1f", snap.ProviderID, *m.Used, *m.Limit, info.gaugePercent)
 		return info
 	}
 
@@ -1684,6 +1708,7 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 	if fh, ok := snap.Metrics["usage_five_hour"]; ok && fh.Used != nil {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
+		info.reason = "usage_five_hour"
 
 		info.gaugePercent = *fh.Used
 		parts := []string{fmt.Sprintf("5h %.0f%%", *fh.Used)}
@@ -1704,12 +1729,49 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *br.Used))
 		}
 		info.detail = strings.Join(detailParts, " · ")
+		core.Tracef("[display] %s: branch=usage_five_hour used=%.1f gauge=%.1f → tag=Usage", snap.ProviderID, *fh.Used, info.gaugePercent)
+		return info
+	}
+
+	// Billing block fallback: JSONL data confirms a 5h billing block exists
+	// but Usage API percentage is unavailable. Classify as "Usage" (not "Credits").
+	if _, hasBillingBlock := snap.Resets["billing_block"]; hasBillingBlock {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "billing_block_fallback"
+
+		var parts []string
+		if dc, ok2 := snap.Metrics["today_api_cost"]; ok2 && dc.Used != nil {
+			parts = append(parts, fmt.Sprintf("~$%.2f today", *dc.Used))
+		}
+		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
+			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
+		}
+		info.summary = strings.Join(parts, " · ")
+
+		var detailParts []string
+		if bc, ok2 := snap.Metrics["5h_block_cost"]; ok2 && bc.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("~$%.2f 5h block", *bc.Used))
+		}
+		if wc, ok2 := snap.Metrics["7d_api_cost"]; ok2 && wc.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("~$%.2f/7d", *wc.Used))
+		}
+		if msgs, ok2 := snap.Metrics["messages_today"]; ok2 && msgs.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("%.0f msgs", *msgs.Used))
+		}
+		if sess, ok2 := snap.Metrics["sessions_today"]; ok2 && sess.Used != nil {
+			detailParts = append(detailParts, fmt.Sprintf("%.0f sessions", *sess.Used))
+		}
+		info.detail = strings.Join(detailParts, " · ")
+		core.Tracef("[display] %s: branch=billing_block_fallback → tag=Usage", snap.ProviderID)
 		return info
 	}
 
 	if m, ok := snap.Metrics["today_api_cost"]; ok && m.Used != nil {
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
+		info.reason = "today_api_cost"
+		core.Tracef("[display] %s: branch=today_api_cost used=%.2f → tag=Credits", snap.ProviderID, *m.Used)
 		parts := []string{fmt.Sprintf("~$%.2f today", *m.Used)}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -1734,8 +1796,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 	}
 
 	if m, ok := snap.Metrics["5h_block_cost"]; ok && m.Used != nil {
-		info.tagEmoji = "💰"
-		info.tagLabel = "Credits"
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
 		info.summary = fmt.Sprintf("~$%.2f / 5h block", *m.Used)
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			info.detail = fmt.Sprintf("$%.2f/h burn rate", *br.Used)

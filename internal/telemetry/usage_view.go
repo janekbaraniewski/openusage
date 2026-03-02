@@ -149,6 +149,9 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
+	metricsBefore := len(snap.Metrics)
+	_, hadFiveHourBefore := snap.Metrics["usage_five_hour"]
+	deletedCount := 0
 	for key := range snap.Metrics {
 		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||
@@ -156,8 +159,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "model_") ||
 			strings.HasPrefix(key, "provider_") {
 			delete(snap.Metrics, key)
+			deletedCount++
 		}
 	}
+	_, hasFiveHourAfter := snap.Metrics["usage_five_hour"]
+	core.Tracef("[usage_view] %s: cleanup deleted %d/%d metrics, usage_five_hour before=%v after=%v",
+		snap.ProviderID, deletedCount, metricsBefore, hadFiveHourBefore, hasFiveHourAfter)
 	for key := range snap.Raw {
 		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||

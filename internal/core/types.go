@@ -133,6 +133,103 @@ func (s UsageSnapshot) MetaValue(key string) (string, bool) {
 	return "", false
 }
 
+// DeepClone returns a deep copy of the snapshot with all map and pointer
+// fields fully independent from the original.
+func (s UsageSnapshot) DeepClone() UsageSnapshot {
+	clone := s
+	clone.Metrics = deepCloneMetrics(s.Metrics)
+	clone.Resets = deepCloneTimeMap(s.Resets)
+	clone.Attributes = deepCloneStringMap(s.Attributes)
+	clone.Diagnostics = deepCloneStringMap(s.Diagnostics)
+	clone.Raw = deepCloneStringMap(s.Raw)
+
+	if s.ModelUsage != nil {
+		clone.ModelUsage = make([]ModelUsageRecord, len(s.ModelUsage))
+		for i, rec := range s.ModelUsage {
+			clone.ModelUsage[i] = rec
+			clone.ModelUsage[i].Dimensions = deepCloneStringMap(rec.Dimensions)
+			clone.ModelUsage[i].InputTokens = cloneFloat64Ptr(rec.InputTokens)
+			clone.ModelUsage[i].OutputTokens = cloneFloat64Ptr(rec.OutputTokens)
+			clone.ModelUsage[i].CachedTokens = cloneFloat64Ptr(rec.CachedTokens)
+			clone.ModelUsage[i].ReasoningTokens = cloneFloat64Ptr(rec.ReasoningTokens)
+			clone.ModelUsage[i].TotalTokens = cloneFloat64Ptr(rec.TotalTokens)
+			clone.ModelUsage[i].CostUSD = cloneFloat64Ptr(rec.CostUSD)
+			clone.ModelUsage[i].Requests = cloneFloat64Ptr(rec.Requests)
+		}
+	}
+
+	if s.DailySeries != nil {
+		clone.DailySeries = make(map[string][]TimePoint, len(s.DailySeries))
+		for k, pts := range s.DailySeries {
+			cp := make([]TimePoint, len(pts))
+			copy(cp, pts)
+			clone.DailySeries[k] = cp
+		}
+	}
+
+	return clone
+}
+
+// DeepCloneSnapshots returns a deep copy of a snapshot map where each
+// snapshot is independently deep-cloned.
+func DeepCloneSnapshots(m map[string]UsageSnapshot) map[string]UsageSnapshot {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]UsageSnapshot, len(m))
+	for k, v := range m {
+		out[k] = v.DeepClone()
+	}
+	return out
+}
+
+func deepCloneMetrics(m map[string]Metric) map[string]Metric {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]Metric, len(m))
+	for k, v := range m {
+		out[k] = Metric{
+			Limit:     cloneFloat64Ptr(v.Limit),
+			Remaining: cloneFloat64Ptr(v.Remaining),
+			Used:      cloneFloat64Ptr(v.Used),
+			Unit:      v.Unit,
+			Window:    v.Window,
+		}
+	}
+	return out
+}
+
+func deepCloneTimeMap(m map[string]time.Time) map[string]time.Time {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]time.Time, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func deepCloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneFloat64Ptr(p *float64) *float64 {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
 func (s UsageSnapshot) WorstPercent() float64 {
 	worst := float64(100)
 	found := false

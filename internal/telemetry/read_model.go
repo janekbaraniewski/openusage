@@ -114,7 +114,11 @@ func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[s
 		}
 
 		if latest != nil {
+			metricsBefore := len(s.Metrics)
 			s = mergeLimitSnapshotRoot(s, *latest)
+			core.Tracef("[hydrate] %s/%s: limit_snapshot found, metrics %d→%d", providerID, effectiveAccountID, metricsBefore, len(s.Metrics))
+		} else {
+			core.Tracef("[hydrate] %s/%s: no limit_snapshot in DB, metrics=%d", providerID, effectiveAccountID, len(s.Metrics))
 		}
 		out[accountID] = s
 	}

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -21,6 +22,8 @@ import (
 
 type Provider struct {
 	providerbase.Base
+	mu            sync.Mutex
+	usageAPICache *usageResponse // last successful Usage API response
 }
 
 func New() *Provider {
@@ -395,18 +398,41 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 func (p *Provider) readUsageAPI(orgUUID string, snap *core.UsageSnapshot) error {
 	cookies, err := getClaudeSessionCookies()
 	if err != nil {
+		if cached := p.getCachedUsage(); cached != nil {
+			applyUsageResponse(cached, snap, time.Now())
+			snap.Raw["usage_api_cached"] = "true"
+			return nil
+		}
 		return fmt.Errorf("cookie extraction: %w", err)
 	}
 
 	usage, err := fetchUsageAPI(orgUUID, cookies)
 	if err != nil {
+		if cached := p.getCachedUsage(); cached != nil {
+			applyUsageResponse(cached, snap, time.Now())
+			snap.Raw["usage_api_cached"] = "true"
+			return nil
+		}
 		return fmt.Errorf("API fetch: %w", err)
 	}
 
+	p.setCachedUsage(usage)
 	applyUsageResponse(usage, snap, time.Now())
 
 	snap.Raw["usage_api_ok"] = "true"
 	return nil
+}
+
+func (p *Provider) getCachedUsage() *usageResponse {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.usageAPICache
+}
+
+func (p *Provider) setCachedUsage(u *usageResponse) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.usageAPICache = u
 }
 
 func applyUsageResponse(usage *usageResponse, snap *core.UsageSnapshot, now time.Time) {
