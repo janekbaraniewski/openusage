@@ -108,6 +108,11 @@ func startViaManagedService(
 		return nil, fmt.Errorf("telemetry daemon service is not installed; run `%s`", manager.InstallHint())
 	}
 	if err := manager.Start(); err != nil {
+		// If start returned an ambiguous manager-level error, still check whether
+		// a daemon reached health on the socket before failing hard.
+		if waitErr := waitAndVerifyDaemon(ctx, client, socketPath); waitErr == nil {
+			return client, nil
+		}
 		return nil, fmt.Errorf("start telemetry daemon service: %w\n%s", err, StartupDiagnostics(manager, socketPath))
 	}
 	if err := waitAndVerifyDaemon(ctx, client, socketPath); err != nil {

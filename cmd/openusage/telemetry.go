@@ -260,64 +260,67 @@ func newTelemetryDaemonCommand() *cobra.Command {
 		verbose         bool
 	)
 
+	runDaemon := func(_ *cobra.Command, _ []string) error {
+		cfgFile, loadErr := config.Load()
+		if loadErr != nil {
+			cfgFile = config.DefaultConfig()
+		}
+
+		resolvedInterval := interval
+		if resolvedInterval <= 0 {
+			resolvedInterval = time.Duration(cfgFile.UI.RefreshIntervalSeconds) * time.Second
+		}
+		if resolvedInterval <= 0 {
+			resolvedInterval = 30 * time.Second
+		}
+
+		resolvedCollect := collectInterval
+		if resolvedCollect <= 0 {
+			resolvedCollect = resolvedInterval
+		}
+		resolvedPoll := pollInterval
+		if resolvedPoll <= 0 {
+			resolvedPoll = resolvedInterval
+		}
+
+		// Check for actionable integrations and print advisory hints.
+		detected := detect.AutoDetect()
+		dirs := integrations.NewDefaultDirs()
+		matches := integrations.MatchDetected(integrations.AllDefinitions(), detected, dirs)
+		var actionableIDs []string
+		for _, m := range matches {
+			if m.Actionable {
+				actionableIDs = append(actionableIDs, string(m.Definition.ID))
+			}
+		}
+		if len(actionableIDs) > 0 {
+			fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
+			fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
+		}
+
+		return daemon.RunServer(daemon.Config{
+			DBPath:          strings.TrimSpace(dbPath),
+			SpoolDir:        strings.TrimSpace(spoolDir),
+			SocketPath:      strings.TrimSpace(socketPath),
+			CollectInterval: resolvedCollect,
+			PollInterval:    resolvedPoll,
+			Verbose:         verbose,
+		})
+	}
+
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the telemetry daemon server",
 		Long:  "Start the telemetry daemon. Use subcommands to install, uninstall, or check status.",
 		Example: strings.Join([]string{
 			"  openusage telemetry daemon",
+			"  openusage telemetry daemon run",
 			"  openusage telemetry daemon --verbose",
 			"  openusage telemetry daemon install",
 			"  openusage telemetry daemon status",
 			"  openusage telemetry daemon uninstall",
 		}, "\n"),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cfgFile, loadErr := config.Load()
-			if loadErr != nil {
-				cfgFile = config.DefaultConfig()
-			}
-
-			resolvedInterval := interval
-			if resolvedInterval <= 0 {
-				resolvedInterval = time.Duration(cfgFile.UI.RefreshIntervalSeconds) * time.Second
-			}
-			if resolvedInterval <= 0 {
-				resolvedInterval = 30 * time.Second
-			}
-
-			resolvedCollect := collectInterval
-			if resolvedCollect <= 0 {
-				resolvedCollect = resolvedInterval
-			}
-			resolvedPoll := pollInterval
-			if resolvedPoll <= 0 {
-				resolvedPoll = resolvedInterval
-			}
-
-			// Check for actionable integrations and print advisory hints.
-			detected := detect.AutoDetect()
-			dirs := integrations.NewDefaultDirs()
-			matches := integrations.MatchDetected(integrations.AllDefinitions(), detected, dirs)
-			var actionableIDs []string
-			for _, m := range matches {
-				if m.Actionable {
-					actionableIDs = append(actionableIDs, string(m.Definition.ID))
-				}
-			}
-			if len(actionableIDs) > 0 {
-				fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
-				fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
-			}
-
-			return daemon.RunServer(daemon.Config{
-				DBPath:          strings.TrimSpace(dbPath),
-				SpoolDir:        strings.TrimSpace(spoolDir),
-				SocketPath:      strings.TrimSpace(socketPath),
-				CollectInterval: resolvedCollect,
-				PollInterval:    resolvedPoll,
-				Verbose:         verbose,
-			})
-		},
+		RunE: runDaemon,
 	}
 
 	defaultSocketPath, _ := telemetry.DefaultSocketPath()
@@ -332,11 +335,20 @@ func newTelemetryDaemonCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 0, "provider poll interval override (0 uses --interval)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "enable daemon logs")
 
+	cmd.AddCommand(newDaemonRunCommand(runDaemon))
 	cmd.AddCommand(newDaemonInstallCommand())
 	cmd.AddCommand(newDaemonUninstallCommand())
 	cmd.AddCommand(newDaemonStatusCommand())
 
 	return cmd
+}
+
+func newDaemonRunCommand(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   "run",
+		Short: "Run the telemetry daemon server",
+		RunE:  runE,
+	}
 }
 
 func newDaemonInstallCommand() *cobra.Command {
@@ -370,12 +382,15 @@ func newDaemonUninstallCommand() *cobra.Command {
 }
 
 func newDaemonStatusCommand() *cobra.Command {
-	return &cobra.Command{
+	var details bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show telemetry daemon status",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return daemon.ServiceStatus(strings.TrimSpace(socketPath))
+			return daemon.ServiceStatus(strings.TrimSpace(socketPath), details)
 		},
 	}
+	cmd.Flags().BoolVar(&details, "details", false, "include verbose startup diagnostics")
+	return cmd
 }
