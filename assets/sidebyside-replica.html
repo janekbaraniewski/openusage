@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenUsage TUI Replica</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #14191f;
+    color: #c8c8c8;
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.25;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: 0px;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  :root {
+    --bg: #14191f;
+    --border: #2a2f38;
+    --text: #c8c8c8;
+    --text-dim: #6a6a8a;
+    --text-bright: #e8e8e8;
+    --green: #4ec940;
+    --green-bright: #5fd35f;
+    --yellow: #e8c840;
+    --orange: #e8943c;
+    --red: #e84040;
+    --cyan: #40c8e8;
+    --magenta: #c840e8;
+    --purple: #9a6aff;
+    --blue: #4a8af5;
+    --pink: #f06090;
+    --teal: #40d8a8;
+    --cell: 14px;
+  }
+
+  .status-bar {
+    background: var(--bg);
+    color: var(--text);
+    padding: 0 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border);
+  }
+  .status-bar-left { display: flex; align-items: center; gap: 4px; }
+  .status-bar-right { color: var(--text-dim); font-size: 11px; }
+  .status-bar .app-name { color: var(--yellow); font-weight: bold; }
+  .status-bar .sep { color: var(--text-dim); }
+
+  .main { display: flex; height: calc(100vh - 20px); }
+
+  .left-panel {
+    width: 31%;
+    min-width: 300px;
+    max-width: 480px;
+    border-right: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .left-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding-top: 6px; }
+  .left-footer { flex-shrink: 0; }
+  .left-panel::-webkit-scrollbar { width: 0; }
+
+  .right-panel { flex: 1; overflow-y: auto; padding: 0 12px 16px 12px; position: relative; line-height: 14px; font-size: 11px; }
+  .right-panel::-webkit-scrollbar { width: 0; }
+
+  .provider-header {
+    padding: 2px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; flex-direction: column; justify-content: center;
+    height: auto;
+  }
+  .provider-header .provider-row { display: flex; justify-content: space-between; align-items: center; height: var(--cell); }
+  .provider-name { color: var(--yellow); font-weight: bold; font-size: 11px; }
+  .provider-ok { color: var(--green); font-weight: bold; font-size: 11px; }
+  .provider-sub { color: var(--cyan); font-size: 11px; height: 14px; line-height: 14px; }
+
+  .gauge-section { padding: 4px 12px; display: flex; flex-direction: column; justify-content: flex-start; border-bottom: 1px solid var(--border); height: auto; }
+  .gauge-label-row { display: flex; justify-content: space-between; align-items: center; height: var(--cell); font-size: 11px; }
+  .gauge-bar { height: 6px; background: #333; overflow: hidden; margin: 2px 0; border-radius: 0; }
+  .gauge-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--green-bright)); }
+  .gauge-value { color: var(--green); font-weight: bold; font-size: 11px; }
+  .spend-info { color: var(--text-dim); font-size: 11px; line-height: 14px; }
+  .spend-info .amount { color: var(--yellow); font-weight: bold; }
+  .spend-info .amount-white { color: var(--text); }
+
+  .section-header {
+    color: var(--text-bright); font-weight: bold;
+    padding: 0 12px; font-size: 10px;
+    border-top: 1px solid var(--border);
+    height: var(--cell);
+    display: flex; align-items: center;
+  }
+
+  .model-list { padding: 0 12px; line-height: 1; }
+  .model-row { display: flex; align-items: center; height: var(--cell); font-size: 11px; white-space: nowrap; overflow: hidden; }
+  .model-idx { width: 16px; text-align: right; color: var(--text-dim); margin-right: 4px; flex-shrink: 0; }
+  .model-dot { width: 6px; height: 6px; border-radius: 2px; margin-right: 4px; flex-shrink: 0; }
+  .model-name { white-space: nowrap; color: var(--text); flex-shrink: 0; }
+  .dot-filler { flex: 1; overflow: hidden; white-space: nowrap; color: var(--text-dim); font-size: 11px; letter-spacing: -1px; opacity: 0.35; min-width: 6px; }
+  .model-stats { text-align: right; color: var(--text-dim); white-space: nowrap; font-size: 11px; flex-shrink: 0; }
+  .model-stats .pct { color: var(--yellow); }
+  .model-stats .tok-info { color: var(--text-dim); }
+  .model-stats .cost { color: var(--yellow); }
+
+  .stacked-bar-row { height: 8px; display: flex; align-items: center; padding: 0 12px; }
+  .stacked-bar { display: flex; height: 4px; flex: 1; overflow: hidden; }
+  .stacked-segment { height: 100%; }
+
+  .trend-section { padding: 0 12px; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 2px; padding-bottom: 2px; height: auto; }
+  .left-content::-webkit-scrollbar { width: 0; }
+  .trend-label { color: var(--text-dim); font-size: 11px; font-style: italic; height: var(--cell); line-height: var(--cell); }
+  .trend-row { display: flex; align-items: center; height: var(--cell); font-size: 11px; }
+  .trend-name { width: 100px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .sparkline { display: flex; align-items: flex-end; height: 10px; gap: 1px; }
+  .spark-bar { width: 3px; }
+
+  .tool-row { display: flex; align-items: center; height: var(--cell); font-size: 11px; padding: 0 12px; white-space: nowrap; overflow: hidden; }
+  .tool-idx { width: 16px; text-align: right; color: var(--text-dim); margin-right: 4px; flex-shrink: 0; }
+  .tool-dot { width: 6px; height: 6px; border-radius: 1px; margin-right: 4px; flex-shrink: 0; }
+  .tool-name { white-space: nowrap; color: var(--text); flex-shrink: 0; }
+  .tool-stats { text-align: right; white-space: nowrap; color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+  .tool-stats .pct { color: var(--text); }
+
+  .daily-usage { padding: 0 12px; }
+  .daily-row { display: flex; align-items: center; height: var(--cell); font-size: 11px; }
+  .daily-label { width: 56px; color: var(--text); padding-left: 8px; }
+  .daily-bars { display: flex; align-items: center; height: 8px; margin-right: 6px; width: 60px; }
+  .daily-bar-seg { height: 8px; }
+  .daily-val { color: var(--yellow); }
+
+  .provider-burn-row { display: flex; align-items: center; height: var(--cell); font-size: 11px; padding: 0 12px; white-space: nowrap; overflow: hidden; }
+  .pb-idx { width: 16px; text-align: right; color: var(--text-dim); margin-right: 4px; flex-shrink: 0; }
+  .pb-dot { width: 6px; height: 6px; border-radius: 1px; margin-right: 4px; flex-shrink: 0; }
+  .pb-name { white-space: nowrap; color: var(--text); flex-shrink: 0; }
+  .pb-stats { text-align: right; white-space: nowrap; color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+  .pb-stats .cost { color: var(--yellow); }
+
+  .credits-footer { padding: 0 12px; border-top: 1px solid var(--border); font-size: 11px; line-height: 14px; height: auto; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+
+  .bottom-bar { padding: 0 12px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); height: var(--cell); display: flex; align-items: center; }
+  .bottom-bar .more { color: var(--cyan); }
+
+  .help-bar { padding: 0 12px; font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; background: var(--bg); height: var(--cell); border-top: 1px solid var(--border); }
+
+  .right-header { padding: 14px 0 0 0; margin-bottom: 14px; }
+  .right-header .title { color: var(--text-bright); font-weight: bold; font-size: 11px; }
+
+  .chat-content { padding-bottom: 40px; }
+  .chat-content .tool-call { color: var(--purple); font-size: 11px; margin: 14px 0 0; line-height: 14px; }
+  .chat-content .tool-call .icon { color: var(--cyan); }
+  .chat-content p { margin: 14px 0 0; font-size: 11px; line-height: 14px; }
+  .chat-content hr { border: none; border-top: 1px solid var(--border); margin: 14px 0 0; }
+  .chat-content h2 { color: var(--cyan); font-size: 11px; font-weight: bold; margin: 14px 0 0; line-height: 14px; }
+  .chat-content h3 { color: var(--yellow); font-size: 11px; font-weight: bold; margin: 14px 0 0; line-height: 14px; }
+
+  .hl-green { color: var(--green); }
+  .hl-cyan { color: var(--cyan); }
+  .hl-yellow { color: var(--yellow); }
+  .hl-bold { font-weight: bold; color: var(--text-bright); }
+
+  .md-table {
+    font-size: 11px; margin: 14px 0 0; white-space: pre; line-height: 14px;
+    color: var(--text);
+  }
+  .md-table .pipe { color: var(--text-dim); }
+  .md-table .th { color: var(--cyan); font-weight: bold; }
+  .md-table .hl { color: var(--yellow); font-weight: bold; }
+  .md-table .sep { color: var(--text-dim); }
+
+  .summary-text { font-size: 11px; line-height: 14px; color: var(--text); }
+  .summary-text strong { color: var(--yellow); }
+
+  .chat-content ul { list-style: none; padding-left: 12px; margin: 0; }
+  .chat-content ul li { font-size: 11px; line-height: 14px; }
+  .chat-content ul li::before { content: "- "; color: var(--text-dim); }
+
+  .dot-orange { background: var(--orange); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-pink { background: var(--pink); }
+  .dot-green { background: var(--green); }
+  .dot-red { background: var(--red); }
+  .dot-magenta { background: var(--magenta); }
+  .dot-cyan { background: var(--cyan); }
+  .dot-blue { background: var(--blue); }
+  .dot-teal { background: var(--teal); }
+  .dot-gray { background: #777; }
+
+  .bar-green { background: var(--green); }
+  .bar-yellow { background: var(--yellow); }
+  .bar-orange { background: var(--orange); }
+  .bar-red { background: var(--red); }
+  .bar-cyan { background: var(--cyan); }
+  .bar-magenta { background: var(--magenta); }
+  .bar-purple { background: var(--purple); }
+  .bar-blue { background: var(--blue); }
+  .bar-pink { background: var(--pink); }
+  .bar-teal { background: var(--teal); }
+
+  .input-cursor {
+    display: inline-block; width: 7px; height: 14px; background: var(--text);
+    animation: blink 1s step-end infinite; vertical-align: middle;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <span class="status-bar-left">
+    <span style="color:var(--cyan)">&lt;/&gt;</span>
+    <span class="app-name">OpenUsage</span>
+    <span style="color:var(--green)">6&#x25CF;</span>
+    <span style="color:var(--red)">1</span><span style="color:var(--yellow)">x</span>
+    <span style="color:var(--yellow)">&#x25B3;</span>
+    <span style="color:var(--red)">4</span>
+    <span style="background:var(--yellow);color:#000;padding:0 4px;font-size:11px">unmapped</span>
+    <span style="color:var(--text)">&#x229E;</span>
+    <span style="color:var(--text)">7 providers</span>
+    <span class="sep">&middot;</span>
+    <span style="color:var(--text)">30 Days</span>
+    <span class="sep">&middot;</span>
+    <span style="color:var(--text-dim)">detected additional providers,</span>
+  </span>
+  <span class="status-bar-right"><span style="color:var(--text)">34,112</span> &nbsp; <span style="color:var(--text)">17%</span> <span style="color:var(--text-dim)">($0.17)</span></span>
+</div>
+
+<!-- Main Layout -->
+<div class="main">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="left-content">
+    <div class="provider-header">
+      <div class="provider-row">
+        <span><span style="color:var(--yellow)">&#x25CF;</span> <span class="provider-name">openrouter</span></span>
+        <span class="provider-ok">OK</span>
+      </div>
+      <div><span class="provider-sub"><span style="color:var(--green)">$</span> Credits &middot; openrouter</span></div>
+    </div>
+
+    <div class="gauge-section">
+      <div class="gauge-label-row">
+        <span style="color:var(--text)">Credit Balance</span>
+        <span class="gauge-value">89.9%</span>
+      </div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:89.9%"></div></div>
+      <div class="spend-info">
+        <span class="amount">$8.99 / $10.00 spent</span><br>
+        <span class="amount-white">$1.01 remaining</span> &middot; today <span class="amount-white">$0.63</span> &middot; week <span class="amount-white">$7.12</span><br>
+        <span>466 reqs &middot; $7.12 &middot; 23.2M tok in 30 Days</span>
+      </div>
+    </div>
+
+    <div class="section-header">Model Burn (credits)</div>
+    <div class="stacked-bar-row"><div class="stacked-bar" id="model-stacked-bar"></div></div>
+    <div class="model-list" id="model-burn"></div>
+
+    <div class="trend-section">
+      <div class="trend-label">trend (daily by model)</div>
+      <div id="trend-rows"></div>
+    </div>
+
+    <div class="section-header">Tool Usage (calls)</div>
+    <div class="stacked-bar-row"><div class="stacked-bar" id="tool-stacked-bar"></div></div>
+    <div id="tool-usage"></div>
+
+    <div class="section-header">Daily Usage</div>
+    <div class="daily-usage" id="daily-usage"></div>
+
+    <div class="section-header">Provider Burn (credits)</div>
+    <div class="stacked-bar-row"><div class="stacked-bar" id="provider-stacked-bar"></div></div>
+    <div id="provider-burn"></div>
+
+    </div>
+    <div class="left-footer">
+    <div class="credits-footer" style="white-space:pre;font-family:'SF Mono','Menlo','Monaco','Consolas','Liberation Mono','Courier New',monospace">
+      <div style="display:flex"><span style="color:var(--text)">Credits</span><span style="color:var(--text-dim);flex:1;overflow:hidden"> &middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot; </span><span style="color:var(--text-dim)">balance <span style="color:var(--yellow)">$8.99/$10.00</span> &middot; <span style="color:var(--yellow)">$0.63</span> &middot; <span style="color:var(--yellow)">$7.12</span> &middot; -</span></div>
+      <div style="display:flex"><span style="color:var(--text)">Spend</span><span style="color:var(--text-dim);flex:1;overflow:hidden"> &middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot;&middot; </span><span style="color:var(--text-dim)">today <span style="color:var(--yellow)">$0.63</span> &middot; 7d <span style="color:var(--yellow)">$7.12</span></span></div>
+    </div>
+
+    <div class="bottom-bar"><span class="more">&#x2261; more below</span></div>
+    <div class="help-bar"><span>? help</span></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="right-header">
+      <span class="title"># Comparing GLM-5, Kimi 2.5, Opus 4.6</span>
+    </div>
+
+    <div class="chat-content">
+      <div class="tool-call" style="margin-top:0">&#x25CB; google_search [query=Anthropic Claude latest model 2025 2026, thinking=true]</div>
+      <p>Now I have comprehensive information about all three models. Here's a comparison:</p>
+      <p style="color:var(--text-dim);margin-top:14px">---</p>
+      <h2>GLM-5 vs Kimi K2.5 vs Claude Opus 4.6</h2>
+
+      <div class="md-table"><span class="pipe">|</span> <span class="th">Feature</span> <span class="pipe">|</span> <span class="hl">GLM-5 (Zhipu AI)</span> <span class="pipe">|</span> <span class="hl">Kimi K2.5 (Moonshot AI)</span> <span class="pipe">|</span> <span class="hl">Claude Opus 4.6 (Anthropic)</span> <span class="pipe">|</span>
+<span class="sep">|---------|-------------|-------------|-------------|</span>
+<span class="pipe">|</span> <span class="th">Developer</span> <span class="pipe">|</span> Zhipu AI (China) <span class="pipe">|</span> Moonshot AI (China) <span class="pipe">|</span> Anthropic (USA) <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="th">Release Date</span> <span class="pipe">|</span> Feb 11, 2026 <span class="pipe">|</span> Jan 2026 <span class="pipe">|</span> Feb 5, 2026 <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="th">Architecture</span> <span class="pipe">|</span> MoE (744B total / 44B active) <span class="pipe">|</span> MoE (1T total / 32B active) <span class="pipe">|</span> Proprietary (closed) <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="th">Context Window</span> <span class="pipe">|</span> 200K tokens <span class="pipe">|</span> 256K tokens <span class="pipe">|</span> 1M tokens (beta) <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="th">License</span> <span class="pipe">|</span> MIT (open-weights) <span class="pipe">|</span> Modified MIT (open-weights) <span class="pipe">|</span> Proprietary (closed) <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="th">Hardware</span> <span class="pipe">|</span> Trained on Huawei Ascend chips <span class="pipe">|</span> Consumer-grade compatible <span class="pipe">|</span> Anthropic infrastructure <span class="pipe">|</span></div>
+
+      <h3>Key Strengths</h3>
+      <p><span class="hl-cyan">GLM-5:</span></p>
+      <ul>
+        <li><span class="hl-bold">"Agentic Engineering"</span> focus -- autonomous long-horizon task execution</li>
+        <li>Native multimodality (text, vision, audio, image generation)</li>
+        <li>First open-weights model to score <span class="hl-green">50 on the Intelligence Index</span></li>
+        <li><span class="hl-green">77.8% on SWE-bench Verified</span> -- strong coding performance</li>
+        <li>Aggressively priced (~$0.80-1.00/1M input tokens)</li>
+      </ul>
+
+      <p><span class="hl-cyan">Kimi K2.5:</span></p>
+      <ul>
+        <li><span class="hl-bold">"Agent Swarm" technology</span> -- coordinates up to 100 sub-agents for parallel tasks</li>
+        <li><span class="hl-green">State-of-the-art coding benchmarks</span></li>
+        <li><span class="hl-bold">OK Computer</span> feature -- creates websites, slides, processes 1M+ rows of data</li>
+        <li>Can chain <span class="hl-green">200-300 tool calls autonomously</span></li>
+        <li>Designed to run on consumer hardware (Mac Studio)</li>
+      </ul>
+
+      <p><span class="hl-cyan">Claude Opus 4.6:</span></p>
+      <ul>
+        <li><span class="hl-bold">Highest reasoning capability</span> -- designed for complex legal/financial analysis</li>
+        <li><span class="hl-bold">Adaptive Thinking</span> -- modulates reasoning effort based on task complexity</li>
+        <li><span class="hl-green">14+ hour autonomous workflows</span></li>
+        <li>Largest context window (1M tokens)</li>
+        <li><span class="hl-bold">Claude Code Security</span> -- real-time vulnerability scanning</li>
+        <li>Advanced vision reasoning (Figma, Excel control)</li>
+      </ul>
+
+      <h3>Best Use Cases</h3>
+      <div class="md-table"><span class="pipe">|</span> <span class="th">Model</span> <span class="pipe">|</span> <span class="th">Best For</span> <span class="pipe">|</span>
+<span class="sep">|---------|-------------|</span>
+<span class="pipe">|</span> <span class="hl">GLM-5</span> <span class="pipe">|</span> Cost-sensitive deployments, Chinese market, open-source requirements, multimodal tasks <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="hl">Kimi K2.5</span> <span class="pipe">|</span> Coding, parallel task execution, consumer hardware deployment, data processing <span class="pipe">|</span>
+<span class="pipe">|</span> <span class="hl">Claude Opus 4.6</span> <span class="pipe">|</span> High-stakes reasoning, legal/financial analysis, longest context needs, enterprise safety <span class="pipe">|</span></div>
+
+      <h3>Pricing Comparison</h3>
+      <div class="md-table"><span class="pipe">|</span> <span class="th">Model</span> <span class="pipe">|</span> <span class="th">Input (per 1M tokens)</span> <span class="pipe">|</span> <span class="th">Output (per 1M tokens)</span> <span class="pipe">|</span>
+<span class="sep">|---------|----------------------|------------------------|</span>
+<span class="pipe">|</span> GLM-5 <span class="pipe">|</span> ~$0.80-1.00 <span class="pipe">|</span> ~$2.56-3.20 <span class="pipe">|</span>
+<span class="pipe">|</span> Kimi K2.5 <span class="pipe">|</span> Open-source (self-host) <span class="pipe">|</span> Open-source (self-host) <span class="pipe">|</span>
+<span class="pipe">|</span> Claude Opus 4.6 <span class="pipe">|</span> ~$15-20 (estimated) <span class="pipe">|</span> ~$75-100 (estimated) <span class="pipe">|</span></div>
+
+      <p style="color:var(--text-dim);margin-top:14px">---</p>
+
+      <p class="summary-text"><strong>Summary:</strong> GLM-5 and Kimi K2.5 are both Chinese open-weights models with strong agentic capabilities at lower cost. GLM-5 emphasizes multimodality and hardware independence, while Kimi excels at coding and parallel agent coordination. Claude Opus 4.6 remains the premium choice for highest reasoning quality and longest context, but at significantly higher cost and without open-weights access.</p>
+
+      <div style="margin-top:14px;display:flex;align-items:center;gap:6px;font-size:11px;height:14px;line-height:14px">
+        <span style="width:8px;height:8px;background:var(--orange);display:inline-block;border-radius:1px"></span>
+        <span style="color:var(--orange);font-weight:bold">Zbysiu</span>
+        <span style="color:var(--text-dim)">&middot; z-ai/glm-5 &middot; 2m 5s</span>
+      </div>
+
+      <div style="height:28px;display:flex;align-items:center;border-left:2px solid var(--yellow);padding-left:10px;margin-top:4px"><span style="display:inline-block;width:7px;height:14px;border:1px solid var(--text);opacity:0.7;"></span></div>
+
+      <div style="height:14px;line-height:14px;font-size:11px;border-left:2px solid var(--yellow);padding-left:10px">
+        <span style="color:var(--orange);font-weight:bold">Zbysiu</span>
+        <span style="color:var(--cyan);margin-left:6px">GLM-5</span>
+        <span style="color:var(--text-dim);margin-left:4px">OpenRouter</span>
+      </div>
+    </div>
+
+    <div style="position:absolute;bottom:0;right:0;padding:0 12px;height:14px;line-height:14px;font-size:11px;color:var(--text-dim);background:var(--bg)">
+      <span style="color:var(--yellow)">tab</span> agents &nbsp;
+      <span style="color:var(--yellow)">ctrl+p</span> commands
+    </div>
+  </div>
+
+</div>
+
+<script>
+// All data is static/hardcoded - no user input processed
+function buildModelBurn() {
+  var models = [
+    { name: "qwen-qwen3-coder-flash", pct: "28%", tok: "8.0M tok", cost: "$2.48", color: "orange" },
+    { name: "moonshotai-kimi-k2-5", pct: "42%", tok: "5.8M tok", cost: "$3.76", color: "pink" },
+    { name: "nvidia-nemotron-nano-9b-v2", pct: "0%", tok: "381.4k tok", cost: "$0.02", color: "gray" },
+    { name: "z-ai-glm-5", pct: "3%", tok: "281.4k tok", cost: "$0.31", color: "green" },
+    { name: "deepseek-deepseek-v3-2", pct: "0%", tok: "127.8k tok", cost: "$0.04", color: "red" },
+    { name: "z-ai-glm-4-5", pct: "1%", tok: "119.8k tok", cost: "$0.07", color: "yellow" },
+    { name: "openai-gpt-oss-120b", pct: "0%", tok: "94.7k tok", cost: "$0.01", color: "teal" },
+    { name: "anthropic-claude-sonnet-4\u2026", pct: "3%", tok: "64.8k tok", cost: "$0.27", color: "pink" },
+    { name: "google-gemini-3-pro-previ\u2026", pct: "1%", tok: "42.3k tok", cost: "$0.11", color: "orange" },
+    { name: "moonshotai-kimi-k2-thinki\u2026", pct: "0%", tok: "21.5k tok", cost: "$0.01", color: "magenta" },
+    { name: "moonshotai-kimi-k2", pct: "0%", tok: "21.0k tok", cost: "$0.01", color: "green" },
+    { name: "qwen-qwen3-coder", pct: "0%", tok: "19.3k tok", cost: "$0.01", color: "gray" },
+    { name: "nousresearch-hermes-4-405b", pct: "0%", tok: "11.1k tok", cost: "$0.01", color: "orange" },
+    { name: "unmapped spend (missing h\u2026", pct: "21%", tok: "0 tok", cost: "$1.88", color: "magenta" },
+  ];
+
+  var container = document.getElementById('model-burn');
+  models.forEach(function(m, i) {
+    var row = document.createElement('div');
+    row.className = 'model-row';
+
+    var idx = document.createElement('span');
+    idx.className = 'model-idx';
+    idx.textContent = String(i + 1);
+
+    var dot = document.createElement('span');
+    dot.className = 'model-dot dot-' + m.color;
+
+    var name = document.createElement('span');
+    name.className = 'model-name';
+    name.textContent = m.name;
+
+    var dotFill = document.createElement('span');
+    dotFill.className = 'dot-filler';
+    dotFill.textContent = ' \u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7';
+
+    var stats = document.createElement('span');
+    stats.className = 'model-stats';
+    var pctSpan = document.createElement('span');
+    pctSpan.className = 'pct';
+    pctSpan.textContent = m.pct;
+    var tokSpan = document.createElement('span');
+    tokSpan.className = 'tok-info';
+    tokSpan.textContent = ' ' + m.tok;
+    var sep = document.createTextNode(' \u00B7 ');
+    var costSpan = document.createElement('span');
+    costSpan.className = 'cost';
+    costSpan.textContent = m.cost;
+    stats.appendChild(pctSpan);
+    stats.appendChild(tokSpan);
+    stats.appendChild(sep);
+    stats.appendChild(costSpan);
+
+    row.appendChild(idx);
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(dotFill);
+    row.appendChild(stats);
+    container.appendChild(row);
+  });
+
+  // Stacked bar
+  var stackedBar = document.getElementById('model-stacked-bar');
+  var colors = ['var(--orange)','var(--yellow)','var(--pink)',null,'var(--green)','var(--red)','var(--yellow)','var(--teal)','var(--pink)','var(--orange)','var(--magenta)','var(--green)',null,'var(--orange)','var(--magenta)'];
+  var pcts = [28,2,42,0,3,0.5,1,0.5,3,1,0.5,0.5,0,0.5,21];
+  pcts.forEach(function(p, i) {
+    if (p > 0 && colors[i]) {
+      var seg = document.createElement('div');
+      seg.className = 'stacked-segment';
+      seg.style.width = p + '%';
+      seg.style.background = colors[i];
+      stackedBar.appendChild(seg);
+    }
+  });
+}
+
+function buildTrend() {
+  var trends = [
+    { name: "qwen-qwen3-\u2026", bars: [2,5,8,4,6,3,7,5,9,4,3,6,8,5,7,4], color: "var(--yellow)" },
+    { name: "moonshotai-\u2026", bars: [3,6,4,7,5,8,6,4,7,5,3,6,4,8,5,6], color: "var(--green)" },
+    { name: "z-ai-glm-5", bars: [1,2,1,3,2,1,2,3,1,2,1,1,2,1,2,1], color: "var(--green)" },
+    { name: "deepseek-de\u2026", bars: [1,1,2,1,1,2,1,1,1,2,1,1,1,1,1,1], color: "var(--red)" },
+  ];
+
+  var container = document.getElementById('trend-rows');
+  trends.forEach(function(t) {
+    var row = document.createElement('div');
+    row.className = 'trend-row';
+
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'trend-name';
+    nameSpan.textContent = t.name;
+
+    var sparkline = document.createElement('div');
+    sparkline.className = 'sparkline';
+    t.bars.forEach(function(h) {
+      var bar = document.createElement('div');
+      bar.className = 'spark-bar';
+      bar.style.height = h + 'px';
+      bar.style.background = t.color;
+      sparkline.appendChild(bar);
+    });
+
+    row.appendChild(nameSpan);
+    row.appendChild(sparkline);
+    container.appendChild(row);
+  });
+}
+
+function buildToolUsage() {
+  var tools = [
+    { name: "read", pct: "42%", calls: "187 calls", color: "pink" },
+    { name: "bash", pct: "27%", calls: "121 calls", color: "green" },
+    { name: "edit", pct: "7%", calls: "32 calls", color: "gray" },
+    { name: "glob", pct: "5%", calls: "23 calls", color: "orange" },
+    { name: "grep", pct: "5%", calls: "21 calls", color: "pink" },
+    { name: "todowrite", pct: "4%", calls: "20 calls", color: "teal" },
+    { name: "google_search", pct: "4%", calls: "16 calls", color: "green" },
+    { name: "write", pct: "2%", calls: "10 calls", color: "red" },
+    { name: "webfetch", pct: "2%", calls: "8 calls", color: "yellow" },
+    { name: "task", pct: "1%", calls: "5 calls", color: "teal" },
+    { name: "github_create_or_update_f\u2026", pct: "0%", calls: "1 calls", color: "magenta" },
+    { name: "github_get_file_contents", pct: "0%", calls: "1 calls", color: "orange" },
+    { name: "github_search_repositories", pct: "0%", calls: "1 calls", color: "magenta" },
+    { name: "gopls_go_package_api", pct: "0%", calls: "1 calls", color: "teal" },
+    { name: "gopls_go_workspace", pct: "0%", calls: "1 calls", color: "gray" },
+    { name: "invalid", pct: "0%", calls: "1 calls", color: "orange" },
+  ];
+
+  // Stacked bar
+  var toolStacked = document.getElementById('tool-stacked-bar');
+  var stackColors = ['var(--pink)','var(--green)',null,'var(--orange)','var(--pink)','var(--teal)','var(--green)','var(--red)','var(--yellow)','var(--teal)','var(--magenta)','var(--orange)','var(--magenta)','var(--teal)',null,'var(--orange)'];
+  var toolPcts = [42,27,0,5,5,4,4,2,2,1,0.3,0.3,0.3,0.3,0,0.3];
+  toolPcts.forEach(function(p, i) {
+    if (p > 0 && stackColors[i]) {
+      var seg = document.createElement('div');
+      seg.className = 'stacked-segment';
+      seg.style.width = p + '%';
+      seg.style.background = stackColors[i];
+      toolStacked.appendChild(seg);
+    }
+  });
+
+  var container = document.getElementById('tool-usage');
+  tools.forEach(function(t, i) {
+    var row = document.createElement('div');
+    row.className = 'tool-row';
+
+    var idx = document.createElement('span');
+    idx.className = 'tool-idx';
+    idx.textContent = String(i + 1);
+
+    var dot = document.createElement('span');
+    dot.className = 'tool-dot dot-' + t.color;
+
+    var name = document.createElement('span');
+    name.className = 'tool-name';
+    name.textContent = t.name;
+
+    var toolDotFill = document.createElement('span');
+    toolDotFill.className = 'dot-filler';
+    toolDotFill.textContent = ' \u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7';
+
+    var stats = document.createElement('span');
+    stats.className = 'tool-stats';
+    var pctSpan = document.createElement('span');
+    pctSpan.className = 'pct';
+    pctSpan.textContent = t.pct;
+    var callsSpan = document.createElement('span');
+    callsSpan.textContent = ' ' + t.calls;
+    stats.appendChild(pctSpan);
+    stats.appendChild(callsSpan);
+
+    row.appendChild(idx);
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(toolDotFill);
+    row.appendChild(stats);
+    container.appendChild(row);
+  });
+}
+
+function buildDailyUsage() {
+  var items = [
+    { label: "Cost", val: "$0.63", bars: [{w:18,c:'var(--green)'},{w:10,c:'var(--yellow)'},{w:4,c:'var(--orange)'}] },
+    { label: "Req", val: "34", bars: [{w:12,c:'var(--magenta)'},{w:8,c:'var(--yellow)'},{w:5,c:'var(--orange)'}] },
+    { label: "Tokens", val: "1.1M", bars: [{w:22,c:'var(--green)'},{w:14,c:'var(--teal)'},{w:6,c:'var(--yellow)'}] },
+  ];
+
+  var container = document.getElementById('daily-usage');
+  items.forEach(function(d) {
+    var row = document.createElement('div');
+    row.className = 'daily-row';
+
+    var label = document.createElement('span');
+    label.className = 'daily-label';
+    label.textContent = d.label;
+
+    var barsDiv = document.createElement('span');
+    barsDiv.className = 'daily-bars';
+    d.bars.forEach(function(b) {
+      var seg = document.createElement('span');
+      seg.className = 'daily-bar-seg';
+      seg.style.width = b.w + 'px';
+      seg.style.background = b.c;
+      barsDiv.appendChild(seg);
+    });
+
+    var val = document.createElement('span');
+    val.className = 'daily-val';
+    val.textContent = d.val;
+
+    row.appendChild(label);
+    row.appendChild(barsDiv);
+    row.appendChild(val);
+    container.appendChild(row);
+  });
+}
+
+function buildProviderBurn() {
+  var providers = [
+    { name: "qwen", pct: "28%", tok: "8.0M tok", reqs: "322 req", cost: "$2.49", color: "orange" },
+    { name: "moonshotai", pct: "42%", tok: "5.9M tok", reqs: "87 req", cost: "$3.79", color: "pink" },
+    { name: "z-ai", pct: "4%", tok: "401.2k tok", reqs: "18 req", cost: "$0.39", color: "teal" },
+    { name: "nvidia", pct: "0%", tok: "381.4k tok", reqs: "14 req", cost: "$0.02", color: "gray" },
+    { name: "deepseek", pct: "0%", tok: "127.8k tok", reqs: "10 req", cost: "$0.04", color: "orange" },
+    { name: "openai", pct: "0%", tok: "94.7k tok", reqs: "5 req", cost: "$0.01", color: "magenta" },
+    { name: "anthropic", pct: "3%", tok: "64.8k tok", reqs: "7 req", cost: "$0.27", color: "teal" },
+    { name: "google", pct: "1%", tok: "42.3k tok", reqs: "2 req", cost: "$0.11", color: "green" },
+    { name: "nousresearch", pct: "0%", tok: "11.1k tok", reqs: "1 req", cost: "$0.01", color: "red" },
+    { name: "unmapped spend (missing h\u2026", pct: "21%", tok: "0 tok", reqs: "0 req", cost: "$1.88", color: "yellow" },
+  ];
+
+  // Provider stacked bar
+  var pbStackedBar = document.getElementById('provider-stacked-bar');
+  var pbStackColors = ['var(--orange)','var(--pink)','var(--teal)',null,'var(--orange)','var(--magenta)','var(--teal)','var(--green)','var(--red)','var(--yellow)'];
+  var pbPcts = [28,42,4,0.5,0.5,0.5,3,1,0.5,21];
+  pbPcts.forEach(function(p2, j) {
+    if (p2 > 0 && pbStackColors[j]) {
+      var seg2 = document.createElement('div');
+      seg2.className = 'stacked-segment';
+      seg2.style.width = p2 + '%';
+      seg2.style.background = pbStackColors[j];
+      pbStackedBar.appendChild(seg2);
+    }
+  });
+
+  var container = document.getElementById('provider-burn');
+  providers.forEach(function(p, i) {
+    var row = document.createElement('div');
+    row.className = 'provider-burn-row';
+
+    var idx = document.createElement('span');
+    idx.className = 'pb-idx';
+    idx.textContent = String(i + 1);
+
+    var dot = document.createElement('span');
+    dot.className = 'pb-dot dot-' + p.color;
+
+    var name = document.createElement('span');
+    name.className = 'pb-name';
+    name.textContent = p.name;
+
+    var pbDotFill = document.createElement('span');
+    pbDotFill.className = 'dot-filler';
+    pbDotFill.textContent = ' \u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7';
+
+    var stats = document.createElement('span');
+    stats.className = 'pb-stats';
+    var pctSpan = document.createElement('span');
+    pctSpan.className = 'cost';
+    pctSpan.textContent = p.pct;
+    var tokSpan = document.createTextNode(' ' + p.tok + ' \u00B7 ' + p.reqs + ' \u00B7 ');
+    var costSpan = document.createElement('span');
+    costSpan.className = 'cost';
+    costSpan.textContent = p.cost;
+    stats.appendChild(pctSpan);
+    stats.appendChild(tokSpan);
+    stats.appendChild(costSpan);
+
+    row.appendChild(idx);
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(pbDotFill);
+    row.appendChild(stats);
+    container.appendChild(row);
+  });
+}
+
+buildModelBurn();
+buildTrend();
+buildToolUsage();
+buildDailyUsage();
+buildProviderBurn();
+</script>
+
+</body>
+</html>
