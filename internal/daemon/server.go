@@ -138,6 +138,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
 	go svc.runSpoolMaintenanceLoop(ctx)
+	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
 
 	return svc, nil
@@ -490,6 +491,159 @@ func (s *Service) cleanupSpool(ctx context.Context) {
 			result.RemainingFiles,
 			result.RemainingBytes,
 		)
+	}
+}
+
+// runHookSpoolLoop processes raw hook payloads written to disk by the
+// shell hook when the daemon socket was unreachable.  Files live in
+// the hook-spool directory (sibling of the main spool) and contain a
+// single JSON object: {"source":"…","account_id":"…","payload":<raw>}.
+func (s *Service) runHookSpoolLoop(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	hookSpoolDir, err := telemetry.DefaultHookSpoolDir()
+	if err != nil {
+		s.warnf("hook_spool_loop", "resolve dir error=%v", err)
+		return
+	}
+
+	processTicker := time.NewTicker(5 * time.Second)
+	cleanupTicker := time.NewTicker(5 * time.Minute)
+	defer processTicker.Stop()
+	defer cleanupTicker.Stop()
+
+	s.infof("hook_spool_loop_start", "dir=%s", hookSpoolDir)
+	s.processHookSpool(ctx, hookSpoolDir)
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.infof("hook_spool_loop_stop", "reason=context_done")
+			return
+		case <-processTicker.C:
+			s.processHookSpool(ctx, hookSpoolDir)
+		case <-cleanupTicker.C:
+			s.cleanupHookSpool(hookSpoolDir)
+		}
+	}
+}
+
+type rawHookFile struct {
+	Source    string          `json:"source"`
+	AccountID string          `json:"account_id"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+const hookSpoolBatchLimit = 200
+
+func (s *Service) processHookSpool(ctx context.Context, dir string) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	processed := 0
+	for _, path := range files {
+		if processed >= hookSpoolBatchLimit {
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			_ = os.Remove(path) // unreadable — discard
+			processed++
+			continue
+		}
+
+		var raw rawHookFile
+		if json.Unmarshal(data, &raw) != nil || len(raw.Payload) == 0 {
+			_ = os.Remove(path) // malformed — discard
+			processed++
+			continue
+		}
+
+		source, ok := providers.TelemetrySourceBySystem(raw.Source)
+		if !ok {
+			_ = os.Remove(path) // unknown source — discard
+			processed++
+			continue
+		}
+
+		reqs, parseErr := telemetry.ParseSourceHookPayload(
+			source, raw.Payload,
+			defaultTelemetryOptionsForSource(raw.Source),
+			strings.TrimSpace(raw.AccountID),
+		)
+		if parseErr != nil || len(reqs) == 0 {
+			_ = os.Remove(path)
+			processed++
+			continue
+		}
+
+		tally, _ := s.ingestBatch(ctx, reqs)
+		_ = os.Remove(path)
+		processed++
+
+		s.infof("hook_spool_ingest",
+			"file=%s source=%s processed=%d ingested=%d deduped=%d failed=%d",
+			filepath.Base(path), raw.Source,
+			tally.processed, tally.ingested, tally.deduped, tally.failed,
+		)
+	}
+}
+
+// cleanupHookSpool removes stale or excess files from the hook spool
+// directory.  Files older than 24h are removed unconditionally; the
+// directory is capped at 500 files.
+func (s *Service) cleanupHookSpool(dir string) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) == 0 {
+		// also clean leftover .tmp files
+		tmps, _ := filepath.Glob(filepath.Join(dir, "*.json.tmp"))
+		for _, t := range tmps {
+			_ = os.Remove(t)
+		}
+		return
+	}
+
+	now := time.Now()
+	removed := 0
+	remaining := make([]string, 0, len(files))
+	for _, path := range files {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			_ = os.Remove(path)
+			removed++
+			continue
+		}
+		if now.Sub(info.ModTime()) > 24*time.Hour {
+			_ = os.Remove(path)
+			removed++
+			continue
+		}
+		remaining = append(remaining, path)
+	}
+
+	// hard cap
+	for len(remaining) > 500 {
+		_ = os.Remove(remaining[0])
+		remaining = remaining[1:]
+		removed++
+	}
+
+	// clean .tmp files
+	tmps, _ := filepath.Glob(filepath.Join(dir, "*.json.tmp"))
+	for _, t := range tmps {
+		_ = os.Remove(t)
+		removed++
+	}
+
+	if removed > 0 {
+		s.infof("hook_spool_cleanup", "removed=%d remaining=%d", removed, len(remaining))
 	}
 }
 

@@ -53,9 +53,6 @@ func TestInstallClaudeCode(t *testing.T) {
 	if strings.Contains(templateStr, "__OPENUSAGE_BIN_DEFAULT__") {
 		t.Fatal("template still contains unreplaced bin placeholder")
 	}
-	if !strings.Contains(templateStr, "/usr/local/bin/openusage") {
-		t.Fatal("template missing openusage bin path")
-	}
 
 	// Verify config was patched correctly.
 	configData, err := os.ReadFile(result.ConfigFile)
@@ -140,9 +137,6 @@ func TestInstallOpenCode(t *testing.T) {
 	}
 	if !strings.Contains(string(templateData), "openusage-integration-version: "+IntegrationVersion) {
 		t.Fatal("template missing version marker")
-	}
-	if !strings.Contains(string(templateData), "/usr/local/bin/openusage") {
-		t.Fatal("template missing openusage bin path")
 	}
 
 	// Verify config has plugin entry.

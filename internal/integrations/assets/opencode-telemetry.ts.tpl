@@ -1,22 +1,16 @@
 import type { Plugin } from "@opencode-ai/plugin"
 // openusage-integration-version: __OPENUSAGE_INTEGRATION_VERSION__
 
+import { createConnection as netCreateConnection } from "node:net"
+import { existsSync, mkdirSync, writeFileSync, renameSync, readdirSync } from "node:fs"
+
 type RuntimeConfig = {
   enabled: boolean
-  openusageBin: string
   accountID?: string
-  dbPath?: string
-  spoolDir?: string
-  spoolOnly: boolean
   verbose: boolean
 }
 
 type AnyRecord = Record<string, unknown>
-
-const encoder = new TextEncoder()
-const defaultOpenusageBin = "__OPENUSAGE_BIN_DEFAULT__"
-let lastIngestErrorSignature = ""
-const defaultIngestTimeoutMs = 1500
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) {
@@ -129,65 +123,13 @@ function normalizeModel(value: unknown): { providerID?: string; modelID?: string
   return out
 }
 
-function resolveOpenusageBin(configValue: string | undefined): string {
-  const explicit = pickString(configValue, process.env.OPENUSAGE_BIN)
-  if (explicit !== "") {
-    return explicit
-  }
-  const pinned = pickString(defaultOpenusageBin)
-  if (pinned !== "" && pinned !== "__OPENUSAGE_BIN_DEFAULT__") {
-    return pinned
-  }
-  return "openusage"
-}
-
-function resolveTimeoutMs(): number {
-  const raw = process.env.OPENUSAGE_TELEMETRY_TIMEOUT_MS
-  const parsed = raw ? Number.parseInt(raw, 10) : defaultIngestTimeoutMs
-  if (!Number.isFinite(parsed)) {
-    return defaultIngestTimeoutMs
-  }
-  if (parsed < 200) {
-    return 200
-  }
-  if (parsed > 10000) {
-    return 10000
-  }
-  return parsed
-}
-
 function loadConfig(): RuntimeConfig {
   const accountID = process.env.OPENUSAGE_TELEMETRY_ACCOUNT_ID?.trim()
-  const configuredBin = (process.env.OPENUSAGE_BIN || "").trim()
   return {
     enabled: parseBool(process.env.OPENUSAGE_TELEMETRY_ENABLED, true),
-    openusageBin: resolveOpenusageBin(configuredBin),
     accountID: accountID && accountID !== "" ? accountID : undefined,
-    dbPath: process.env.OPENUSAGE_TELEMETRY_DB_PATH?.trim() || undefined,
-    spoolDir: process.env.OPENUSAGE_TELEMETRY_SPOOL_DIR?.trim() || undefined,
-    spoolOnly: parseBool(process.env.OPENUSAGE_TELEMETRY_SPOOL_ONLY, false),
     verbose: parseBool(process.env.OPENUSAGE_TELEMETRY_VERBOSE, false),
   }
-}
-
-function buildArgs(cfg: RuntimeConfig): string[] {
-  const args = [cfg.openusageBin, "telemetry", "hook", "opencode"]
-  if (cfg.accountID) {
-    args.push("--account-id", cfg.accountID)
-  }
-  if (cfg.dbPath) {
-    args.push("--db-path", cfg.dbPath)
-  }
-  if (cfg.spoolDir) {
-    args.push("--spool-dir", cfg.spoolDir)
-  }
-  if (cfg.spoolOnly) {
-    args.push("--spool-only")
-  }
-  if (cfg.verbose) {
-    args.push("--verbose")
-  }
-  return args
 }
 
 function summarizeParts(parts: unknown): Record<string, number> {
@@ -348,6 +290,62 @@ function safeJSONStringify(value: unknown): string | undefined {
   }
 }
 
+function resolveSocketPath(): string {
+  const explicit = (process.env.OPENUSAGE_SOCKET || "").trim()
+  if (explicit !== "") {
+    return explicit
+  }
+  const stateHome = (process.env.XDG_STATE_HOME || "").trim()
+  const base = stateHome !== "" ? stateHome : `${process.env.HOME}/.local/state`
+  return `${base}/openusage/telemetry.sock`
+}
+
+function resolveHookSpoolDir(): string {
+  const explicit = (process.env.OPENUSAGE_HOOK_SPOOL || "").trim()
+  if (explicit !== "") {
+    return explicit
+  }
+  const stateHome = (process.env.XDG_STATE_HOME || "").trim()
+  const base = stateHome !== "" ? stateHome : `${process.env.HOME}/.local/state`
+  return `${base}/openusage/hook-spool`
+}
+
+async function postToSocket(socketPath: string, path: string, body: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const conn = netCreateConnection({ path: socketPath })
+    let resolved = false
+    const done = (ok: boolean) => { if (!resolved) { resolved = true; resolve(ok) } }
+    conn.setTimeout(2000, () => { conn.destroy(); done(false) })
+    conn.on("error", () => done(false))
+    conn.on("connect", () => {
+      const req = `POST ${path} HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+      conn.write(req, () => { conn.destroy(); done(true) })
+    })
+  })
+}
+
+async function spoolToDisk(source: string, accountID: string, payloadJSON: string, verbose: boolean): Promise<void> {
+  const dir = resolveHookSpoolDir()
+  try {
+    if (!existsSync(dir)) { mkdirSync(dir, { recursive: true }) }
+    const files = readdirSync(dir).filter(f => f.endsWith(".json"))
+    if (files.length >= 500) {
+      if (verbose) { console.error("[openusage-telemetry] hook spool full (500 files)") }
+      return
+    }
+    const ts = Math.floor(Date.now() / 1000)
+    const rnd = Math.random().toString(16).slice(2, 10)
+    const tmp = `${dir}/${ts}_${rnd}.json.tmp`
+    const dst = `${dir}/${ts}_${rnd}.json`
+    // Build record via interpolation — avoids JSON.parse round-trip on payload
+    const record = `{"source":${JSON.stringify(source)},"account_id":${JSON.stringify(accountID)},"payload":${payloadJSON}}`
+    writeFileSync(tmp, record + "\n")
+    renameSync(tmp, dst)
+  } catch (err) {
+    if (verbose) { console.error(`[openusage-telemetry] spool write failed: ${err}`) }
+  }
+}
+
 async function sendPayload(cfg: RuntimeConfig, payload: unknown): Promise<void> {
   const payloadJSON = safeJSONStringify(payload)
   if (!payloadJSON) {
@@ -357,67 +355,22 @@ async function sendPayload(cfg: RuntimeConfig, payload: unknown): Promise<void> 
     return
   }
 
-  let proc: ReturnType<typeof Bun.spawn>
-  try {
-    proc = Bun.spawn(buildArgs(cfg), {
-      stdin: "pipe",
-      stdout: "ignore",
-      stderr: "pipe",
-      env: process.env,
-    })
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
-    const signature = `spawn:${detail}`
-    if (!cfg.verbose && signature === lastIngestErrorSignature) {
-      return
-    }
-    lastIngestErrorSignature = signature
-    console.error(`[openusage-telemetry] hook ingestion spawn failed: ${detail}`)
-    return
+  // Primary: POST to daemon unix socket (no process spawn).
+  const socketPath = resolveSocketPath()
+  let path = "/v1/hook/opencode"
+  if (cfg.accountID) {
+    path += `?account_id=${encodeURIComponent(cfg.accountID)}`
   }
 
   try {
-    const writer = proc.stdin.getWriter()
-    await writer.write(encoder.encode(payloadJSON))
-    await writer.close()
+    const ok = await postToSocket(socketPath, path, payloadJSON)
+    if (ok) return
   } catch {
-    proc.kill()
-    return
+    // socket failed, fall through to spool
   }
 
-  const timeoutMs = resolveTimeoutMs()
-  const timeout = new Promise<number>((resolve) => {
-    setTimeout(() => resolve(-999), timeoutMs)
-  })
-  const exitCode = await Promise.race([proc.exited, timeout])
-  if (exitCode === -999) {
-    proc.kill()
-    const signature = `timeout:${timeoutMs}`
-    if (!cfg.verbose && signature === lastIngestErrorSignature) {
-      return
-    }
-    lastIngestErrorSignature = signature
-    console.error(`[openusage-telemetry] hook ingestion timed out after ${timeoutMs}ms`)
-    return
-  }
-  if (exitCode === 0) {
-    lastIngestErrorSignature = ""
-    return
-  }
-
-  const stderrText = await new Response(proc.stderr).text()
-  const detail = stderrText.trim()
-  const signature = `${exitCode}:${detail}`
-  if (!cfg.verbose && signature === lastIngestErrorSignature) {
-    return
-  }
-  lastIngestErrorSignature = signature
-
-  if (detail !== "") {
-    console.error(`[openusage-telemetry] hook ingestion failed (exit ${exitCode}): ${detail}`)
-  } else {
-    console.error(`[openusage-telemetry] hook ingestion failed (exit ${exitCode})`)
-  }
+  // Fallback: spool raw payload to disk for daemon pickup.
+  await spoolToDisk("opencode", cfg.accountID || "", payloadJSON, cfg.verbose)
 }
 
 export const OpenUsageTelemetry: Plugin = async () => {

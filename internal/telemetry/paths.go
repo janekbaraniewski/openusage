@@ -33,3 +33,11 @@ func DefaultSocketPath() (string, error) {
 	}
 	return filepath.Join(stateDir, "telemetry.sock"), nil
 }
+
+func DefaultHookSpoolDir() (string, error) {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "hook-spool"), nil
+}
