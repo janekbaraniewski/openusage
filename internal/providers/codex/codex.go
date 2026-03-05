@@ -18,6 +18,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/samber/lo"
 )
 
@@ -709,14 +710,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func truncateForError(value string, max int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= max {
-		return value
-	}
-	if max <= 3 {
-		return value[:max]
-	}
-	return value[:max-3] + "..."
+	return shared.Truncate(strings.TrimSpace(value), max)
 }
 
 func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapshot) error {
@@ -1643,18 +1637,7 @@ func formatUsageSummary(entries []usageEntry, max int) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatTokenCount(value int) string {
-	switch {
-	case value >= 1_000_000_000:
-		return fmt.Sprintf("%.1fB", float64(value)/1_000_000_000)
-	case value >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
-	case value >= 1_000:
-		return fmt.Sprintf("%.1fK", float64(value)/1_000)
-	default:
-		return fmt.Sprintf("%d", value)
-	}
-}
+func formatTokenCount(value int) string { return shared.FormatTokenCount(value) }
 
 func usageDelta(current, previous tokenUsage) tokenUsage {
 	return tokenUsage{

@@ -523,6 +523,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Handle left-click tile selection in grid/list mode.
+	if msg.Button == tea.MouseButtonLeft {
+		return m.handleMouseClick(msg)
+	}
+
 	scroll := 0
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
@@ -580,6 +585,131 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.cursor = next
 	}
 
+	return m, nil
+}
+
+// handleMouseClick selects the tile under the mouse cursor when clicked.
+func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.screen != screenDashboard || m.mode != modeList {
+		return m, nil
+	}
+
+	ids := m.filteredIDs()
+	if len(ids) == 0 {
+		return m, nil
+	}
+
+	view := m.activeDashboardView()
+	switch view {
+	case dashboardViewGrid, dashboardViewStacked:
+	default:
+		return m, nil
+	}
+
+	contentH := m.height - 3 // header (2 lines) + footer (1 line)
+	if contentH < 5 {
+		contentH = 5
+	}
+	cols, tileW, tileMaxH := m.tileGrid(m.width, contentH, len(ids))
+	if view == dashboardViewStacked {
+		cols = 1
+	}
+
+	// Header is 2 lines (brand + separator), content starts at Y=2.
+	headerH := 2
+	clickY := msg.Y - headerH
+	clickX := msg.X - 1 // 1-char left padding in content
+
+	if clickX < 0 || clickY < 0 {
+		return m, nil
+	}
+
+	// Determine column from X position.
+	cellW := tileW + tileBorderH + tileGapH
+	if cellW <= 0 {
+		return m, nil
+	}
+	col := clickX / cellW
+	if col >= cols {
+		return m, nil
+	}
+
+	// Determine row from Y position.
+	// We need to figure out the visible row height and account for scroll.
+	// Each tile row is tileMaxH + tileBorderV lines, rows separated by tileGapV.
+	// For single-column (stacked), tileMaxH=0 which means variable height; use an
+	// approximate row height in that case.
+	var rowH int
+	if tileMaxH > 0 {
+		rowH = tileMaxH + tileBorderV
+	} else {
+		// Variable height tiles — estimate from content area.
+		rowH = contentH
+		if len(ids) > 1 {
+			rowH = contentH / len(ids)
+		}
+		if rowH < tileMinHeight+tileBorderV {
+			rowH = tileMinHeight + tileBorderV
+		}
+	}
+
+	rowCell := rowH + tileGapV
+	if rowCell <= 0 {
+		return m, nil
+	}
+
+	// Account for scroll offset.
+	// In grid mode the view scrolls to keep the cursor row visible.
+	// We need to know which line the viewport starts at.
+	cursorRow := m.cursor / cols
+	totalRows := (len(ids) + cols - 1) / cols
+
+	// Build row offsets like renderTilesWithColumns does.
+	rowOffsets := make([]int, totalRows)
+	acc := 0
+	for r := 0; r < totalRows; r++ {
+		rowOffsets[r] = acc
+		acc += rowH
+		if r < totalRows-1 {
+			acc += tileGapV
+		}
+	}
+	totalLines := acc
+
+	rowScrollOffset := 0
+	if cols == 1 {
+		rowScrollOffset = m.tileOffset
+	}
+	scrollLine := 0
+	if cursorRow >= 0 && cursorRow < totalRows {
+		scrollLine = rowOffsets[cursorRow] + rowScrollOffset
+	}
+	if scrollLine > totalLines-contentH {
+		scrollLine = totalLines - contentH
+	}
+	if scrollLine < 0 {
+		scrollLine = 0
+	}
+
+	absY := clickY + scrollLine
+	row := -1
+	for r := 0; r < totalRows; r++ {
+		if absY >= rowOffsets[r] && absY < rowOffsets[r]+rowH {
+			row = r
+			break
+		}
+	}
+	if row < 0 {
+		return m, nil
+	}
+
+	idx := row*cols + col
+	if idx < 0 || idx >= len(ids) {
+		return m, nil
+	}
+
+	m.cursor = idx
+	m.tileOffset = 0
 	return m, nil
 }
 

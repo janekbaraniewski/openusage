@@ -105,6 +105,22 @@ func buildGeminiCLIDemoSnapshot(now time.Time) core.UsageSnapshot {
 			"tool_write_file": {
 				Used: ptr(17), Unit: "calls", Window: "7d",
 			},
+			// ── MCP servers ───────────────────────────────────────
+			"mcp_calls_total":       {Used: ptr(186), Unit: "calls", Window: "7d"},
+			"mcp_calls_total_today": {Used: ptr(28), Unit: "calls", Window: "1d"},
+			"mcp_servers_active":    {Used: ptr(2), Unit: "servers", Window: "7d"},
+
+			"mcp_context7_total":              {Used: ptr(112), Unit: "calls", Window: "7d"},
+			"mcp_context7_total_today":        {Used: ptr(18), Unit: "calls", Window: "1d"},
+			"mcp_context7_resolve_library_id": {Used: ptr(56), Unit: "calls", Window: "7d"},
+			"mcp_context7_query_docs":         {Used: ptr(56), Unit: "calls", Window: "7d"},
+
+			"mcp_filesystem_total":            {Used: ptr(74), Unit: "calls", Window: "7d"},
+			"mcp_filesystem_total_today":      {Used: ptr(10), Unit: "calls", Window: "1d"},
+			"mcp_filesystem_read_file":        {Used: ptr(34), Unit: "calls", Window: "7d"},
+			"mcp_filesystem_list_directory":   {Used: ptr(24), Unit: "calls", Window: "7d"},
+			"mcp_filesystem_write_file":       {Used: ptr(16), Unit: "calls", Window: "7d"},
+
 			"lang_go":         {Used: ptr(73), Unit: "requests", Window: "7d"},
 			"lang_markdown":   {Used: ptr(31), Unit: "requests", Window: "7d"},
 			"lang_yaml":       {Used: ptr(19), Unit: "requests", Window: "7d"},

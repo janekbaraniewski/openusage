@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 // OPENUSAGE_THEME_DIR can point to one or more additional theme directories
 // (path-list separated, e.g. ":" on unix, ";" on Windows).
 const themeDirEnvVar = "OPENUSAGE_THEME_DIR"
+
+//go:embed bundled_themes/*.json
+var bundledThemesFS embed.FS
 
 // Theme represents the full visual token set used by the TUI.
 //
@@ -58,198 +62,67 @@ var (
 )
 
 func init() {
-	themes = builtinThemes()
+	themes = loadDefaultThemes()
 	activeThemeIdx = defaultThemeIndex(themes)
 	if len(themes) > 0 {
 		applyTheme(themes[activeThemeIdx])
 	}
 }
 
-func builtinThemes() []Theme {
-	return []Theme{
-		{
-			Name: "Gruvbox", Icon: "🌻",
-			Base: "#282828", Mantle: "#1D2021",
-			Surface0: "#3C3836", Surface1: "#504945", Surface2: "#665C54", Overlay: "#504945",
-			Text: "#EBDBB2", Subtext: "#D5C4A1", Dim: "#665C54",
-			Accent: "#D3869B", Blue: "#83A598", Sapphire: "#83A598",
-			Green: "#B8BB26", Yellow: "#FABD2F", Red: "#FB4934",
-			Peach: "#FE8019", Teal: "#8EC07C", Flamingo: "#D3869B",
-			Rosewater: "#EBDBB2", Lavender: "#D3869B", Sky: "#83A598", Maroon: "#CC241D",
-		},
-		{
-			Name: "Catppuccin Mocha", Icon: "🐱",
-			Base: "#1E1E2E", Mantle: "#181825",
-			Surface0: "#313244", Surface1: "#45475A", Surface2: "#585B70", Overlay: "#45475A",
-			Text: "#CDD6F4", Subtext: "#A6ADC8", Dim: "#585B70",
-			Accent: "#CBA6F7", Blue: "#89B4FA", Sapphire: "#74C7EC",
-			Green: "#A6E3A1", Yellow: "#F9E2AF", Red: "#F38BA8",
-			Peach: "#FAB387", Teal: "#94E2D5", Flamingo: "#F2CDCD",
-			Rosewater: "#F5E0DC", Lavender: "#B4BEFE", Sky: "#89DCEB", Maroon: "#EBA0AC",
-		},
-		{
-			Name: "Dracula", Icon: "🧛",
-			Base: "#282A36", Mantle: "#21222C",
-			Surface0: "#44475A", Surface1: "#6272A4", Surface2: "#7E8AB0", Overlay: "#44475A",
-			Text: "#F8F8F2", Subtext: "#BFBFBF", Dim: "#6272A4",
-			Accent: "#BD93F9", Blue: "#8BE9FD", Sapphire: "#8BE9FD",
-			Green: "#50FA7B", Yellow: "#F1FA8C", Red: "#FF5555",
-			Peach: "#FFB86C", Teal: "#8BE9FD", Flamingo: "#FF79C6",
-			Rosewater: "#FF79C6", Lavender: "#BD93F9", Sky: "#8BE9FD", Maroon: "#FF6E6E",
-		},
-		{
-			Name: "Nord", Icon: "❄",
-			Base: "#2E3440", Mantle: "#242933",
-			Surface0: "#3B4252", Surface1: "#434C5E", Surface2: "#4C566A", Overlay: "#434C5E",
-			Text: "#ECEFF4", Subtext: "#D8DEE9", Dim: "#4C566A",
-			Accent: "#B48EAD", Blue: "#81A1C1", Sapphire: "#88C0D0",
-			Green: "#A3BE8C", Yellow: "#EBCB8B", Red: "#BF616A",
-			Peach: "#D08770", Teal: "#8FBCBB", Flamingo: "#B48EAD",
-			Rosewater: "#D8DEE9", Lavender: "#B48EAD", Sky: "#88C0D0", Maroon: "#BF616A",
-		},
-		{
-			Name: "Tokyo Night", Icon: "🌃",
-			Base: "#1A1B26", Mantle: "#16161E",
-			Surface0: "#24283B", Surface1: "#414868", Surface2: "#565F89", Overlay: "#414868",
-			Text: "#C0CAF5", Subtext: "#A9B1D6", Dim: "#565F89",
-			Accent: "#BB9AF7", Blue: "#7AA2F7", Sapphire: "#7DCFFF",
-			Green: "#9ECE6A", Yellow: "#E0AF68", Red: "#F7768E",
-			Peach: "#FF9E64", Teal: "#73DACA", Flamingo: "#FF007C",
-			Rosewater: "#C0CAF5", Lavender: "#BB9AF7", Sky: "#7DCFFF", Maroon: "#DB4B4B",
-		},
-		{
-			Name: "Synthwave '84", Icon: "🌆",
-			Base: "#262335", Mantle: "#1E1A2B",
-			Surface0: "#34294F", Surface1: "#443873", Surface2: "#544693", Overlay: "#443873",
-			Text: "#F0E6FF", Subtext: "#C2B5D9", Dim: "#544693",
-			Accent: "#FF7EDB", Blue: "#36F9F6", Sapphire: "#72F1B8",
-			Green: "#72F1B8", Yellow: "#FEDE5D", Red: "#FE4450",
-			Peach: "#FF8B39", Teal: "#36F9F6", Flamingo: "#FF7EDB",
-			Rosewater: "#F97E72", Lavender: "#CF8DFB", Sky: "#36F9F6", Maroon: "#FE4450",
-		},
-		{
-			Name: "One Dark", Icon: "🧪",
-			Base: "#282C34", Mantle: "#21252B",
-			Surface0: "#2C313C", Surface1: "#3E4451", Surface2: "#4B5263", Overlay: "#3E4451",
-			Text: "#ABB2BF", Subtext: "#98A2B3", Dim: "#5C6370",
-			Accent: "#C678DD", Blue: "#61AFEF", Sapphire: "#56B6C2",
-			Green: "#98C379", Yellow: "#E5C07B", Red: "#E06C75",
-			Peach: "#D19A66", Teal: "#56B6C2", Flamingo: "#BE5046",
-			Rosewater: "#E5C07B", Lavender: "#C678DD", Sky: "#61AFEF", Maroon: "#BE5046",
-		},
-		{
-			Name: "Solarized Dark", Icon: "🌅",
-			Base: "#002B36", Mantle: "#073642",
-			Surface0: "#073642", Surface1: "#0E3A45", Surface2: "#144754", Overlay: "#0E3A45",
-			Text: "#93A1A1", Subtext: "#839496", Dim: "#586E75",
-			Accent: "#D33682", Blue: "#268BD2", Sapphire: "#2AA198",
-			Green: "#859900", Yellow: "#B58900", Red: "#DC322F",
-			Peach: "#CB4B16", Teal: "#2AA198", Flamingo: "#D33682",
-			Rosewater: "#EEE8D5", Lavender: "#6C71C4", Sky: "#268BD2", Maroon: "#DC322F",
-		},
-		{
-			Name: "Monokai", Icon: "🦎",
-			Base: "#272822", Mantle: "#1E1F1C",
-			Surface0: "#3E3D32", Surface1: "#575642", Surface2: "#75715E", Overlay: "#575642",
-			Text: "#F8F8F2", Subtext: "#CFCFC2", Dim: "#75715E",
-			Accent: "#AE81FF", Blue: "#66D9EF", Sapphire: "#78DCE8",
-			Green: "#A6E22E", Yellow: "#E6DB74", Red: "#F92672",
-			Peach: "#FD971F", Teal: "#66D9EF", Flamingo: "#F92672",
-			Rosewater: "#F8F8F2", Lavender: "#AE81FF", Sky: "#78DCE8", Maroon: "#D14A68",
-		},
-		{
-			Name: "Everforest", Icon: "🌲",
-			Base: "#2D353B", Mantle: "#232A2E",
-			Surface0: "#343F44", Surface1: "#3D484D", Surface2: "#475258", Overlay: "#3D484D",
-			Text: "#D3C6AA", Subtext: "#A7C080", Dim: "#859289",
-			Accent: "#D699B6", Blue: "#7FBBB3", Sapphire: "#83C092",
-			Green: "#A7C080", Yellow: "#DBBC7F", Red: "#E67E80",
-			Peach: "#E69875", Teal: "#83C092", Flamingo: "#D699B6",
-			Rosewater: "#D3C6AA", Lavender: "#D699B6", Sky: "#7FBBB3", Maroon: "#E67E80",
-		},
-		{
-			Name: "Kanagawa", Icon: "⛩",
-			Base: "#1F1F28", Mantle: "#16161D",
-			Surface0: "#2A2A37", Surface1: "#363646", Surface2: "#54546D", Overlay: "#363646",
-			Text: "#DCD7BA", Subtext: "#C8C093", Dim: "#727169",
-			Accent: "#957FB8", Blue: "#7E9CD8", Sapphire: "#7FB4CA",
-			Green: "#76946A", Yellow: "#C0A36E", Red: "#C34043",
-			Peach: "#FFA066", Teal: "#6A9589", Flamingo: "#D27E99",
-			Rosewater: "#DCD7BA", Lavender: "#957FB8", Sky: "#7FB4CA", Maroon: "#E46876",
-		},
-		{
-			Name: "Rose Pine", Icon: "🌹",
-			Base: "#191724", Mantle: "#16141F",
-			Surface0: "#1F1D2E", Surface1: "#26233A", Surface2: "#403D52", Overlay: "#26233A",
-			Text: "#E0DEF4", Subtext: "#908CAA", Dim: "#6E6A86",
-			Accent: "#C4A7E7", Blue: "#9CCFD8", Sapphire: "#31748F",
-			Green: "#9CCFD8", Yellow: "#F6C177", Red: "#EB6F92",
-			Peach: "#EA9A97", Teal: "#9CCFD8", Flamingo: "#EBBCBA",
-			Rosewater: "#E0DEF4", Lavender: "#C4A7E7", Sky: "#9CCFD8", Maroon: "#B4637A",
-		},
-		{
-			Name: "Ayu Dark", Icon: "🌙",
-			Base: "#0B0E14", Mantle: "#090B10",
-			Surface0: "#11151C", Surface1: "#1B2330", Surface2: "#2A3547", Overlay: "#1B2330",
-			Text: "#BFBDB6", Subtext: "#A6A49D", Dim: "#626A73",
-			Accent: "#D2A6FF", Blue: "#59C2FF", Sapphire: "#95E6CB",
-			Green: "#AAD94C", Yellow: "#FFB454", Red: "#F07178",
-			Peach: "#FF8F40", Teal: "#95E6CB", Flamingo: "#F29668",
-			Rosewater: "#E6E1CF", Lavender: "#D2A6FF", Sky: "#73D0FF", Maroon: "#E06C75",
-		},
-		{
-			Name: "Nightfox", Icon: "🦊",
-			Base: "#192330", Mantle: "#131A24",
-			Surface0: "#29394F", Surface1: "#394B70", Surface2: "#4E5F82", Overlay: "#394B70",
-			Text: "#CDCECF", Subtext: "#9DA9BC", Dim: "#738091",
-			Accent: "#9D79D6", Blue: "#719CD6", Sapphire: "#63CDCF",
-			Green: "#81B29A", Yellow: "#DBC074", Red: "#C94F6D",
-			Peach: "#F4A261", Teal: "#63CDCF", Flamingo: "#9D79D6",
-			Rosewater: "#CDCECF", Lavender: "#9D79D6", Sky: "#63CDCF", Maroon: "#C94F6D",
-		},
-		{
-			Name: "Grayscale", Icon: "⬛",
-			Base: "#000000", Mantle: "#0A0A0A",
-			Surface0: "#181818", Surface1: "#2A2A2A", Surface2: "#3E3E3E", Overlay: "#2A2A2A",
-			Text: "#F5F5F5", Subtext: "#D6D6D6", Dim: "#A8A8A8",
-			Accent: "#FFFFFF", Blue: "#E8E8E8", Sapphire: "#DDDDDD",
-			Green: "#D0D0D0", Yellow: "#BEBEBE", Red: "#AAAAAA",
-			Peach: "#ECECEC", Teal: "#CCCCCC", Flamingo: "#B4B4B4",
-			Rosewater: "#F0F0F0", Lavender: "#D9D9D9", Sky: "#CDCDCD", Maroon: "#989898",
-		},
-		// Source (OpenCode): https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/opencode/src/cli/cmd/tui/context/theme/opencode.json
-		{
-			Name: "OpenCode Official", Icon: "◧",
-			Base: "#0A0A0A", Mantle: "#141414",
-			Surface0: "#1E1E1E", Surface1: "#323232", Surface2: "#3C3C3C", Overlay: "#484848",
-			Text: "#EEEEEE", Subtext: "#808080", Dim: "#606060",
-			Accent: "#9D7CD8", Blue: "#5C9CF5", Sapphire: "#56B6C2",
-			Green: "#7FD88F", Yellow: "#E5C07B", Red: "#E06C75",
-			Peach: "#F5A742", Teal: "#56B6C2", Flamingo: "#FAB283",
-			Rosewater: "#FFC09F", Lavender: "#9D7CD8", Sky: "#5C9CF5", Maroon: "#C53B53",
-		},
-		// Source (Claude Code): https://unpkg.com/@anthropic-ai/claude-code@2.1.63/cli.js (theme object Jy5 in vm initializer)
-		{
-			Name: "Claude Code Dark", Icon: "◨",
-			Base: "#000000", Mantle: "#111111",
-			Surface0: "#373737", Surface1: "#505050", Surface2: "#888888", Overlay: "#999999",
-			Text: "#FFFFFF", Subtext: "#C1C1C1", Dim: "#999999",
-			Accent: "#B1B9F9", Blue: "#93A5FF", Sapphire: "#48968C",
-			Green: "#4EBA65", Yellow: "#FFC107", Red: "#FF6B80",
-			Peach: "#D77757", Teal: "#00CCCC", Flamingo: "#FD5DB1",
-			Rosewater: "#EB9F7F", Lavender: "#AF87FF", Sky: "#B1B9F9", Maroon: "#7A2936",
-		},
+// defaultTheme is the single hardcoded fallback theme — a custom deep-space
+// palette with vibrant accent colors designed for high contrast and readability.
+func defaultTheme() Theme {
+	return Theme{
+		Name: "Deep Space", Icon: "✦",
+		Base: "#0C0E16", Mantle: "#080A11",
+		Surface0: "#161928", Surface1: "#1E2235", Surface2: "#2A2F47", Overlay: "#1E2235",
+		Text: "#E4E6F0", Subtext: "#B0B4C8", Dim: "#5C6180",
+		Accent: "#7EB8F7", Blue: "#5DA4E8", Sapphire: "#4EC5C1",
+		Green: "#59D4A0", Yellow: "#F0C75E", Red: "#F06A7A",
+		Peach: "#F09860", Teal: "#4EC5C1", Flamingo: "#E878B0",
+		Rosewater: "#F0D0C0", Lavender: "#A899F0", Sky: "#70C8E8", Maroon: "#C44B5C",
 	}
+}
+
+// loadDefaultThemes returns the default theme plus all bundled JSON themes.
+func loadDefaultThemes() []Theme {
+	all := []Theme{defaultTheme()}
+
+	entries, err := bundledThemesFS.ReadDir("bundled_themes")
+	if err != nil {
+		return all
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
+	})
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+			continue
+		}
+		data, readErr := bundledThemesFS.ReadFile("bundled_themes/" + entry.Name())
+		if readErr != nil {
+			continue
+		}
+		var t Theme
+		if unmarshalErr := json.Unmarshal(data, &t); unmarshalErr != nil {
+			continue
+		}
+		t = normalizeTheme(t)
+		if validateErr := t.validate(); validateErr != nil {
+			continue
+		}
+		all = append(all, t)
+	}
+	return all
 }
 
 func defaultThemeIndex(all []Theme) int {
 	for i, t := range all {
-		if strings.EqualFold(strings.TrimSpace(t.Name), "Gruvbox") {
+		if strings.EqualFold(strings.TrimSpace(t.Name), "Deep Space") {
 			return i
 		}
-	}
-	if len(all) == 0 {
-		return 0
 	}
 	return 0
 }
@@ -434,7 +307,8 @@ func setActiveThemeByNameLocked(name string) bool {
 	return false
 }
 
-// LoadThemes reloads the theme catalog from built-ins plus external theme files.
+// LoadThemes reloads the theme catalog from the default theme, bundled themes,
+// plus external theme files.
 //
 // External files are loaded from:
 //  1. <configDir>/themes
@@ -451,7 +325,7 @@ func LoadThemes(configDir string) error {
 		currentName = themes[activeThemeIdx].Name
 	}
 
-	nextThemes := builtinThemes()
+	nextThemes := loadDefaultThemes()
 	var errs []error
 	for _, dir := range themeSearchDirs(configDir) {
 		loaded, err := loadThemesFromDir(dir)

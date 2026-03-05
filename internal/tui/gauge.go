@@ -31,112 +31,9 @@ func usageGaugeColor(usedPercent, warnThresh, critThresh float64) lipgloss.Color
 	}
 }
 
-func RenderGauge(percent float64, width int, warnThresh, critThresh float64) string {
-	if width < 5 {
-		width = 5
-	}
-
-	if percent < 0 {
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
-		return track + dimStyle.Render(" N/A")
-	}
-	if percent > 100 {
-		percent = 100
-	}
-
-	color := gaugeColor(percent, warnThresh, critThresh)
-	filledStyle := lipgloss.NewStyle().Foreground(color)
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-
-	totalUnits := width * 8
-	fillUnits := int(percent / 100 * float64(totalUnits))
-
-	fullCells := fillUnits / 8
-	remainder := fillUnits % 8
-	hasPartial := remainder > 0
-	emptyCells := width - fullCells
-	if hasPartial {
-		emptyCells--
-	}
-	if emptyCells < 0 {
-		emptyCells = 0
-	}
-
-	var b strings.Builder
-	b.WriteString(filledStyle.Render(strings.Repeat("█", fullCells)))
-	if hasPartial {
-		b.WriteString(filledStyle.Render(blockChars[remainder]))
-	}
-	b.WriteString(trackStyle.Render(strings.Repeat("░", emptyCells)))
-
-	pctStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
-	return fmt.Sprintf("%s %s", b.String(), pctStyle.Render(fmt.Sprintf("%5.1f%%", percent)))
-}
-
-func RenderUsageGauge(usedPercent float64, width int, warnThresh, critThresh float64) string {
-	if width < 5 {
-		width = 5
-	}
-
-	if usedPercent < 0 {
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
-		return track + dimStyle.Render(" N/A")
-	}
-	if usedPercent > 100 {
-		usedPercent = 100
-	}
-
-	color := usageGaugeColor(usedPercent, warnThresh, critThresh)
-	filledStyle := lipgloss.NewStyle().Foreground(color)
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-
-	totalUnits := width * 8
-	fillUnits := int(usedPercent / 100 * float64(totalUnits))
-
-	fullCells := fillUnits / 8
-	remainder := fillUnits % 8
-	hasPartial := remainder > 0
-	emptyCells := width - fullCells
-	if hasPartial {
-		emptyCells--
-	}
-	if emptyCells < 0 {
-		emptyCells = 0
-	}
-
-	var b strings.Builder
-	b.WriteString(filledStyle.Render(strings.Repeat("█", fullCells)))
-	if hasPartial {
-		b.WriteString(filledStyle.Render(blockChars[remainder]))
-	}
-	b.WriteString(trackStyle.Render(strings.Repeat("░", emptyCells)))
-
-	pctStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
-	return fmt.Sprintf("%s %s", b.String(), pctStyle.Render(fmt.Sprintf("%5.1f%%", usedPercent)))
-}
-
-func RenderMiniGauge(usedPercent float64, width int) string {
-	if width < 3 {
-		width = 3
-	}
-	if usedPercent < 0 {
-		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
-	}
-	if usedPercent > 100 {
-		usedPercent = 100
-	}
-
-	var color lipgloss.Color
-	switch {
-	case usedPercent >= 80:
-		color = colorCrit
-	case usedPercent >= 50:
-		color = colorWarn
-	default:
-		color = colorOK
-	}
-	percent := usedPercent
-
+// renderGaugeBar draws a sub-cell-accurate gauge bar and returns the bar string.
+// percent must be in [0, 100]. width is the bar width in terminal columns.
+func renderGaugeBar(percent float64, width int, color lipgloss.Color) string {
 	filledStyle := lipgloss.NewStyle().Foreground(color)
 	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 
@@ -161,6 +58,55 @@ func RenderMiniGauge(usedPercent float64, width int) string {
 	}
 	b.WriteString(trackStyle.Render(strings.Repeat("░", emptyCells)))
 	return b.String()
+}
+
+func renderGaugeWithLabel(percent float64, width int, color lipgloss.Color) string {
+	if width < 5 {
+		width = 5
+	}
+	if percent < 0 {
+		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		return track + dimStyle.Render(" N/A")
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	bar := renderGaugeBar(percent, width, color)
+	pctStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
+	return fmt.Sprintf("%s %s", bar, pctStyle.Render(fmt.Sprintf("%5.1f%%", percent)))
+}
+
+func RenderGauge(percent float64, width int, warnThresh, critThresh float64) string {
+	color := gaugeColor(percent, warnThresh, critThresh)
+	return renderGaugeWithLabel(percent, width, color)
+}
+
+func RenderUsageGauge(usedPercent float64, width int, warnThresh, critThresh float64) string {
+	color := usageGaugeColor(usedPercent, warnThresh, critThresh)
+	return renderGaugeWithLabel(usedPercent, width, color)
+}
+
+func RenderMiniGauge(usedPercent float64, width int) string {
+	if width < 3 {
+		width = 3
+	}
+	if usedPercent < 0 {
+		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+	}
+	if usedPercent > 100 {
+		usedPercent = 100
+	}
+
+	var color lipgloss.Color
+	switch {
+	case usedPercent >= 80:
+		color = colorCrit
+	case usedPercent >= 50:
+		color = colorWarn
+	default:
+		color = colorOK
+	}
+	return renderGaugeBar(usedPercent, width, color)
 }
 
 // GaugeSegment represents one colored segment of a stacked gauge bar.

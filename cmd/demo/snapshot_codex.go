@@ -95,6 +95,30 @@ func buildCodexDemoSnapshot(now time.Time) core.UsageSnapshot {
 			"tool_mcp_gopls":      {Used: ptr(4), Unit: "calls", Window: "all-time"},
 			"tool_mcp_kubernetes": {Used: ptr(3), Unit: "calls", Window: "all-time"},
 			"tool_mcp_linear":     {Used: ptr(2), Unit: "calls", Window: "all-time"},
+
+			// ── MCP servers ───────────────────────────────────────
+			"mcp_calls_total":       {Used: ptr(384), Unit: "calls", Window: "all-time"},
+			"mcp_calls_total_today": {Used: ptr(52), Unit: "calls", Window: "1d"},
+			"mcp_servers_active":    {Used: ptr(3), Unit: "servers", Window: "all-time"},
+
+			"mcp_gopls_total":               {Used: ptr(218), Unit: "calls", Window: "all-time"},
+			"mcp_gopls_total_today":         {Used: ptr(34), Unit: "calls", Window: "1d"},
+			"mcp_gopls_go_diagnostics":      {Used: ptr(92), Unit: "calls", Window: "all-time"},
+			"mcp_gopls_go_file_context":     {Used: ptr(74), Unit: "calls", Window: "all-time"},
+			"mcp_gopls_go_search":           {Used: ptr(52), Unit: "calls", Window: "all-time"},
+
+			"mcp_kubernetes_total":           {Used: ptr(98), Unit: "calls", Window: "all-time"},
+			"mcp_kubernetes_total_today":     {Used: ptr(12), Unit: "calls", Window: "1d"},
+			"mcp_kubernetes_get_pods":        {Used: ptr(42), Unit: "calls", Window: "all-time"},
+			"mcp_kubernetes_apply_manifest":  {Used: ptr(31), Unit: "calls", Window: "all-time"},
+			"mcp_kubernetes_get_logs":        {Used: ptr(25), Unit: "calls", Window: "all-time"},
+
+			"mcp_linear_total":              {Used: ptr(68), Unit: "calls", Window: "all-time"},
+			"mcp_linear_total_today":        {Used: ptr(6), Unit: "calls", Window: "1d"},
+			"mcp_linear_list_issues":        {Used: ptr(32), Unit: "calls", Window: "all-time"},
+			"mcp_linear_save_issue":         {Used: ptr(22), Unit: "calls", Window: "all-time"},
+			"mcp_linear_get_issue":          {Used: ptr(14), Unit: "calls", Window: "all-time"},
+
 			"tool_calls_total":    {Used: ptr(14352), Unit: "calls", Window: "all-time"},
 			"tool_completed":      {Used: ptr(13060), Unit: "calls", Window: "all-time"},
 			"tool_errored":        {Used: ptr(1060), Unit: "calls", Window: "all-time"},

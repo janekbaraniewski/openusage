@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -25,13 +26,21 @@ func main() {
 	}
 
 	root := cobra.Command{
-		Use:   "openusage",
-		Short: "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
+		Use:     "openusage",
+		Short:   "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
+		Version: version.Version,
 		Run: func(_ *cobra.Command, _ []string) {
 			runDashboard(cfg)
 		},
 	}
 
+	root.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(_ *cobra.Command, _ []string) {
+			fmt.Println(version.String())
+		},
+	})
 	root.AddCommand(newTelemetryCommand())
 	root.AddCommand(newIntegrationsCommand())
 

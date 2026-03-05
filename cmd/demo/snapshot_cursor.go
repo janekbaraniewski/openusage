@@ -140,6 +140,36 @@ func buildCursorDemoSnapshot(now time.Time) core.UsageSnapshot {
 		metrics["tool_"+te.name] = core.Metric{Used: ptr(te.count), Unit: "calls", Window: "all-time"}
 	}
 
+	// ── MCP servers ───────────────────────────────────────
+	metrics["mcp_calls_total"] = core.Metric{Used: ptr(262), Unit: "calls", Window: "all-time"}
+	metrics["mcp_calls_total_today"] = core.Metric{Used: ptr(45), Unit: "calls", Window: "1d"}
+	metrics["mcp_servers_active"] = core.Metric{Used: ptr(6), Unit: "servers", Window: "all-time"}
+
+	metrics["mcp_github_total"] = core.Metric{Used: ptr(45), Unit: "calls", Window: "all-time"}
+	metrics["mcp_github_total_today"] = core.Metric{Used: ptr(8), Unit: "calls", Window: "1d"}
+	metrics["mcp_github_list_issues"] = core.Metric{Used: ptr(18), Unit: "calls", Window: "all-time"}
+	metrics["mcp_github_create_pull_request"] = core.Metric{Used: ptr(12), Unit: "calls", Window: "all-time"}
+	metrics["mcp_github_search_code"] = core.Metric{Used: ptr(15), Unit: "calls", Window: "all-time"}
+
+	metrics["mcp_jira_total"] = core.Metric{Used: ptr(38), Unit: "calls", Window: "all-time"}
+	metrics["mcp_jira_total_today"] = core.Metric{Used: ptr(6), Unit: "calls", Window: "1d"}
+	metrics["mcp_jira_search_issues"] = core.Metric{Used: ptr(20), Unit: "calls", Window: "all-time"}
+	metrics["mcp_jira_create_issue"] = core.Metric{Used: ptr(18), Unit: "calls", Window: "all-time"}
+
+	metrics["mcp_slack_total"] = core.Metric{Used: ptr(32), Unit: "calls", Window: "all-time"}
+	metrics["mcp_slack_total_today"] = core.Metric{Used: ptr(5), Unit: "calls", Window: "1d"}
+	metrics["mcp_slack_send_message"] = core.Metric{Used: ptr(14), Unit: "calls", Window: "all-time"}
+	metrics["mcp_slack_read_channel"] = core.Metric{Used: ptr(18), Unit: "calls", Window: "all-time"}
+
+	metrics["mcp_confluence_total"] = core.Metric{Used: ptr(28), Unit: "calls", Window: "all-time"}
+	metrics["mcp_confluence_total_today"] = core.Metric{Used: ptr(4), Unit: "calls", Window: "1d"}
+
+	metrics["mcp_linear_total"] = core.Metric{Used: ptr(24), Unit: "calls", Window: "all-time"}
+	metrics["mcp_linear_total_today"] = core.Metric{Used: ptr(3), Unit: "calls", Window: "1d"}
+
+	metrics["mcp_notion_total"] = core.Metric{Used: ptr(20), Unit: "calls", Window: "all-time"}
+	metrics["mcp_notion_total_today"] = core.Metric{Used: ptr(2), Unit: "calls", Window: "1d"}
+
 	langEntries := []struct {
 		name  string
 		count float64

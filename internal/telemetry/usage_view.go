@@ -210,8 +210,9 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 	metricsBefore := len(snap.Metrics)
 	_, hadFiveHourBefore := snap.Metrics["usage_five_hour"]
+	stripAllTime := timeWindow != "" && timeWindow != "all"
 	deletedCount := 0
-	for key := range snap.Metrics {
+	for key, m := range snap.Metrics {
 		if strings.HasPrefix(key, "source_") ||
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
@@ -219,6 +220,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "lang_") ||
 			isStaleActivityMetric(key) {
+			delete(snap.Metrics, key)
+			deletedCount++
+		} else if stripAllTime && m.Window == "all-time" && !isCurrentStateMetric(key) {
+			// Strip cumulative "all-time" metrics from the limit_snapshot so the
+			// TUI doesn't show misleading all-time counts under a windowed badge.
+			// Current-state metrics (plan quotas, billing, team) are preserved.
 			delete(snap.Metrics, key)
 			deletedCount++
 		}
@@ -748,11 +755,20 @@ func queryLanguageAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	// Query file paths from tool_usage events. Language is inferred in Go
 	// from the file extension since SQLite lacks convenient path functions.
+	//
+	// File paths live in different locations depending on the source:
+	//   - JSONL collector:  $.file or $.payload.file
+	//   - Hook events:      $.tool_input.file_path (Read/Edit/Write)
+	//                       $.tool_input.path (Grep/Glob)
+	//   - Hook response:    $.tool_response.file.filePath (Read response)
 	query := usageCTE + `
 		SELECT
 			COALESCE(
 				NULLIF(TRIM(json_extract(source_payload, '$.file')), ''),
 				NULLIF(TRIM(json_extract(source_payload, '$.payload.file')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_input.file_path')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_input.path')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_response.file.filePath')), ''),
 				''
 			) AS file_path,
 			COALESCE(requests, 1) AS requests
@@ -960,6 +976,8 @@ func queryCodeStatsAgg(ctx context.Context, db *sql.DB, filter usageFilter) (tel
 				THEN NULLIF(TRIM(COALESCE(
 					json_extract(source_payload, '$.file'),
 					json_extract(source_payload, '$.payload.file'),
+					json_extract(source_payload, '$.tool_input.file_path'),
+					json_extract(source_payload, '$.tool_input.path'),
 					''
 				)), '')
 			END) AS files_changed
@@ -1285,6 +1303,27 @@ func isStaleActivityMetric(key string) bool {
 		strings.HasPrefix(key, "5h_block_") ||
 		strings.HasPrefix(key, "project_") ||
 		strings.HasPrefix(key, "agent_") {
+		return true
+	}
+	return false
+}
+
+// isCurrentStateMetric returns true for metrics that represent the current state
+// of a plan, billing cycle, or team — values that are always "latest" regardless
+// of time window. These are preserved even when stripping all-time cumulative
+// metrics for windowed views.
+func isCurrentStateMetric(key string) bool {
+	if strings.HasPrefix(key, "plan_") ||
+		strings.HasPrefix(key, "billing_") ||
+		strings.HasPrefix(key, "team_") ||
+		strings.HasPrefix(key, "spend_") ||
+		strings.HasPrefix(key, "individual_") {
+		return true
+	}
+	switch key {
+	case "today_cost",
+		"7d_api_cost", "all_time_api_cost", "5h_block_cost",
+		"usage_daily", "usage_weekly", "usage_five_hour":
 		return true
 	}
 	return false
