@@ -57,7 +57,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	defer resp.Body.Close()
 
-	snap, _ := shared.ProcessStandardResponse(resp, acct, p.ID())
+	snap, err := shared.ProcessStandardResponse(resp, acct, p.ID())
+	if err != nil {
+		return snap, fmt.Errorf("groq: processing response: %w", err)
+	}
 	shared.ApplyStandardRateLimits(resp, &snap)
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpd", "requests", "1d",
 		"x-ratelimit-limit-requests-day", "x-ratelimit-remaining-requests-day", "x-ratelimit-reset-requests-day")
