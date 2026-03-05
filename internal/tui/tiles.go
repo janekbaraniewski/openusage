@@ -401,8 +401,18 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 	badge := StatusBadge(snap.Status)
 	badgeW := lipgloss.Width(badge)
+
+	// Time window pill for top-right corner (next to status badge).
+	twPill := lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("⏱ " + m.timeWindow.Label())
+	if m.refreshing {
+		frame := m.animFrame % len(SpinnerFrames)
+		twPill += " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
+	}
+	twPillW := lipgloss.Width(twPill)
+	rightW := twPillW + 1 + badgeW // pill + space + badge
+
 	name := snap.AccountID
-	maxName := innerW - badgeW - 4
+	maxName := innerW - rightW - 4
 	if maxName < 5 {
 		maxName = 5
 	}
@@ -410,11 +420,11 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		name = name[:maxName-1] + "…"
 	}
 	hdrLeft := fmt.Sprintf("%s %s", iconStr, nameStyle.Render(name))
-	gap := innerW - lipgloss.Width(hdrLeft) - badgeW
+	gap := innerW - lipgloss.Width(hdrLeft) - rightW
 	if gap < 1 {
 		gap = 1
 	}
-	hdrLine1 := hdrLeft + strings.Repeat(" ", gap) + badge
+	hdrLine1 := hdrLeft + strings.Repeat(" ", gap) + twPill + " " + badge
 
 	var hdrLine2 string
 	provID := snap.ProviderID
@@ -993,6 +1003,7 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 
 	var segments []string
 	var used []string
+	seenLabels := map[string]bool{}
 	add := func(key string, met core.Metric) {
 		if len(segments) >= maxSegments {
 			return
@@ -1001,6 +1012,13 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 		if segment == "" {
 			return
 		}
+		// Deduplicate: if a previous segment already resolved to the same
+		// label (e.g. two metrics both showing "7d"), skip the later one.
+		resolvedLabel := resolvedCompactLabel(widget, key, met)
+		if seenLabels[resolvedLabel] {
+			return
+		}
+		seenLabels[resolvedLabel] = true
 		segments = append(segments, segment)
 		used = append(used, key)
 	}
@@ -1055,10 +1073,48 @@ func compactMetricSegment(widget core.DashboardWidget, key string, met core.Metr
 		return ""
 	}
 	label := compactMetricLabel(widget, key)
+	// When the metric carries a Window tag, replace any hardcoded time-window
+	// prefix in the label with the actual window value so labels stay in sync
+	// with the selected time range.
+	if w := strings.TrimSpace(met.Window); w != "" && label != "" {
+		label = replaceTimePrefix(label, w)
+	}
 	if label == "" {
 		return value
 	}
 	return label + " " + value
+}
+
+// resolvedCompactLabel returns the final label string that compactMetricSegment
+// would use for deduplication purposes (without the value part).
+func resolvedCompactLabel(widget core.DashboardWidget, key string, met core.Metric) string {
+	label := compactMetricLabel(widget, key)
+	if w := strings.TrimSpace(met.Window); w != "" && label != "" {
+		label = replaceTimePrefix(label, w)
+	}
+	return strings.ToLower(strings.TrimSpace(label))
+}
+
+// replaceTimePrefix swaps a hardcoded time prefix (today, 7d, 30d, all, 1d)
+// at the start of a label with the metric's actual window tag.
+func replaceTimePrefix(label, window string) string {
+	prefixes := []string{"today ", "7d ", "30d ", "1d ", "all "}
+	low := strings.ToLower(label)
+	for _, p := range prefixes {
+		if strings.HasPrefix(low, p) {
+			rest := label[len(p):]
+			if rest == "" {
+				return window
+			}
+			return window + " " + rest
+		}
+	}
+	// Exact match (label IS just the time tag, no suffix).
+	switch strings.ToLower(label) {
+	case "today", "7d", "30d", "1d", "all":
+		return window
+	}
+	return label
 }
 
 func compactMetricLabel(widget core.DashboardWidget, key string) string {
@@ -1486,7 +1542,18 @@ func collectActiveResetEntries(snap core.UsageSnapshot, widget core.DashboardWid
 		}
 		return entries[i].label < entries[j].label
 	})
-	return entries
+
+	// Deduplicate entries with the same label, keeping the first (highest priority).
+	seen := make(map[string]bool, len(entries))
+	deduped := entries[:0]
+	for _, e := range entries {
+		if seen[e.label] {
+			continue
+		}
+		seen[e.label] = true
+		deduped = append(deduped, e)
+	}
+	return deduped
 }
 
 func resetSortPriority(key string) int {
@@ -4163,6 +4230,13 @@ func colorForTool(colors map[string]lipgloss.Color, name string) lipgloss.Color 
 func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allLangs, usedKeys := collectProviderLanguageMix(snap)
 	if len(allLangs) == 0 {
+		// Show "no data" placeholder when telemetry is active but no language data.
+		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
+			return []string{
+				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language (requests)"),
+				dimStyle.Render("  No language data for this time range"),
+			}, usedKeys
+		}
 		return nil, nil
 	}
 
@@ -4348,7 +4422,13 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 	aiPct := getVal(cs.AIPercent)
 	prompts := getVal(cs.Prompts)
 
-	if added <= 0 && removed <= 0 && commits <= 0 {
+	if added <= 0 && removed <= 0 && commits <= 0 && files <= 0 {
+		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
+			return []string{
+				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Code Statistics"),
+				dimStyle.Render("  No code stats for this time range"),
+			}, usedKeys
+		}
 		return nil, nil
 	}
 
@@ -4443,6 +4523,12 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 			usedKeys[key] = true
 			continue
 		}
+		// Skip time-bucketed variants (e.g. tool_bash_today) — these are
+		// supplementary metrics that would appear as duplicate entries.
+		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_1d") || strings.HasSuffix(key, "_7d") || strings.HasSuffix(key, "_30d") {
+			usedKeys[key] = true
+			continue
+		}
 		name := strings.TrimPrefix(key, "tool_")
 		if name == "" {
 			continue
@@ -4452,6 +4538,12 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 	}
 
 	if len(byTool) == 0 {
+		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
+			return []string{
+				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage (calls)"),
+				dimStyle.Render("  No tool data for this time range"),
+			}, usedKeys
+		}
 		return nil, nil
 	}
 

@@ -7,6 +7,7 @@ func TestTimeWindowHours(t *testing.T) {
 		tw   TimeWindow
 		want int
 	}{
+		{TimeWindowAll, 0},
 		{TimeWindow1d, 24},
 		{TimeWindow3d, 72},
 		{TimeWindow7d, 168},
@@ -49,6 +50,7 @@ func TestTimeWindowLabel(t *testing.T) {
 		tw   TimeWindow
 		want string
 	}{
+		{TimeWindowAll, "All Time"},
 		{TimeWindow1d, "Today"},
 		{TimeWindow3d, "3 Days"},
 		{TimeWindow7d, "7 Days"},
@@ -70,6 +72,7 @@ func TestTimeWindowSQLiteOffset(t *testing.T) {
 		tw   TimeWindow
 		want string
 	}{
+		{TimeWindowAll, ""},
 		{TimeWindow1d, "-1 day"},
 		{TimeWindow3d, "-3 day"},
 		{TimeWindow7d, "-7 day"},
@@ -90,6 +93,7 @@ func TestParseTimeWindow(t *testing.T) {
 		input string
 		want  TimeWindow
 	}{
+		{"all", TimeWindowAll},
 		{"1d", TimeWindow1d},
 		{"3d", TimeWindow3d},
 		{"7d", TimeWindow7d},
@@ -140,7 +144,8 @@ func TestNextTimeWindow(t *testing.T) {
 		{TimeWindow1d, TimeWindow3d},
 		{TimeWindow3d, TimeWindow7d},
 		{TimeWindow7d, TimeWindow30d},
-		{TimeWindow30d, TimeWindow1d},
+		{TimeWindow30d, TimeWindowAll},
+		{TimeWindowAll, TimeWindow1d},
 		{TimeWindow("unknown"), TimeWindow1d},
 	}
 	for _, tt := range tests {

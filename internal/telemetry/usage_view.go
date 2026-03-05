@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -45,6 +44,11 @@ type telemetryToolAgg struct {
 	Calls1d float64
 }
 
+type telemetryLanguageAgg struct {
+	Language string
+	Requests float64
+}
+
 type telemetryProviderAgg struct {
 	Provider string
 	CostUSD  float64
@@ -60,6 +64,24 @@ type telemetryDayPoint struct {
 	Tokens   float64
 }
 
+type telemetryActivityAgg struct {
+	Messages     float64
+	Sessions     float64
+	ToolCalls    float64
+	InputTokens  float64
+	OutputTokens float64
+	CachedTokens float64
+	ReasonTokens float64
+	TotalTokens  float64
+	TotalCost    float64
+}
+
+type telemetryCodeStatsAgg struct {
+	FilesChanged float64
+	LinesAdded   float64
+	LinesRemoved float64
+}
+
 type telemetryUsageAgg struct {
 	LastOccurred string
 	EventCount   int64
@@ -69,6 +91,9 @@ type telemetryUsageAgg struct {
 	Providers    []telemetryProviderAgg
 	Sources      []telemetrySourceAgg
 	Tools        []telemetryToolAgg
+	Languages    []telemetryLanguageAgg
+	Activity     telemetryActivityAgg
+	CodeStats    telemetryCodeStatsAgg
 	Daily        []telemetryDayPoint
 	ModelDaily   map[string][]core.TimePoint
 	SourceDaily  map[string][]core.TimePoint
@@ -96,6 +121,7 @@ func applyCanonicalUsageViewWithDB(
 
 	out := make(map[string]core.UsageSnapshot, len(snaps))
 	cache := make(map[string]*telemetryUsageAgg)
+	telemetryActiveProviders := queryTelemetryActiveProviders(ctx, db)
 
 	for accountID, snap := range snaps {
 		s := snap
@@ -125,7 +151,26 @@ func applyCanonicalUsageViewWithDB(
 			agg = loaded
 		}
 		if agg == nil || agg.EventCount == 0 {
-			out[accountID] = s
+			// Check if telemetry is active for this provider (has ANY events, just not in this window).
+			hasTelemetry := false
+			for _, sp := range sourceProviders {
+				if telemetryActiveProviders[sp] {
+					hasTelemetry = true
+					break
+				}
+			}
+			if hasTelemetry && agg != nil {
+				// Telemetry is active but no events in this time window.
+				// Strip stale all-time metrics so TUI shows "no data" placeholders.
+				windowLabel := "all"
+				if timeWindowHours > 0 && timeWindow != "" {
+					windowLabel = timeWindow
+				}
+				applyUsageViewToSnapshot(&s, agg, windowLabel)
+				out[accountID] = s
+			} else {
+				out[accountID] = s
+			}
 			continue
 		}
 
@@ -157,7 +202,9 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "provider_") {
+			strings.HasPrefix(key, "provider_") ||
+			strings.HasPrefix(key, "lang_") ||
+			isStaleActivityMetric(key) {
 			delete(snap.Metrics, key)
 			deletedCount++
 		}
@@ -171,6 +218,8 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
 			strings.HasPrefix(key, "provider_") ||
+			strings.HasPrefix(key, "lang_") ||
+			strings.HasPrefix(key, "jsonl_") ||
 			strings.HasPrefix(key, "usage_") ||
 			strings.HasPrefix(key, "analytics_") {
 			delete(snap.Raw, key)
@@ -210,6 +259,10 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		}
 	}
 
+	// Replace stale template ModelUsage with time-windowed records from
+	// telemetry. The template's ModelUsage represents the full billing cycle
+	// and would be misleading for shorter time windows.
+	snap.ModelUsage = nil
 	modelCostTotal := 0.0
 	for _, model := range agg.Models {
 		mk := sanitizeMetricID(model.Model)
@@ -221,11 +274,29 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: timeWindow}
 		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
 		modelCostTotal += model.CostUSD
+		snap.ModelUsage = append(snap.ModelUsage, core.ModelUsageRecord{
+			RawModelID:  model.Model,
+			RawSource:   "telemetry",
+			Window:      timeWindow,
+			InputTokens: float64Ptr(model.InputTokens),
+			OutputTokens: float64Ptr(model.OutputTokens),
+			CachedTokens: float64Ptr(model.CachedTokens),
+			ReasoningTokens: float64Ptr(model.Reasoning),
+			TotalTokens: float64Ptr(model.TotalTokens),
+			CostUSD:     float64Ptr(model.CostUSD),
+			Requests:    float64Ptr(model.Requests),
+		})
 	}
-	if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
-		uk := "model_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
-		snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+	// Only compute unattributed model cost when we have windowed model data.
+	// When agg.Models is empty (no events in window), the authoritativeCost
+	// represents the full billing cycle — attributing it as "unattributed"
+	// would be misleading for the selected time range.
+	if len(agg.Models) > 0 {
+		if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+			uk := "model_unattributed"
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
+			snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+		}
 	}
 
 	providerCostTotal := 0.0
@@ -266,6 +337,39 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
 	}
 
+	for _, lang := range agg.Languages {
+		lk := sanitizeMetricID(lang.Language)
+		snap.Metrics["lang_"+lk] = core.Metric{Used: float64Ptr(lang.Requests), Unit: "requests", Window: timeWindow}
+	}
+
+	// Emit windowed activity metrics.
+	act := agg.Activity
+	if act.Messages > 0 {
+		snap.Metrics["messages_today"] = core.Metric{Used: float64Ptr(act.Messages), Unit: "messages", Window: timeWindow}
+	}
+	if act.Sessions > 0 {
+		snap.Metrics["sessions_today"] = core.Metric{Used: float64Ptr(act.Sessions), Unit: "sessions", Window: timeWindow}
+	}
+	if act.ToolCalls > 0 {
+		snap.Metrics["tool_calls_today"] = core.Metric{Used: float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["7d_tool_calls"] = core.Metric{Used: float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
+	}
+	if act.InputTokens > 0 {
+		snap.Metrics["today_input_tokens"] = core.Metric{Used: float64Ptr(act.InputTokens), Unit: "tokens", Window: timeWindow}
+	}
+	if act.OutputTokens > 0 {
+		snap.Metrics["today_output_tokens"] = core.Metric{Used: float64Ptr(act.OutputTokens), Unit: "tokens", Window: timeWindow}
+	}
+	if act.TotalCost > 0 {
+		snap.Metrics["today_api_cost"] = core.Metric{Used: float64Ptr(act.TotalCost), Unit: "USD", Window: timeWindow}
+	}
+
+	// Emit windowed code stats.
+	cs := agg.CodeStats
+	if cs.FilesChanged > 0 {
+		snap.Metrics["composer_files_changed"] = core.Metric{Used: float64Ptr(cs.FilesChanged), Unit: "files", Window: timeWindow}
+	}
+
 	// Emit window-level aggregate metrics for the TUI header/tile display.
 	var windowRequests, windowCost, windowTokens float64
 	for _, model := range agg.Models {
@@ -286,18 +390,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
 	snap.DailySeries["analytics_requests"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Requests })
 	snap.DailySeries["analytics_tokens"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Tokens })
-	todayCost, weekCost, monthCost := usageCostWindowsUTC(agg.Daily, time.Now().UTC())
-	if todayCost > 0 {
-		snap.Metrics["today_cost"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
-		snap.Metrics["usage_daily"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
-	}
-	if weekCost > 0 {
-		snap.Metrics["7d_api_cost"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
-		snap.Metrics["usage_weekly"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
-	}
-	if monthCost > 0 {
-		snap.Metrics["analytics_30d_cost"] = core.Metric{Used: float64Ptr(monthCost), Unit: "USD", Window: "30d"}
-	}
+	// Fixed-window cost metrics (7d_api_cost, 5h_block_cost, all_time_api_cost,
+	// usage_daily, usage_weekly) are preserved from the provider template — they
+	// come from the provider's Fetch() with real API data. We do NOT re-emit
+	// them here because agg.Daily is already filtered to the selected time
+	// window, so usageCostWindowsUTC would produce incorrect values (e.g.
+	// "7d cost" would equal "3d cost" when the user picks a 3-day window).
 
 	for model, series := range agg.ModelDaily {
 		snap.DailySeries["usage_model_"+sanitizeMetricID(model)] = series
@@ -324,6 +422,31 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	snap.SetDiagnostic("telemetry_event_count", fmt.Sprintf("%d", agg.EventCount))
 }
 
+// queryTelemetryActiveProviders returns the set of provider IDs that have at least
+// one telemetry event in the database, regardless of time window. This is used to
+// distinguish providers that have a telemetry adapter (but may have no events in the
+// current time window) from providers that have no telemetry at all.
+func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]bool {
+	out := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, `
+		SELECT DISTINCT LOWER(TRIM(provider_id))
+		FROM usage_events
+		WHERE event_type IN ('message_usage', 'tool_usage')
+		  AND provider_id IS NOT NULL AND provider_id != ''
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid string
+		if rows.Scan(&pid) == nil && pid != "" {
+			out[pid] = true
+		}
+	}
+	return out
+}
+
 func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string, timeWindowHours int) (*telemetryUsageAgg, error) {
 	providerIDs = normalizeProviderIDs(providerIDs)
 	if len(providerIDs) == 0 {
@@ -343,9 +466,13 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 		if scoped == nil {
 			scoped = &telemetryUsageAgg{}
 		}
-		scoped.Scope = "account"
-		scoped.AccountID = accountID
-		return scoped, nil
+		// If account-scoped query found events, use it.
+		if scoped.EventCount > 0 {
+			scoped.Scope = "account"
+			scoped.AccountID = accountID
+			return scoped, nil
+		}
+		// Fall through to provider-scoped query if no account-scoped events found.
 	}
 
 	fallback, err := loadUsageViewForFilter(ctx, db, usageFilter{
@@ -400,6 +527,18 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if err != nil {
 		return nil, err
 	}
+	languages, err := queryLanguageAgg(ctx, db, filter)
+	if err != nil {
+		return nil, err
+	}
+	activity, err := queryActivityAgg(ctx, db, filter)
+	if err != nil {
+		return nil, err
+	}
+	codeStats, err := queryCodeStatsAgg(ctx, db, filter)
+	if err != nil {
+		return nil, err
+	}
 	daily, err := queryDailyTotals(ctx, db, filter)
 	if err != nil {
 		return nil, err
@@ -425,6 +564,9 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg.Providers = providers
 	agg.Sources = sources
 	agg.Tools = tools
+	agg.Languages = languages
+	agg.Activity = activity
+	agg.CodeStats = codeStats
 	agg.Daily = daily
 	agg.ModelDaily = modelDaily
 	agg.SourceDaily = sourceDaily
@@ -568,6 +710,124 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 	return out, nil
 }
 
+func queryLanguageAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryLanguageAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	// Query file paths from tool_usage events. Language is inferred in Go
+	// from the file extension since SQLite lacks convenient path functions.
+	query := usageCTE + `
+		SELECT
+			COALESCE(
+				NULLIF(TRIM(json_extract(source_payload, '$.file')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.payload.file')), ''),
+				''
+			) AS file_path,
+			COALESCE(requests, 1) AS requests
+		FROM deduped_usage
+		WHERE event_type = 'tool_usage'
+		  AND status != 'error'
+	`
+	rows, err := db.QueryContext(ctx, query, whereArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("canonical usage language query: %w", err)
+	}
+	defer rows.Close()
+
+	langCounts := make(map[string]float64)
+	for rows.Next() {
+		var filePath string
+		var requests float64
+		if err := rows.Scan(&filePath, &requests); err != nil {
+			continue
+		}
+		lang := inferLanguageFromFilePath(filePath)
+		if lang != "" {
+			langCounts[lang] += requests
+		}
+	}
+
+	out := make([]telemetryLanguageAgg, 0, len(langCounts))
+	for lang, count := range langCounts {
+		out = append(out, telemetryLanguageAgg{Language: lang, Requests: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Requests > out[j].Requests
+	})
+	return out, nil
+}
+
+// inferLanguageFromFilePath maps a file path to a programming language name.
+func inferLanguageFromFilePath(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return ""
+	}
+	// Check base name for special files.
+	base := p
+	if idx := strings.LastIndex(p, "/"); idx >= 0 {
+		base = p[idx+1:]
+	}
+	if idx := strings.LastIndex(base, "\\"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	switch strings.ToLower(base) {
+	case "dockerfile":
+		return "docker"
+	case "makefile":
+		return "make"
+	}
+	// Check file extension.
+	idx := strings.LastIndex(p, ".")
+	if idx < 0 {
+		return ""
+	}
+	ext := strings.ToLower(p[idx:])
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".tf", ".tfvars", ".hcl":
+		return "terraform"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "shell"
+	case ".md", ".mdx":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".yml", ".yaml":
+		return "yaml"
+	case ".sql":
+		return "sql"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cc", ".cpp", ".cxx", ".hpp":
+		return "cpp"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".swift":
+		return "swift"
+	case ".vue":
+		return "vue"
+	case ".svelte":
+		return "svelte"
+	case ".toml":
+		return "toml"
+	case ".xml":
+		return "xml"
+	}
+	return ""
+}
+
 func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProviderAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	// Provider resolution order:
@@ -614,6 +874,69 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 			continue
 		}
 		out = append(out, row)
+	}
+	return out, nil
+}
+
+func queryActivityAgg(ctx context.Context, db *sql.DB, filter usageFilter) (telemetryActivityAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
+		SELECT
+			COUNT(DISTINCT CASE WHEN event_type = 'message_usage' THEN
+				COALESCE(NULLIF(TRIM(message_id), ''), COALESCE(NULLIF(TRIM(turn_id), ''), dedup_key))
+			END) AS messages,
+			COUNT(DISTINCT CASE WHEN event_type = 'message_usage' THEN
+				NULLIF(TRIM(session_id), '')
+			END) AS sessions,
+			SUM(CASE WHEN event_type = 'tool_usage' THEN COALESCE(requests, 1) ELSE 0 END) AS tool_calls,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(input_tokens, 0) ELSE 0 END) AS input_tokens,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(output_tokens, 0) ELSE 0 END) AS output_tokens,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(cache_read_tokens, 0) ELSE 0 END) AS cached_tokens,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(reasoning_tokens, 0) ELSE 0 END) AS reasoning_tokens,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(total_tokens, 0) ELSE 0 END) AS total_tokens,
+			SUM(CASE WHEN event_type = 'message_usage' THEN COALESCE(cost_usd, 0) ELSE 0 END) AS total_cost
+		FROM deduped_usage
+		WHERE status != 'error'
+	`
+	var out telemetryActivityAgg
+	err := db.QueryRowContext(ctx, query, whereArgs...).Scan(
+		&out.Messages, &out.Sessions, &out.ToolCalls,
+		&out.InputTokens, &out.OutputTokens, &out.CachedTokens,
+		&out.ReasonTokens, &out.TotalTokens, &out.TotalCost,
+	)
+	if err != nil {
+		return out, fmt.Errorf("canonical usage activity query: %w", err)
+	}
+	return out, nil
+}
+
+func queryCodeStatsAgg(ctx context.Context, db *sql.DB, filter usageFilter) (telemetryCodeStatsAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	// Count distinct file paths from tool_usage events to estimate files changed.
+	// Only count mutating tools (edit, write, create, delete, rename, move).
+	query := usageCTE + `
+		SELECT
+			COUNT(DISTINCT CASE
+				WHEN LOWER(tool_name) LIKE '%edit%'
+				  OR LOWER(tool_name) LIKE '%write%'
+				  OR LOWER(tool_name) LIKE '%create%'
+				  OR LOWER(tool_name) LIKE '%delete%'
+				  OR LOWER(tool_name) LIKE '%rename%'
+				  OR LOWER(tool_name) LIKE '%move%'
+				THEN NULLIF(TRIM(COALESCE(
+					json_extract(source_payload, '$.file'),
+					json_extract(source_payload, '$.payload.file'),
+					''
+				)), '')
+			END) AS files_changed
+		FROM deduped_usage
+		WHERE event_type = 'tool_usage'
+		  AND status != 'error'
+	`
+	var out telemetryCodeStatsAgg
+	err := db.QueryRowContext(ctx, query, whereArgs...).Scan(&out.FilesChanged)
+	if err != nil {
+		return out, fmt.Errorf("canonical usage code stats query: %w", err)
 	}
 	return out, nil
 }
@@ -891,31 +1214,47 @@ func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float6
 	})
 }
 
-func usageCostWindowsUTC(daily []telemetryDayPoint, now time.Time) (today float64, week float64, month float64) {
-	if len(daily) == 0 {
-		return 0, 0, 0
-	}
-	utcNow := now.UTC()
-	todayKey := utcNow.Format("2006-01-02")
-	weekStartKey := utcNow.AddDate(0, 0, -6).Format("2006-01-02")
-	monthStartKey := utcNow.AddDate(0, 0, -29).Format("2006-01-02")
 
-	for _, row := range daily {
-		day := strings.TrimSpace(row.Day)
-		if day == "" {
-			continue
-		}
-		if day == todayKey {
-			today += row.CostUSD
-		}
-		if day >= weekStartKey && day <= todayKey {
-			week += row.CostUSD
-		}
-		if day >= monthStartKey && day <= todayKey {
-			month += row.CostUSD
-		}
+// isStaleActivityMetric returns true for metrics that are computed by the provider
+// with hardcoded time windows (today/7d/all-time) and should be replaced by
+// telemetry-windowed equivalents.
+func isStaleActivityMetric(key string) bool {
+	// Activity counters with hardcoded time windows.
+	switch key {
+	case "messages_today", "sessions_today", "tool_calls_today",
+		"7d_tool_calls", "all_time_tool_calls", "tool_calls_total",
+		"tool_completed", "tool_errored", "tool_cancelled", "tool_success_rate",
+		"today_input_tokens", "today_output_tokens",
+		"7d_input_tokens", "7d_output_tokens",
+		"all_time_input_tokens", "all_time_output_tokens",
+		"all_time_cache_read_tokens", "all_time_cache_create_tokens",
+		"all_time_cache_create_5m_tokens", "all_time_cache_create_1h_tokens",
+		"all_time_reasoning_tokens",
+		"today_api_cost",
+		"burn_rate",
+		"composer_lines_added", "composer_lines_removed",
+		"composer_files_changed", "scored_commits", "total_prompts":
+		return true
 	}
-	return today, week, month
+	// Fixed-window cost metrics from provider Fetch() are preserved —
+	// the telemetry view does NOT re-emit them (it only has windowed data).
+	switch key {
+	case "7d_api_cost", "all_time_api_cost", "5h_block_cost":
+		return false
+	}
+	// Prefixed tokens/cost metrics from providers.
+	if strings.HasPrefix(key, "tokens_today_") ||
+		strings.HasPrefix(key, "input_tokens_") ||
+		strings.HasPrefix(key, "output_tokens_") ||
+		strings.HasPrefix(key, "today_") ||
+		strings.HasPrefix(key, "7d_") ||
+		strings.HasPrefix(key, "all_time_") ||
+		strings.HasPrefix(key, "5h_block_") ||
+		strings.HasPrefix(key, "project_") ||
+		strings.HasPrefix(key, "agent_") {
+		return true
+	}
+	return false
 }
 
 func usageAuthoritativeCost(snap core.UsageSnapshot) float64 {

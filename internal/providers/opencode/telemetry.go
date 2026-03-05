@@ -273,6 +273,15 @@ func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
 				occurred = shared.UnixAuto(tool.Timestamp)
 			}
 
+			// Extract tool's target file path from raw payload for language inference.
+			toolFilePath := ""
+			var rawPayloadMap map[string]any
+			if json.Unmarshal(ev.Payload, &rawPayloadMap) == nil {
+				if paths := shared.ExtractFilePathsFromPayload(rawPayloadMap); len(paths) > 0 {
+					toolFilePath = paths[0]
+				}
+			}
+
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: telemetryEventSchema,
 				Channel:       shared.TelemetryChannelJSONL,
@@ -288,8 +297,9 @@ func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
 				Requests:      shared.Int64Ptr(1),
 				Status:        shared.TelemetryStatusOK,
 				Payload: map[string]any{
-					"file": path,
-					"line": lineNumber,
+					"source_file": path,
+					"line":        lineNumber,
+					"file":        toolFilePath,
 				},
 			})
 		}
@@ -653,6 +663,19 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			occurredAt = shared.UnixAuto(timeCreated)
 		}
 
+		// Extract tool's target file path from part payload for language inference.
+		toolFilePath := ""
+		if stateInput, ok := partPayload["state"].(map[string]any); ok {
+			if paths := shared.ExtractFilePathsFromPayload(stateInput); len(paths) > 0 {
+				toolFilePath = paths[0]
+			}
+		}
+		if toolFilePath == "" {
+			if paths := shared.ExtractFilePathsFromPayload(partPayload); len(paths) > 0 {
+				toolFilePath = paths[0]
+			}
+		}
+
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetrySQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
@@ -692,6 +715,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				},
 				"upstream_provider": upstreamProvider,
 				"status":            statusRaw,
+				"file":              toolFilePath,
 			},
 		})
 	}

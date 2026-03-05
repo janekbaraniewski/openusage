@@ -242,3 +242,81 @@ func uniqueStrings(in []string) []string {
 	sort.Strings(result)
 	return result
 }
+
+// ExtractFilePathsFromPayload walks a JSON-like structure and extracts file path
+// candidates from values stored under path-related keys. This is used by telemetry
+// adapters to extract tool target file paths for language inference.
+func ExtractFilePathsFromPayload(input any) []string {
+	pathKeyHints := map[string]bool{
+		"path": true, "paths": true, "file": true, "files": true, "filepath": true, "file_path": true,
+		"cwd": true, "directory": true, "dir": true, "glob": true, "pattern": true, "target": true,
+		"from": true, "to": true, "include": true, "exclude": true,
+	}
+
+	candidates := make(map[string]bool)
+	var walk func(value any, hinted bool)
+	walk = func(value any, hinted bool) {
+		switch v := value.(type) {
+		case map[string]any:
+			for key, child := range v {
+				k := strings.ToLower(strings.TrimSpace(key))
+				childHinted := hinted || pathKeyHints[k] || strings.Contains(k, "path") || strings.Contains(k, "file")
+				walk(child, childHinted)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child, hinted)
+			}
+		case string:
+			if !hinted {
+				return
+			}
+			for _, token := range extractPathTokens(v) {
+				candidates[token] = true
+			}
+		}
+	}
+	walk(input, false)
+
+	out := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		out = append(out, candidate)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func extractPathTokens(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		fields = []string{raw}
+	}
+	var out []string
+	for _, field := range fields {
+		token := strings.Trim(field, "\"'`()[]{}<>,:;")
+		if token == "" {
+			continue
+		}
+		lower := strings.ToLower(token)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "file://") {
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			continue
+		}
+		if !strings.Contains(token, "/") && !strings.Contains(token, "\\") && !strings.Contains(token, ".") {
+			continue
+		}
+		token = strings.TrimPrefix(token, "./")
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return lo.Uniq(out)
+}
