@@ -641,6 +641,19 @@ func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *test
 	}
 }
 
+func TestParseMCPToolName_CopilotLegacyWrapper(t *testing.T) {
+	server, function, ok := parseMCPToolName("github_mcp_server_list_issues")
+	if !ok {
+		t.Fatal("parseMCPToolName should parse copilot wrapper pattern")
+	}
+	if server != "github" {
+		t.Fatalf("server = %q, want github", server)
+	}
+	if function != "list_issues" {
+		t.Fatalf("function = %q, want list_issues", function)
+	}
+}
+
 func TestApplyCanonicalUsageView_SkipsProviderBurnMetricsForCodex(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)

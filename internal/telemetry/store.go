@@ -394,7 +394,7 @@ func enrichEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string, nor
 	modelRaw := chooseString(current.ModelRaw, norm.ModelRaw, override)
 	modelCanonical := chooseString(current.ModelCanonical, norm.ModelCanonical, override)
 	modelLineage := chooseString(current.ModelLineageID, norm.ModelLineageID, override)
-	toolName := chooseString(current.ToolName, norm.ToolName, override)
+	toolName := chooseToolName(current.ToolName, norm.ToolName, override)
 
 	inputTokens := chooseInt64(current.InputTokens, norm.InputTokens, override)
 	outputTokens := chooseInt64(current.OutputTokens, norm.OutputTokens, override)
@@ -480,6 +480,43 @@ func chooseString(current sql.NullString, incoming string, override bool) string
 		return trimmedIncoming
 	}
 	return strings.TrimSpace(current.String)
+}
+
+func chooseToolName(current sql.NullString, incoming string, override bool) string {
+	currentName := strings.ToLower(strings.TrimSpace(current.String))
+	incomingName := strings.ToLower(strings.TrimSpace(incoming))
+
+	if !current.Valid || currentName == "" {
+		return incomingName
+	}
+	if override && incomingName != "" {
+		return incomingName
+	}
+	if incomingName == "" {
+		return currentName
+	}
+	if currentName == "unknown" && incomingName != "unknown" {
+		return incomingName
+	}
+	// When parsers improve MCP normalization over time, prefer canonical
+	// mcp__server__function labels so existing deduped rows self-heal.
+	if isCanonicalMCPToolName(incomingName) && !isCanonicalMCPToolName(currentName) {
+		return incomingName
+	}
+	return currentName
+}
+
+func isCanonicalMCPToolName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if !strings.HasPrefix(normalized, "mcp__") {
+		return false
+	}
+	rest := strings.TrimPrefix(normalized, "mcp__")
+	parts := strings.SplitN(rest, "__", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	return strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
 }
 
 func chooseInt64(current sql.NullInt64, incoming *int64, override bool) *int64 {
@@ -599,6 +636,36 @@ func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, err
 	n, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("telemetry: prune orphan raw events rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// PruneRawEventPayloads clears source_payload from old raw events to reclaim
+// disk space. All useful data has already been extracted into usage_events.
+// Keeps payloads for events newer than retentionHours.
+func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, limit int) (int64, error) {
+	if s == nil || s.db == nil || retentionHours < 0 || limit <= 0 {
+		return 0, nil
+	}
+	cutoff := fmt.Sprintf("-%d hours", retentionHours)
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE usage_raw_events
+		SET source_payload = '{}'
+		WHERE raw_event_id IN (
+			SELECT raw_event_id
+			FROM usage_raw_events
+			WHERE ingested_at < datetime('now', ?)
+			  AND LENGTH(source_payload) > 2
+			ORDER BY ingested_at ASC
+			LIMIT ?
+		)
+	`, cutoff, limit)
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune raw event payloads: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune raw event payloads rows affected: %w", err)
 	}
 	return n, nil
 }

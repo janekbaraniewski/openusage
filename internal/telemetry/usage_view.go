@@ -255,6 +255,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "model_") ||
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "lang_") ||
+			strings.HasPrefix(key, "interface_") ||
 			isStaleActivityMetric(key) {
 			delete(snap.Metrics, key)
 			deletedCount++
@@ -1524,6 +1525,26 @@ func parseMCPToolName(raw string) (server, function string, ok bool) {
 		return rest[:idx], rest[idx+2:], true
 	}
 
+	// Copilot legacy wrapper format: "<server>_mcp_server_<function>".
+	if strings.Contains(raw, "_mcp_server_") {
+		parts := strings.SplitN(raw, "_mcp_server_", 2)
+		server = sanitizeMCPToolSegment(parts[0])
+		function = sanitizeMCPToolSegment(parts[1])
+		if server != "" && function != "" {
+			return server, function, true
+		}
+	}
+
+	// Copilot legacy wrapper format variant: "<server>-mcp-server-<function>".
+	if strings.Contains(raw, "-mcp-server-") {
+		parts := strings.SplitN(raw, "-mcp-server-", 2)
+		server = sanitizeMCPToolSegment(parts[0])
+		function = sanitizeMCPToolSegment(parts[1])
+		if server != "" && function != "" {
+			return server, function, true
+		}
+	}
+
 	// Legacy format: "something (mcp)" from old Cursor data.
 	if strings.HasSuffix(raw, " (mcp)") {
 		body := strings.TrimSuffix(raw, " (mcp)")
@@ -1549,6 +1570,28 @@ func parseMCPToolName(raw string) (server, function string, ok bool) {
 	}
 
 	return "", "", false
+}
+
+func sanitizeMCPToolSegment(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	lastUnderscore := false
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteRune('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // findServerFunctionSplit finds the best hyphen position to split "server-function"

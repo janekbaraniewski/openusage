@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,12 +11,15 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
 	telemetrySchemaVersion   = "copilot_v2"
 	defaultCopilotSessionDir = ".copilot/session-state"
+	defaultCopilotStoreDB    = ".copilot/session-store.db"
 )
 
 type copilotTelemetryAssistantMessageData struct {
@@ -69,6 +73,7 @@ func (p *Provider) System() string { return p.ID() }
 // extracts usage telemetry events from assistant.usage entries.
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	sessionDir := shared.ExpandHome(opts.Path("sessions_dir", defaultCopilotSessionsDir()))
+	storeDB := shared.ExpandHome(opts.Path("session_store_db", defaultCopilotSessionStoreDB()))
 	if sessionDir == "" {
 		return nil, nil
 	}
@@ -79,6 +84,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	}
 
 	var out []shared.TelemetryEvent
+	seenSessions := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
@@ -86,12 +92,20 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		if !entry.IsDir() {
 			continue
 		}
+		seenSessions[entry.Name()] = true
 		eventsPath := filepath.Join(sessionDir, entry.Name(), "events.jsonl")
 		events, err := parseCopilotTelemetrySessionFile(eventsPath, entry.Name())
 		if err != nil {
 			continue
 		}
 		out = append(out, events...)
+	}
+
+	// Fallback to durable session-store metadata for sessions that no longer have
+	// events.jsonl state (Copilot rotates session-state aggressively).
+	storeEvents, err := parseCopilotTelemetrySessionStore(ctx, storeDB, seenSessions)
+	if err == nil {
+		out = append(out, storeEvents...)
 	}
 	return out, nil
 }
@@ -108,6 +122,14 @@ func defaultCopilotSessionsDir() string {
 		return ""
 	}
 	return filepath.Join(home, defaultCopilotSessionDir)
+}
+
+func defaultCopilotSessionStoreDB() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, defaultCopilotStoreDB)
 }
 
 // parseCopilotTelemetrySessionFile parses a single session's events.jsonl and
@@ -813,6 +835,22 @@ func parseCopilotTelemetryMCPTool(raw string) (string, string, bool) {
 		return "", "", false
 	}
 
+	// Copilot-native MCP wrappers: github_mcp_server_list_issues.
+	if parts := strings.SplitN(normalized, "_mcp_server_", 2); len(parts) == 2 {
+		server := sanitizeCopilotMCPSegment(parts[0])
+		function := sanitizeCopilotMCPSegment(parts[1])
+		if server != "" && function != "" {
+			return server, function, true
+		}
+	}
+	if parts := strings.SplitN(normalized, "-mcp-server-", 2); len(parts) == 2 {
+		server := sanitizeCopilotMCPSegment(parts[0])
+		function := sanitizeCopilotMCPSegment(parts[1])
+		if server != "" && function != "" {
+			return server, function, true
+		}
+	}
+
 	if strings.HasPrefix(normalized, "mcp__") {
 		rest := strings.TrimPrefix(normalized, "mcp__")
 		parts := strings.SplitN(rest, "__", 2)
@@ -1235,4 +1273,226 @@ func truncate(input string, max int) string {
 		return input
 	}
 	return input[:max]
+}
+
+func parseCopilotTelemetrySessionStore(ctx context.Context, dbPath string, skipSessions map[string]bool) ([]shared.TelemetryEvent, error) {
+	if strings.TrimSpace(dbPath) == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, nil
+	}
+
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	if !copilotTelemetryTableExists(ctx, db, "sessions") || !copilotTelemetryTableExists(ctx, db, "turns") {
+		return nil, nil
+	}
+
+	query := `
+		SELECT
+			s.id,
+			COALESCE(s.cwd, ''),
+			COALESCE(s.repository, ''),
+			COALESCE(t.turn_index, 0),
+			COALESCE(t.user_message, ''),
+			COALESCE(t.assistant_response, ''),
+			COALESCE(t.timestamp, '')
+		FROM sessions s
+		JOIN turns t ON t.session_id = s.id
+		ORDER BY s.id ASC, t.turn_index ASC
+	`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []shared.TelemetryEvent
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+
+		var (
+			sessionID string
+			cwd       string
+			repo      string
+			turnIndex int
+			userMsg   string
+			reply     string
+			tsRaw     string
+		)
+		if err := rows.Scan(&sessionID, &cwd, &repo, &turnIndex, &userMsg, &reply, &tsRaw); err != nil {
+			continue
+		}
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" || skipSessions[sessionID] {
+			continue
+		}
+
+		workspaceID := shared.SanitizeWorkspace(cwd)
+		clientLabel := normalizeCopilotClient(repo, cwd)
+		occurredAt := time.Now().UTC()
+		if parsed := shared.FlexParseTime(tsRaw); !parsed.IsZero() {
+			occurredAt = parsed
+		}
+
+		messageID := fmt.Sprintf("%s:turn:%d", sessionID, turnIndex)
+		model := "unknown"
+
+		payload := map[string]any{
+			"source_file":            dbPath,
+			"event":                  "session_store.turn",
+			"client":                 clientLabel,
+			"upstream_provider":      "github",
+			"session_store_fallback": true,
+			"user_chars":             len(strings.TrimSpace(userMsg)),
+			"assistant_chars":        len(strings.TrimSpace(reply)),
+			"turn_index":             turnIndex,
+		}
+		if strings.TrimSpace(repo) != "" {
+			payload["repository"] = strings.TrimSpace(repo)
+		}
+		if strings.TrimSpace(cwd) != "" {
+			payload["cwd"] = strings.TrimSpace(cwd)
+		}
+
+		out = append(out, shared.TelemetryEvent{
+			SchemaVersion: telemetrySchemaVersion,
+			Channel:       shared.TelemetryChannelSQLite,
+			OccurredAt:    occurredAt,
+			AccountID:     "copilot",
+			WorkspaceID:   workspaceID,
+			SessionID:     sessionID,
+			TurnID:        messageID,
+			MessageID:     messageID,
+			ProviderID:    "copilot",
+			AgentName:     "copilot",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      model,
+			Requests:      shared.Int64Ptr(1),
+			Status:        shared.TelemetryStatusOK,
+			Payload:       payload,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	// Add session_files fallback for language/code-stats even when JSONL tool
+	// execution events are unavailable.
+	if copilotTelemetryTableExists(ctx, db, "session_files") {
+		fileRows, err := db.QueryContext(ctx, `
+			SELECT
+				COALESCE(sf.session_id, ''),
+				COALESCE(sf.file_path, ''),
+				COALESCE(sf.tool_name, ''),
+				COALESCE(sf.turn_index, 0),
+				COALESCE(sf.first_seen_at, ''),
+				COALESCE(s.cwd, ''),
+				COALESCE(s.repository, '')
+			FROM session_files sf
+			LEFT JOIN sessions s ON s.id = sf.session_id
+			ORDER BY sf.session_id ASC, sf.turn_index ASC, sf.id ASC
+		`)
+		if err == nil {
+			defer fileRows.Close()
+			for fileRows.Next() {
+				if ctx.Err() != nil {
+					return out, ctx.Err()
+				}
+				var (
+					sessionID string
+					filePath  string
+					toolRaw   string
+					turnIndex int
+					tsRaw     string
+					cwd       string
+					repo      string
+				)
+				if err := fileRows.Scan(&sessionID, &filePath, &toolRaw, &turnIndex, &tsRaw, &cwd, &repo); err != nil {
+					continue
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				filePath = strings.TrimSpace(filePath)
+				if sessionID == "" || filePath == "" || skipSessions[sessionID] {
+					continue
+				}
+
+				workspaceID := shared.SanitizeWorkspace(cwd)
+				clientLabel := normalizeCopilotClient(repo, cwd)
+				occurredAt := time.Now().UTC()
+				if parsed := shared.FlexParseTime(tsRaw); !parsed.IsZero() {
+					occurredAt = parsed
+				}
+
+				toolName, meta := normalizeCopilotTelemetryToolName(toolRaw)
+				if toolName == "" || toolName == "unknown" {
+					toolName = "workspace_file_changed"
+				}
+
+				toolCallID := fmt.Sprintf("store:%s:%d:%s", sessionID, turnIndex, sanitizeMetricName(filePath))
+				messageID := fmt.Sprintf("%s:turn:%d", sessionID, turnIndex)
+				payload := map[string]any{
+					"source_file":            dbPath,
+					"event":                  "session_store.file",
+					"client":                 clientLabel,
+					"upstream_provider":      "github",
+					"session_store_fallback": true,
+					"file":                   filePath,
+					"turn_index":             turnIndex,
+					"tool_name_raw":          strings.TrimSpace(toolRaw),
+				}
+				for key, value := range meta {
+					payload[key] = value
+				}
+				if lang := inferCopilotLanguageFromPath(filePath); lang != "" {
+					payload["language"] = lang
+				}
+				if strings.TrimSpace(repo) != "" {
+					payload["repository"] = strings.TrimSpace(repo)
+				}
+				if strings.TrimSpace(cwd) != "" {
+					payload["cwd"] = strings.TrimSpace(cwd)
+				}
+
+				out = append(out, shared.TelemetryEvent{
+					SchemaVersion: telemetrySchemaVersion,
+					Channel:       shared.TelemetryChannelSQLite,
+					OccurredAt:    occurredAt,
+					AccountID:     "copilot",
+					WorkspaceID:   workspaceID,
+					SessionID:     sessionID,
+					TurnID:        messageID,
+					MessageID:     messageID,
+					ToolCallID:    toolCallID,
+					ProviderID:    "copilot",
+					AgentName:     "copilot",
+					EventType:     shared.TelemetryEventTypeToolUsage,
+					ModelRaw:      "unknown",
+					ToolName:      toolName,
+					Requests:      shared.Int64Ptr(1),
+					Status:        shared.TelemetryStatusOK,
+					Payload:       payload,
+				})
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func copilotTelemetryTableExists(ctx context.Context, db *sql.DB, table string) bool {
+	var exists int
+	err := db.QueryRowContext(ctx,
+		`SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`,
+		strings.TrimSpace(table),
+	).Scan(&exists)
+	return err == nil && exists == 1
 }

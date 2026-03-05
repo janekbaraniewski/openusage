@@ -1,11 +1,15 @@
 package copilot
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
@@ -381,6 +385,113 @@ func TestParseCopilotTelemetrySessionFile_ShutdownDoesNotDuplicateWhenUsageExist
 	}
 	if messageUsageCount != 1 {
 		t.Fatalf("message usage count = %d, want 1 (assistant.usage only)", messageUsageCount)
+	}
+}
+
+func TestNormalizeCopilotTelemetryToolName_CopilotMCPPattern(t *testing.T) {
+	tool, meta := normalizeCopilotTelemetryToolName("github_mcp_server_list_issues")
+	if tool != "mcp__github__list_issues" {
+		t.Fatalf("tool = %q, want mcp__github__list_issues", tool)
+	}
+	if got, _ := meta["mcp_server"].(string); got != "github" {
+		t.Fatalf("meta.mcp_server = %q, want github", got)
+	}
+	if got, _ := meta["mcp_function"].(string); got != "list_issues" {
+		t.Fatalf("meta.mcp_function = %q, want list_issues", got)
+	}
+}
+
+func TestParseCopilotTelemetrySessionStore_Fallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "session-store.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	for _, stmt := range []string{
+		`CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			cwd TEXT,
+			repository TEXT,
+			branch TEXT,
+			summary TEXT,
+			created_at TEXT,
+			updated_at TEXT
+		)`,
+		`CREATE TABLE turns (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			turn_index INTEGER NOT NULL,
+			user_message TEXT,
+			assistant_response TEXT,
+			timestamp TEXT
+		)`,
+		`CREATE TABLE session_files (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			tool_name TEXT,
+			turn_index INTEGER,
+			first_seen_at TEXT
+		)`,
+		`INSERT INTO sessions (id, cwd, repository) VALUES
+			('sess-missing-jsonl', '/Users/test/openusage', 'janek/openusage'),
+			('sess-has-jsonl', '/Users/test/other', 'janek/other')`,
+		`INSERT INTO turns (session_id, turn_index, user_message, assistant_response, timestamp) VALUES
+			('sess-missing-jsonl', 0, 'hello', 'world', '2026-03-01T10:00:00Z'),
+			('sess-has-jsonl', 1, 'skip', 'skip', '2026-03-01T10:01:00Z')`,
+		`INSERT INTO session_files (session_id, file_path, tool_name, turn_index, first_seen_at) VALUES
+			('sess-missing-jsonl', 'internal/providers/copilot/telemetry.go', 'edit', 0, '2026-03-01T10:00:10Z'),
+			('sess-has-jsonl', 'internal/providers/copilot/copilot.go', 'view', 1, '2026-03-01T10:01:10Z')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+
+	events, err := parseCopilotTelemetrySessionStore(context.Background(), dbPath, map[string]bool{
+		"sess-has-jsonl": true,
+	})
+	if err != nil {
+		t.Fatalf("parseCopilotTelemetrySessionStore() error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want 2 (turn + session_file for fallback session)", len(events))
+	}
+
+	var hasMessageUsage bool
+	var hasFileTool bool
+	for _, ev := range events {
+		if ev.SessionID != "sess-missing-jsonl" {
+			t.Fatalf("unexpected session id %q, expected fallback-only session", ev.SessionID)
+		}
+		switch ev.EventType {
+		case shared.TelemetryEventTypeMessageUsage:
+			hasMessageUsage = true
+			if ev.Requests == nil || *ev.Requests != 1 {
+				t.Fatalf("message usage requests = %v, want 1", ev.Requests)
+			}
+			if got, _ := ev.Payload["session_store_fallback"].(bool); !got {
+				t.Fatalf("missing payload.session_store_fallback=true")
+			}
+		case shared.TelemetryEventTypeToolUsage:
+			hasFileTool = true
+			if ev.ToolName != "edit" {
+				t.Fatalf("tool fallback name = %q, want edit", ev.ToolName)
+			}
+			if got, _ := ev.Payload["file"].(string); got != "internal/providers/copilot/telemetry.go" {
+				t.Fatalf("tool fallback payload.file = %q, want internal/providers/copilot/telemetry.go", got)
+			}
+		}
+	}
+	if !hasMessageUsage {
+		t.Fatal("missing message usage fallback event")
+	}
+	if !hasFileTool {
+		t.Fatal("missing session file fallback tool event")
 	}
 }
 

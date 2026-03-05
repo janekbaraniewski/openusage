@@ -338,6 +338,57 @@ func TestStoreIngest_DedupStableIDIgnoresAccountProviderAgentDrift(t *testing.T)
 	}
 }
 
+func TestStoreIngest_DedupCanonicalMCPToolNameWins(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	firstReq := IngestRequest{
+		SourceSystem:  SourceSystem("copilot"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Date(2026, time.March, 5, 11, 0, 0, 0, time.UTC),
+		ProviderID:    "copilot",
+		AccountID:     "copilot",
+		SessionID:     "sess-copilot-1",
+		ToolCallID:    "tool-call-1",
+		EventType:     EventTypeToolUsage,
+		ToolName:      "github_mcp_server_list_issues",
+		Requests:      int64Ptr(1),
+	}
+	if _, err := store.Ingest(context.Background(), firstReq); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+
+	secondReq := firstReq
+	secondReq.OccurredAt = secondReq.OccurredAt.Add(1 * time.Second)
+	secondReq.ToolName = "mcp__github__list_issues"
+	second, err := store.Ingest(context.Background(), secondReq)
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if !second.Deduped {
+		t.Fatalf("second ingest should be deduped")
+	}
+
+	var toolName sql.NullString
+	if err := db.QueryRow(
+		`SELECT tool_name FROM usage_events WHERE dedup_key = ?`,
+		BuildDedupKey(firstReq),
+	).Scan(&toolName); err != nil {
+		t.Fatalf("query canonical tool_name: %v", err)
+	}
+	if !toolName.Valid || toolName.String != "mcp__github__list_issues" {
+		t.Fatalf("tool_name = %#v, want mcp__github__list_issues", toolName)
+	}
+}
+
 func TestStorePruneOldEvents_DeletesExpiredEventsOnly(t *testing.T) {
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
 	if err != nil {
