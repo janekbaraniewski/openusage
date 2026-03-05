@@ -162,6 +162,12 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				toolName = "unknown"
 			}
 
+			// Extract tool's target file path from input for language inference.
+			toolFilePath := ""
+			if paths := shared.ExtractFilePathsFromPayload(part.Input); len(paths) > 0 {
+				toolFilePath = paths[0]
+			}
+
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: "claude_jsonl_v1",
 				Channel:       shared.TelemetryChannelJSONL,
@@ -180,8 +186,9 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				Requests:      shared.Int64Ptr(1),
 				Status:        shared.TelemetryStatusOK,
 				Payload: map[string]any{
-					"file": path,
-					"line": lineNumber,
+					"source_file": path,
+					"line":        lineNumber,
+					"file":        toolFilePath,
 				},
 			})
 		}

@@ -174,8 +174,8 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				TotalTokens:     shared.Int64Ptr(int64(delta.TotalTokens)),
 				Status:          shared.TelemetryStatusOK,
 				Payload: map[string]any{
-					"file": path,
-					"line": lineNumber,
+					"source_file": path,
+					"line":        lineNumber,
 				},
 			})
 		}

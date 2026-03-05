@@ -8,6 +8,7 @@ const (
 	TimeWindow3d  TimeWindow = "3d"
 	TimeWindow7d  TimeWindow = "7d"
 	TimeWindow30d TimeWindow = "30d"
+	TimeWindowAll TimeWindow = "all"
 )
 
 var ValidTimeWindows = []TimeWindow{
@@ -15,11 +16,14 @@ var ValidTimeWindows = []TimeWindow{
 	TimeWindow3d,
 	TimeWindow7d,
 	TimeWindow30d,
+	TimeWindowAll,
 }
 
-// Hours returns the window size in hours.
+// Hours returns the window size in hours. Returns 0 for TimeWindowAll (no filter).
 func (tw TimeWindow) Hours() int {
 	switch tw {
+	case TimeWindowAll:
+		return 0
 	case TimeWindow1d:
 		return 24
 	case TimeWindow3d:
@@ -40,6 +44,8 @@ func (tw TimeWindow) Days() int {
 
 func (tw TimeWindow) Label() string {
 	switch tw {
+	case TimeWindowAll:
+		return "All Time"
 	case TimeWindow1d:
 		return "Today"
 	case TimeWindow3d:
@@ -54,9 +60,11 @@ func (tw TimeWindow) Label() string {
 }
 
 // SQLiteOffset returns the SQLite datetime offset string for this window
-// (e.g., "-7 day").
+// (e.g., "-7 day"). Returns empty string for TimeWindowAll (no filter).
 func (tw TimeWindow) SQLiteOffset() string {
 	switch tw {
+	case TimeWindowAll:
+		return ""
 	case TimeWindow1d:
 		return "-1 day"
 	case TimeWindow3d:
@@ -80,10 +88,13 @@ func ParseTimeWindow(s string) TimeWindow {
 }
 
 // LargestWindowFitting returns the largest valid TimeWindow whose Days() <= maxDays.
-// Falls back to the smallest window if none fit.
+// Falls back to the smallest window if none fit. Skips TimeWindowAll.
 func LargestWindowFitting(maxDays int) TimeWindow {
 	var best TimeWindow
 	for _, tw := range ValidTimeWindows {
+		if tw == TimeWindowAll {
+			continue
+		}
 		if tw.Days() <= maxDays {
 			if best == "" || tw.Days() > best.Days() {
 				best = tw

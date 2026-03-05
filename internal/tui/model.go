@@ -364,6 +364,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SnapshotsMsg:
+		if m.refreshing && m.hasData && !snapshotsReady(msg) {
+			// During a time-window change the daemon may return empty
+			// template snapshots while it recomputes. Keep the old data
+			// visible so tiles don't flash to the loading screen.
+			return m, nil
+		}
 		m.snapshots = msg
 		m.refreshing = false
 		if len(msg) > 0 || snapshotsReady(msg) {
