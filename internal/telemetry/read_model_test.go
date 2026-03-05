@@ -352,6 +352,11 @@ func TestApplyCanonicalTelemetryView_RepairsLegacyCodexProviderID(t *testing.T) 
 		t.Fatalf("ingest legacy codex tool usage: %v", err)
 	}
 
+	// RunMigrations applies the one-shot repairs that were previously inline in the read path.
+	if err := store.RunMigrations(context.Background()); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
 	base := map[string]core.UsageSnapshot{
 		"codex-cli": {
 			ProviderID: "codex",
