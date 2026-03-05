@@ -85,18 +85,21 @@ changelog:
   sort: asc
   use: github
   groups:
-    - title: "✨ Features"
+    - title: "Features"
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
       order: 0
-    - title: "🐛 Bug Fixes"
+    - title: "Bug Fixes"
       regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
       order: 1
-    - title: "📚 Documentation"
-      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+    - title: "Performance"
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
       order: 2
-    - title: "🧹 Maintenance"
-      regexp: '^.*?(chore|ci|build|refactor|perf|test)(\([[:word:]]+\))??!?:.+$'
+    - title: "Documentation"
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
       order: 3
+    - title: "Maintenance"
+      regexp: '^.*?(chore|ci|build|refactor|test)(\([[:word:]]+\))??!?:.+$'
+      order: 4
     - title: "Other"
       order: 999
   filters:
@@ -111,8 +114,6 @@ release:
   prerelease: auto
   name_template: "v{{.Version}}"
   header: |
-    ## OpenUsage {{.Version}}
-
-    Monitor your AI coding tool quotas from a single TUI dashboard.
+    ## Changelog
   footer: |
     **Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/{{ .PreviousTag }}...{{ .Tag }}

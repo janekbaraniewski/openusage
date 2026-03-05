@@ -130,6 +130,12 @@ Use these directly when you need a specific phase, or let `/develop-feature` cha
 | `/finalize-feature <name>` | [SKILL.md](docs/skills/finalize-feature/SKILL.md) | Create branch, commit, open PR with summary |
 | `/add-new-provider <name>` | [add-new-provider.md](docs/skills/add-new-provider.md) | Add a new AI provider (specialized 7-phase process) |
 
+### Release
+
+| Command | Skill | Purpose |
+|---------|-------|---------|
+| `/cut-release` | [SKILL.md](docs/skills/cut-release/SKILL.md) | Tag, push, and publish a GitHub release with hand-crafted notes |
+
 ### Meta / Tooling
 
 | Command | Skill | Purpose |
