@@ -62,10 +62,11 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
 			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
 			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
-			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
+			{Name: "MCP Usage", Order: 4, Style: core.DetailSectionStyleMCP},
+			{Name: "Spending", Order: 5, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 6, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 7, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 8, Style: core.DetailSectionStyleActivity},
 		},
 	}
 }

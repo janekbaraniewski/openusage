@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	telemetrySchemaVersion    = "copilot_v1"
-	defaultCopilotSessionDir  = ".copilot/session-state"
+	telemetrySchemaVersion   = "copilot_v1"
+	defaultCopilotSessionDir = ".copilot/session-state"
 )
 
 // System returns the telemetry system identifier for the copilot provider.

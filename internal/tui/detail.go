@@ -36,6 +36,10 @@ func DetailTabs(snap core.UsageSnapshot) []string {
 	if hasLanguageMetrics(snap) {
 		tabs = append(tabs, "Languages")
 	}
+	// Add MCP Usage tab if MCP metrics are available.
+	if hasMCPMetrics(snap) {
+		tabs = append(tabs, "MCP Usage")
+	}
 	// Add Trends tab if daily series has enough data for a chart.
 	if hasChartableSeries(snap.DailySeries) {
 		tabs = append(tabs, "Trends")
@@ -107,6 +111,14 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 		sb.WriteString("\n")
 		renderDetailSectionHeader(&sb, "Languages", w)
 		renderLanguagesSection(&sb, snap, w)
+	}
+
+	// MCP Usage section — dispatched directly (needs full snapshot metrics).
+	showMCP := tabName == "MCP Usage" || showAll
+	if showMCP && hasMCPMetrics(snap) {
+		sb.WriteString("\n")
+		renderDetailSectionHeader(&sb, "MCP Usage", w)
+		renderMCPSection(&sb, snap, w)
 	}
 
 	// Trends section — dispatched directly (needs full snapshot DailySeries).
@@ -355,6 +367,10 @@ func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget, d
 	groups := make(map[string]*metricGroup)
 
 	for key, m := range metrics {
+		// MCP metrics are rendered in their own dedicated section.
+		if strings.HasPrefix(key, "mcp_") {
+			continue
+		}
 		groupName, label, order := classifyMetric(key, m, widget, details)
 		g, ok := groups[groupName]
 		if !ok {
@@ -958,6 +974,167 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 			sb.WriteString("  " + dimStyle.Render(fmt.Sprintf("+ %d more languages", remaining)) + "\n")
 		}
 	}
+}
+
+// hasMCPMetrics checks if the snapshot contains any MCP metric keys.
+func hasMCPMetrics(snap core.UsageSnapshot) bool {
+	for key := range snap.Metrics {
+		if strings.HasPrefix(key, "mcp_") {
+			return true
+		}
+	}
+	return false
+}
+
+// renderMCPSection renders MCP server and function call metrics.
+// Uses prettifyMCPServerName/prettifyMCPFunctionName from tiles.go (same package).
+func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
+	type mcpFunc struct {
+		name  string
+		calls float64
+	}
+	type mcpServer struct {
+		rawName string
+		name    string
+		calls   float64
+		funcs   []mcpFunc
+	}
+
+	// Collect server totals from metrics.
+	serverMap := make(map[string]*mcpServer)
+	for key, m := range snap.Metrics {
+		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
+			continue
+		}
+		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
+			continue
+		}
+		if strings.HasSuffix(key, "_today") {
+			continue
+		}
+
+		rest := strings.TrimPrefix(key, "mcp_")
+
+		if strings.HasSuffix(rest, "_total") {
+			rawServerName := strings.TrimSuffix(rest, "_total")
+			if rawServerName == "" {
+				continue
+			}
+			serverMap[rawServerName] = &mcpServer{
+				rawName: rawServerName,
+				name:    prettifyMCPServerName(rawServerName),
+				calls:   *m.Used,
+			}
+		}
+	}
+
+	// Second pass: collect functions for each known server.
+	for key, m := range snap.Metrics {
+		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
+			continue
+		}
+		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
+			continue
+		}
+		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_total") {
+			continue
+		}
+
+		rest := strings.TrimPrefix(key, "mcp_")
+		for rawServerName, srv := range serverMap {
+			prefix := rawServerName + "_"
+			if strings.HasPrefix(rest, prefix) {
+				funcName := strings.TrimPrefix(rest, prefix)
+				if funcName != "" {
+					srv.funcs = append(srv.funcs, mcpFunc{
+						name:  prettifyMCPFunctionName(funcName),
+						calls: *m.Used,
+					})
+				}
+				break
+			}
+		}
+	}
+
+	// Sort servers by calls desc.
+	servers := make([]*mcpServer, 0, len(serverMap))
+	for _, srv := range serverMap {
+		sort.Slice(srv.funcs, func(i, j int) bool {
+			if srv.funcs[i].calls != srv.funcs[j].calls {
+				return srv.funcs[i].calls > srv.funcs[j].calls
+			}
+			return srv.funcs[i].name < srv.funcs[j].name
+		})
+		servers = append(servers, srv)
+	}
+	sort.Slice(servers, func(i, j int) bool {
+		if servers[i].calls != servers[j].calls {
+			return servers[i].calls > servers[j].calls
+		}
+		return servers[i].name < servers[j].name
+	})
+
+	if len(servers) == 0 {
+		return
+	}
+
+	var totalCalls float64
+	for _, srv := range servers {
+		totalCalls += srv.calls
+	}
+	if totalCalls <= 0 {
+		return
+	}
+
+	// Render stacked bar.
+	barW := w - 4
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	// Build color map using prettified names (same as tile).
+	var allEntries []toolMixEntry
+	for _, srv := range servers {
+		allEntries = append(allEntries, toolMixEntry{name: srv.name, count: srv.calls})
+	}
+	toolColors := buildToolColorMap(allEntries, snap.AccountID)
+
+	sb.WriteString(fmt.Sprintf("  %s\n", renderToolMixBar(allEntries, totalCalls, barW, toolColors)))
+
+	// Render server + function rows.
+	for i, srv := range servers {
+		toolColor := colorForTool(toolColors, srv.name)
+		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
+		serverLabel := fmt.Sprintf("%s %d %s", colorDot, i+1, srv.name)
+		pct := srv.calls / totalCalls * 100
+		valueStr := fmt.Sprintf("%2.0f%% %.0f", pct, srv.calls)
+		sb.WriteString(renderDotLeaderRow(serverLabel, valueStr, w-2))
+		sb.WriteString("\n")
+
+		// Show up to 8 functions.
+		maxFuncs := 8
+		if len(srv.funcs) < maxFuncs {
+			maxFuncs = len(srv.funcs)
+		}
+		for j := 0; j < maxFuncs; j++ {
+			fn := srv.funcs[j]
+			fnLabel := "    " + fn.name
+			fnValue := fmt.Sprintf("%.0f", fn.calls)
+			sb.WriteString(renderDotLeaderRow(fnLabel, fnValue, w-2))
+			sb.WriteString("\n")
+		}
+		if len(srv.funcs) > 8 {
+			sb.WriteString(dimStyle.Render(fmt.Sprintf("    + %d more functions", len(srv.funcs)-8)))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Footer.
+	footer := fmt.Sprintf("%d servers · %.0f calls", len(servers), totalCalls)
+	sb.WriteString("  " + dimStyle.Render(footer) + "\n")
 }
 
 // hasModelCostMetrics checks if the snapshot contains model cost metric keys.
@@ -1567,6 +1744,8 @@ func sectionIcon(title string) string {
 		return "🗂"
 	case "Trends":
 		return "📈"
+	case "MCP Usage":
+		return "🔌"
 	case "Attributes":
 		return "📋"
 	case "Diagnostics":
@@ -1596,6 +1775,8 @@ func sectionColor(title string) lipgloss.Color {
 		return colorPeach
 	case "Trends":
 		return colorSapphire
+	case "MCP Usage":
+		return colorSky
 	case "Attributes":
 		return colorBlue
 	case "Diagnostics":

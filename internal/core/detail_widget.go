@@ -11,6 +11,7 @@ const (
 	DetailSectionStyleModels    DetailSectionStyle = "models"
 	DetailSectionStyleTrends    DetailSectionStyle = "trends"
 	DetailSectionStyleLanguages DetailSectionStyle = "languages"
+	DetailSectionStyleMCP       DetailSectionStyle = "mcp"
 )
 
 type DetailSection struct {

@@ -849,10 +849,10 @@ func TestParseParameterSize(t *testing.T) {
 func TestDetailWidget(t *testing.T) {
 	p := New()
 	dw := p.DetailWidget()
-	if len(dw.Sections) != 7 {
-		t.Fatalf("DetailWidget sections = %d, want 7", len(dw.Sections))
+	if len(dw.Sections) != 8 {
+		t.Fatalf("DetailWidget sections = %d, want 8", len(dw.Sections))
 	}
-	expectedSections := []string{"Usage", "Models", "Languages", "Spending", "Trends", "Tokens", "Activity"}
+	expectedSections := []string{"Usage", "Models", "Languages", "MCP Usage", "Spending", "Trends", "Tokens", "Activity"}
 	for i, s := range dw.Sections {
 		if s.Name != expectedSections[i] {
 			t.Errorf("section[%d] = %q, want %q", i, s.Name, expectedSections[i])
