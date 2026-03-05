@@ -150,9 +150,9 @@ You can define custom themes as JSON files loaded at startup from:
 Theme files use the same color token fields as built-ins. See the full grayscale example:
 [`configs/themes/grayscale.json`](configs/themes/grayscale.json)
 
-Companion presets matched to official upstream palettes:
-- OpenCode companion: `OpenCode Official` ([configs/themes/slate_opencode.json](configs/themes/slate_opencode.json))
-- Claude Code companion: `Claude Code Dark` ([configs/themes/warm_claude.json](configs/themes/warm_claude.json))
+Additional example presets:
+- Slate: [`configs/themes/slate.json`](configs/themes/slate.json)
+- Warm: [`configs/themes/warm.json`](configs/themes/warm.json)
 
 ## Daemon
 

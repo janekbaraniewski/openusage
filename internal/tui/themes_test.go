@@ -75,7 +75,24 @@ func externalThemeJSON(name, icon, accent string) string {
 }`
 }
 
-func TestBuiltinThemesIncludeCalmPresets(t *testing.T) {
+func TestDefaultThemeIsFirst(t *testing.T) {
+	savedThemes, savedIdx := snapshotThemeState()
+	defer restoreThemeState(savedThemes, savedIdx)
+
+	if err := LoadThemes(t.TempDir()); err != nil {
+		t.Fatalf("LoadThemes error: %v", err)
+	}
+
+	list := AvailableThemes()
+	if len(list) == 0 {
+		t.Fatal("no themes loaded")
+	}
+	if list[0].Name != "Deep Space" {
+		t.Fatalf("first theme = %q, want Deep Space", list[0].Name)
+	}
+}
+
+func TestBundledThemesLoaded(t *testing.T) {
 	savedThemes, savedIdx := snapshotThemeState()
 	defer restoreThemeState(savedThemes, savedIdx)
 
@@ -88,9 +105,32 @@ func TestBuiltinThemesIncludeCalmPresets(t *testing.T) {
 	for _, theme := range list {
 		found[theme.Name] = true
 	}
-	for _, expected := range []string{"Grayscale", "OpenCode Official", "Claude Code Dark"} {
+	for _, expected := range []string{"Deep Space", "Gruvbox", "Catppuccin Mocha", "Dracula", "Nord", "Grayscale"} {
 		if !found[expected] {
 			t.Fatalf("%s theme not found in available themes", expected)
+		}
+	}
+	// Should have at least the default + bundled themes
+	if len(list) < 10 {
+		t.Fatalf("expected at least 10 themes, got %d", len(list))
+	}
+}
+
+func TestNoProductNamesInThemes(t *testing.T) {
+	savedThemes, savedIdx := snapshotThemeState()
+	defer restoreThemeState(savedThemes, savedIdx)
+
+	if err := LoadThemes(t.TempDir()); err != nil {
+		t.Fatalf("LoadThemes error: %v", err)
+	}
+
+	forbidden := []string{"claude", "opencode", "cursor", "copilot", "gemini"}
+	for _, theme := range AvailableThemes() {
+		lower := strings.ToLower(theme.Name)
+		for _, word := range forbidden {
+			if strings.Contains(lower, word) {
+				t.Errorf("theme %q contains product name %q", theme.Name, word)
+			}
 		}
 	}
 }
@@ -119,7 +159,7 @@ func TestLoadThemesFromConfigDir(t *testing.T) {
 	}
 }
 
-func TestLoadThemesCanOverrideBuiltinByName(t *testing.T) {
+func TestLoadThemesCanOverrideBundledByName(t *testing.T) {
 	savedThemes, savedIdx := snapshotThemeState()
 	defer restoreThemeState(savedThemes, savedIdx)
 
@@ -172,6 +212,6 @@ func TestLoadThemesReportsInvalidThemeFiles(t *testing.T) {
 	}
 
 	if !SetThemeByName("Gruvbox") {
-		t.Fatal("expected built-in themes to remain available")
+		t.Fatal("expected bundled themes to remain available")
 	}
 }
