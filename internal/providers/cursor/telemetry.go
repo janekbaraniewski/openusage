@@ -34,11 +34,12 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	seenTools := make(map[string]bool)
 	var out []shared.TelemetryEvent
 
-	// Collect from the tracking DB (ai_code_hashes table).
+	// Collect from the tracking DB (ai_code_hashes + scored_commits).
 	if trackingDBPath != "" {
-		events, err := collectTrackingDBEvents(ctx, trackingDBPath)
+		events, commitEvents, err := collectTrackingDBEvents(ctx, trackingDBPath)
 		if err == nil {
 			appendCursorDedupEvents(&out, events, seenMessages, seenTools)
+			appendCursorDedupEvents(&out, commitEvents, seenMessages, seenTools)
 		}
 	}
 
@@ -92,24 +93,27 @@ func defaultStateDBPath() string {
 	}
 }
 
-// collectTrackingDBEvents reads the ai_code_hashes table from the Cursor
-// tracking database and produces message usage events.
-func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.TelemetryEvent, error) {
+// collectTrackingDBEvents reads the ai_code_hashes and scored_commits tables
+// from the Cursor tracking database. Returns (usage events, commit events, error).
+func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.TelemetryEvent, []shared.TelemetryEvent, error) {
 	if strings.TrimSpace(dbPath) == "" {
-		return nil, nil
-	}
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer db.Close()
 
+	// Collect scored commits from the same DB connection.
+	var commitEvents []shared.TelemetryEvent
+	if cursorTableExists(ctx, db, "scored_commits") {
+		commitEvents, _ = queryScoredCommits(ctx, db, dbPath)
+	}
+
 	if !cursorTableExists(ctx, db, "ai_code_hashes") {
-		return nil, nil
+		return nil, commitEvents, nil
 	}
 
 	timeExpr := chooseTrackingTimeExpr(ctx, db)
@@ -118,29 +122,35 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 		SELECT COALESCE(source, ''),
 		       COALESCE(model, ''),
 		       COALESCE(fileExtension, ''),
+		       COALESCE(fileName, ''),
+		       COALESCE(requestId, ''),
+		       COALESCE(conversationId, ''),
 		       COALESCE(%s, 0),
 		       rowid
 		FROM ai_code_hashes
 		ORDER BY %s ASC`, timeExpr, timeExpr))
 	if err != nil {
-		return nil, fmt.Errorf("cursor: querying ai_code_hashes: %w", err)
+		return nil, commitEvents, fmt.Errorf("cursor: querying ai_code_hashes: %w", err)
 	}
 	defer rows.Close()
 
 	var out []shared.TelemetryEvent
 	for rows.Next() {
 		if ctx.Err() != nil {
-			return out, ctx.Err()
+			return out, commitEvents, ctx.Err()
 		}
 
 		var (
-			source    string
-			model     string
-			fileExt   string
-			timestamp int64
-			rowID     int64
+			source         string
+			model          string
+			fileExt        string
+			fileName       string
+			requestID      string
+			conversationID string
+			timestamp      int64
+			rowID          int64
 		)
-		if err := rows.Scan(&source, &model, &fileExt, &timestamp, &rowID); err != nil {
+		if err := rows.Scan(&source, &model, &fileExt, &fileName, &requestID, &conversationID, &timestamp, &rowID); err != nil {
 			continue
 		}
 
@@ -151,22 +161,33 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 
 		messageID := fmt.Sprintf("cursor-tracking:%d", rowID)
 
+		clientBucket := cursorSourceToClientBucket(source)
+
+		// Use conversationId as session ID to link tracking events to composer sessions.
+		sessionID := strings.TrimSpace(conversationID)
+
 		payload := map[string]any{
 			"source": map[string]any{
 				"db_path": dbPath,
 				"table":   "ai_code_hashes",
 				"row_id":  rowID,
 			},
+			"client":        clientBucket,
+			"cursor_source": source,
 		}
 		if fileExt != "" {
 			payload["file_extension"] = fileExt
-			payload["file"] = "example" + normalizeFileExtension(fileExt)
 		}
-		if source != "" {
-			payload["cursor_source"] = source
+		if fileName != "" {
+			payload["file"] = fileName
+		} else if fileExt != "" {
+			payload["file"] = "example" + normalizeFileExtension(fileExt)
 		}
 		if upstream := inferProviderFromModel(model); upstream != "cursor" {
 			payload["upstream_provider"] = upstream
+		}
+		if requestID != "" {
+			payload["request_id"] = requestID
 		}
 
 		out = append(out, shared.TelemetryEvent{
@@ -174,7 +195,7 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 			Channel:       shared.TelemetryChannelSQLite,
 			OccurredAt:    occurredAt,
 			AccountID:     "",
-			SessionID:     "",
+			SessionID:     sessionID,
 			MessageID:     messageID,
 			ProviderID:    "cursor",
 			AgentName:     cursorAgentName(source),
@@ -186,7 +207,7 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 		})
 	}
 
-	return out, rows.Err()
+	return out, commitEvents, rows.Err()
 }
 
 // collectStateDBEvents reads composerData and bubbleId entries from the
@@ -223,20 +244,43 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 		out = append(out, toolEvents...)
 	}
 
+	// Collect token counts from bubble entries and attach to composer sessions.
+	tokenEvents, err := collectBubbleTokenEvents(ctx, db, dbPath)
+	if err == nil {
+		out = append(out, tokenEvents...)
+	}
+
+	// Collect daily stats (tab/composer suggested/accepted lines).
+	if cursorTableExists(ctx, db, "ItemTable") {
+		dailyEvents, err := collectDailyStatsEvents(ctx, db, dbPath)
+		if err == nil {
+			out = append(out, dailyEvents...)
+		}
+	}
+
 	return out, nil
 }
 
 // collectComposerEvents extracts usage data from composerData entries.
-// Each composer session has a usageData map with per-model cost and request counts.
+// Each composer session has a usageData map with per-model cost and request counts,
+// plus session metadata like mode, model config, and file changes.
 func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT key,
 		       json_extract(value, '$.usageData'),
 		       json_extract(value, '$.createdAt'),
 		       json_extract(value, '$.unifiedMode'),
+		       json_extract(value, '$.forceMode'),
 		       json_extract(value, '$.isAgentic'),
 		       json_extract(value, '$.totalLinesAdded'),
-		       json_extract(value, '$.totalLinesRemoved')
+		       json_extract(value, '$.totalLinesRemoved'),
+		       json_extract(value, '$.modelConfig.modelName'),
+		       json_extract(value, '$.newlyCreatedFiles'),
+		       json_extract(value, '$.addedFiles'),
+		       json_extract(value, '$.removedFiles'),
+		       json_extract(value, '$.contextTokensUsed'),
+		       json_extract(value, '$.contextTokenLimit'),
+		       json_extract(value, '$.filesChangedCount')
 		FROM cursorDiskKV
 		WHERE key LIKE 'composerData:%'
 		  AND json_extract(value, '$.usageData') IS NOT NULL
@@ -253,15 +297,25 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 		}
 
 		var (
-			key          string
-			usageJSON    sql.NullString
-			createdAt    sql.NullInt64
-			mode         sql.NullString
-			isAgentic    sql.NullBool
-			linesAdded   sql.NullInt64
-			linesRemoved sql.NullInt64
+			key             string
+			usageJSON       sql.NullString
+			createdAt       sql.NullInt64
+			mode            sql.NullString
+			forceMode       sql.NullString
+			isAgentic       sql.NullBool
+			linesAdded      sql.NullInt64
+			linesRemoved    sql.NullInt64
+			modelConfigName sql.NullString
+			newlyCreated    sql.NullString
+			addedFiles      sql.NullString
+			removedFiles    sql.NullString
+			ctxTokensUsed   sql.NullInt64
+			ctxTokenLimit   sql.NullInt64
+			filesChangedCnt sql.NullInt64
 		)
-		if err := rows.Scan(&key, &usageJSON, &createdAt, &mode, &isAgentic, &linesAdded, &linesRemoved); err != nil {
+		if err := rows.Scan(&key, &usageJSON, &createdAt, &mode, &forceMode, &isAgentic,
+			&linesAdded, &linesRemoved, &modelConfigName, &newlyCreated, &addedFiles, &removedFiles,
+			&ctxTokensUsed, &ctxTokenLimit, &filesChangedCnt); err != nil {
 			continue
 		}
 		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
@@ -294,6 +348,7 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 					"table":   "cursorDiskKV",
 					"key":     key,
 				},
+				"client":        "IDE",
 				"cursor_source": "composer",
 			}
 			if upstream := inferProviderFromModel(model); upstream != "cursor" {
@@ -301,6 +356,9 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 			}
 			if mode.Valid && mode.String != "" {
 				payload["mode"] = mode.String
+			}
+			if forceMode.Valid && forceMode.String != "" {
+				payload["force_mode"] = forceMode.String
 			}
 			if isAgentic.Valid {
 				payload["is_agentic"] = isAgentic.Bool
@@ -310,6 +368,30 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 			}
 			if linesRemoved.Valid && linesRemoved.Int64 > 0 {
 				payload["lines_removed"] = linesRemoved.Int64
+			}
+			if modelConfigName.Valid && modelConfigName.String != "" {
+				payload["model_config"] = modelConfigName.String
+			}
+			newFileCount := countJSONArrayItems(newlyCreated)
+			addedCount := countNullableInt(addedFiles)
+			removedCount := countNullableInt(removedFiles)
+			if newFileCount > 0 {
+				payload["newly_created_files"] = newFileCount
+			}
+			if addedCount > 0 {
+				payload["added_files"] = addedCount
+			}
+			if removedCount > 0 {
+				payload["removed_files"] = removedCount
+			}
+			if ctxTokensUsed.Valid && ctxTokensUsed.Int64 > 0 {
+				payload["context_tokens_used"] = ctxTokensUsed.Int64
+			}
+			if ctxTokenLimit.Valid && ctxTokenLimit.Int64 > 0 {
+				payload["context_token_limit"] = ctxTokenLimit.Int64
+			}
+			if filesChangedCnt.Valid && filesChangedCnt.Int64 > 0 {
+				payload["files_changed"] = filesChangedCnt.Int64
 			}
 
 			out = append(out, shared.TelemetryEvent{
@@ -417,6 +499,7 @@ func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared
 					"table":   "cursorDiskKV",
 					"key":     key,
 				},
+				"client":          "IDE",
 				"raw_tool_name":   toolNameRaw.String,
 				"raw_tool_status": toolStatusRaw.String,
 			},
@@ -533,6 +616,15 @@ func inferProviderFromModel(model string) string {
 	}
 }
 
+// cursorSourceToClientBucket maps a Cursor source column value to a client
+// bucket name suitable for the clientDimensionExpr "$.client" field.
+func cursorSourceToClientBucket(source string) string {
+	if strings.ToLower(strings.TrimSpace(source)) == "cli" {
+		return "CLI"
+	}
+	return "IDE"
+}
+
 // cursorAgentName maps a Cursor source identifier to an agent name for
 // telemetry classification.
 func cursorAgentName(source string) string {
@@ -576,4 +668,302 @@ func normalizeFileExtension(ext string) string {
 		return "." + ext
 	}
 	return ext
+}
+
+// collectBubbleTokenEvents extracts token counts from bubbleId entries in the
+// state DB. Each AI response bubble (type=2) may have a tokenCount with
+// inputTokens/outputTokens. These are emitted as message_usage events linked
+// to their parent composer session via conversationId.
+func collectBubbleTokenEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+	sessionTimestamps := buildSessionTimestampMap(ctx, db)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT key,
+		       json_extract(value, '$.tokenCount.inputTokens'),
+		       json_extract(value, '$.tokenCount.outputTokens'),
+		       json_extract(value, '$.conversationId'),
+		       json_extract(value, '$.model')
+		FROM cursorDiskKV
+		WHERE key LIKE 'bubbleId:%'
+		  AND json_extract(value, '$.type') = 2
+		  AND json_extract(value, '$.tokenCount') IS NOT NULL
+		  AND json_extract(value, '$.tokenCount.inputTokens') > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("cursor: querying bubbleId tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var out []shared.TelemetryEvent
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+
+		var (
+			key            string
+			inputTokens    sql.NullInt64
+			outputTokens   sql.NullInt64
+			conversationID sql.NullString
+			model          sql.NullString
+		)
+		if err := rows.Scan(&key, &inputTokens, &outputTokens, &conversationID, &model); err != nil {
+			continue
+		}
+		if !inputTokens.Valid || inputTokens.Int64 <= 0 {
+			continue
+		}
+
+		bubbleID := strings.TrimPrefix(key, "bubbleId:")
+		messageID := fmt.Sprintf("cursor-bubble-tokens:%s", bubbleID)
+
+		sessionID := ""
+		if conversationID.Valid && conversationID.String != "" {
+			sessionID = conversationID.String
+		}
+
+		var occurredAt time.Time
+		if sessionID != "" {
+			if ts, ok := sessionTimestamps[sessionID]; ok {
+				occurredAt = ts
+			}
+		}
+
+		modelRaw := ""
+		if model.Valid {
+			modelRaw = model.String
+		}
+
+		var inTok, outTok *int64
+		if inputTokens.Valid && inputTokens.Int64 > 0 {
+			inTok = shared.Int64Ptr(inputTokens.Int64)
+		}
+		if outputTokens.Valid && outputTokens.Int64 > 0 {
+			outTok = shared.Int64Ptr(outputTokens.Int64)
+		}
+
+		out = append(out, shared.TelemetryEvent{
+			SchemaVersion: telemetryCursorSQLiteSchema,
+			Channel:       shared.TelemetryChannelSQLite,
+			OccurredAt:    occurredAt,
+			SessionID:     sessionID,
+			MessageID:     messageID,
+			ProviderID:    "cursor",
+			AgentName:     "cursor",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      modelRaw,
+			InputTokens:   inTok,
+			OutputTokens:  outTok,
+			Requests:      shared.Int64Ptr(1),
+			Status:        shared.TelemetryStatusOK,
+			Payload: map[string]any{
+				"source": map[string]any{
+					"db_path": dbPath,
+					"table":   "cursorDiskKV",
+					"key":     key,
+				},
+				"client":        "IDE",
+				"cursor_source": "composer",
+			},
+		})
+	}
+
+	return out, rows.Err()
+}
+
+// collectDailyStatsEvents extracts daily code tracking stats from ItemTable.
+// Keys like "aiCodeTracking.dailyStats.v1.5.2025-11-23" contain tab/composer
+// suggested/accepted line counts per day.
+func collectDailyStatsEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT key, value FROM ItemTable
+		WHERE key LIKE 'aiCodeTracking.dailyStats.%'`)
+	if err != nil {
+		return nil, fmt.Errorf("cursor: querying dailyStats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []shared.TelemetryEvent
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+
+		var key, rawJSON string
+		if err := rows.Scan(&key, &rawJSON); err != nil {
+			continue
+		}
+
+		var stats cursorDailyStats
+		if json.Unmarshal([]byte(rawJSON), &stats) != nil {
+			continue
+		}
+		if stats.Date == "" {
+			continue
+		}
+
+		dayTime, err := time.Parse("2006-01-02", stats.Date)
+		if err != nil {
+			continue
+		}
+
+		messageID := fmt.Sprintf("cursor-daily-stats:%s", stats.Date)
+
+		out = append(out, shared.TelemetryEvent{
+			SchemaVersion: telemetryCursorSQLiteSchema,
+			Channel:       shared.TelemetryChannelSQLite,
+			OccurredAt:    dayTime,
+			MessageID:     messageID,
+			ProviderID:    "cursor",
+			AgentName:     "cursor",
+			EventType:     shared.TelemetryEventTypeRawEnvelope,
+			Requests:      shared.Int64Ptr(1),
+			Status:        shared.TelemetryStatusOK,
+			Payload: map[string]any{
+				"source": map[string]any{
+					"db_path": dbPath,
+					"table":   "ItemTable",
+					"key":     key,
+				},
+				"daily_stats": map[string]any{
+					"date":                     stats.Date,
+					"tab_suggested_lines":      stats.TabSuggestedLines,
+					"tab_accepted_lines":       stats.TabAcceptedLines,
+					"composer_suggested_lines": stats.ComposerSuggestedLines,
+					"composer_accepted_lines":  stats.ComposerAcceptedLines,
+				},
+			},
+		})
+	}
+
+	return out, rows.Err()
+}
+
+// queryScoredCommits reads scored_commits from an already-open tracking DB
+// and produces telemetry events with AI contribution percentages per commit.
+func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT commitHash, branchName, scoredAt,
+		       COALESCE(linesAdded, 0), COALESCE(linesDeleted, 0),
+		       COALESCE(tabLinesAdded, 0), COALESCE(tabLinesDeleted, 0),
+		       COALESCE(composerLinesAdded, 0), COALESCE(composerLinesDeleted, 0),
+		       COALESCE(humanLinesAdded, 0), COALESCE(humanLinesDeleted, 0),
+		       COALESCE(commitMessage, ''),
+		       COALESCE(v1AiPercentage, ''), COALESCE(v2AiPercentage, '')
+		FROM scored_commits
+		ORDER BY scoredAt ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("cursor: querying scored_commits: %w", err)
+	}
+	defer rows.Close()
+
+	var out []shared.TelemetryEvent
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+
+		var (
+			commitHash       string
+			branchName       string
+			scoredAt         int64
+			linesAdded       int64
+			linesDeleted     int64
+			tabAdded         int64
+			tabDeleted       int64
+			composerAdded    int64
+			composerDeleted  int64
+			humanAdded       int64
+			humanDeleted     int64
+			commitMessage    string
+			v1AiPct, v2AiPct string
+		)
+		if err := rows.Scan(&commitHash, &branchName, &scoredAt,
+			&linesAdded, &linesDeleted, &tabAdded, &tabDeleted,
+			&composerAdded, &composerDeleted, &humanAdded, &humanDeleted,
+			&commitMessage, &v1AiPct, &v2AiPct); err != nil {
+			continue
+		}
+
+		occurredAt := time.Now().UTC()
+		if scoredAt > 0 {
+			occurredAt = shared.UnixAuto(scoredAt)
+		}
+
+		messageID := fmt.Sprintf("cursor-scored-commit:%s", commitHash)
+
+		out = append(out, shared.TelemetryEvent{
+			SchemaVersion: telemetryCursorSQLiteSchema,
+			Channel:       shared.TelemetryChannelSQLite,
+			OccurredAt:    occurredAt,
+			MessageID:     messageID,
+			ProviderID:    "cursor",
+			AgentName:     "cursor",
+			EventType:     shared.TelemetryEventTypeRawEnvelope,
+			Requests:      shared.Int64Ptr(1),
+			Status:        shared.TelemetryStatusOK,
+			Payload: map[string]any{
+				"source": map[string]any{
+					"db_path": dbPath,
+					"table":   "scored_commits",
+				},
+				"scored_commit": map[string]any{
+					"commit_hash":            commitHash,
+					"branch":                 branchName,
+					"message":                truncateString(commitMessage, 200),
+					"lines_added":            linesAdded,
+					"lines_deleted":          linesDeleted,
+					"tab_lines_added":        tabAdded,
+					"tab_lines_deleted":      tabDeleted,
+					"composer_lines_added":   composerAdded,
+					"composer_lines_deleted": composerDeleted,
+					"human_lines_added":      humanAdded,
+					"human_lines_deleted":    humanDeleted,
+					"v1_ai_percentage":       v1AiPct,
+					"v2_ai_percentage":       v2AiPct,
+				},
+			},
+		})
+	}
+
+	return out, rows.Err()
+}
+
+type cursorDailyStats struct {
+	Date                   string `json:"date"`
+	TabSuggestedLines      int    `json:"tabSuggestedLines"`
+	TabAcceptedLines       int    `json:"tabAcceptedLines"`
+	ComposerSuggestedLines int    `json:"composerSuggestedLines"`
+	ComposerAcceptedLines  int    `json:"composerAcceptedLines"`
+}
+
+// countJSONArrayItems parses a nullable string as a JSON array and returns its length.
+func countJSONArrayItems(s sql.NullString) int {
+	if !s.Valid || s.String == "" || s.String == "[]" {
+		return 0
+	}
+	var arr []any
+	if json.Unmarshal([]byte(s.String), &arr) != nil {
+		return 0
+	}
+	return len(arr)
+}
+
+// countNullableInt parses a nullable string as an integer count.
+// Handles both integer values and JSON array strings.
+func countNullableInt(s sql.NullString) int {
+	if !s.Valid || s.String == "" {
+		return 0
+	}
+	var n int
+	if _, err := fmt.Sscanf(s.String, "%d", &n); err == nil {
+		return n
+	}
+	return countJSONArrayItems(s)
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
