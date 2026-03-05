@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -124,7 +125,8 @@ type telemetryUsageAgg struct {
 type usageFilter struct {
 	ProviderIDs     []string
 	AccountID       string
-	TimeWindowHours int // 0 = no filter
+	TimeWindowHours int    // 0 = no filter
+	materializedTbl string // if set, queries read from this temp table instead of rebuilding the CTE
 }
 
 func clientDimensionExpr() string {
@@ -161,7 +163,10 @@ func applyCanonicalUsageViewWithDB(
 
 	out := make(map[string]core.UsageSnapshot, len(snaps))
 	cache := make(map[string]*telemetryUsageAgg)
+
+	activeStart := time.Now()
 	telemetryActiveProviders := queryTelemetryActiveProviders(ctx, db)
+	core.Tracef("[usage_view_perf] queryTelemetryActiveProviders: %dms", time.Since(activeStart).Milliseconds())
 
 	for accountID, snap := range snaps {
 		s := snap
@@ -605,6 +610,7 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 }
 
 func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter) (*telemetryUsageAgg, error) {
+	filterStart := time.Now()
 	agg := &telemetryUsageAgg{
 		ModelDaily:   make(map[string][]core.TimePoint),
 		SourceDaily:  make(map[string][]core.TimePoint),
@@ -612,65 +618,121 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 		ClientTokens: make(map[string][]core.TimePoint),
 	}
 
+	// Materialize the deduped CTE into a temp table so subsequent queries
+	// read from a flat table instead of rebuilding the 3-level CTE each time.
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	countQuery := usageCTE + `
+	tempTable := "_deduped_tmp"
+
+	matStart := time.Now()
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
+	materializeSQL := fmt.Sprintf("CREATE TEMP TABLE %s AS %s SELECT * FROM deduped_usage", tempTable, usageCTE)
+	if _, err := db.ExecContext(ctx, materializeSQL, whereArgs...); err != nil {
+		return nil, fmt.Errorf("materialize deduped usage: %w", err)
+	}
+	core.Tracef("[usage_view_perf] materialize temp table: %dms (providers=%v, windowHours=%d)",
+		time.Since(matStart).Milliseconds(), filter.ProviderIDs, filter.TimeWindowHours)
+	defer func() {
+		_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
+	}()
+
+	// Create indexes on the temp table for the aggregation queries.
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_type ON %s(event_type)", tempTable))
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_occurred ON %s(occurred_at)", tempTable))
+
+	// Count from the materialized table.
+	countStart := time.Now()
+	countQuery := fmt.Sprintf(`
 		SELECT COALESCE(MAX(occurred_at), ''), COUNT(*)
-		FROM deduped_usage
-		WHERE 1=1
-		  AND event_type IN ('message_usage', 'tool_usage')
-	`
-	if err := db.QueryRowContext(ctx, countQuery, whereArgs...).Scan(&agg.LastOccurred, &agg.EventCount); err != nil {
+		FROM %s
+		WHERE event_type IN ('message_usage', 'tool_usage')
+	`, tempTable)
+	if err := db.QueryRowContext(ctx, countQuery).Scan(&agg.LastOccurred, &agg.EventCount); err != nil {
 		return nil, fmt.Errorf("canonical usage count query: %w", err)
 	}
+	core.Tracef("[usage_view_perf] countQuery: %dms (events=%d, providers=%v, windowHours=%d)",
+		time.Since(countStart).Milliseconds(), agg.EventCount, filter.ProviderIDs, filter.TimeWindowHours)
 	if agg.EventCount == 0 {
 		return agg, nil
 	}
 
-	models, err := queryModelAgg(ctx, db, filter)
+	// All subsequent queries use the materialized temp table.
+	matFilter := filter
+	matFilter.materializedTbl = tempTable
+
+	trace := func(label string) func() {
+		start := time.Now()
+		return func() { core.Tracef("[usage_view_perf]   %s: %dms", label, time.Since(start).Milliseconds()) }
+	}
+
+	done := trace("queryModelAgg")
+	models, err := queryModelAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	sources, err := querySourceAgg(ctx, db, filter)
+	done = trace("querySourceAgg")
+	sources, err := querySourceAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	tools, err := queryToolAgg(ctx, db, filter)
+	done = trace("queryToolAgg")
+	tools, err := queryToolAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	providers, err := queryProviderAgg(ctx, db, filter)
+	done = trace("queryProviderAgg")
+	providers, err := queryProviderAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	languages, err := queryLanguageAgg(ctx, db, filter)
+	done = trace("queryLanguageAgg")
+	languages, err := queryLanguageAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	activity, err := queryActivityAgg(ctx, db, filter)
+	done = trace("queryActivityAgg")
+	activity, err := queryActivityAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	codeStats, err := queryCodeStatsAgg(ctx, db, filter)
+	done = trace("queryCodeStatsAgg")
+	codeStats, err := queryCodeStatsAgg(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	daily, err := queryDailyTotals(ctx, db, filter)
+	done = trace("queryDailyTotals")
+	daily, err := queryDailyTotals(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
-	modelDaily, err := queryDailyByDimension(ctx, db, filter, "model")
+	done = trace("queryDailyByDimension(model)")
+	modelDaily, err := queryDailyByDimension(ctx, db, matFilter, "model")
+	done()
 	if err != nil {
 		return nil, err
 	}
-	sourceDaily, err := queryDailyByDimension(ctx, db, filter, "source")
+	done = trace("queryDailyByDimension(source)")
+	sourceDaily, err := queryDailyByDimension(ctx, db, matFilter, "source")
+	done()
 	if err != nil {
 		return nil, err
 	}
-	clientDaily, err := queryDailyByDimension(ctx, db, filter, "client")
+	done = trace("queryDailyByDimension(client)")
+	clientDaily, err := queryDailyByDimension(ctx, db, matFilter, "client")
+	done()
 	if err != nil {
 		return nil, err
 	}
-	clientTokens, err := queryDailyClientTokens(ctx, db, filter)
+	done = trace("queryDailyClientTokens")
+	clientTokens, err := queryDailyClientTokens(ctx, db, matFilter)
+	done()
 	if err != nil {
 		return nil, err
 	}
@@ -688,6 +750,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg.SourceDaily = sourceDaily
 	agg.ClientDaily = clientDaily
 	agg.ClientTokens = clientTokens
+	core.Tracef("[usage_view_perf] loadUsageViewForFilter TOTAL: %dms (providers=%v)", time.Since(filterStart).Milliseconds(), filter.ProviderIDs)
 	return agg, nil
 }
 
@@ -1292,6 +1355,10 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 }
 
 func dedupedUsageCTE(filter usageFilter) (string, []any) {
+	// If a materialized temp table exists, just alias it — no CTE rebuild needed.
+	if filter.materializedTbl != "" {
+		return fmt.Sprintf(`WITH deduped_usage AS (SELECT * FROM %s) `, filter.materializedTbl), nil
+	}
 	where, args := usageWhereClause("e", filter)
 	cte := fmt.Sprintf(`
 		WITH scoped_usage AS (
