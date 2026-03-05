@@ -9,6 +9,7 @@ const (
 	MetricGroupSpending MetricGroup = "Spending"
 	MetricGroupTokens   MetricGroup = "Tokens"
 	MetricGroupActivity MetricGroup = "Activity"
+	MetricGroupMCP      MetricGroup = "MCP Usage"
 )
 
 func InferMetricGroup(key string, m Metric) MetricGroup {
@@ -70,6 +71,10 @@ func InferMetricGroup(key string, m Metric) MetricGroup {
 		return MetricGroupTokens
 	case strings.Contains(lk, "token"):
 		return MetricGroupTokens
+	}
+
+	if strings.HasPrefix(key, "mcp_") {
+		return MetricGroupMCP
 	}
 
 	return MetricGroupActivity

@@ -95,6 +95,7 @@ const (
 	DashboardSectionClientBurn        DashboardStandardSection = "client_burn"
 	DashboardSectionToolUsage         DashboardStandardSection = "tool_usage"
 	DashboardSectionActualToolUsage   DashboardStandardSection = "actual_tool_usage"
+	DashboardSectionMCPUsage          DashboardStandardSection = "mcp_usage"
 	DashboardSectionLanguageBurn      DashboardStandardSection = "language_burn"
 	DashboardSectionCodeStats         DashboardStandardSection = "code_stats"
 	DashboardSectionDailyUsage        DashboardStandardSection = "daily_usage"
@@ -111,6 +112,7 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
 		DashboardSectionActualToolUsage,
+		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
@@ -128,6 +130,7 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
 		DashboardSectionActualToolUsage,
+		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
@@ -162,6 +165,8 @@ type DashboardWidget struct {
 	CodeStatsMetrics CodeStatsConfig
 	// Opt-in actual tool usage panel (tool calls from agent bubbles).
 	ShowActualToolUsage bool
+	// Opt-in MCP server usage panel (MCP tool calls per server).
+	ShowMCPUsage bool
 
 	// API key provider metadata. APIKeyEnv marks a provider as configurable in API Keys tab.
 	APIKeyEnv        string

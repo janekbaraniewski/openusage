@@ -584,6 +584,16 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, actualToolKeys)
 
+	var mcpUsageLines []string
+	var mcpUsageKeys map[string]bool
+	if widget.ShowMCPUsage {
+		mcpUsageLines, mcpUsageKeys = buildMCPUsageLines(snap, innerW)
+		if len(mcpUsageLines) > 0 {
+			sectionsByID[core.DashboardSectionMCPUsage] = section{withSectionPadding(mcpUsageLines)}
+		}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, mcpUsageKeys)
+
 	var langBurnLines []string
 	var langBurnKeys map[string]bool
 	if widget.ShowLanguageComposition {
@@ -4533,6 +4543,11 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 		if name == "" {
 			continue
 		}
+		// Skip MCP tools — they have their own dedicated section.
+		if strings.HasPrefix(name, "mcp_") {
+			usedKeys[key] = true
+			continue
+		}
 		byTool[name] += *met.Used
 		usedKeys[key] = true
 	}
@@ -4616,6 +4631,218 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 
 	if hiddenCount > 0 {
 		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more tools (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+// prettifyMCPServerName cleans up raw MCP server identifiers for display.
+// Strips common prefixes (claude_ai_, plugin_), suffixes (_mcp), deduplicates,
+// and title-cases the result.
+func prettifyMCPServerName(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return "unknown"
+	}
+
+	// Strip known prefixes from claude.ai marketplace and plugin system.
+	s = strings.TrimPrefix(s, "claude_ai_")
+	s = strings.TrimPrefix(s, "plugin_")
+
+	// Strip trailing _mcp suffix (redundant — everything here is MCP).
+	s = strings.TrimSuffix(s, "_mcp")
+
+	// Deduplicate: "slack_slack" → "slack".
+	parts := strings.Split(s, "_")
+	if len(parts) >= 2 && parts[0] == parts[len(parts)-1] {
+		parts = parts[:len(parts)-1]
+	}
+	s = strings.Join(parts, "_")
+
+	if s == "" {
+		return raw
+	}
+
+	// Title case with separators preserved.
+	return prettifyMCPName(s)
+}
+
+// prettifyMCPFunctionName cleans up raw MCP function names for display.
+func prettifyMCPFunctionName(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return raw
+	}
+	return prettifyMCPName(s)
+}
+
+// prettifyMCPName converts snake_case/kebab-case to Title Case.
+func prettifyMCPName(s string) string {
+	// Replace underscores and hyphens with spaces, then title-case each word.
+	s = strings.NewReplacer("_", " ", "-", " ").Replace(s)
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[string]bool) {
+	usedKeys := make(map[string]bool)
+
+	type funcEntry struct {
+		name  string
+		calls float64
+	}
+	type serverEntry struct {
+		rawName string
+		name    string
+		calls   float64
+		funcs   []funcEntry
+	}
+
+	// First pass: collect server totals.
+	serverMap := make(map[string]*serverEntry)
+	for key, m := range snap.Metrics {
+		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
+			continue
+		}
+		usedKeys[key] = true
+
+		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
+			continue
+		}
+		if strings.HasSuffix(key, "_today") {
+			continue
+		}
+
+		rest := strings.TrimPrefix(key, "mcp_")
+		if !strings.HasSuffix(rest, "_total") {
+			continue
+		}
+		rawServerName := strings.TrimSuffix(rest, "_total")
+		if rawServerName == "" {
+			continue
+		}
+		serverMap[rawServerName] = &serverEntry{
+			rawName: rawServerName,
+			name:    prettifyMCPServerName(rawServerName),
+			calls:   *m.Used,
+		}
+	}
+
+	// Second pass: collect functions for each known server.
+	for key, m := range snap.Metrics {
+		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
+			continue
+		}
+		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
+			continue
+		}
+		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_total") {
+			continue
+		}
+		rest := strings.TrimPrefix(key, "mcp_")
+		for rawServerName, srv := range serverMap {
+			prefix := rawServerName + "_"
+			if strings.HasPrefix(rest, prefix) {
+				funcName := strings.TrimPrefix(rest, prefix)
+				if funcName != "" {
+					srv.funcs = append(srv.funcs, funcEntry{
+						name:  prettifyMCPFunctionName(funcName),
+						calls: *m.Used,
+					})
+				}
+				break
+			}
+		}
+	}
+
+	// Sort servers and their functions.
+	var servers []*serverEntry
+	var totalCalls float64
+	for _, srv := range serverMap {
+		sort.Slice(srv.funcs, func(i, j int) bool {
+			if srv.funcs[i].calls != srv.funcs[j].calls {
+				return srv.funcs[i].calls > srv.funcs[j].calls
+			}
+			return srv.funcs[i].name < srv.funcs[j].name
+		})
+		servers = append(servers, srv)
+		totalCalls += srv.calls
+	}
+	sort.Slice(servers, func(i, j int) bool {
+		if servers[i].calls != servers[j].calls {
+			return servers[i].calls > servers[j].calls
+		}
+		return servers[i].name < servers[j].name
+	})
+
+	if len(servers) == 0 || totalCalls <= 0 {
+		return nil, usedKeys
+	}
+
+	// Header.
+	headerSuffix := shortCompact(totalCalls) + " calls · " + fmt.Sprintf("%d servers", len(servers))
+	heading := lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("MCP Usage") +
+		"  " + dimStyle.Render(headerSuffix)
+
+	// Build entries for the bar using prettified names.
+	var allEntries []toolMixEntry
+	for _, srv := range servers {
+		allEntries = append(allEntries, toolMixEntry{name: srv.name, count: srv.calls})
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	toolColors := buildToolColorMap(allEntries, snap.AccountID)
+
+	lines := []string{
+		heading,
+		"  " + renderToolMixBar(allEntries, totalCalls, barW, toolColors),
+	}
+
+	// Show up to 6 servers with nested function breakdown.
+	displayLimit := 6
+	visible := servers
+	if len(visible) > displayLimit {
+		visible = visible[:displayLimit]
+	}
+
+	for idx, srv := range visible {
+		pct := srv.calls / totalCalls * 100
+		toolColor := colorForTool(toolColors, srv.name)
+		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, srv.name)
+		valueStr := fmt.Sprintf("%2.0f%% %s", pct, shortCompact(srv.calls))
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+
+		// Show top 3 functions per server, indented.
+		maxFuncs := 3
+		if len(srv.funcs) < maxFuncs {
+			maxFuncs = len(srv.funcs)
+		}
+		for j := 0; j < maxFuncs; j++ {
+			fn := srv.funcs[j]
+			fnLabel := "    " + fn.name
+			fnValue := fmt.Sprintf("%.0f", fn.calls)
+			lines = append(lines, renderDotLeaderRow(fnLabel, fnValue, innerW))
+		}
+		if len(srv.funcs) > 3 {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("    + %d more", len(srv.funcs)-3)))
+		}
+	}
+
+	if len(servers) > displayLimit {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more servers", len(servers)-displayLimit)))
 	}
 
 	return lines, usedKeys

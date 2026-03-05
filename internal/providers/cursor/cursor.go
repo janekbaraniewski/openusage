@@ -2225,31 +2225,82 @@ func (p *Provider) readToolUsage(ctx context.Context, db *sql.DB, snap *core.Usa
 }
 
 // normalizeToolName cleans up raw tool names from Cursor bubble data.
-// MCP tools have long prefixed names like "mcp-kubernetes-user-kubernetes-pods_list"
-// which we normalize to shorter display names.
+// MCP tools come in formats like:
+//   - "mcp-kubernetes-user-kubernetes-pods_list" (Cursor's internal format)
+//   - Hyphen-prefixed with "user-" for user-installed MCP servers
+//
+// We normalize MCP tools to the canonical "mcp__server__function" format
+// so the telemetry pipeline handles all providers uniformly.
 func normalizeToolName(raw string) string {
 	name := strings.TrimSpace(raw)
 	if name == "" {
 		return "unknown"
 	}
 
-	// Normalize MCP tool names: "mcp-server-user-server-tool" → "tool (mcp)"
+	// Detect MCP tools by prefix.
 	if strings.HasPrefix(name, "mcp-") || strings.HasPrefix(name, "mcp_") {
-		parts := strings.Split(name, "-")
-		if len(parts) >= 4 {
-			toolPart := strings.Join(parts[3:], "-")
-			return toolPart + " (mcp)"
-		}
-		parts = strings.Split(name, "_")
-		if len(parts) >= 3 {
-			toolPart := strings.Join(parts[2:], "_")
-			return toolPart + " (mcp)"
-		}
+		return normalizeCursorMCPName(name)
 	}
 
 	// Strip version suffixes: "read_file_v2" → "read_file"
 	name = strings.TrimSuffix(name, "_v2")
 	name = strings.TrimSuffix(name, "_v3")
+
+	return name
+}
+
+// normalizeCursorMCPName converts Cursor's MCP tool name format to the
+// canonical "mcp__server__function" format used by the telemetry pipeline.
+//
+// Input formats:
+//
+//	"mcp-kubernetes-user-kubernetes-pods_list"  → "mcp__kubernetes__pods_list"
+//	"mcp-notion-workspace-notion-notion-fetch"  → "mcp__notion__fetch"
+//	"mcp_something_else"                        → "mcp__something__else" (fallback)
+func normalizeCursorMCPName(name string) string {
+	// Primary format: "mcp-SERVER-user-SERVER-FUNCTION" (hyphen-separated).
+	if strings.HasPrefix(name, "mcp-") {
+		rest := name[4:] // strip "mcp-"
+		parts := strings.SplitN(rest, "-user-", 2)
+		if len(parts) == 2 {
+			server := parts[0]
+			// After "user-", the server name is repeated then the function follows.
+			// e.g., "kubernetes-pods_list" where "kubernetes" is the repeated server.
+			afterUser := parts[1]
+			// Strip the repeated server prefix if present.
+			serverDash := server + "-"
+			if strings.HasPrefix(afterUser, serverDash) {
+				function := afterUser[len(serverDash):]
+				return "mcp__" + server + "__" + function
+			}
+			// Server not repeated — the whole remainder is server-function.
+			// Try to split on first hyphen: "notion-fetch" → server=notion, function=fetch.
+			if idx := strings.LastIndex(afterUser, "-"); idx > 0 {
+				return "mcp__" + server + "__" + afterUser[idx+1:]
+			}
+			return "mcp__" + server + "__" + afterUser
+		}
+
+		// Simpler format: "mcp-server-function" (no "user" segment).
+		// e.g., "mcp-kubernetes-pods_log"
+		if idx := strings.Index(rest, "-"); idx > 0 {
+			server := rest[:idx]
+			function := rest[idx+1:]
+			return "mcp__" + server + "__" + function
+		}
+		return "mcp__" + rest + "__"
+	}
+
+	// Underscore format: "mcp_server_function" (less common).
+	if strings.HasPrefix(name, "mcp_") {
+		rest := name[4:]
+		if idx := strings.Index(rest, "_"); idx > 0 {
+			server := rest[:idx]
+			function := rest[idx+1:]
+			return "mcp__" + server + "__" + function
+		}
+		return "mcp__" + rest + "__"
+	}
 
 	return name
 }

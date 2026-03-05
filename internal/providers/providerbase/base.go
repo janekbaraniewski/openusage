@@ -173,6 +173,7 @@ func CodingToolDashboard(options ...DashboardOption) core.DashboardWidget {
 	cfg.ClientCompositionHeading = "Clients"
 	cfg.ShowToolComposition = false
 	cfg.ShowActualToolUsage = true
+	cfg.ShowMCPUsage = true
 	cfg.ShowLanguageComposition = true
 	cfg.ShowCodeStatsComposition = true
 	cfg.CodeStatsMetrics = shared.DefaultCodeStatsConfig()

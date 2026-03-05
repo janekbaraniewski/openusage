@@ -44,6 +44,19 @@ type telemetryToolAgg struct {
 	Calls1d float64
 }
 
+type telemetryMCPFunctionAgg struct {
+	Function string
+	Calls    float64
+	Calls1d  float64
+}
+
+type telemetryMCPServerAgg struct {
+	Server    string
+	Calls     float64
+	Calls1d   float64
+	Functions []telemetryMCPFunctionAgg
+}
+
 type telemetryLanguageAgg struct {
 	Language string
 	Requests float64
@@ -91,6 +104,7 @@ type telemetryUsageAgg struct {
 	Providers    []telemetryProviderAgg
 	Sources      []telemetrySourceAgg
 	Tools        []telemetryToolAgg
+	MCPServers   []telemetryMCPServerAgg
 	Languages    []telemetryLanguageAgg
 	Activity     telemetryActivityAgg
 	CodeStats    telemetryCodeStatsAgg
@@ -275,16 +289,16 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
 		modelCostTotal += model.CostUSD
 		snap.ModelUsage = append(snap.ModelUsage, core.ModelUsageRecord{
-			RawModelID:  model.Model,
-			RawSource:   "telemetry",
-			Window:      timeWindow,
-			InputTokens: float64Ptr(model.InputTokens),
-			OutputTokens: float64Ptr(model.OutputTokens),
-			CachedTokens: float64Ptr(model.CachedTokens),
+			RawModelID:      model.Model,
+			RawSource:       "telemetry",
+			Window:          timeWindow,
+			InputTokens:     float64Ptr(model.InputTokens),
+			OutputTokens:    float64Ptr(model.OutputTokens),
+			CachedTokens:    float64Ptr(model.CachedTokens),
 			ReasoningTokens: float64Ptr(model.Reasoning),
-			TotalTokens: float64Ptr(model.TotalTokens),
-			CostUSD:     float64Ptr(model.CostUSD),
-			Requests:    float64Ptr(model.Requests),
+			TotalTokens:     float64Ptr(model.TotalTokens),
+			CostUSD:         float64Ptr(model.CostUSD),
+			Requests:        float64Ptr(model.Requests),
 		})
 	}
 	// Only compute unattributed model cost when we have windowed model data.
@@ -335,6 +349,25 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		tk := sanitizeMetricID(tool.Tool)
 		snap.Metrics["tool_"+tk] = core.Metric{Used: float64Ptr(tool.Calls), Unit: "calls", Window: timeWindow}
 		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
+	}
+
+	// MCP server metrics.
+	var mcpTotalCalls, mcpTotalCalls1d float64
+	for _, srv := range agg.MCPServers {
+		sk := sanitizeMetricID(srv.Server)
+		snap.Metrics["mcp_"+sk+"_total"] = core.Metric{Used: float64Ptr(srv.Calls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["mcp_"+sk+"_total_today"] = core.Metric{Used: float64Ptr(srv.Calls1d), Unit: "calls", Window: "1d"}
+		mcpTotalCalls += srv.Calls
+		mcpTotalCalls1d += srv.Calls1d
+		for _, fn := range srv.Functions {
+			fk := sanitizeMetricID(fn.Function)
+			snap.Metrics["mcp_"+sk+"_"+fk] = core.Metric{Used: float64Ptr(fn.Calls), Unit: "calls", Window: timeWindow}
+		}
+	}
+	if mcpTotalCalls > 0 {
+		snap.Metrics["mcp_calls_total"] = core.Metric{Used: float64Ptr(mcpTotalCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["mcp_calls_total_today"] = core.Metric{Used: float64Ptr(mcpTotalCalls1d), Unit: "calls", Window: "1d"}
+		snap.Metrics["mcp_servers_active"] = core.Metric{Used: float64Ptr(float64(len(agg.MCPServers))), Unit: "servers", Window: timeWindow}
 	}
 
 	for _, lang := range agg.Languages {
@@ -564,6 +597,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg.Providers = providers
 	agg.Sources = sources
 	agg.Tools = tools
+	agg.MCPServers = buildMCPAgg(tools)
 	agg.Languages = languages
 	agg.Activity = activity
 	agg.CodeStats = codeStats
@@ -1214,7 +1248,6 @@ func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float6
 	})
 }
 
-
 // isStaleActivityMetric returns true for metrics that are computed by the provider
 // with hardcoded time windows (today/7d/all-time) and should be replaced by
 // telemetry-windowed equivalents.
@@ -1285,6 +1318,144 @@ func sortedSeriesFromByDay(byDay map[string]float64) []core.TimePoint {
 		})
 	}
 	return out
+}
+
+// parseMCPToolName extracts server and function from an MCP tool name.
+// Raw tool names use double underscores: mcp__server__function.
+// Returns ("", "", false) for non-MCP tools.
+// parseMCPToolName extracts server and function from an MCP tool name.
+// Supports two formats:
+//   - Canonical: "mcp__server__function" (double underscores, from Claude Code and normalized Cursor)
+//   - Legacy:    "server-function (mcp)" or "user-server-function (mcp)" (old Cursor data)
+//
+// Returns ("", "", false) for non-MCP tools.
+func parseMCPToolName(raw string) (server, function string, ok bool) {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+
+	// Canonical format: mcp__server__function
+	if strings.HasPrefix(raw, "mcp__") {
+		rest := raw[5:]
+		idx := strings.Index(rest, "__")
+		if idx < 0 {
+			return rest, "", true
+		}
+		return rest[:idx], rest[idx+2:], true
+	}
+
+	// Legacy format: "something (mcp)" from old Cursor data.
+	if strings.HasSuffix(raw, " (mcp)") {
+		body := strings.TrimSuffix(raw, " (mcp)")
+		body = strings.TrimSpace(body)
+		if body == "" {
+			return "", "", false
+		}
+
+		// Strip "user-" prefix if present.
+		body = strings.TrimPrefix(body, "user-")
+
+		// Try to extract server from "server-function" format.
+		// e.g., "kubernetes-pods_log" → server=kubernetes, function=pods_log
+		// e.g., "gcp-gcloud-run_gcloud_command" → server=gcp-gcloud, function=run_gcloud_command
+		// Heuristic: the function part typically contains underscores, so split on the
+		// last hyphen that precedes an underscore-containing segment.
+		if idx := findServerFunctionSplit(body); idx > 0 {
+			return body[:idx], body[idx+1:], true
+		}
+
+		// No clear server-function split — treat whole body as function with unknown server.
+		return "other", body, true
+	}
+
+	return "", "", false
+}
+
+// findServerFunctionSplit finds the best hyphen position to split "server-function"
+// in a Cursor MCP tool name. The function name typically contains underscores
+// (e.g., "pods_list", "search_docs") while server names use hyphens.
+// Strategy: find the last hyphen where the part AFTER it contains an underscore.
+// This handles multi-segment server names like "gcp-gcloud" or "runai-docs".
+func findServerFunctionSplit(s string) int {
+	bestIdx := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '-' {
+			rest := s[i+1:]
+			if strings.Contains(rest, "_") {
+				bestIdx = i
+			}
+		}
+	}
+	if bestIdx > 0 {
+		return bestIdx
+	}
+
+	// No underscore-based split found. Fall back to first hyphen if no more hyphens after.
+	// e.g., "kubernetes-pods_log" or "smart-query"
+	if idx := strings.Index(s, "-"); idx > 0 {
+		return idx
+	}
+	return -1
+}
+
+func buildMCPAgg(tools []telemetryToolAgg) []telemetryMCPServerAgg {
+	type serverData struct {
+		calls   float64
+		calls1d float64
+		funcs   map[string]*telemetryMCPFunctionAgg
+	}
+	servers := make(map[string]*serverData)
+
+	for _, tool := range tools {
+		server, function, ok := parseMCPToolName(tool.Tool)
+		if !ok || server == "" {
+			continue
+		}
+		sd, exists := servers[server]
+		if !exists {
+			sd = &serverData{funcs: make(map[string]*telemetryMCPFunctionAgg)}
+			servers[server] = sd
+		}
+		sd.calls += tool.Calls
+		sd.calls1d += tool.Calls1d
+		if function != "" {
+			if f, ok := sd.funcs[function]; ok {
+				f.Calls += tool.Calls
+				f.Calls1d += tool.Calls1d
+			} else {
+				sd.funcs[function] = &telemetryMCPFunctionAgg{
+					Function: function,
+					Calls:    tool.Calls,
+					Calls1d:  tool.Calls1d,
+				}
+			}
+		}
+	}
+
+	result := make([]telemetryMCPServerAgg, 0, len(servers))
+	for name, sd := range servers {
+		var funcs []telemetryMCPFunctionAgg
+		for _, f := range sd.funcs {
+			funcs = append(funcs, *f)
+		}
+		sort.Slice(funcs, func(i, j int) bool {
+			if funcs[i].Calls != funcs[j].Calls {
+				return funcs[i].Calls > funcs[j].Calls
+			}
+			return funcs[i].Function < funcs[j].Function
+		})
+		result = append(result, telemetryMCPServerAgg{
+			Server:    name,
+			Calls:     sd.calls,
+			Calls1d:   sd.calls1d,
+			Functions: funcs,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Calls != result[j].Calls {
+			return result[i].Calls > result[j].Calls
+		}
+		return result[i].Server < result[j].Server
+	})
+	return result
 }
 
 func sanitizeMetricID(raw string) string {
