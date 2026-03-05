@@ -2068,16 +2068,21 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 		barW = 40
 	}
 
-	heading := "Model Burn (tokens)"
+	headingName := "Model Burn"
+	var headerSuffix string
 	switch mode {
 	case "requests":
-		heading = "Model Activity (requests)"
+		headingName = "Model Activity"
+		headerSuffix = shortCompact(total) + " req"
 	case "cost":
-		heading = "Model Burn (credits)"
+		headerSuffix = fmt.Sprintf("$%.2f", total)
+	default:
+		headerSuffix = shortCompact(total) + " tok"
 	}
 
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(headingName) +
+			"  " + dimStyle.Render(headerSuffix),
 		"  " + renderModelMixBar(allModels, total, barW, mode, modelColors),
 	}
 
@@ -3348,17 +3353,25 @@ func buildProviderClientCompositionLinesWithWidget(snap core.UsageSnapshot, inne
 		barW = 40
 	}
 
-	heading := widget.ClientCompositionHeading
-	if heading == "" {
-		heading = "Client Burn (tokens)"
-		if mode == "requests" {
-			heading = "Client Activity (requests)"
-		} else if mode == "sessions" {
-			heading = "Client Activity (sessions)"
+	headingName := widget.ClientCompositionHeading
+	if headingName == "" {
+		headingName = "Client Burn"
+		if mode == "requests" || mode == "sessions" {
+			headingName = "Client Activity"
 		}
 	}
+	var clientHeaderSuffix string
+	switch mode {
+	case "requests":
+		clientHeaderSuffix = shortCompact(total) + " req"
+	case "sessions":
+		clientHeaderSuffix = shortCompact(total) + " sess"
+	default:
+		clientHeaderSuffix = shortCompact(total) + " tok"
+	}
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(headingName) +
+			"  " + dimStyle.Render(clientHeaderSuffix),
 		"  " + renderClientMixBar(allClients, total, barW, clientColors, mode),
 	}
 
@@ -4133,13 +4146,15 @@ func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expa
 		barW = 40
 	}
 
-	heading := "Tool Usage (calls)"
+	toolHeadingName := "Tool Usage"
 	if widget.ToolCompositionHeading != "" {
-		heading = widget.ToolCompositionHeading
+		toolHeadingName = widget.ToolCompositionHeading
 	}
+	toolHeaderSuffix := shortCompact(totalCalls) + " calls"
 
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(toolHeadingName) +
+			"  " + dimStyle.Render(toolHeaderSuffix),
 		"  " + renderToolMixBar(allTools, totalCalls, barW, toolColors),
 	}
 
@@ -4243,7 +4258,7 @@ func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, 
 		// Show "no data" placeholder when telemetry is active but no language data.
 		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
 			return []string{
-				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language (requests)"),
+				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language"),
 				dimStyle.Render("  No language data for this time range"),
 			}, usedKeys
 		}
@@ -4269,8 +4284,10 @@ func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, 
 		barW = 40
 	}
 
+	langHeaderSuffix := shortCompact(totalReqs) + " req"
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language (requests)"),
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language") +
+			"  " + dimStyle.Render(langHeaderSuffix),
 		"  " + renderToolMixBar(allLangs, totalReqs, barW, langColors),
 	}
 
@@ -4442,8 +4459,20 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 		return nil, nil
 	}
 
+	var codeStatParts []string
+	if files > 0 {
+		codeStatParts = append(codeStatParts, shortCompact(files)+" files")
+	}
+	if added > 0 || removed > 0 {
+		codeStatParts = append(codeStatParts, shortCompact(added+removed)+" lines")
+	}
+	codeStatSuffix := strings.Join(codeStatParts, " · ")
+	codeStatHeading := lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Code Statistics")
+	if codeStatSuffix != "" {
+		codeStatHeading += "  " + dimStyle.Render(codeStatSuffix)
+	}
 	lines := []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Code Statistics"),
+		codeStatHeading,
 	}
 
 	barW := innerW - 2
@@ -4555,7 +4584,7 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 	if len(byTool) == 0 {
 		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
 			return []string{
-				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage (calls)"),
+				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage"),
 				dimStyle.Render("  No tool data for this time range"),
 			}, usedKeys
 		}
