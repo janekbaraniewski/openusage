@@ -748,11 +748,20 @@ func queryLanguageAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	// Query file paths from tool_usage events. Language is inferred in Go
 	// from the file extension since SQLite lacks convenient path functions.
+	//
+	// File paths live in different locations depending on the source:
+	//   - JSONL collector:  $.file or $.payload.file
+	//   - Hook events:      $.tool_input.file_path (Read/Edit/Write)
+	//                       $.tool_input.path (Grep/Glob)
+	//   - Hook response:    $.tool_response.file.filePath (Read response)
 	query := usageCTE + `
 		SELECT
 			COALESCE(
 				NULLIF(TRIM(json_extract(source_payload, '$.file')), ''),
 				NULLIF(TRIM(json_extract(source_payload, '$.payload.file')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_input.file_path')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_input.path')), ''),
+				NULLIF(TRIM(json_extract(source_payload, '$.tool_response.file.filePath')), ''),
 				''
 			) AS file_path,
 			COALESCE(requests, 1) AS requests
@@ -960,6 +969,8 @@ func queryCodeStatsAgg(ctx context.Context, db *sql.DB, filter usageFilter) (tel
 				THEN NULLIF(TRIM(COALESCE(
 					json_extract(source_payload, '$.file'),
 					json_extract(source_payload, '$.payload.file'),
+					json_extract(source_payload, '$.tool_input.file_path'),
+					json_extract(source_payload, '$.tool_input.path'),
 					''
 				)), '')
 			END) AS files_changed
