@@ -38,8 +38,20 @@ func TestFetch_ReadsLocalData(t *testing.T) {
 				"selectedType": "oauth-personal",
 			},
 		},
+		"mcpServers": map[string]any{
+			"gopls": map[string]any{"command": "gopls"},
+			"linear": map[string]any{
+				"command": "linear-mcp",
+			},
+			"kubernetes": map[string]any{"url": "http://localhost:8080"},
+		},
 	}
 	writeJSON(t, filepath.Join(tmpDir, "settings.json"), settings)
+	writeJSON(t, filepath.Join(tmpDir, "mcp-server-enablement.json"), map[string]any{
+		"gopls":      map[string]any{"enabled": true},
+		"linear":     map[string]any{"enabled": false},
+		"kubernetes": map[string]any{"enabled": true},
+	})
 
 	os.WriteFile(filepath.Join(tmpDir, "installation_id"), []byte("test-uuid-1234"), 0644)
 
@@ -87,6 +99,22 @@ func TestFetch_ReadsLocalData(t *testing.T) {
 	}
 	if conv.Used == nil || *conv.Used != 3 {
 		t.Errorf("total_conversations = %v, want 3", conv.Used)
+	}
+
+	configured, ok := snap.Metrics["mcp_servers_configured"]
+	if !ok || configured.Used == nil || *configured.Used != 3 {
+		t.Fatalf("mcp_servers_configured = %+v, want 3", configured)
+	}
+	enabled, ok := snap.Metrics["mcp_servers_enabled"]
+	if !ok || enabled.Used == nil || *enabled.Used != 2 {
+		t.Fatalf("mcp_servers_enabled = %+v, want 2", enabled)
+	}
+	disabled, ok := snap.Metrics["mcp_servers_disabled"]
+	if !ok || disabled.Used == nil || *disabled.Used != 1 {
+		t.Fatalf("mcp_servers_disabled = %+v, want 1", disabled)
+	}
+	if !strings.Contains(snap.Raw["mcp_servers"], "gopls") {
+		t.Fatalf("mcp_servers raw missing gopls: %q", snap.Raw["mcp_servers"])
 	}
 }
 
@@ -458,6 +486,18 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 							"new_string":  "one\ntwo\nthree",
 							"instruction": "append line",
 						},
+						"resultDisplay": map[string]any{
+							"diffStat": map[string]any{
+								"model_added_lines":   7,
+								"model_removed_lines": 3,
+								"model_added_chars":   210,
+								"model_removed_chars": 72,
+								"user_added_lines":    2,
+								"user_removed_lines":  1,
+								"user_added_chars":    48,
+								"user_removed_chars":  16,
+							},
+						},
 					},
 					{
 						"name":   "write_file",
@@ -465,6 +505,18 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 						"args": map[string]any{
 							"file_path": "internal/providers/gemini_cli/widget.go",
 							"content":   "a\nb\n",
+						},
+						"resultDisplay": map[string]any{
+							"diffStat": map[string]any{
+								"model_added_lines":   10,
+								"model_removed_lines": 0,
+								"model_added_chars":   300,
+								"model_removed_chars": 0,
+								"user_added_lines":    0,
+								"user_removed_lines":  0,
+								"user_added_chars":    0,
+								"user_removed_chars":  0,
+							},
 						},
 					},
 					{
@@ -514,11 +566,20 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 	if m, ok := snap.Metrics["lang_go"]; !ok || m.Used == nil || *m.Used != 3 {
 		t.Fatalf("lang_go = %v, want 3", m.Used)
 	}
-	if m, ok := snap.Metrics["composer_lines_added"]; !ok || m.Used == nil || *m.Used != 5 {
-		t.Fatalf("composer_lines_added = %v, want 5", m.Used)
+	if m, ok := snap.Metrics["composer_lines_added"]; !ok || m.Used == nil || *m.Used != 17 {
+		t.Fatalf("composer_lines_added = %v, want 17", m.Used)
 	}
-	if m, ok := snap.Metrics["composer_lines_removed"]; !ok || m.Used == nil || *m.Used != 2 {
-		t.Fatalf("composer_lines_removed = %v, want 2", m.Used)
+	if m, ok := snap.Metrics["composer_lines_removed"]; !ok || m.Used == nil || *m.Used != 3 {
+		t.Fatalf("composer_lines_removed = %v, want 3", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_user_lines_added"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("composer_user_lines_added = %v, want 2", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_user_lines_removed"]; !ok || m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_user_lines_removed = %v, want 1", m.Used)
+	}
+	if m, ok := snap.Metrics["composer_diffstat_events"]; !ok || m.Used == nil || *m.Used != 2 {
+		t.Fatalf("composer_diffstat_events = %v, want 2", m.Used)
 	}
 	if m, ok := snap.Metrics["composer_files_changed"]; !ok || m.Used == nil || *m.Used != 2 {
 		t.Fatalf("composer_files_changed = %v, want 2", m.Used)
@@ -544,8 +605,8 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 	if m, ok := snap.Metrics["total_prompts"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("total_prompts = %v, want 1", m.Used)
 	}
-	if m, ok := snap.Metrics["ai_code_percentage"]; !ok || m.Used == nil || *m.Used != 100 {
-		t.Fatalf("ai_code_percentage = %v, want 100", m.Used)
+	if m, ok := snap.Metrics["ai_code_percentage"]; !ok || m.Used == nil || *m.Used < 86 || *m.Used > 87 {
+		t.Fatalf("ai_code_percentage = %v, want ~86.96", m.Used)
 	}
 	if !strings.Contains(snap.Raw["language_usage"], "go: 3 req") {
 		t.Fatalf("language_usage = %q, want go usage summary", snap.Raw["language_usage"])

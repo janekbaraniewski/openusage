@@ -49,7 +49,7 @@ func New() *Provider {
 			ID: "gemini_cli",
 			Info: core.ProviderInfo{
 				Name:         "Gemini CLI",
-				Capabilities: []string{"local_config", "oauth_status", "conversation_count", "local_sessions", "token_usage", "by_model", "by_client", "quota_api"},
+				Capabilities: []string{"local_config", "oauth_status", "conversation_count", "local_sessions", "token_usage", "by_model", "by_client", "mcp_config", "code_generation", "quota_api"},
 				DocURL:       "https://github.com/google-gemini/gemini-cli",
 			},
 			Auth: core.ProviderAuthSpec{
@@ -108,6 +108,17 @@ type geminiSettings struct {
 	Experimental struct {
 		Plan bool `json:"plan"`
 	} `json:"experimental"`
+	MCPServers map[string]geminiMCPServer `json:"mcpServers,omitempty"`
+}
+
+type geminiMCPServer struct {
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	URL     string   `json:"url,omitempty"`
+}
+
+type geminiMCPEnablement struct {
+	Enabled bool `json:"enabled"`
 }
 
 type tokenRefreshResponse struct {
@@ -182,6 +193,7 @@ type geminiChatFile struct {
 }
 
 type geminiChatMessage struct {
+	ID        string              `json:"id,omitempty"`
 	Type      string              `json:"type"`
 	Timestamp string              `json:"timestamp"`
 	Model     string              `json:"model"`
@@ -191,9 +203,27 @@ type geminiChatMessage struct {
 }
 
 type geminiToolCall struct {
-	Name   string          `json:"name"`
-	Status string          `json:"status,omitempty"`
-	Args   json.RawMessage `json:"args,omitempty"`
+	ID                     string          `json:"id,omitempty"`
+	Name                   string          `json:"name"`
+	Status                 string          `json:"status,omitempty"`
+	Timestamp              string          `json:"timestamp,omitempty"`
+	DisplayName            string          `json:"displayName,omitempty"`
+	Description            string          `json:"description,omitempty"`
+	RenderOutputAsMarkdown *bool           `json:"renderOutputAsMarkdown,omitempty"`
+	Result                 json.RawMessage `json:"result,omitempty"`
+	ResultDisplay          json.RawMessage `json:"resultDisplay,omitempty"`
+	Args                   json.RawMessage `json:"args,omitempty"`
+}
+
+type geminiDiffStat struct {
+	ModelAddedLines   int `json:"model_added_lines"`
+	ModelRemovedLines int `json:"model_removed_lines"`
+	ModelAddedChars   int `json:"model_added_chars"`
+	ModelRemovedChars int `json:"model_removed_chars"`
+	UserAddedLines    int `json:"user_added_lines"`
+	UserRemovedLines  int `json:"user_removed_lines"`
+	UserAddedChars    int `json:"user_added_chars"`
+	UserRemovedChars  int `json:"user_removed_chars"`
 }
 
 type geminiMessageToken struct {
@@ -301,6 +331,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			if settings.General.PreviewFeatures {
 				snap.Raw["preview_features"] = "enabled"
 			}
+			applyGeminiMCPMetadata(&snap, settings, filepath.Join(configDir, "mcp-server-enablement.json"))
 		}
 	}
 
@@ -946,6 +977,99 @@ func applyQuotaStatus(snap *core.UsageSnapshot, worstFraction float64) {
 	}
 }
 
+func applyGeminiMCPMetadata(snap *core.UsageSnapshot, settings geminiSettings, enablementPath string) {
+	configured := make(map[string]bool)
+	for name := range settings.MCPServers {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		configured[name] = true
+	}
+
+	enabled := make(map[string]bool)
+	disabled := make(map[string]bool)
+	if data, err := os.ReadFile(enablementPath); err == nil {
+		var state map[string]geminiMCPEnablement
+		if json.Unmarshal(data, &state) == nil {
+			for name, cfg := range state {
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				configured[name] = true
+				if cfg.Enabled {
+					enabled[name] = true
+					delete(disabled, name)
+					continue
+				}
+				if !enabled[name] {
+					disabled[name] = true
+				}
+			}
+		}
+	}
+
+	configuredNames := mapKeysSorted(configured)
+	enabledNames := mapKeysSorted(enabled)
+	disabledNames := mapKeysSorted(disabled)
+
+	if len(configuredNames) == 0 {
+		return
+	}
+
+	setUsedMetric(snap, "mcp_servers_configured", float64(len(configuredNames)), "servers", defaultUsageWindowLabel)
+	if len(enabledNames) > 0 {
+		setUsedMetric(snap, "mcp_servers_enabled", float64(len(enabledNames)), "servers", defaultUsageWindowLabel)
+	}
+	if len(disabledNames) > 0 {
+		setUsedMetric(snap, "mcp_servers_disabled", float64(len(disabledNames)), "servers", defaultUsageWindowLabel)
+	}
+	if len(enabledNames)+len(disabledNames) > 0 {
+		setUsedMetric(snap, "mcp_servers_tracked", float64(len(enabledNames)+len(disabledNames)), "servers", defaultUsageWindowLabel)
+	}
+
+	if summary := formatGeminiNameList(configuredNames, maxBreakdownRaw); summary != "" {
+		snap.Raw["mcp_servers"] = summary
+	}
+	if summary := formatGeminiNameList(enabledNames, maxBreakdownRaw); summary != "" {
+		snap.Raw["mcp_servers_enabled"] = summary
+	}
+	if summary := formatGeminiNameList(disabledNames, maxBreakdownRaw); summary != "" {
+		snap.Raw["mcp_servers_disabled"] = summary
+	}
+}
+
+func mapKeysSorted(values map[string]bool) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func formatGeminiNameList(values []string, max int) string {
+	if len(values) == 0 {
+		return ""
+	}
+	limit := max
+	if limit <= 0 || limit > len(values) {
+		limit = len(values)
+	}
+	out := strings.Join(values[:limit], ", ")
+	if len(values) > limit {
+		out += fmt.Sprintf(", +%d more", len(values)-limit)
+	}
+	return out
+}
+
 func (t geminiMessageToken) toUsage() tokenUsage {
 	total := t.Total
 	if total <= 0 {
@@ -1005,8 +1129,15 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	totalToolErrored := 0
 	totalToolCancelled := 0
 	quotaLimitEvents := 0
-	inferredLinesAdded := 0
-	inferredLinesRemoved := 0
+	modelLinesAdded := 0
+	modelLinesRemoved := 0
+	modelCharsAdded := 0
+	modelCharsRemoved := 0
+	userLinesAdded := 0
+	userLinesRemoved := 0
+	userCharsAdded := 0
+	userCharsRemoved := 0
+	diffStatEvents := 0
 	inferredCommitCount := 0
 
 	var lastModelName string
@@ -1105,9 +1236,21 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 					}
 
 					if successfulToolCall && isGeminiMutatingTool(toolLower) {
-						added, removed := estimateGeminiToolLineDelta(tc.Args)
-						inferredLinesAdded += added
-						inferredLinesRemoved += removed
+						if diff, ok := extractGeminiToolDiffStat(tc.ResultDisplay); ok {
+							modelLinesAdded += diff.ModelAddedLines
+							modelLinesRemoved += diff.ModelRemovedLines
+							modelCharsAdded += diff.ModelAddedChars
+							modelCharsRemoved += diff.ModelRemovedChars
+							userLinesAdded += diff.UserAddedLines
+							userLinesRemoved += diff.UserRemovedLines
+							userCharsAdded += diff.UserAddedChars
+							userCharsRemoved += diff.UserRemovedChars
+							diffStatEvents++
+						} else {
+							added, removed := estimateGeminiToolLineDelta(tc.Args)
+							modelLinesAdded += added
+							modelLinesRemoved += removed
+						}
 					}
 
 					if !successfulToolCall {
@@ -1323,11 +1466,11 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	setUsedMetric(snap, "7d_reasoning_tokens", sumLastNDays(dailyReasoningTokens, 7), "tokens", "7d")
 	setUsedMetric(snap, "7d_tool_tokens", sumLastNDays(dailyToolTokens, 7), "tokens", "7d")
 
-	if inferredLinesAdded > 0 {
-		setUsedMetric(snap, "composer_lines_added", float64(inferredLinesAdded), "lines", defaultUsageWindowLabel)
+	if modelLinesAdded > 0 {
+		setUsedMetric(snap, "composer_lines_added", float64(modelLinesAdded), "lines", defaultUsageWindowLabel)
 	}
-	if inferredLinesRemoved > 0 {
-		setUsedMetric(snap, "composer_lines_removed", float64(inferredLinesRemoved), "lines", defaultUsageWindowLabel)
+	if modelLinesRemoved > 0 {
+		setUsedMetric(snap, "composer_lines_removed", float64(modelLinesRemoved), "lines", defaultUsageWindowLabel)
 	}
 	if len(changedFiles) > 0 {
 		setUsedMetric(snap, "composer_files_changed", float64(len(changedFiles)), "files", defaultUsageWindowLabel)
@@ -1335,8 +1478,35 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	if inferredCommitCount > 0 {
 		setUsedMetric(snap, "scored_commits", float64(inferredCommitCount), "commits", defaultUsageWindowLabel)
 	}
-	if inferredLinesAdded > 0 || inferredLinesRemoved > 0 {
-		setPercentMetric(snap, "ai_code_percentage", 100, defaultUsageWindowLabel)
+	if userLinesAdded > 0 {
+		setUsedMetric(snap, "composer_user_lines_added", float64(userLinesAdded), "lines", defaultUsageWindowLabel)
+	}
+	if userLinesRemoved > 0 {
+		setUsedMetric(snap, "composer_user_lines_removed", float64(userLinesRemoved), "lines", defaultUsageWindowLabel)
+	}
+	if modelCharsAdded > 0 {
+		setUsedMetric(snap, "composer_model_chars_added", float64(modelCharsAdded), "chars", defaultUsageWindowLabel)
+	}
+	if modelCharsRemoved > 0 {
+		setUsedMetric(snap, "composer_model_chars_removed", float64(modelCharsRemoved), "chars", defaultUsageWindowLabel)
+	}
+	if userCharsAdded > 0 {
+		setUsedMetric(snap, "composer_user_chars_added", float64(userCharsAdded), "chars", defaultUsageWindowLabel)
+	}
+	if userCharsRemoved > 0 {
+		setUsedMetric(snap, "composer_user_chars_removed", float64(userCharsRemoved), "chars", defaultUsageWindowLabel)
+	}
+	if diffStatEvents > 0 {
+		setUsedMetric(snap, "composer_diffstat_events", float64(diffStatEvents), "calls", defaultUsageWindowLabel)
+	}
+	totalModelLineDelta := modelLinesAdded + modelLinesRemoved
+	totalUserLineDelta := userLinesAdded + userLinesRemoved
+	if totalModelLineDelta > 0 || totalUserLineDelta > 0 {
+		totalLineDelta := totalModelLineDelta + totalUserLineDelta
+		if totalLineDelta > 0 {
+			aiPct := float64(totalModelLineDelta) / float64(totalLineDelta) * 100
+			setPercentMetric(snap, "ai_code_percentage", aiPct, defaultUsageWindowLabel)
+		}
 	}
 
 	if quotaLimitEvents > 0 {
@@ -1877,6 +2047,50 @@ func estimateGeminiToolLineDelta(raw json.RawMessage) (added int, removed int) {
 	}
 	walk(payload)
 	return added, removed
+}
+
+func extractGeminiToolDiffStat(raw json.RawMessage) (geminiDiffStat, bool) {
+	var empty geminiDiffStat
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return empty, false
+	}
+
+	var root map[string]json.RawMessage
+	if json.Unmarshal(raw, &root) != nil {
+		return empty, false
+	}
+	diffRaw, ok := root["diffStat"]
+	if !ok {
+		return empty, false
+	}
+
+	var stat geminiDiffStat
+	if json.Unmarshal(diffRaw, &stat) != nil {
+		return empty, false
+	}
+
+	stat.ModelAddedLines = max(0, stat.ModelAddedLines)
+	stat.ModelRemovedLines = max(0, stat.ModelRemovedLines)
+	stat.ModelAddedChars = max(0, stat.ModelAddedChars)
+	stat.ModelRemovedChars = max(0, stat.ModelRemovedChars)
+	stat.UserAddedLines = max(0, stat.UserAddedLines)
+	stat.UserRemovedLines = max(0, stat.UserRemovedLines)
+	stat.UserAddedChars = max(0, stat.UserAddedChars)
+	stat.UserRemovedChars = max(0, stat.UserRemovedChars)
+
+	if stat.ModelAddedLines == 0 &&
+		stat.ModelRemovedLines == 0 &&
+		stat.ModelAddedChars == 0 &&
+		stat.ModelRemovedChars == 0 &&
+		stat.UserAddedLines == 0 &&
+		stat.UserRemovedLines == 0 &&
+		stat.UserAddedChars == 0 &&
+		stat.UserRemovedChars == 0 {
+		return empty, false
+	}
+
+	return stat, true
 }
 
 func inferGeminiLanguageFromPath(path string) string {

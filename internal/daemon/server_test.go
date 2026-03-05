@@ -83,3 +83,26 @@ func TestEnsureSocketPathAvailable_RejectsRegularFile(t *testing.T) {
 		t.Fatalf("error = %q, want not a socket message", err)
 	}
 }
+
+func TestTelemetryOptionsForSource_GeminiSessionsPath(t *testing.T) {
+	opts := telemetryOptionsForSource(
+		"gemini_cli",
+		"/tmp/codex-sessions",
+		"/tmp/gemini-sessions",
+		"/tmp/claude-projects",
+		"/tmp/claude-projects-alt",
+		[]string{"/tmp/opencode-events"},
+		"/tmp/opencode-events.jsonl",
+		"/tmp/opencode.db",
+	)
+
+	if got := opts.Paths["sessions_dir"]; got != "/tmp/gemini-sessions" {
+		t.Fatalf("sessions_dir = %q, want /tmp/gemini-sessions", got)
+	}
+	if _, ok := opts.Paths["projects_dir"]; ok {
+		t.Fatalf("unexpected claude projects_dir for gemini source: %+v", opts.Paths)
+	}
+	if _, ok := opts.Paths["events_file"]; ok {
+		t.Fatalf("unexpected opencode events_file for gemini source: %+v", opts.Paths)
+	}
+}

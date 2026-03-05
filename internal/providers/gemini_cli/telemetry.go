@@ -1,10 +1,13 @@
 package gemini_cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,7 +15,7 @@ import (
 )
 
 const (
-	telemetrySchemaVersion = "gemini_cli_v1"
+	telemetrySchemaVersion = "gemini_cli_v2"
 )
 
 // System implements shared.TelemetrySource.
@@ -92,27 +95,58 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 	var out []shared.TelemetryEvent
 
 	for msgIdx, msg := range chat.Messages {
-		occurredAt := parseMessageTime(msg.Timestamp, chat.StartTime, chat.LastUpdated)
+		messageOccurredAt := parseMessageTime(msg.Timestamp, chat.StartTime, chat.LastUpdated)
+		messageID := geminiTelemetryMessageID(sessionID, msg, msgIdx)
+		turnID := fmt.Sprintf("%s:msg%d", sessionID, msgIdx)
+		if messageID != "" {
+			turnID = messageID
+		}
 
 		// Emit tool usage events for each tool call.
 		for tcIdx, tc := range msg.ToolCalls {
-			toolName := strings.TrimSpace(tc.Name)
-			if toolName == "" {
+			toolName, payloadToolMeta := normalizeGeminiTelemetryToolName(tc)
+			if strings.TrimSpace(toolName) == "" {
 				continue
 			}
 
 			status := telemetryStatusFromToolCall(tc.Status)
-			toolCallID := fmt.Sprintf("%s:msg%d:tc%d", sessionID, msgIdx, tcIdx)
+			toolCallID := strings.TrimSpace(tc.ID)
+			if toolCallID == "" {
+				toolCallID = fmt.Sprintf("%s:msg%d:tc%d", sessionID, msgIdx, tcIdx)
+			}
+			occurredAt := parseToolCallTime(tc.Timestamp, msg.Timestamp, chat.StartTime, chat.LastUpdated)
 
 			payload := map[string]any{
-				"file":              path,
+				"source_file":       path,
 				"upstream_provider": "google",
+				"client":            "CLI",
+				"tool_type":         "native",
+			}
+			for key, value := range payloadToolMeta {
+				payload[key] = value
 			}
 			if tc.Args != nil {
 				for _, fp := range extractGeminiToolPaths(tc.Args) {
 					payload["file"] = fp
 					break
 				}
+			}
+			if _, ok := payload["file"]; !ok {
+				if resultFile := extractGeminiResultDisplayFile(tc.ResultDisplay); resultFile != "" {
+					payload["file"] = resultFile
+				}
+			}
+			if diff, ok := extractGeminiToolDiffStat(tc.ResultDisplay); ok {
+				payload["model_added_lines"] = diff.ModelAddedLines
+				payload["model_removed_lines"] = diff.ModelRemovedLines
+				payload["user_added_lines"] = diff.UserAddedLines
+				payload["user_removed_lines"] = diff.UserRemovedLines
+				payload["model_added_chars"] = diff.ModelAddedChars
+				payload["model_removed_chars"] = diff.ModelRemovedChars
+				payload["user_added_chars"] = diff.UserAddedChars
+				payload["user_removed_chars"] = diff.UserRemovedChars
+				payload["lines_added"] = diff.ModelAddedLines + diff.UserAddedLines
+				payload["lines_removed"] = diff.ModelRemovedLines + diff.UserRemovedLines
 			}
 
 			out = append(out, shared.TelemetryEvent{
@@ -121,7 +155,8 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 				OccurredAt:    occurredAt,
 				AccountID:     "gemini_cli",
 				SessionID:     sessionID,
-				TurnID:        fmt.Sprintf("%s:msg%d", sessionID, msgIdx),
+				TurnID:        turnID,
+				MessageID:     messageID,
 				ToolCallID:    toolCallID,
 				ProviderID:    "gemini_cli",
 				AgentName:     "gemini_cli",
@@ -155,16 +190,18 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 		}
 
 		turnIndex++
-		turnID := fmt.Sprintf("%s:%d", sessionID, turnIndex)
-		messageID := fmt.Sprintf("%s:msg%d", sessionID, msgIdx)
+		tokenTurnID := fmt.Sprintf("%s:%d", sessionID, turnIndex)
+		if strings.TrimSpace(messageID) != "" {
+			tokenTurnID = messageID
+		}
 
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion:   telemetrySchemaVersion,
 			Channel:         shared.TelemetryChannelJSONL,
-			OccurredAt:      occurredAt,
+			OccurredAt:      messageOccurredAt,
 			AccountID:       "gemini_cli",
 			SessionID:       sessionID,
-			TurnID:          turnID,
+			TurnID:          tokenTurnID,
 			MessageID:       messageID,
 			ProviderID:      "gemini_cli",
 			AgentName:       "gemini_cli",
@@ -177,8 +214,9 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 			TotalTokens:     shared.Int64Ptr(int64(delta.TotalTokens)),
 			Status:          shared.TelemetryStatusOK,
 			Payload: map[string]any{
-				"file":              path,
+				"source_file":       path,
 				"tool_tokens":       delta.ToolTokens,
+				"client":            "CLI",
 				"upstream_provider": "google",
 			},
 		})
@@ -200,6 +238,153 @@ func parseMessageTime(msgTimestamp, sessionStart, sessionLastUpdated string) tim
 		return ts
 	}
 	return time.Now().UTC()
+}
+
+func parseToolCallTime(toolTimestamp, msgTimestamp, sessionStart, sessionLastUpdated string) time.Time {
+	if ts, err := shared.ParseTimestampString(toolTimestamp); err == nil {
+		return ts
+	}
+	if ts, err := shared.ParseTimestampString(msgTimestamp); err == nil {
+		return ts
+	}
+	if ts, err := shared.ParseTimestampString(sessionLastUpdated); err == nil {
+		return ts
+	}
+	if ts, err := shared.ParseTimestampString(sessionStart); err == nil {
+		return ts
+	}
+	return time.Now().UTC()
+}
+
+func geminiTelemetryMessageID(sessionID string, msg geminiChatMessage, msgIdx int) string {
+	msgID := strings.TrimSpace(msg.ID)
+	if msgID == "" {
+		return fmt.Sprintf("%s:msg%d", sessionID, msgIdx)
+	}
+	if strings.Contains(msgID, ":") {
+		return msgID
+	}
+	return fmt.Sprintf("%s:%s", sessionID, msgID)
+}
+
+func normalizeGeminiTelemetryToolName(tc geminiToolCall) (string, map[string]any) {
+	toolName := strings.TrimSpace(tc.Name)
+	displayName := strings.TrimSpace(tc.DisplayName)
+	description := strings.TrimSpace(tc.Description)
+
+	payload := make(map[string]any)
+	if toolName == "" && displayName == "" {
+		return "", payload
+	}
+	if displayName != "" {
+		payload["tool_display_name"] = displayName
+	}
+	if description != "" {
+		payload["tool_description"] = truncate(description, 240)
+	}
+	if tc.RenderOutputAsMarkdown != nil {
+		payload["render_output_markdown"] = *tc.RenderOutputAsMarkdown
+	}
+	if strings.TrimSpace(toolName) != "" {
+		payload["tool_name_raw"] = strings.TrimSpace(toolName)
+	}
+
+	if strings.HasPrefix(strings.ToLower(toolName), "mcp__") {
+		canonical := strings.ToLower(strings.TrimSpace(toolName))
+		payload["tool_type"] = "mcp"
+		if parts := strings.SplitN(strings.TrimPrefix(canonical, "mcp__"), "__", 2); len(parts) == 2 {
+			payload["mcp_server"] = parts[0]
+			payload["mcp_function"] = parts[1]
+		}
+		return canonical, payload
+	}
+
+	if mcpServer, mcpFunction, ok := extractGeminiMCPTool(displayName, toolName); ok {
+		payload["tool_type"] = "mcp"
+		payload["mcp_server"] = mcpServer
+		payload["mcp_function"] = mcpFunction
+		return "mcp__" + mcpServer + "__" + mcpFunction, payload
+	}
+
+	return sanitizeMetricName(toolName), payload
+}
+
+var geminiMCPDisplayPattern = regexp.MustCompile(`(?i)\(([^()]+?)\s+mcp server\)\s*$`)
+
+func extractGeminiMCPTool(displayName, fallbackToolName string) (server, function string, ok bool) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return "", "", false
+	}
+	matches := geminiMCPDisplayPattern.FindStringSubmatch(displayName)
+	if len(matches) != 2 {
+		return "", "", false
+	}
+
+	server = normalizeGeminiMCPToken(matches[1])
+	function = normalizeGeminiMCPToken(fallbackToolName)
+	if function == "" {
+		withoutSuffix := strings.TrimSpace(geminiMCPDisplayPattern.ReplaceAllString(displayName, ""))
+		function = normalizeGeminiMCPToken(withoutSuffix)
+	}
+	if server == "" || function == "" {
+		return "", "", false
+	}
+	return server, function, true
+}
+
+func normalizeGeminiMCPToken(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	underscore := false
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			underscore = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			underscore = false
+		case r == '-' || r == '_':
+			if !underscore {
+				b.WriteRune(r)
+				underscore = true
+			}
+		default:
+			if !underscore {
+				b.WriteByte('_')
+				underscore = true
+			}
+		}
+	}
+
+	return strings.Trim(b.String(), "_-")
+}
+
+func extractGeminiResultDisplayFile(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || raw[0] != '{' {
+		return ""
+	}
+
+	var root map[string]any
+	if json.Unmarshal(raw, &root) != nil {
+		return ""
+	}
+	for _, key := range []string{"filePath", "file_path", "path", "file"} {
+		if value, ok := root[key].(string); ok {
+			for _, token := range extractGeminiPathTokens(value) {
+				if token != "" {
+					return token
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // telemetryStatusFromToolCall maps a Gemini CLI tool call status string to a

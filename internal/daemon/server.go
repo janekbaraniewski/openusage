@@ -28,6 +28,7 @@ import (
 
 const (
 	defaultCodexSessionsDir     = "~/.codex/sessions"
+	defaultGeminiSessionsDir    = "~/.gemini/tmp"
 	defaultClaudeProjectsDir    = "~/.claude/projects"
 	defaultClaudeProjectsAltDir = "~/.config/claude/projects"
 	defaultOpenCodeDBPath       = "~/.local/share/opencode/opencode.db"
@@ -508,13 +509,22 @@ func (s *Service) runHookSpoolLoop(ctx context.Context) {
 		return
 	}
 
-	processTicker := time.NewTicker(5 * time.Second)
-	cleanupTicker := time.NewTicker(5 * time.Minute)
+	processInterval := 5 * time.Second
+	cleanupInterval := 5 * time.Minute
+	processTicker := time.NewTicker(processInterval)
+	cleanupTicker := time.NewTicker(cleanupInterval)
 	defer processTicker.Stop()
 	defer cleanupTicker.Stop()
 
-	s.infof("hook_spool_loop_start", "dir=%s", hookSpoolDir)
+	s.infof(
+		"hook_spool_loop_start",
+		"dir=%s process_interval=%s cleanup_interval=%s",
+		hookSpoolDir,
+		processInterval,
+		cleanupInterval,
+	)
 	s.processHookSpool(ctx, hookSpoolDir)
+	s.cleanupHookSpool(hookSpoolDir)
 
 	for {
 		select {
@@ -1173,6 +1183,7 @@ func defaultTelemetryOptionsForSource(sourceSystem string) shared.TelemetryColle
 	return telemetryOptionsForSource(
 		sourceSystem,
 		defaultCodexSessionsDir,
+		defaultGeminiSessionsDir,
 		defaultClaudeProjectsDir,
 		defaultClaudeProjectsAltDir,
 		nil,
@@ -1184,6 +1195,7 @@ func defaultTelemetryOptionsForSource(sourceSystem string) shared.TelemetryColle
 func telemetryOptionsForSource(
 	sourceSystem string,
 	codexSessions string,
+	geminiSessions string,
 	claudeProjects string,
 	claudeProjectsAlt string,
 	opencodeEventsDirs []string,
@@ -1198,6 +1210,8 @@ func telemetryOptionsForSource(
 	switch sourceSystem {
 	case "codex":
 		opts.Paths["sessions_dir"] = codexSessions
+	case "gemini_cli":
+		opts.Paths["sessions_dir"] = geminiSessions
 	case "claude_code":
 		opts.Paths["projects_dir"] = claudeProjects
 		opts.Paths["alt_projects_dir"] = claudeProjectsAlt
