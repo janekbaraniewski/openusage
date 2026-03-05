@@ -13,6 +13,10 @@ var (
 	providerWidgets   map[string]core.DashboardWidget
 	providerDetails   map[string]core.DetailWidget
 	providerOrder     []string
+
+	providerWidgetOverridesMu    sync.RWMutex
+	providerSectionOrderOverride []core.DashboardStandardSection
+	providerSectionOverrideSet   bool
 )
 
 func loadProviderSpecs() {
@@ -38,9 +42,9 @@ func dashboardWidget(providerID string) core.DashboardWidget {
 	loadProviderSpecs()
 
 	if cfg, ok := providerWidgets[providerID]; ok {
-		return cfg
+		return applyDashboardSectionOverride(cfg)
 	}
-	return core.DefaultDashboardWidget()
+	return applyDashboardSectionOverride(core.DefaultDashboardWidget())
 }
 
 func detailWidget(providerID string) core.DetailWidget {
@@ -100,4 +104,41 @@ func envVarForProvider(providerID string) string {
 		return ""
 	}
 	return spec.Auth.APIKeyEnv
+}
+
+func setDashboardWidgetSectionOverrides(sections []core.DashboardStandardSection) {
+	providerWidgetOverridesMu.Lock()
+	defer providerWidgetOverridesMu.Unlock()
+
+	if sections == nil {
+		providerSectionOrderOverride = nil
+		providerSectionOverrideSet = false
+		return
+	}
+
+	seen := make(map[core.DashboardStandardSection]bool, len(sections))
+	filtered := make([]core.DashboardStandardSection, 0, len(sections))
+	for _, section := range sections {
+		if !core.IsKnownDashboardStandardSection(section) || seen[section] {
+			continue
+		}
+		filtered = append(filtered, section)
+		seen[section] = true
+	}
+	providerSectionOrderOverride = append([]core.DashboardStandardSection(nil), filtered...)
+	providerSectionOverrideSet = true
+}
+
+func applyDashboardSectionOverride(cfg core.DashboardWidget) core.DashboardWidget {
+	providerWidgetOverridesMu.RLock()
+	sections := providerSectionOrderOverride
+	set := providerSectionOverrideSet
+	providerWidgetOverridesMu.RUnlock()
+
+	if !set {
+		return cfg
+	}
+
+	cfg.StandardSectionOrder = append([]core.DashboardStandardSection(nil), sections...)
+	return cfg
 }

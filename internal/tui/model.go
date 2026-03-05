@@ -119,17 +119,20 @@ type Model struct {
 	appUpdateLatest   string
 	appUpdateHint     string
 
-	providerOrder       []string
-	providerEnabled     map[string]bool
-	accountProviders    map[string]string
-	showSettingsModal   bool
-	settingsModalTab    settingsModalTab
-	settingsCursor      int
-	settingsBodyOffset  int
-	settingsThemeCursor int
-	settingsViewCursor  int
-	settingsStatus      string
-	integrationStatuses []integrations.Status
+	providerOrder            []string
+	providerEnabled          map[string]bool
+	accountProviders         map[string]string
+	showSettingsModal        bool
+	settingsModalTab         settingsModalTab
+	settingsCursor           int
+	settingsBodyOffset       int
+	settingsThemeCursor      int
+	settingsViewCursor       int
+	settingsSectionRowCursor int
+	settingsStatus           string
+	integrationStatuses      []integrations.Status
+
+	widgetSections []config.DashboardWidgetSection
 
 	apiKeyEditing       bool
 	apiKeyInput         string
@@ -195,6 +198,9 @@ type dashboardPrefsPersistedMsg struct {
 type dashboardViewPersistedMsg struct {
 	err error
 }
+type dashboardWidgetSectionsPersistedMsg struct {
+	err error
+}
 type timeWindowPersistedMsg struct {
 	err error
 }
@@ -250,6 +256,17 @@ func (m Model) persistDashboardViewCmd() tea.Cmd {
 			log.Printf("dashboard view persist: %v", err)
 		}
 		return dashboardViewPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
+	sections := m.dashboardWidgetSectionConfigEntries()
+	return func() tea.Msg {
+		err := config.SaveDashboardWidgetSections(sections)
+		if err != nil {
+			log.Printf("dashboard widget sections persist: %v", err)
+		}
+		return dashboardWidgetSectionsPersistedMsg{err: err}
 	}
 }
 
@@ -402,6 +419,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsStatus = "view save failed"
 		} else {
 			m.settingsStatus = "view saved"
+		}
+		return m, nil
+
+	case dashboardWidgetSectionsPersistedMsg:
+		if msg.err != nil {
+			m.settingsStatus = "section save failed"
+		} else {
+			m.settingsStatus = "sections saved"
 		}
 		return m, nil
 
@@ -2349,6 +2374,7 @@ func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accoun
 	}
 
 	m.providerOrder = order
+	m.setWidgetSections(dashboardCfg.WidgetSections)
 }
 
 func (m *Model) ensureSnapshotProvidersKnown() {
@@ -2388,6 +2414,94 @@ func (m Model) settingsIDs() []string {
 	ids := make([]string, len(m.providerOrder))
 	copy(ids, m.providerOrder)
 	return ids
+}
+
+func (m *Model) setWidgetSections(entries []config.DashboardWidgetSection) {
+	m.widgetSections = normalizeWidgetSectionEntries(entries)
+	m.applyWidgetSectionOverrides()
+}
+
+func normalizeWidgetSectionEntries(entries []config.DashboardWidgetSection) []config.DashboardWidgetSection {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	out := make([]config.DashboardWidgetSection, 0, len(entries))
+	seen := make(map[core.DashboardStandardSection]bool, len(entries))
+	for _, entry := range entries {
+		sectionID := core.DashboardStandardSection(strings.ToLower(strings.TrimSpace(string(entry.ID))))
+		if sectionID == core.DashboardSectionHeader || !core.IsKnownDashboardStandardSection(sectionID) || seen[sectionID] {
+			continue
+		}
+		out = append(out, config.DashboardWidgetSection{
+			ID:      sectionID,
+			Enabled: entry.Enabled,
+		})
+		seen[sectionID] = true
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (m *Model) applyWidgetSectionOverrides() {
+	if len(m.widgetSections) == 0 {
+		setDashboardWidgetSectionOverrides(nil)
+		return
+	}
+	visible := make([]core.DashboardStandardSection, 0, len(m.widgetSections))
+	for _, entry := range m.widgetSections {
+		if !entry.Enabled {
+			continue
+		}
+		visible = append(visible, entry.ID)
+	}
+	setDashboardWidgetSectionOverrides(visible)
+}
+
+func (m Model) defaultWidgetSectionEntries() []config.DashboardWidgetSection {
+	ordered := make([]core.DashboardStandardSection, 0, len(core.DashboardStandardSections()))
+	for _, section := range core.DashboardStandardSections() {
+		if section == core.DashboardSectionHeader {
+			continue
+		}
+		ordered = append(ordered, section)
+	}
+
+	entries := make([]config.DashboardWidgetSection, 0, len(ordered))
+	for _, section := range ordered {
+		entries = append(entries, config.DashboardWidgetSection{
+			ID:      section,
+			Enabled: true,
+		})
+	}
+	return entries
+}
+
+func (m Model) widgetSectionEntries() []config.DashboardWidgetSection {
+	if len(m.widgetSections) == 0 {
+		return m.defaultWidgetSectionEntries()
+	}
+	out := make([]config.DashboardWidgetSection, len(m.widgetSections))
+	copy(out, m.widgetSections)
+	return out
+}
+
+func (m *Model) setWidgetSectionEntries(entries []config.DashboardWidgetSection) {
+	normalized := normalizeWidgetSectionEntries(entries)
+	m.widgetSections = normalized
+	m.applyWidgetSectionOverrides()
+}
+
+func (m Model) dashboardWidgetSectionConfigEntries() []config.DashboardWidgetSection {
+	if len(m.widgetSections) == 0 {
+		return nil
+	}
+	out := make([]config.DashboardWidgetSection, len(m.widgetSections))
+	copy(out, m.widgetSections)
+	return out
 }
 
 func (m Model) telemetryUnmappedProviders() []string {

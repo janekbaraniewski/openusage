@@ -38,6 +38,28 @@
         "account_id": "openrouter",
         "enabled": false
       }
+    ],
+    "widget_sections": [
+      {
+        "id": "top_usage_progress",
+        "enabled": true
+      },
+      {
+        "id": "model_burn",
+        "enabled": true
+      },
+      {
+        "id": "client_burn",
+        "enabled": true
+      },
+      {
+        "id": "other_data",
+        "enabled": true
+      },
+      {
+        "id": "daily_usage",
+        "enabled": false
+      }
     ]
   },
   "auto_detect": true,

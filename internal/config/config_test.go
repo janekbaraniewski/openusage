@@ -557,6 +557,92 @@ func TestSaveDashboardViewTo(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_DashboardWidgetSections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	content := `{
+  "dashboard": {
+    "widget_sections": [
+      {"id": "top_usage_progress"},
+      {"id": "unknown_section", "enabled": true},
+      {"id": "header", "enabled": true},
+      {"id": "top_usage_progress", "enabled": false},
+      {"id": "other_data", "enabled": false},
+      {"id": "daily_usage", "enabled": true}
+    ]
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Dashboard.WidgetSections) != 3 {
+		t.Fatalf("widget_sections count = %d, want 3", len(cfg.Dashboard.WidgetSections))
+	}
+	if cfg.Dashboard.WidgetSections[0].ID != core.DashboardSectionTopUsageProgress || !cfg.Dashboard.WidgetSections[0].Enabled {
+		t.Fatalf("section[0] = %#v, want top_usage_progress enabled=true", cfg.Dashboard.WidgetSections[0])
+	}
+	if cfg.Dashboard.WidgetSections[1].ID != core.DashboardSectionOtherData || cfg.Dashboard.WidgetSections[1].Enabled {
+		t.Fatalf("section[1] = %#v, want other_data enabled=false", cfg.Dashboard.WidgetSections[1])
+	}
+	if cfg.Dashboard.WidgetSections[2].ID != core.DashboardSectionDailyUsage || !cfg.Dashboard.WidgetSections[2].Enabled {
+		t.Fatalf("section[2] = %#v, want daily_usage enabled=true", cfg.Dashboard.WidgetSections[2])
+	}
+}
+
+func TestSaveDashboardWidgetSectionsTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	cfg.Dashboard.View = DashboardViewSplit
+	cfg.Dashboard.Providers = []DashboardProviderConfig{
+		{AccountID: "openai-personal", Enabled: true},
+	}
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	sections := []DashboardWidgetSection{
+		{ID: core.DashboardSectionTopUsageProgress, Enabled: true},
+		{ID: core.DashboardSectionOtherData, Enabled: false},
+		{ID: core.DashboardStandardSection("unknown"), Enabled: true},
+		{ID: core.DashboardSectionHeader, Enabled: true},
+		{ID: core.DashboardSectionTopUsageProgress, Enabled: false},
+	}
+	if err := SaveDashboardWidgetSectionsTo(path, sections); err != nil {
+		t.Fatalf("SaveDashboardWidgetSectionsTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+	if loaded.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view should be preserved, got %q", loaded.Dashboard.View)
+	}
+	if len(loaded.Dashboard.Providers) != 1 || loaded.Dashboard.Providers[0].AccountID != "openai-personal" {
+		t.Errorf("dashboard.providers should be preserved, got %#v", loaded.Dashboard.Providers)
+	}
+	if len(loaded.Dashboard.WidgetSections) != 2 {
+		t.Fatalf("widget_sections count = %d, want 2", len(loaded.Dashboard.WidgetSections))
+	}
+	if loaded.Dashboard.WidgetSections[0].ID != core.DashboardSectionTopUsageProgress || !loaded.Dashboard.WidgetSections[0].Enabled {
+		t.Fatalf("section[0] = %#v, want top_usage_progress enabled=true", loaded.Dashboard.WidgetSections[0])
+	}
+	if loaded.Dashboard.WidgetSections[1].ID != core.DashboardSectionOtherData || loaded.Dashboard.WidgetSections[1].Enabled {
+		t.Fatalf("section[1] = %#v, want other_data enabled=false", loaded.Dashboard.WidgetSections[1])
+	}
+}
+
 func TestLoadFrom_DashboardViewTabs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"tabs"}}`), 0o644); err != nil {

@@ -56,3 +56,32 @@ func TestDashboardWidget_EffectiveStandardSectionOrderFiltersUnknownAndDuplicate
 		}
 	}
 }
+
+func TestDashboardStandardSections_ReturnsCanonicalOrderedCopy(t *testing.T) {
+	got := DashboardStandardSections()
+	want := DefaultDashboardWidget().EffectiveStandardSectionOrder()
+
+	if len(got) != len(want) {
+		t.Fatalf("section count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("section[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	got[0] = DashboardSectionOtherData
+	again := DashboardStandardSections()
+	if again[0] != DashboardSectionHeader {
+		t.Fatalf("DashboardStandardSections should return a copy; first = %q", again[0])
+	}
+}
+
+func TestIsKnownDashboardStandardSection(t *testing.T) {
+	if !IsKnownDashboardStandardSection(DashboardSectionTopUsageProgress) {
+		t.Fatal("expected top_usage_progress to be known")
+	}
+	if IsKnownDashboardStandardSection(DashboardStandardSection("nope")) {
+		t.Fatal("unexpected unknown section marked as known")
+	}
+}

@@ -1,6 +1,10 @@
 package providers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
+)
 
 func TestAllProviders_ContainsOpenCode(t *testing.T) {
 	all := AllProviders()
@@ -40,5 +44,41 @@ func TestTelemetrySourceBySystem_CaseInsensitive(t *testing.T) {
 	}
 	if source.System() != "codex" {
 		t.Fatalf("source.system = %q, want codex", source.System())
+	}
+}
+
+func TestAllProviders_HaveUniqueAndConsistentIDs(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, p := range AllProviders() {
+		id := p.ID()
+		if id == "" {
+			t.Fatalf("provider %T has empty ID", p)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate provider ID %q", id)
+		}
+		seen[id] = true
+
+		spec := p.Spec()
+		if spec.ID != "" && spec.ID != id {
+			t.Fatalf("provider %q spec.ID = %q, want %q", id, spec.ID, id)
+		}
+	}
+}
+
+func TestAllProviders_DashboardSectionsAreKnownAndUnique(t *testing.T) {
+	for _, p := range AllProviders() {
+		id := p.ID()
+		sections := p.DashboardWidget().EffectiveStandardSectionOrder()
+		seen := make(map[core.DashboardStandardSection]bool, len(sections))
+		for _, section := range sections {
+			if !core.IsKnownDashboardStandardSection(section) {
+				t.Fatalf("provider %q has unknown dashboard section %q", id, section)
+			}
+			if seen[section] {
+				t.Fatalf("provider %q has duplicate dashboard section %q", id, section)
+			}
+			seen[section] = true
+		}
 	}
 }

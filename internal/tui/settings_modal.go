@@ -14,6 +14,7 @@ type settingsModalTab int
 
 const (
 	settingsTabProviders settingsModalTab = iota
+	settingsTabWidgetSections
 	settingsTabTheme
 	settingsTabView
 	settingsTabAPIKeys
@@ -24,6 +25,7 @@ const (
 
 var settingsTabNames = []string{
 	"Providers",
+	"Widget Sections",
 	"Theme",
 	"View",
 	"API Keys",
@@ -42,6 +44,7 @@ func (m *Model) openSettingsModal() {
 	if len(m.providerOrder) > 0 {
 		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
 	}
+	m.settingsSectionRowCursor = 0
 	themes := AvailableThemes()
 	if len(themes) > 0 {
 		m.settingsThemeCursor = clamp(ActiveThemeIndex(), 0, len(themes)-1)
@@ -59,6 +62,7 @@ func (m *Model) closeSettingsModal() {
 	m.apiKeyInput = ""
 	m.apiKeyStatus = ""
 	m.settingsBodyOffset = 0
+	m.settingsSectionRowCursor = 0
 }
 
 func (m Model) settingsModalInfo() string {
@@ -160,6 +164,33 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rebuildSortedIDs()
 			m.settingsStatus = "saving settings..."
 			return m, m.persistDashboardPrefsCmd()
+		}
+	case settingsTabWidgetSections:
+		switch msg.String() {
+		case "up", "k":
+			if m.settingsSectionRowCursor > 0 {
+				m.settingsSectionRowCursor--
+			}
+		case "down", "j":
+			entries := m.widgetSectionEntries()
+			if m.settingsSectionRowCursor < len(entries)-1 {
+				m.settingsSectionRowCursor++
+			}
+		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
+			cmd := m.moveSelectedWidgetSection(-1)
+			if cmd != nil {
+				return m, cmd
+			}
+		case "J", "shift+j", "shift+down", "ctrl+down", "alt+down":
+			cmd := m.moveSelectedWidgetSection(1)
+			if cmd != nil {
+				return m, cmd
+			}
+		case " ", "enter":
+			cmd := m.toggleSelectedWidgetSection()
+			if cmd != nil {
+				return m, cmd
+			}
 		}
 	case settingsTabTheme:
 		themes := AvailableThemes()
@@ -332,12 +363,50 @@ func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {
 	return m.persistDashboardPrefsCmd()
 }
 
+func (m *Model) moveSelectedWidgetSection(delta int) tea.Cmd {
+	if m == nil || delta == 0 {
+		return nil
+	}
+	entries := m.widgetSectionEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+
+	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	target := cursor + delta
+	if target < 0 || target >= len(entries) {
+		return nil
+	}
+	entries[cursor], entries[target] = entries[target], entries[cursor]
+	m.settingsSectionRowCursor = target
+	m.setWidgetSectionEntries(entries)
+	m.settingsStatus = "saving sections..."
+	return m.persistDashboardWidgetSectionsCmd()
+}
+
+func (m *Model) toggleSelectedWidgetSection() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	entries := m.widgetSectionEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	entries[cursor].Enabled = !entries[cursor].Enabled
+	m.setWidgetSectionEntries(entries)
+	m.settingsStatus = "saving sections..."
+	return m.persistDashboardWidgetSectionsCmd()
+}
+
 func (m *Model) resetSettingsCursorForTab() {
 	switch m.settingsModalTab {
 	case settingsTabTelemetry:
 		m.settingsCursor = m.currentTimeWindowIndex()
 	case settingsTabView:
 		m.settingsViewCursor = dashboardViewIndex(m.configuredDashboardView())
+	case settingsTabWidgetSections:
+		m.settingsSectionRowCursor = 0
 	default:
 		m.settingsCursor = 0
 	}
@@ -425,6 +494,8 @@ func (m Model) settingsModalHint() string {
 	switch m.settingsModalTab {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
+	case settingsTabWidgetSections:
+		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
@@ -445,6 +516,8 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 	switch m.settingsModalTab {
 	case settingsTabProviders:
 		return m.renderSettingsProvidersBody(w, h)
+	case settingsTabWidgetSections:
+		return m.renderSettingsWidgetSectionsBody(w, h)
 	case settingsTabAPIKeys:
 		return m.renderSettingsAPIKeysBody(w, h)
 	case settingsTabView:
@@ -490,6 +563,54 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 		line := fmt.Sprintf("%s%s %2d. %s  %s", prefix, boxStyle.Render(box), i+1, id, dimStyle.Render(providerID))
+		lines = append(lines, line)
+	}
+
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
+	entries := m.widgetSectionEntries()
+	if len(entries) == 0 {
+		return padToSize(dimStyle.Render("No dashboard sections available."), w, h)
+	}
+
+	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	headerLines := 4
+	listHeight := h - headerLines
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(entries), cursor, listHeight)
+
+	visibleCount := 0
+	for _, entry := range entries {
+		if entry.Enabled {
+			visibleCount++
+		}
+	}
+
+	lines := make([]string, 0, h)
+	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Global Dashboard Widget Sections"))
+	lines = append(lines, dimStyle.Render("Applies to all provider widgets"))
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("%d/%d sections visible", visibleCount, len(entries))))
+	lines = append(lines, "")
+
+	for i := start; i < end; i++ {
+		entry := entries[i]
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+
+		box := "☐"
+		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		if entry.Enabled {
+			box = "☑"
+			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+		}
+
+		line := fmt.Sprintf("%s%s %2d. %s", prefix, boxStyle.Render(box), i+1, entry.ID)
 		lines = append(lines, line)
 	}
 

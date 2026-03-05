@@ -39,6 +39,11 @@ type DashboardProviderConfig struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+type DashboardWidgetSection struct {
+	ID      core.DashboardStandardSection `json:"id"`
+	Enabled bool                          `json:"enabled"`
+}
+
 const (
 	DashboardViewGrid    = "grid"
 	DashboardViewStacked = "stacked"
@@ -67,9 +72,29 @@ func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (s *DashboardWidgetSection) UnmarshalJSON(data []byte) error {
+	type rawDashboardWidgetSection struct {
+		ID      string `json:"id"`
+		Enabled *bool  `json:"enabled"`
+	}
+
+	var raw rawDashboardWidgetSection
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	s.ID = core.DashboardStandardSection(raw.ID)
+	s.Enabled = true
+	if raw.Enabled != nil {
+		s.Enabled = *raw.Enabled
+	}
+	return nil
+}
+
 type DashboardConfig struct {
-	Providers []DashboardProviderConfig `json:"providers"`
-	View      string                    `json:"view"`
+	Providers      []DashboardProviderConfig `json:"providers"`
+	View           string                    `json:"view"`
+	WidgetSections []DashboardWidgetSection  `json:"widget_sections,omitempty"`
 }
 
 type IntegrationState struct {
@@ -167,6 +192,7 @@ func LoadFrom(path string) (Config, error) {
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 	cfg.Dashboard.View = normalizeDashboardView(cfg.Dashboard.View)
+	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(cfg.Dashboard.WidgetSections)
 
 	return cfg, nil
 }
@@ -247,6 +273,39 @@ func normalizeDashboardView(view string) string {
 	}
 }
 
+func normalizeDashboardWidgetSections(in []DashboardWidgetSection) []DashboardWidgetSection {
+	if len(in) == 0 {
+		return nil
+	}
+	return normalizeDashboardWidgetSectionEntries(in)
+}
+
+func normalizeDashboardWidgetSectionEntries(in []DashboardWidgetSection) []DashboardWidgetSection {
+	if len(in) == 0 {
+		return nil
+	}
+
+	normalized := make([]DashboardWidgetSection, 0, len(in))
+	seenSections := make(map[core.DashboardStandardSection]bool, len(in))
+
+	for _, section := range in {
+		sectionID := core.DashboardStandardSection(strings.ToLower(strings.TrimSpace(string(section.ID))))
+		if sectionID == core.DashboardSectionHeader || !core.IsKnownDashboardStandardSection(sectionID) || seenSections[sectionID] {
+			continue
+		}
+		normalized = append(normalized, DashboardWidgetSection{
+			ID:      sectionID,
+			Enabled: section.Enabled,
+		})
+		seenSections[sectionID] = true
+	}
+
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
 // saveMu guards read-modify-write cycles on the config file.
 var saveMu sync.Mutex
 
@@ -320,6 +379,24 @@ func SaveDashboardViewTo(path string, view string) error {
 		cfg = DefaultConfig()
 	}
 	cfg.Dashboard.View = normalizeDashboardView(view)
+	return SaveTo(path, cfg)
+}
+
+// SaveDashboardWidgetSections persists dashboard widget section preferences
+// into the config file (read-modify-write).
+func SaveDashboardWidgetSections(sections []DashboardWidgetSection) error {
+	return SaveDashboardWidgetSectionsTo(ConfigPath(), sections)
+}
+
+func SaveDashboardWidgetSectionsTo(path string, sections []DashboardWidgetSection) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		cfg = DefaultConfig()
+	}
+	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(sections)
 	return SaveTo(path, cfg)
 }
 

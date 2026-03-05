@@ -143,6 +143,18 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 	}
 }
 
+// DashboardStandardSections returns the canonical dashboard section list
+// in the default render order.
+func DashboardStandardSections() []DashboardStandardSection {
+	return append([]DashboardStandardSection(nil), defaultDashboardSectionOrder()...)
+}
+
+// IsKnownDashboardStandardSection reports whether section is a supported
+// dashboard standard section identifier.
+func IsKnownDashboardStandardSection(section DashboardStandardSection) bool {
+	return isKnownDashboardSection(section)
+}
+
 type DashboardWidget struct {
 	DisplayStyle DashboardDisplayStyle
 	ResetStyle   DashboardResetStyle
