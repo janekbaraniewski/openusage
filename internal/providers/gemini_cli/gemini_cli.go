@@ -19,6 +19,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/samber/lo"
 )
 
@@ -594,12 +595,7 @@ func formatWindow(d time.Duration) string {
 	return fmt.Sprintf("%dm", minutes)
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
+func truncate(s string, maxLen int) string { return shared.Truncate(s, maxLen) }
 
 type quotaAggregationResult struct {
 	bucketCount   int
@@ -1942,18 +1938,7 @@ func inferGeminiLanguageFromPath(path string) string {
 	return ""
 }
 
-func formatTokenCount(value int) string {
-	switch {
-	case value >= 1_000_000_000:
-		return fmt.Sprintf("%.1fB", float64(value)/1_000_000_000)
-	case value >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
-	case value >= 1_000:
-		return fmt.Sprintf("%.1fK", float64(value)/1_000)
-	default:
-		return fmt.Sprintf("%d", value)
-	}
-}
+func formatTokenCount(value int) string { return shared.FormatTokenCount(value) }
 
 func usageDelta(current, previous tokenUsage) tokenUsage {
 	return tokenUsage{
