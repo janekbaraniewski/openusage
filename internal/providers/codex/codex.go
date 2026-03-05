@@ -1078,6 +1078,25 @@ func inferToolCallOutcome(output string) int {
 		}
 		return 2
 	}
+	if idx := strings.Index(lower, "exit code "); idx >= 0 {
+		rest := lower[idx+len("exit code "):]
+		n := 0
+		foundDigit := false
+		for _, r := range rest {
+			if r < '0' || r > '9' {
+				if foundDigit {
+					break
+				}
+				continue
+			}
+			foundDigit = true
+			n = n*10 + int(r-'0')
+		}
+		if !foundDigit || n == 0 {
+			return 1
+		}
+		return 2
+	}
 	if strings.Contains(lower, `"exit_code":`) && !strings.Contains(lower, `"exit_code":0`) {
 		return 2
 	}
@@ -1670,6 +1689,8 @@ func classifyClient(source, originator string) string {
 	org := strings.ToLower(strings.TrimSpace(originator))
 
 	switch {
+	case src == "openusage" || src == "codex":
+		return "CLI"
 	case strings.Contains(org, "desktop"):
 		return "Desktop App"
 	case strings.Contains(org, "exec") || src == "exec":

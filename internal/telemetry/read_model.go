@@ -73,6 +73,9 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	if err := configureSQLiteConnection(db); err != nil {
 		return snaps, fmt.Errorf("configure telemetry read model db: %w", err)
 	}
+	if err := repairLegacyProviderIDs(ctx, db); err != nil {
+		return snaps, fmt.Errorf("repair telemetry provider ids: %w", err)
+	}
 
 	merged, err := hydrateRootsFromLimitSnapshots(ctx, db, snaps)
 	if err != nil {
@@ -84,6 +87,39 @@ func ApplyCanonicalTelemetryViewWithOptions(
 		return snaps, err
 	}
 	return applyCanonicalUsageViewWithDB(ctx, db, merged, links, options.TimeWindowHours, options.TimeWindow)
+}
+
+func repairLegacyProviderIDs(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `
+		UPDATE usage_events
+		SET provider_id = 'codex'
+		WHERE LOWER(TRIM(provider_id)) = 'openai'
+		  AND LOWER(TRIM(agent_name)) = 'codex'
+		  AND raw_event_id IN (
+			SELECT raw_event_id
+			FROM usage_raw_events
+			WHERE LOWER(TRIM(source_system)) = 'codex'
+		  )
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `
+		UPDATE usage_events
+		SET account_id = 'codex-cli'
+		WHERE LOWER(TRIM(provider_id)) = 'codex'
+		  AND LOWER(TRIM(account_id)) = 'codex'
+		  AND LOWER(TRIM(agent_name)) = 'codex'
+		  AND raw_event_id IN (
+			SELECT raw_event_id
+			FROM usage_raw_events
+			WHERE LOWER(TRIM(source_system)) = 'codex'
+		  )
+	`)
+	return err
 }
 
 func hydrateRootsFromLimitSnapshots(ctx context.Context, db *sql.DB, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {

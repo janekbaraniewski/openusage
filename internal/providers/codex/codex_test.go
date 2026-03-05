@@ -687,6 +687,15 @@ func TestFetchBuildsModelAndClientUsageSplits(t *testing.T) {
 	}
 }
 
+func TestClassifyClient_NormalizesCodexWrapperSources(t *testing.T) {
+	if got := classifyClient("openusage", ""); got != "CLI" {
+		t.Fatalf("classifyClient(openusage) = %q, want CLI", got)
+	}
+	if got := classifyClient("codex", ""); got != "CLI" {
+		t.Fatalf("classifyClient(codex) = %q, want CLI", got)
+	}
+}
+
 func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsRoot := filepath.Join(tmpDir, "sessions")

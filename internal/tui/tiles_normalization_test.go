@@ -187,6 +187,50 @@ func TestCollectProviderClientMix_AggregatesSourceSeriesByClient(t *testing.T) {
 	}
 }
 
+func TestCollectProviderClientMix_IgnoresSourceSeriesWhenClientSeriesExists(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"client_cli_requests": {Used: float64Ptr(10), Unit: "requests"},
+		},
+		DailySeries: map[string][]core.TimePoint{
+			"usage_client_cli": {
+				{Date: "2026-03-04", Value: 4},
+				{Date: "2026-03-05", Value: 6},
+			},
+			"usage_source_openusage": {
+				{Date: "2026-03-04", Value: 40},
+				{Date: "2026-03-05", Value: 60},
+			},
+			"usage_source_codex": {
+				{Date: "2026-03-04", Value: 40},
+				{Date: "2026-03-05", Value: 60},
+			},
+		},
+	}
+
+	clients, _ := collectProviderClientMix(snap)
+
+	if _, ok := clientByName(clients, "openusage"); ok {
+		t.Fatalf("unexpected workspace-derived client bucket present: %+v", clients)
+	}
+	if _, ok := clientByName(clients, "codex"); ok {
+		t.Fatalf("unexpected source-system-derived client bucket present: %+v", clients)
+	}
+	cli, ok := clientByName(clients, "cli_agents")
+	if !ok {
+		t.Fatalf("missing canonical cli_agents client: %+v", clients)
+	}
+	if len(cli.series) != 2 {
+		t.Fatalf("cli_agents series length = %d, want 2", len(cli.series))
+	}
+	if cli.series[0].Date != "2026-03-04" || cli.series[0].Value != 4 {
+		t.Fatalf("unexpected cli_agents day1 point: %+v", cli.series[0])
+	}
+	if cli.series[1].Date != "2026-03-05" || cli.series[1].Value != 6 {
+		t.Fatalf("unexpected cli_agents day2 point: %+v", cli.series[1])
+	}
+}
+
 func TestCollectProviderClientMix_DoesNotDoubleCountRequestsTodayFallback(t *testing.T) {
 	snap := core.UsageSnapshot{
 		Metrics: map[string]core.Metric{

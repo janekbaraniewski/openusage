@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -555,6 +556,294 @@ func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissi
 	}
 	if _, ok := snap.Metrics["provider_qwen_cost_usd"]; ok {
 		t.Fatal("provider_qwen_cost_usd should not exist without explicit upstream provider")
+	}
+}
+
+func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Now().UTC().Add(-2 * time.Minute)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    occurredAt,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		AgentName:     "codex",
+		EventType:     EventTypeToolUsage,
+		SessionID:     "sess-codex-1",
+		ToolCallID:    "tool-ok-1",
+		ToolName:      "exec_command",
+		Requests:      int64Ptr(1),
+		Status:        EventStatusOK,
+	}); err != nil {
+		t.Fatalf("ingest ok tool event: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    occurredAt.Add(1 * time.Second),
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		AgentName:     "codex",
+		EventType:     EventTypeToolUsage,
+		SessionID:     "sess-codex-1",
+		ToolCallID:    "tool-err-1",
+		ToolName:      "mcp__gopls__go_workspace",
+		Requests:      int64Ptr(1),
+		Status:        EventStatusError,
+	}); err != nil {
+		t.Fatalf("ingest errored mcp tool event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["codex-cli"]
+
+	if got := metricUsed(snap.Metrics["tool_exec_command"]); got != 1 {
+		t.Fatalf("tool_exec_command = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["tool_mcp_gopls_go_workspace"]); got != 1 {
+		t.Fatalf("tool_mcp_gopls_go_workspace = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["tool_calls_total"]); got != 2 {
+		t.Fatalf("tool_calls_total = %v, want 2", got)
+	}
+	if got := metricUsed(snap.Metrics["tool_completed"]); got != 1 {
+		t.Fatalf("tool_completed = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["tool_errored"]); got != 1 {
+		t.Fatalf("tool_errored = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["tool_success_rate"]); got != 50 {
+		t.Fatalf("tool_success_rate = %v, want 50", got)
+	}
+
+	if got := metricUsed(snap.Metrics["mcp_calls_total"]); got != 1 {
+		t.Fatalf("mcp_calls_total = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["mcp_gopls_total"]); got != 1 {
+		t.Fatalf("mcp_gopls_total = %v, want 1", got)
+	}
+}
+
+func TestApplyCanonicalUsageView_SkipsProviderBurnMetricsForCodex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	occurredAt := time.Now().UTC()
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    occurredAt,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-codex-2",
+		MessageID:     "msg-1",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(10),
+		OutputTokens:  int64Ptr(5),
+		TotalTokens:   int64Ptr(15),
+		CostUSD:       float64Ptr(0.01),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"upstream_provider": "openai",
+		},
+	}); err != nil {
+		t.Fatalf("ingest codex message event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["codex-cli"]
+
+	for key := range snap.Metrics {
+		if strings.HasPrefix(key, "provider_") {
+			t.Fatalf("unexpected codex provider burn metric: %s", key)
+		}
+	}
+}
+
+func TestApplyCanonicalUsageView_DedupsCodexMessageUsageByTurnID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-dedup-1",
+		TurnID:        "turn-dedup-1",
+		MessageID:     "sess-dedup-1:101",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(10),
+		OutputTokens:  int64Ptr(5),
+		TotalTokens:   int64Ptr(15),
+		Requests:      int64Ptr(1),
+		Status:        EventStatusOK,
+	}); err != nil {
+		t.Fatalf("ingest first codex message event: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now.Add(1 * time.Second),
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-dedup-1",
+		TurnID:        "turn-dedup-1",
+		MessageID:     "sess-dedup-1:102",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(15),
+		OutputTokens:  int64Ptr(9),
+		TotalTokens:   int64Ptr(24),
+		Requests:      int64Ptr(1),
+		Status:        EventStatusOK,
+	}); err != nil {
+		t.Fatalf("ingest second codex message event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["codex-cli"]
+
+	if got := metricUsed(snap.Metrics["client_cli_requests"]); got != 1 {
+		t.Fatalf("client_cli_requests = %v, want 1 (deduped by turn_id)", got)
+	}
+	if got := metricUsed(snap.Metrics["window_requests"]); got != 1 {
+		t.Fatalf("window_requests = %v, want 1 (deduped by turn_id)", got)
+	}
+	if got := metricUsed(snap.Metrics["window_tokens"]); got != 24 {
+		t.Fatalf("window_tokens = %v, want 24 from the newest turn event", got)
+	}
+}
+
+func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-clients-1",
+		MessageID:     "msg-clients-1",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(10),
+		OutputTokens:  int64Ptr(5),
+		TotalTokens:   int64Ptr(15),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"client": "CLI",
+		},
+	}); err != nil {
+		t.Fatalf("ingest cli event: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now.Add(1 * time.Second),
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-clients-1",
+		MessageID:     "msg-clients-2",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(12),
+		OutputTokens:  int64Ptr(6),
+		TotalTokens:   int64Ptr(18),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"client": "Desktop App",
+		},
+	}); err != nil {
+		t.Fatalf("ingest desktop event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["codex-cli"]
+
+	if got := metricUsed(snap.Metrics["client_cli_requests"]); got != 1 {
+		t.Fatalf("client_cli_requests = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["client_desktop_app_requests"]); got != 1 {
+		t.Fatalf("client_desktop_app_requests = %v, want 1", got)
+	}
+	if _, ok := snap.Metrics["client_openusage_requests"]; ok {
+		t.Fatalf("unexpected workspace-derived client metric client_openusage_requests present")
 	}
 }
 

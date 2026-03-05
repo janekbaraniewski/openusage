@@ -307,3 +307,69 @@ func TestApplyCanonicalTelemetryView_UsesProviderLinksForCanonicalUsage(t *testi
 		t.Fatalf("unexpected telemetry_unmapped_providers = %q", gotDiag)
 	}
 }
+
+func TestApplyCanonicalTelemetryView_RepairsLegacyCodexProviderID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	input := int64(21)
+	total := int64(21)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Now().UTC(),
+		ProviderID:    "openai", // legacy misattribution from codex parser
+		AccountID:     "codex-cli",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-codex-fix-1",
+		MessageID:     "msg-codex-fix-1",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   &input,
+		TotalTokens:   &total,
+		Requests:      int64Ptr(1),
+	}); err != nil {
+		t.Fatalf("ingest legacy codex usage: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Now().UTC(),
+		ProviderID:    "codex",
+		AccountID:     "codex", // legacy account id before codex-cli normalization
+		AgentName:     "codex",
+		EventType:     EventTypeToolUsage,
+		SessionID:     "sess-codex-fix-1",
+		ToolCallID:    "tool-codex-fix-1",
+		ToolName:      "mcp__gopls__go_workspace",
+		Requests:      int64Ptr(1),
+		Status:        EventStatusOK,
+	}); err != nil {
+		t.Fatalf("ingest legacy codex tool usage: %v", err)
+	}
+
+	base := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	got, err := applyCanonicalTelemetryViewForTest(context.Background(), dbPath, base)
+	if err != nil {
+		t.Fatalf("apply canonical telemetry view: %v", err)
+	}
+
+	snap := got["codex-cli"]
+	if modelMetric, ok := snap.Metrics["model_gpt_5_codex_input_tokens"]; !ok || modelMetric.Used == nil || *modelMetric.Used != 21 {
+		t.Fatalf("missing codex usage metric after provider repair: %+v", modelMetric)
+	}
+	if toolMetric, ok := snap.Metrics["tool_mcp_gopls_go_workspace"]; !ok || toolMetric.Used == nil || *toolMetric.Used != 1 {
+		t.Fatalf("missing codex tool metric after account repair: %+v", toolMetric)
+	}
+}

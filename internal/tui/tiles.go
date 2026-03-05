@@ -3092,6 +3092,15 @@ func sourceAsClientBucket(source string) string {
 	return s
 }
 
+func canonicalClientBucket(name string) string {
+	bucket := sourceAsClientBucket(name)
+	switch bucket {
+	case "codex", "openusage":
+		return "cli_agents"
+	}
+	return bucket
+}
+
 // collectInterfaceAsClients builds clientMixEntry items from interface_ metrics
 // so the interface breakdown (composer, cli, human, tab) can be shown directly
 // in the client composition section instead of a separate panel.
@@ -3113,7 +3122,7 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 		if !strings.HasPrefix(key, "interface_") {
 			continue
 		}
-		name := strings.TrimPrefix(key, "interface_")
+		name := canonicalClientBucket(strings.TrimPrefix(key, "interface_"))
 		if name == "" {
 			continue
 		}
@@ -3128,7 +3137,7 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 		}
 		switch {
 		case strings.HasPrefix(key, "usage_client_"):
-			name := strings.TrimPrefix(key, "usage_client_")
+			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_client_"))
 			if name == "" {
 				continue
 			}
@@ -3138,7 +3147,7 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 			if source == "" {
 				continue
 			}
-			name := sourceAsClientBucket(source)
+			name := canonicalClientBucket(source)
 			mergeSeriesByDay(usageSeriesByName, name, points)
 		}
 	}
@@ -3465,6 +3474,7 @@ func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[st
 	usageSourceSeriesByClient := make(map[string]map[string]float64)
 	hasAllTimeRequests := make(map[string]bool)
 	requestsTodayFallback := make(map[string]float64)
+	hasAnyClientMetrics := false
 
 	for key, met := range snap.Metrics {
 		if met.Used == nil {
@@ -3475,6 +3485,8 @@ func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[st
 			if !ok {
 				continue
 			}
+			name = canonicalClientBucket(name)
+			hasAnyClientMetrics = true
 			client := ensure(name)
 			switch field {
 			case "total_tokens":
@@ -3501,7 +3513,7 @@ func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[st
 			if !ok {
 				continue
 			}
-			clientName := sourceAsClientBucket(sourceName)
+			clientName := canonicalClientBucket(sourceName)
 			client := ensure(clientName)
 			switch field {
 			case "requests":
@@ -3522,6 +3534,13 @@ func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[st
 			client.requests = value
 		}
 	}
+	hasAnyClientSeries := false
+	for key := range snap.DailySeries {
+		if strings.HasPrefix(key, "tokens_client_") || strings.HasPrefix(key, "usage_client_") {
+			hasAnyClientSeries = true
+			break
+		}
+	}
 
 	for key, points := range snap.DailySeries {
 		if len(points) == 0 {
@@ -3530,19 +3549,22 @@ func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[st
 
 		switch {
 		case strings.HasPrefix(key, "tokens_client_"):
-			name := strings.TrimPrefix(key, "tokens_client_")
+			name := canonicalClientBucket(strings.TrimPrefix(key, "tokens_client_"))
 			if name == "" {
 				continue
 			}
 			mergeSeriesByDay(tokenSeriesByClient, name, points)
 		case strings.HasPrefix(key, "usage_client_"):
-			name := strings.TrimPrefix(key, "usage_client_")
+			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_client_"))
 			if name == "" {
 				continue
 			}
 			mergeSeriesByDay(usageClientSeriesByClient, name, points)
 		case strings.HasPrefix(key, "usage_source_"):
-			name := sourceAsClientBucket(strings.TrimPrefix(key, "usage_source_"))
+			if hasAnyClientMetrics || hasAnyClientSeries {
+				continue
+			}
+			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_source_"))
 			if name == "" {
 				continue
 			}
