@@ -456,6 +456,77 @@ func TestSortToolMixEntries_BreaksTiesAlphabetically(t *testing.T) {
 	}
 }
 
+func TestBuildActualToolUsageLines_FiltersMCPToolNames(t *testing.T) {
+	snap := core.UsageSnapshot{
+		AccountID: "copilot",
+		Metrics: map[string]core.Metric{
+			"tool_view":                          {Used: float64Ptr(10), Unit: "calls"},
+			"tool_bash":                          {Used: float64Ptr(3), Unit: "calls"},
+			"tool_mcp_github_list_issues":        {Used: float64Ptr(4), Unit: "calls"},
+			"tool_github_mcp_server_get_commit":  {Used: float64Ptr(2), Unit: "calls"},
+			"tool_gopls_go_workspace_mcp":        {Used: float64Ptr(1), Unit: "calls"},
+			"tool_calls_total":                   {Used: float64Ptr(20), Unit: "calls"},
+			"tool_success_rate":                  {Used: float64Ptr(98), Unit: "%"},
+			"tool_github_mcp_server_list_issues": {Used: float64Ptr(5), Unit: "calls"},
+		},
+	}
+
+	lines, used := buildActualToolUsageLines(snap, 120, false)
+	joined := strings.Join(lines, "\n")
+
+	if !strings.Contains(joined, "13 calls") {
+		t.Fatalf("expected non-MCP total in heading, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "view") || !strings.Contains(joined, "bash") {
+		t.Fatalf("expected non-MCP tools to remain, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "github_mcp_server") || strings.Contains(joined, "mcp_github") || strings.Contains(joined, "_mcp") {
+		t.Fatalf("expected MCP tools to be excluded from tool usage, got:\n%s", joined)
+	}
+	for _, key := range []string{
+		"tool_mcp_github_list_issues",
+		"tool_github_mcp_server_get_commit",
+		"tool_gopls_go_workspace_mcp",
+		"tool_github_mcp_server_list_issues",
+	} {
+		if !used[key] {
+			t.Fatalf("expected key %q to be marked as consumed", key)
+		}
+	}
+}
+
+func TestBuildMCPUsageLines_ExpandedShowsHiddenFunctions(t *testing.T) {
+	snap := core.UsageSnapshot{
+		AccountID: "copilot",
+		Metrics: map[string]core.Metric{
+			"mcp_calls_total":              {Used: float64Ptr(11), Unit: "calls"},
+			"mcp_servers_active":           {Used: float64Ptr(1), Unit: "servers"},
+			"mcp_github_total":             {Used: float64Ptr(11), Unit: "calls"},
+			"mcp_github_get_file_contents": {Used: float64Ptr(2), Unit: "calls"},
+			"mcp_github_actions_list":      {Used: float64Ptr(2), Unit: "calls"},
+			"mcp_github_get_commit":        {Used: float64Ptr(2), Unit: "calls"},
+			"mcp_github_list_branches":     {Used: float64Ptr(2), Unit: "calls"},
+			"mcp_github_list_issues":       {Used: float64Ptr(2), Unit: "calls"},
+			"mcp_github_search_code":       {Used: float64Ptr(1), Unit: "calls"},
+		},
+	}
+
+	collapsed, _ := buildMCPUsageLines(snap, 120, false)
+	expanded, _ := buildMCPUsageLines(snap, 120, true)
+	collapsedJoined := strings.Join(collapsed, "\n")
+	expandedJoined := strings.Join(expanded, "\n")
+
+	if !strings.Contains(collapsedJoined, "+ 3 more (Ctrl+O)") {
+		t.Fatalf("collapsed MCP view should show expand hint, got:\n%s", collapsedJoined)
+	}
+	if strings.Contains(expandedJoined, "+ 3 more") {
+		t.Fatalf("expanded MCP view should show all functions, got:\n%s", expandedJoined)
+	}
+	if len(expanded) <= len(collapsed) {
+		t.Fatalf("expanded MCP view should contain more rows; collapsed=%d expanded=%d", len(collapsed), len(expanded))
+	}
+}
+
 func TestBuildModelColorMap_AssignsDistinctColorsForVisibleModels(t *testing.T) {
 	models := []modelMixEntry{
 		{name: "claude-opus"},

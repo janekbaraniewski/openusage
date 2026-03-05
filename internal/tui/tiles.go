@@ -587,7 +587,7 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var mcpUsageLines []string
 	var mcpUsageKeys map[string]bool
 	if widget.ShowMCPUsage {
-		mcpUsageLines, mcpUsageKeys = buildMCPUsageLines(snap, innerW)
+		mcpUsageLines, mcpUsageKeys = buildMCPUsageLines(snap, innerW, modelMixExpanded)
 		if len(mcpUsageLines) > 0 {
 			sectionsByID[core.DashboardSectionMCPUsage] = section{withSectionPadding(mcpUsageLines)}
 		}
@@ -3070,7 +3070,7 @@ func sourceAsClientBucket(source string) string {
 	}
 
 	switch s {
-	case "composer", "tab", "human", "vscode", "ide", "editor":
+	case "composer", "tab", "human", "vscode", "ide", "editor", "cursor":
 		return "ide"
 	case "cloud", "cloud_agent", "cloud_agents", "web", "web_agent", "background_agent":
 		return "cloud_agents"
@@ -3173,7 +3173,10 @@ func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[s
 		clients = append(clients, *entry)
 	}
 	sort.Slice(clients, func(i, j int) bool {
-		return clients[i].requests > clients[j].requests
+		if clients[i].requests != clients[j].requests {
+			return clients[i].requests > clients[j].requests
+		}
+		return clients[i].name < clients[j].name
 	})
 	return clients, usedKeys
 }
@@ -4595,7 +4598,7 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 			continue
 		}
 		// Skip MCP tools — they have their own dedicated section.
-		if strings.HasPrefix(name, "mcp_") {
+		if isMCPToolMetricName(name) {
 			usedKeys[key] = true
 			continue
 		}
@@ -4687,6 +4690,20 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 	return lines, usedKeys
 }
 
+func isMCPToolMetricName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "mcp_") {
+		return true
+	}
+	if strings.Contains(normalized, "_mcp_server_") || strings.Contains(normalized, "-mcp-server-") {
+		return true
+	}
+	return strings.HasSuffix(normalized, "_mcp")
+}
+
 // prettifyMCPServerName cleans up raw MCP server identifiers for display.
 // Strips common prefixes (claude_ai_, plugin_), suffixes (_mcp), deduplicates,
 // and title-cases the result.
@@ -4740,7 +4757,7 @@ func prettifyMCPName(s string) string {
 	return strings.Join(words, " ")
 }
 
-func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[string]bool) {
+func buildMCPUsageLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	usedKeys := make(map[string]bool)
 
 	type funcEntry struct {
@@ -4863,6 +4880,9 @@ func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[stri
 
 	// Show up to 6 servers with nested function breakdown.
 	displayLimit := 6
+	if expanded {
+		displayLimit = len(servers)
+	}
 	visible := servers
 	if len(visible) > displayLimit {
 		visible = visible[:displayLimit]
@@ -4878,6 +4898,9 @@ func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[stri
 
 		// Show top 3 functions per server, indented.
 		maxFuncs := 3
+		if expanded {
+			maxFuncs = len(srv.funcs)
+		}
 		if len(srv.funcs) < maxFuncs {
 			maxFuncs = len(srv.funcs)
 		}
@@ -4887,13 +4910,13 @@ func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[stri
 			fnValue := fmt.Sprintf("%s calls", shortCompact(fn.calls))
 			lines = append(lines, renderDotLeaderRow(fnLabel, fnValue, innerW))
 		}
-		if len(srv.funcs) > 3 {
-			lines = append(lines, dimStyle.Render(fmt.Sprintf("    + %d more", len(srv.funcs)-3)))
+		if !expanded && len(srv.funcs) > 3 {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("    + %d more (Ctrl+O)", len(srv.funcs)-3)))
 		}
 	}
 
-	if len(servers) > displayLimit {
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more servers", len(servers)-displayLimit)))
+	if !expanded && len(servers) > displayLimit {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more servers (Ctrl+O)", len(servers)-displayLimit)))
 	}
 
 	return lines, usedKeys
