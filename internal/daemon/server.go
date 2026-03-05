@@ -105,6 +105,9 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open daemon telemetry store: %w", err)
 	}
+	if err := store.RunMigrations(ctx); err != nil {
+		log.Printf("[daemon] warning: migrations failed: %v", err)
+	}
 
 	svc := &Service{
 		cfg:               cfg,
@@ -311,16 +314,20 @@ func (s *Service) computeReadModel(
 	ctx context.Context,
 	req ReadModelRequest,
 ) (map[string]core.UsageSnapshot, error) {
+	start := time.Now()
 	templates := ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	if len(templates) == 0 {
 		return map[string]core.UsageSnapshot{}, nil
 	}
 	tw := core.ParseTimeWindow(req.TimeWindow)
-	return telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
+	result, err := telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
 		ProviderLinks:   req.ProviderLinks,
 		TimeWindowHours: tw.Hours(),
 		TimeWindow:      req.TimeWindow,
 	})
+	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
+		time.Since(start).Milliseconds(), req.TimeWindow, len(req.Accounts), len(result))
+	return result, err
 }
 
 func (s *Service) refreshReadModelCacheAsync(
@@ -730,6 +737,16 @@ func (s *Service) pruneTelemetryOrphans(ctx context.Context) {
 	if removed > 0 {
 		s.infof("prune_orphan_raw_events", "removed=%d batch_size=%d", removed, pruneBatchSize)
 	}
+
+	// Opportunistically prune raw payloads older than 1 hour during each
+	// orphan cleanup cycle. This keeps the DB compact without waiting for
+	// the 6-hour retention loop.
+	payloadCtx, payloadCancel := context.WithTimeout(ctx, 4*time.Second)
+	defer payloadCancel()
+	pruned, pruneErr := s.store.PruneRawEventPayloads(payloadCtx, 1, pruneBatchSize)
+	if pruneErr == nil && pruned > 0 {
+		s.infof("prune_raw_payloads", "pruned=%d", pruned)
+	}
 }
 
 // --- Retention loop ---
@@ -787,6 +804,8 @@ func (s *Service) pruneOldData(ctx context.Context) {
 			s.infof("retention_orphan_prune", "removed=%d", orphaned)
 		}
 	}
+
+	// Payload pruning is handled by pruneTelemetryOrphans (runs every ~45s).
 }
 
 // --- Poll loop ---
@@ -1127,7 +1146,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	computeCtx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+	computeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
