@@ -961,7 +961,7 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", emptyLen))
 
 		pctStr := lipgloss.NewStyle().Foreground(item.Color).Render(fmt.Sprintf("%4.1f%%", pct))
-		countStr := dimStyle.Render(formatNumber(item.Value))
+		countStr := dimStyle.Render(formatNumber(item.Value) + " req")
 
 		sb.WriteString(fmt.Sprintf("  %s %s%s  %s  %s\n",
 			labelStyle.Width(labelW).Render(label),
@@ -1110,7 +1110,7 @@ func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
 		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
 		serverLabel := fmt.Sprintf("%s %d %s", colorDot, i+1, srv.name)
 		pct := srv.calls / totalCalls * 100
-		valueStr := fmt.Sprintf("%2.0f%% %.0f", pct, srv.calls)
+		valueStr := fmt.Sprintf("%2.0f%% %s calls", pct, shortCompact(srv.calls))
 		sb.WriteString(renderDotLeaderRow(serverLabel, valueStr, w-2))
 		sb.WriteString("\n")
 
@@ -1122,7 +1122,7 @@ func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
 		for j := 0; j < maxFuncs; j++ {
 			fn := srv.funcs[j]
 			fnLabel := "    " + fn.name
-			fnValue := fmt.Sprintf("%.0f", fn.calls)
+			fnValue := fmt.Sprintf("%s calls", shortCompact(fn.calls))
 			sb.WriteString(renderDotLeaderRow(fnLabel, fnValue, w-2))
 			sb.WriteString("\n")
 		}

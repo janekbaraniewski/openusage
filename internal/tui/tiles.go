@@ -4625,7 +4625,7 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 			label = label[:maxLabelLen-1] + "…"
 		}
 		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
-		valueStr := fmt.Sprintf("%2.0f%% %s", pct, shortCompact(tool.count))
+		valueStr := fmt.Sprintf("%2.0f%% %s calls", pct, shortCompact(tool.count))
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
 	}
 
@@ -4822,7 +4822,7 @@ func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[stri
 		toolColor := colorForTool(toolColors, srv.name)
 		colorDot := lipgloss.NewStyle().Foreground(toolColor).Render("■")
 		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, srv.name)
-		valueStr := fmt.Sprintf("%2.0f%% %s", pct, shortCompact(srv.calls))
+		valueStr := fmt.Sprintf("%2.0f%% %s calls", pct, shortCompact(srv.calls))
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
 
 		// Show top 3 functions per server, indented.
@@ -4833,7 +4833,7 @@ func buildMCPUsageLines(snap core.UsageSnapshot, innerW int) ([]string, map[stri
 		for j := 0; j < maxFuncs; j++ {
 			fn := srv.funcs[j]
 			fnLabel := "    " + fn.name
-			fnValue := fmt.Sprintf("%.0f", fn.calls)
+			fnValue := fmt.Sprintf("%s calls", shortCompact(fn.calls))
 			lines = append(lines, renderDotLeaderRow(fnLabel, fnValue, innerW))
 		}
 		if len(srv.funcs) > 3 {
