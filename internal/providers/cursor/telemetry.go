@@ -337,6 +337,10 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 // collectToolEvents extracts tool call data from bubbleId entries in the
 // state database. Each AI response bubble (type=2) may contain toolFormerData.
 func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+	// Pre-query composerData to build a map of conversationId → createdAt
+	// so tool events can be assigned meaningful timestamps.
+	sessionTimestamps := buildSessionTimestampMap(ctx, db)
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT key,
 		       json_extract(value, '$.toolFormerData.name'),
@@ -384,10 +388,20 @@ func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared
 			sessionID = conversationID.String
 		}
 
+		// Derive timestamp from the parent composer session's createdAt.
+		// If no matching session is found, use zero time so the telemetry
+		// store can handle it appropriately.
+		var occurredAt time.Time
+		if sessionID != "" {
+			if ts, ok := sessionTimestamps[sessionID]; ok {
+				occurredAt = ts
+			}
+		}
+
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
-			OccurredAt:    time.Now().UTC(),
+			OccurredAt:    occurredAt,
 			AccountID:     "",
 			SessionID:     sessionID,
 			ToolCallID:    toolCallID,
@@ -410,6 +424,44 @@ func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared
 	}
 
 	return out, rows.Err()
+}
+
+// buildSessionTimestampMap queries composerData entries from cursorDiskKV and
+// returns a map of sessionID (composerData key suffix) → createdAt time.
+// This is used to assign meaningful timestamps to tool events (bubbleId entries)
+// that reference a conversationId matching a composer session.
+func buildSessionTimestampMap(ctx context.Context, db *sql.DB) map[string]time.Time {
+	m := make(map[string]time.Time)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT key, json_extract(value, '$.createdAt')
+		FROM cursorDiskKV
+		WHERE key LIKE 'composerData:%'
+		  AND json_extract(value, '$.createdAt') IS NOT NULL`)
+	if err != nil {
+		return m
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return m
+		}
+		var (
+			key       string
+			createdAt sql.NullInt64
+		)
+		if err := rows.Scan(&key, &createdAt); err != nil {
+			continue
+		}
+		if !createdAt.Valid || createdAt.Int64 <= 0 {
+			continue
+		}
+		sessionID := strings.TrimPrefix(key, "composerData:")
+		m[sessionID] = shared.UnixAuto(createdAt.Int64)
+	}
+
+	return m
 }
 
 // appendCursorDedupEvents appends events to the output slice, deduplicating

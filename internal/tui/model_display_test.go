@@ -335,8 +335,8 @@ func TestComputeDisplayInfo_TodayApiCostBranchWithoutFiveHour(t *testing.T) {
 	if got.gaugePercent != -1 {
 		t.Fatalf("gaugePercent = %v, want -1 (no gauge)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "$55.57 today") {
-		t.Fatalf("summary = %q, want '$55.57 today'", got.summary)
+	if !strings.Contains(got.summary, "$55.57 1d") {
+		t.Fatalf("summary = %q, want '$55.57 1d'", got.summary)
 	}
 	if got.reason != "today_api_cost" {
 		t.Fatalf("reason = %q, want today_api_cost", got.reason)
@@ -370,8 +370,8 @@ func TestComputeDisplayInfo_BillingBlockFallbackClassifiesAsUsage(t *testing.T) 
 	if got.reason != "billing_block_fallback" {
 		t.Fatalf("reason = %q, want billing_block_fallback", got.reason)
 	}
-	if !strings.Contains(got.summary, "$161.85 today") {
-		t.Fatalf("summary = %q, want '$161.85 today'", got.summary)
+	if !strings.Contains(got.summary, "$161.85 1d") {
+		t.Fatalf("summary = %q, want '$161.85 1d'", got.summary)
 	}
 	if !strings.Contains(got.detail, "$94.93 5h block") {
 		t.Fatalf("detail = %q, want '$94.93 5h block'", got.detail)

@@ -1729,7 +1729,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 
 		var detailParts []string
 		if dc, ok2 := snap.Metrics["today_api_cost"]; ok2 && dc.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("~$%.2f today", *dc.Used))
+			tag := metricWindowTag(dc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f %s", *dc.Used, tag))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f", *dc.Used))
+			}
 		}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -1748,7 +1753,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 
 		var parts []string
 		if dc, ok2 := snap.Metrics["today_api_cost"]; ok2 && dc.Used != nil {
-			parts = append(parts, fmt.Sprintf("~$%.2f today", *dc.Used))
+			tag := metricWindowTag(dc)
+			if tag != "" {
+				parts = append(parts, fmt.Sprintf("~$%.2f %s", *dc.Used, tag))
+			} else {
+				parts = append(parts, fmt.Sprintf("~$%.2f", *dc.Used))
+			}
 		}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
@@ -1760,7 +1770,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 			detailParts = append(detailParts, fmt.Sprintf("~$%.2f 5h block", *bc.Used))
 		}
 		if wc, ok2 := snap.Metrics["7d_api_cost"]; ok2 && wc.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("~$%.2f/7d", *wc.Used))
+			tag := metricWindowTag(wc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f/%s", *wc.Used, tag))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f", *wc.Used))
+			}
 		}
 		if msgs, ok2 := snap.Metrics["messages_today"]; ok2 && msgs.Used != nil {
 			detailParts = append(detailParts, fmt.Sprintf("%.0f msgs", *msgs.Used))
@@ -1778,7 +1793,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		info.tagLabel = "Credits"
 		info.reason = "today_api_cost"
 		core.Tracef("[display] %s: branch=today_api_cost used=%.2f → tag=Credits", snap.ProviderID, *m.Used)
-		parts := []string{fmt.Sprintf("~$%.2f today", *m.Used)}
+		tag := metricWindowTag(m)
+		var costLabel string
+		if tag != "" {
+			costLabel = fmt.Sprintf("~$%.2f %s", *m.Used, tag)
+		} else {
+			costLabel = fmt.Sprintf("~$%.2f", *m.Used)
+		}
+		parts := []string{costLabel}
 		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
 			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
 		}
@@ -1789,7 +1811,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 			detailParts = append(detailParts, fmt.Sprintf("~$%.2f 5h block", *bc.Used))
 		}
 		if wc, ok2 := snap.Metrics["7d_api_cost"]; ok2 && wc.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("~$%.2f/7d", *wc.Used))
+			wcTag := metricWindowTag(wc)
+			if wcTag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f/%s", *wc.Used, wcTag))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("~$%.2f", *wc.Used))
+			}
 		}
 		if msgs, ok2 := snap.Metrics["messages_today"]; ok2 && msgs.Used != nil {
 			detailParts = append(detailParts, fmt.Sprintf("%.0f msgs", *msgs.Used))
@@ -1937,13 +1964,6 @@ func fallbackDisplayMetricKeys(metrics map[string]core.Metric) []string {
 // computeDetailedCreditsDisplayInfo renders a richer credits summary/detail view
 // for providers that expose both balance and usage dimensions.
 func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDisplayInfo) providerDisplayInfo {
-	metricUsed := func(key string) *float64 {
-		if m, ok := snap.Metrics[key]; ok && m.Used != nil {
-			return m.Used
-		}
-		return nil
-	}
-
 	// Prefer account-level purchased credits when available.
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
@@ -1958,17 +1978,35 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 		}
 
 		detailParts := []string{fmt.Sprintf("$%.2f remaining", *m.Remaining)}
-		switch {
-		case metricUsed("today_cost") != nil:
-			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("today_cost")))
-		case metricUsed("usage_daily") != nil:
-			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *metricUsed("usage_daily")))
+		if dc, ok2 := snap.Metrics["today_cost"]; ok2 && dc.Used != nil {
+			tag := metricWindowTag(dc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *dc.Used))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *dc.Used))
+			}
+		} else if dc, ok2 := snap.Metrics["usage_daily"]; ok2 && dc.Used != nil {
+			tag := metricWindowTag(dc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *dc.Used))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *dc.Used))
+			}
 		}
-		switch {
-		case metricUsed("7d_api_cost") != nil:
-			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("7d_api_cost")))
-		case metricUsed("usage_weekly") != nil:
-			detailParts = append(detailParts, fmt.Sprintf("week $%.2f", *metricUsed("usage_weekly")))
+		if wc, ok2 := snap.Metrics["7d_api_cost"]; ok2 && wc.Used != nil {
+			tag := metricWindowTag(wc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *wc.Used))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *wc.Used))
+			}
+		} else if wc, ok2 := snap.Metrics["usage_weekly"]; ok2 && wc.Used != nil {
+			tag := metricWindowTag(wc)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *wc.Used))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *wc.Used))
+			}
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))
@@ -1985,7 +2023,12 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 
 		var detailParts []string
 		if daily, ok := snap.Metrics["usage_daily"]; ok && daily.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("today $%.2f", *daily.Used))
+			tag := metricWindowTag(daily)
+			if tag != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%s $%.2f", tag, *daily.Used))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("$%.2f", *daily.Used))
+			}
 		}
 		if byok, ok := snap.Metrics["byok_daily"]; ok && byok.Used != nil && *byok.Used > 0 {
 			detailParts = append(detailParts, fmt.Sprintf("BYOK $%.2f", *byok.Used))
@@ -2028,6 +2071,16 @@ func windowActivityLine(snap core.UsageSnapshot, tw core.TimeWindow) string {
 		return ""
 	}
 	return strings.Join(parts, " · ") + " in " + tw.Label()
+}
+
+// metricWindowTag returns a short display label from a metric's Window field.
+// For example "1d" → "1d", "7d" → "7d", "30d" → "30d", "all" → "all", "" → "".
+func metricWindowTag(met core.Metric) string {
+	w := strings.TrimSpace(met.Window)
+	if w == "" {
+		return ""
+	}
+	return w
 }
 
 func bestMetricPercent(snap core.UsageSnapshot) float64 {

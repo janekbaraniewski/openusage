@@ -286,7 +286,7 @@ func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *tes
 	}
 }
 
-func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t *testing.T) {
+func TestApplyCanonicalUsageView_FallsBackToProviderScopeForAccountView(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
 	store, err := OpenStore(dbPath)
 	if err != nil {
@@ -332,14 +332,13 @@ func TestApplyCanonicalUsageView_DoesNotFallbackToProviderScopeForAccountView(t 
 	}
 
 	snap := merged["cursor-ide"]
-	if _, ok := snap.Metrics["client_opencode_requests"]; ok {
-		t.Fatalf("unexpected provider-scope fallback metric client_opencode_requests in account-scoped cursor view")
+	// With provider-scope fallback, telemetry data should now be applied when
+	// account-scoped query returns 0 events but provider-scoped data exists.
+	if _, ok := snap.Metrics["client_opencode_requests"]; !ok {
+		t.Fatalf("expected provider-scope fallback metric client_opencode_requests in cursor view")
 	}
-	if got := snap.Attributes["telemetry_view"]; got != "" {
-		t.Fatalf("telemetry_view = %q, want empty (no account-scoped canonical usage)", got)
-	}
-	if metric := snap.Metrics["total_ai_requests"]; metric.Used == nil || *metric.Used != 10 {
-		t.Fatalf("total_ai_requests changed unexpectedly: %+v", metric)
+	if got := snap.Attributes["telemetry_view"]; got != "canonical" {
+		t.Fatalf("telemetry_view = %q, want %q (provider-scope fallback should apply canonical view)", got, "canonical")
 	}
 }
 

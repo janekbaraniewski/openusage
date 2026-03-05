@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -260,6 +259,10 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		}
 	}
 
+	// Replace stale template ModelUsage with time-windowed records from
+	// telemetry. The template's ModelUsage represents the full billing cycle
+	// and would be misleading for shorter time windows.
+	snap.ModelUsage = nil
 	modelCostTotal := 0.0
 	for _, model := range agg.Models {
 		mk := sanitizeMetricID(model.Model)
@@ -271,11 +274,29 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: timeWindow}
 		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
 		modelCostTotal += model.CostUSD
+		snap.ModelUsage = append(snap.ModelUsage, core.ModelUsageRecord{
+			RawModelID:  model.Model,
+			RawSource:   "telemetry",
+			Window:      timeWindow,
+			InputTokens: float64Ptr(model.InputTokens),
+			OutputTokens: float64Ptr(model.OutputTokens),
+			CachedTokens: float64Ptr(model.CachedTokens),
+			ReasoningTokens: float64Ptr(model.Reasoning),
+			TotalTokens: float64Ptr(model.TotalTokens),
+			CostUSD:     float64Ptr(model.CostUSD),
+			Requests:    float64Ptr(model.Requests),
+		})
 	}
-	if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
-		uk := "model_unattributed"
-		snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
-		snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+	// Only compute unattributed model cost when we have windowed model data.
+	// When agg.Models is empty (no events in window), the authoritativeCost
+	// represents the full billing cycle — attributing it as "unattributed"
+	// would be misleading for the selected time range.
+	if len(agg.Models) > 0 {
+		if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
+			uk := "model_unattributed"
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
+			snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
+		}
 	}
 
 	providerCostTotal := 0.0
@@ -369,18 +390,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })
 	snap.DailySeries["analytics_requests"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Requests })
 	snap.DailySeries["analytics_tokens"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.Tokens })
-	todayCost, weekCost, monthCost := usageCostWindowsUTC(agg.Daily, time.Now().UTC())
-	if todayCost > 0 {
-		snap.Metrics["today_cost"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
-		snap.Metrics["usage_daily"] = core.Metric{Used: float64Ptr(todayCost), Unit: "USD", Window: "1d"}
-	}
-	if weekCost > 0 {
-		snap.Metrics["7d_api_cost"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
-		snap.Metrics["usage_weekly"] = core.Metric{Used: float64Ptr(weekCost), Unit: "USD", Window: "7d"}
-	}
-	if monthCost > 0 {
-		snap.Metrics["analytics_30d_cost"] = core.Metric{Used: float64Ptr(monthCost), Unit: "USD", Window: "30d"}
-	}
+	// Fixed-window cost metrics (7d_api_cost, 5h_block_cost, all_time_api_cost,
+	// usage_daily, usage_weekly) are preserved from the provider template — they
+	// come from the provider's Fetch() with real API data. We do NOT re-emit
+	// them here because agg.Daily is already filtered to the selected time
+	// window, so usageCostWindowsUTC would produce incorrect values (e.g.
+	// "7d cost" would equal "3d cost" when the user picks a 3-day window).
 
 	for model, series := range agg.ModelDaily {
 		snap.DailySeries["usage_model_"+sanitizeMetricID(model)] = series
@@ -1199,32 +1214,6 @@ func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float6
 	})
 }
 
-func usageCostWindowsUTC(daily []telemetryDayPoint, now time.Time) (today float64, week float64, month float64) {
-	if len(daily) == 0 {
-		return 0, 0, 0
-	}
-	utcNow := now.UTC()
-	todayKey := utcNow.Format("2006-01-02")
-	weekStartKey := utcNow.AddDate(0, 0, -6).Format("2006-01-02")
-	monthStartKey := utcNow.AddDate(0, 0, -29).Format("2006-01-02")
-
-	for _, row := range daily {
-		day := strings.TrimSpace(row.Day)
-		if day == "" {
-			continue
-		}
-		if day == todayKey {
-			today += row.CostUSD
-		}
-		if day >= weekStartKey && day <= todayKey {
-			week += row.CostUSD
-		}
-		if day >= monthStartKey && day <= todayKey {
-			month += row.CostUSD
-		}
-	}
-	return today, week, month
-}
 
 // isStaleActivityMetric returns true for metrics that are computed by the provider
 // with hardcoded time windows (today/7d/all-time) and should be replaced by
@@ -1241,11 +1230,17 @@ func isStaleActivityMetric(key string) bool {
 		"all_time_cache_read_tokens", "all_time_cache_create_tokens",
 		"all_time_cache_create_5m_tokens", "all_time_cache_create_1h_tokens",
 		"all_time_reasoning_tokens",
-		"today_api_cost", "5h_block_cost", "7d_api_cost", "all_time_api_cost",
+		"today_api_cost",
 		"burn_rate",
 		"composer_lines_added", "composer_lines_removed",
 		"composer_files_changed", "scored_commits", "total_prompts":
 		return true
+	}
+	// Fixed-window cost metrics from provider Fetch() are preserved —
+	// the telemetry view does NOT re-emit them (it only has windowed data).
+	switch key {
+	case "7d_api_cost", "all_time_api_cost", "5h_block_cost":
+		return false
 	}
 	// Prefixed tokens/cost metrics from providers.
 	if strings.HasPrefix(key, "tokens_today_") ||

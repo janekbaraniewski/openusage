@@ -149,7 +149,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				SessionID:     sessionID,
 				TurnID:        turnID,
 				MessageID:     messageID,
-				ProviderID:    "github",
+				ProviderID:    "copilot",
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
 				ModelRaw:      model,
@@ -159,8 +159,9 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				Requests:      shared.Int64Ptr(1),
 				Status:        shared.TelemetryStatusOK,
 				Payload: map[string]any{
-					"source_file": path,
-					"line":        lineNum + 1,
+					"source_file":       path,
+					"line":              lineNum + 1,
+					"upstream_provider": "github",
 				},
 			}
 

@@ -1003,6 +1003,7 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 
 	var segments []string
 	var used []string
+	seenLabels := map[string]bool{}
 	add := func(key string, met core.Metric) {
 		if len(segments) >= maxSegments {
 			return
@@ -1011,6 +1012,13 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 		if segment == "" {
 			return
 		}
+		// Deduplicate: if a previous segment already resolved to the same
+		// label (e.g. two metrics both showing "7d"), skip the later one.
+		resolvedLabel := resolvedCompactLabel(widget, key, met)
+		if seenLabels[resolvedLabel] {
+			return
+		}
+		seenLabels[resolvedLabel] = true
 		segments = append(segments, segment)
 		used = append(used, key)
 	}
@@ -1065,10 +1073,48 @@ func compactMetricSegment(widget core.DashboardWidget, key string, met core.Metr
 		return ""
 	}
 	label := compactMetricLabel(widget, key)
+	// When the metric carries a Window tag, replace any hardcoded time-window
+	// prefix in the label with the actual window value so labels stay in sync
+	// with the selected time range.
+	if w := strings.TrimSpace(met.Window); w != "" && label != "" {
+		label = replaceTimePrefix(label, w)
+	}
 	if label == "" {
 		return value
 	}
 	return label + " " + value
+}
+
+// resolvedCompactLabel returns the final label string that compactMetricSegment
+// would use for deduplication purposes (without the value part).
+func resolvedCompactLabel(widget core.DashboardWidget, key string, met core.Metric) string {
+	label := compactMetricLabel(widget, key)
+	if w := strings.TrimSpace(met.Window); w != "" && label != "" {
+		label = replaceTimePrefix(label, w)
+	}
+	return strings.ToLower(strings.TrimSpace(label))
+}
+
+// replaceTimePrefix swaps a hardcoded time prefix (today, 7d, 30d, all, 1d)
+// at the start of a label with the metric's actual window tag.
+func replaceTimePrefix(label, window string) string {
+	prefixes := []string{"today ", "7d ", "30d ", "1d ", "all "}
+	low := strings.ToLower(label)
+	for _, p := range prefixes {
+		if strings.HasPrefix(low, p) {
+			rest := label[len(p):]
+			if rest == "" {
+				return window
+			}
+			return window + " " + rest
+		}
+	}
+	// Exact match (label IS just the time tag, no suffix).
+	switch strings.ToLower(label) {
+	case "today", "7d", "30d", "1d", "all":
+		return window
+	}
+	return label
 }
 
 func compactMetricLabel(widget core.DashboardWidget, key string) string {

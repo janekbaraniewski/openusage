@@ -105,7 +105,8 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 			toolCallID := fmt.Sprintf("%s:msg%d:tc%d", sessionID, msgIdx, tcIdx)
 
 			payload := map[string]any{
-				"file": path,
+				"file":              path,
+				"upstream_provider": "google",
 			}
 			if tc.Args != nil {
 				for _, fp := range extractGeminiToolPaths(tc.Args) {
@@ -122,7 +123,7 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 				SessionID:     sessionID,
 				TurnID:        fmt.Sprintf("%s:msg%d", sessionID, msgIdx),
 				ToolCallID:    toolCallID,
-				ProviderID:    "google",
+				ProviderID:    "gemini_cli",
 				AgentName:     "gemini_cli",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      normalizeModelName(msg.Model),
@@ -165,7 +166,7 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 			SessionID:       sessionID,
 			TurnID:          turnID,
 			MessageID:       messageID,
-			ProviderID:      "google",
+			ProviderID:      "gemini_cli",
 			AgentName:       "gemini_cli",
 			EventType:       shared.TelemetryEventTypeMessageUsage,
 			ModelRaw:        normalizeModelName(msg.Model),
@@ -176,8 +177,9 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 			TotalTokens:     shared.Int64Ptr(int64(delta.TotalTokens)),
 			Status:          shared.TelemetryStatusOK,
 			Payload: map[string]any{
-				"file":       path,
-				"tool_tokens": delta.ToolTokens,
+				"file":              path,
+				"tool_tokens":       delta.ToolTokens,
+				"upstream_provider": "google",
 			},
 		})
 	}
