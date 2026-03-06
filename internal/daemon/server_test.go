@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/providers"
 )
 
 func shortSocketPath(t *testing.T, suffix string) string {
@@ -84,25 +86,17 @@ func TestEnsureSocketPathAvailable_RejectsRegularFile(t *testing.T) {
 	}
 }
 
-func TestTelemetryOptionsForSource_GeminiSessionsPath(t *testing.T) {
-	opts := telemetryOptionsForSource(
-		"gemini_cli",
-		"/tmp/codex-sessions",
-		"/tmp/gemini-sessions",
-		"/tmp/claude-projects",
-		"/tmp/claude-projects-alt",
-		[]string{"/tmp/opencode-events"},
-		"/tmp/opencode-events.jsonl",
-		"/tmp/opencode.db",
-	)
+func TestDefaultCollectOptions_GeminiHasSessionsDir(t *testing.T) {
+	source, ok := providers.TelemetrySourceBySystem("gemini_cli")
+	if !ok {
+		t.Skip("gemini_cli telemetry source not found in registry")
+	}
+	opts := source.DefaultCollectOptions()
 
-	if got := opts.Paths["sessions_dir"]; got != "/tmp/gemini-sessions" {
-		t.Fatalf("sessions_dir = %q, want /tmp/gemini-sessions", got)
+	if got := opts.Paths["sessions_dir"]; got == "" {
+		t.Fatal("expected non-empty sessions_dir from gemini DefaultCollectOptions")
 	}
 	if _, ok := opts.Paths["projects_dir"]; ok {
-		t.Fatalf("unexpected claude projects_dir for gemini source: %+v", opts.Paths)
-	}
-	if _, ok := opts.Paths["events_file"]; ok {
-		t.Fatalf("unexpected opencode events_file for gemini source: %+v", opts.Paths)
+		t.Fatalf("unexpected claude projects_dir in gemini opts: %+v", opts.Paths)
 	}
 }

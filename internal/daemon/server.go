@@ -26,14 +26,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
-const (
-	defaultCodexSessionsDir     = "~/.codex/sessions"
-	defaultGeminiSessionsDir    = "~/.gemini/tmp"
-	defaultClaudeProjectsDir    = "~/.claude/projects"
-	defaultClaudeProjectsAltDir = "~/.config/claude/projects"
-	defaultOpenCodeDBPath       = "~/.local/share/opencode/opencode.db"
-)
-
 type Service struct {
 	cfg Config
 
@@ -537,7 +529,7 @@ func (s *Service) processHookSpool(ctx context.Context, dir string) {
 
 		reqs, parseErr := telemetry.ParseSourceHookPayload(
 			source, raw.Payload,
-			defaultTelemetryOptionsForSource(raw.Source),
+			source.DefaultCollectOptions(),
 			strings.TrimSpace(raw.AccountID),
 		)
 		if parseErr != nil || len(reqs) == 0 {
@@ -1009,7 +1001,7 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := strings.TrimSpace(r.URL.Query().Get("account_id"))
-	reqs, err := telemetry.ParseSourceHookPayload(source, payload, defaultTelemetryOptionsForSource(sourceName), accountID)
+	reqs, err := telemetry.ParseSourceHookPayload(source, payload, source.DefaultCollectOptions(), accountID)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse hook payload: %v", err))
 		return
@@ -1129,8 +1121,7 @@ func buildCollectors() []telemetry.Collector {
 		if !ok {
 			continue
 		}
-		opts := defaultTelemetryOptionsForSource(source.System())
-		collectors = append(collectors, telemetry.NewSourceCollector(source, opts, ""))
+		collectors = append(collectors, telemetry.NewSourceCollector(source, source.DefaultCollectOptions(), ""))
 	}
 	return collectors
 }
@@ -1143,49 +1134,6 @@ func providersByID() map[string]core.UsageProvider {
 	return out
 }
 
-func defaultTelemetryOptionsForSource(sourceSystem string) shared.TelemetryCollectOptions {
-	return telemetryOptionsForSource(
-		sourceSystem,
-		defaultCodexSessionsDir,
-		defaultGeminiSessionsDir,
-		defaultClaudeProjectsDir,
-		defaultClaudeProjectsAltDir,
-		nil,
-		"",
-		defaultOpenCodeDBPath,
-	)
-}
-
-func telemetryOptionsForSource(
-	sourceSystem string,
-	codexSessions string,
-	geminiSessions string,
-	claudeProjects string,
-	claudeProjectsAlt string,
-	opencodeEventsDirs []string,
-	opencodeEventsFile string,
-	opencodeDB string,
-) shared.TelemetryCollectOptions {
-	opts := shared.TelemetryCollectOptions{
-		Paths:     map[string]string{},
-		PathLists: map[string][]string{},
-	}
-
-	switch sourceSystem {
-	case "codex":
-		opts.Paths["sessions_dir"] = codexSessions
-	case "gemini_cli":
-		opts.Paths["sessions_dir"] = geminiSessions
-	case "claude_code":
-		opts.Paths["projects_dir"] = claudeProjects
-		opts.Paths["alt_projects_dir"] = claudeProjectsAlt
-	case "opencode":
-		opts.Paths["events_file"] = opencodeEventsFile
-		opts.Paths["db_path"] = opencodeDB
-		opts.PathLists["events_dirs"] = opencodeEventsDirs
-	}
-	return opts
-}
 
 func FlushInBatches(ctx context.Context, pipeline *telemetry.Pipeline, maxTotal int) (telemetry.FlushResult, []string) {
 	var (
