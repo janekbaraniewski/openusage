@@ -61,11 +61,11 @@ type IngestRequest struct {
 	ProviderID          string        `json:"provider_id,omitempty"`
 	AccountID           string        `json:"account_id,omitempty"`
 
-	AgentName            string      `json:"agent_name,omitempty"`
-	EventType            EventType   `json:"event_type,omitempty"`
-	ModelRaw             string      `json:"model_raw,omitempty"`
-	ModelCanonical       string      `json:"model_canonical,omitempty"`
-	ModelLineageID       string      `json:"model_lineage_id,omitempty"`
+	AgentName      string    `json:"agent_name,omitempty"`
+	EventType      EventType `json:"event_type,omitempty"`
+	ModelRaw       string    `json:"model_raw,omitempty"`
+	ModelCanonical string    `json:"model_canonical,omitempty"`
+	ModelLineageID string    `json:"model_lineage_id,omitempty"`
 	core.TokenUsage
 	ToolName             string      `json:"tool_name,omitempty"`
 	Status               EventStatus `json:"status,omitempty"`
@@ -76,19 +76,19 @@ type IngestRequest struct {
 type CanonicalEvent struct {
 	EventID string `json:"event_id"`
 
-	OccurredAt           time.Time   `json:"occurred_at"`
-	ProviderID           string      `json:"provider_id,omitempty"`
-	AgentName            string      `json:"agent_name"`
-	AccountID            string      `json:"account_id,omitempty"`
-	WorkspaceID          string      `json:"workspace_id,omitempty"`
-	SessionID            string      `json:"session_id,omitempty"`
-	TurnID               string      `json:"turn_id,omitempty"`
-	MessageID            string      `json:"message_id,omitempty"`
-	ToolCallID           string      `json:"tool_call_id,omitempty"`
-	EventType            EventType   `json:"event_type"`
-	ModelRaw             string      `json:"model_raw,omitempty"`
-	ModelCanonical       string      `json:"model_canonical,omitempty"`
-	ModelLineageID       string      `json:"model_lineage_id,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+	ProviderID     string    `json:"provider_id,omitempty"`
+	AgentName      string    `json:"agent_name"`
+	AccountID      string    `json:"account_id,omitempty"`
+	WorkspaceID    string    `json:"workspace_id,omitempty"`
+	SessionID      string    `json:"session_id,omitempty"`
+	TurnID         string    `json:"turn_id,omitempty"`
+	MessageID      string    `json:"message_id,omitempty"`
+	ToolCallID     string    `json:"tool_call_id,omitempty"`
+	EventType      EventType `json:"event_type"`
+	ModelRaw       string    `json:"model_raw,omitempty"`
+	ModelCanonical string    `json:"model_canonical,omitempty"`
+	ModelLineageID string    `json:"model_lineage_id,omitempty"`
 	core.TokenUsage
 	ToolName             string      `json:"tool_name,omitempty"`
 	Status               EventStatus `json:"status"`

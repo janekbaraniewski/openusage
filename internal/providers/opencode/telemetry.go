@@ -712,7 +712,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			AgentName:  core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"agent"}), "opencode"),
 			EventType:  shared.TelemetryEventTypeToolUsage,
 			ModelRaw:   modelRaw,
-			ToolName: toolName,
+			ToolName:   toolName,
 			TokenUsage: core.TokenUsage{
 				Requests: core.Int64Ptr(1),
 			},

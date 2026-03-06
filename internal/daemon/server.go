@@ -1134,7 +1134,6 @@ func providersByID() map[string]core.UsageProvider {
 	return out
 }
 
-
 func FlushInBatches(ctx context.Context, pipeline *telemetry.Pipeline, maxTotal int) (telemetry.FlushResult, []string) {
 	var (
 		accum    telemetry.FlushResult
