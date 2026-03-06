@@ -38,8 +38,12 @@ func detectClaudeCode(result *Result) {
 			ID:       "claude-code",
 			Provider: "claude_code",
 			Auth:     "local",
-			Binary:   statsFile,
-			BaseURL:  accountFile,
+			Binary:   statsFile,  // compat fallback
+			BaseURL:  accountFile, // compat fallback
+			Paths: map[string]string{
+				"stats_cache":    statsFile,
+				"account_config": accountFile,
+			},
 		})
 	} else {
 		log.Printf("[detect] Claude Code found but no stats data at expected locations")

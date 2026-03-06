@@ -198,18 +198,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	trackingDBPath := ""
-	stateDBPath := ""
-	if acct.ExtraData != nil {
-		trackingDBPath = acct.ExtraData["tracking_db"]
-		stateDBPath = acct.ExtraData["state_db"]
-	}
-	if trackingDBPath == "" {
-		trackingDBPath = acct.Binary
-	}
-	if stateDBPath == "" {
-		stateDBPath = acct.BaseURL
-	}
+	trackingDBPath := acct.Path("tracking_db", acct.Binary)
+	stateDBPath := acct.Path("state_db", acct.BaseURL)
 
 	// If the token was not persisted (json:"-"), try to extract it fresh
 	// from the Cursor state DB so daemon polls can access the API.
@@ -699,7 +689,7 @@ func (p *Provider) callDashboardAPIWithBody(ctx context.Context, token, method s
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -723,7 +713,7 @@ func (p *Provider) callRESTAPI(ctx context.Context, token, path string, result i
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -746,7 +736,7 @@ func (p *Provider) doPost(ctx context.Context, token, url string, result interfa
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -867,7 +857,7 @@ func applyModelAggregations(snap *core.UsageSnapshot, aggregations []modelAggreg
 
 		if agg.TotalCents > 0 || inputTokens != "" || outputTokens != "" || cacheWriteTokens != "" || cacheReadTokens != "" {
 			applied = true
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 	}
 	return applied
@@ -1981,7 +1971,7 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 		if r, ok := modelRequests[model]; ok {
 			rec.Requests = core.Float64Ptr(float64(r))
 		}
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 	}
 
 	for mode, count := range modeSessions {

@@ -12,18 +12,50 @@ type AccountConfig struct {
 	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
-	// Binary is the path to a CLI binary for CLI-based providers (copilot, gemini_cli).
-	// For local-file providers it is repurposed as a data file path
-	// (e.g. cursor tracking DB, claude_code stats-cache.json).
+	// Binary stores a CLI binary path (copilot, gemini_cli) or a primary data
+	// file path (cursor tracking DB, claude_code stats-cache.json).
+	// Prefer using Paths for new providers.
 	Binary string `json:"binary,omitempty"`
 
-	// BaseURL is the custom API base URL for HTTP providers (openrouter, codex, ollama).
-	// For local-file providers it is repurposed as a secondary data file path
-	// (e.g. cursor state.vscdb, claude_code .claude.json).
+	// BaseURL stores an API base URL (openrouter, codex, ollama) or a secondary
+	// data file path (cursor state.vscdb, claude_code .claude.json).
+	// Prefer using Paths for new providers.
 	BaseURL string `json:"base_url,omitempty"`
+
+	// Paths holds named provider-specific paths/URLs, replacing the overloaded
+	// Binary and BaseURL fields. Keys are provider-defined (e.g. "tracking_db",
+	// "state_db", "stats_cache", "account_config").
+	Paths map[string]string `json:"paths,omitempty"`
 
 	Token     string            `json:"-"` // runtime-only: access token (never persisted)
 	ExtraData map[string]string `json:"-"` // runtime-only: extra detection data (never persisted)
+}
+
+// Path returns the named provider-specific path. It checks Paths first,
+// then ExtraData (for backward compat with detect), then the given fallback.
+func (c AccountConfig) Path(key, fallback string) string {
+	if c.Paths != nil {
+		if v, ok := c.Paths[key]; ok && v != "" {
+			return v
+		}
+	}
+	if c.ExtraData != nil {
+		if v, ok := c.ExtraData[key]; ok && v != "" {
+			return v
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return ""
+}
+
+// SetPath stores a named provider-specific path.
+func (c *AccountConfig) SetPath(key, value string) {
+	if c.Paths == nil {
+		c.Paths = make(map[string]string)
+	}
+	c.Paths[key] = value
 }
 
 func (c AccountConfig) ResolveAPIKey() string {

@@ -330,8 +330,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		home = filepath.Dir(claudeDir) // derive "home" from the override
 	}
 
-	statsPath := acct.Binary    // repurposed field — path to stats-cache.json
-	accountPath := acct.BaseURL // repurposed field — path to .claude.json
+	statsPath := acct.Path("stats_cache", acct.Binary)
+	accountPath := acct.Path("account_config", acct.BaseURL)
 
 	if accountPath == "" {
 		accountPath = filepath.Join(home, ".claude.json")
@@ -662,7 +662,7 @@ func (p *Provider) readStats(path string, snap *core.UsageSnapshot) error {
 		if usage.CostUSD > 0 {
 			rec.CostUSD = core.Float64Ptr(usage.CostUSD)
 		}
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 	}
 
 	if totalCostUSD > 0 {
