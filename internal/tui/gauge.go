@@ -222,34 +222,3 @@ func RenderShimmerGauge(width, frame int) string {
 
 	return b.String() + dimStyle.Render("   ···")
 }
-
-func RenderGradientGauge(percent float64, width int, colors []lipgloss.Color) string {
-	if width < 5 {
-		width = 5
-	}
-	if percent < 0 || len(colors) == 0 {
-		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
-	}
-	if percent > 100 {
-		percent = 100
-	}
-
-	filled := int(percent / 100 * float64(width))
-	empty := width - filled
-	if empty < 0 {
-		empty = 0
-	}
-
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-
-	var b strings.Builder
-	for i := 0; i < filled; i++ {
-		ci := i * len(colors) / (filled + 1)
-		if ci >= len(colors) {
-			ci = len(colors) - 1
-		}
-		b.WriteString(lipgloss.NewStyle().Foreground(colors[ci]).Render("█"))
-	}
-	b.WriteString(trackStyle.Render(strings.Repeat("░", empty)))
-	return b.String()
-}

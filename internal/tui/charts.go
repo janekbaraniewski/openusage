@@ -404,25 +404,6 @@ func (c *brailleCanvas) drawLine(x0, y0, x1, y1, seriesIdx int) {
 	}
 }
 
-func (c *brailleCanvas) fillBelow(seriesIdx int) {
-	for px := 0; px < c.pw; px++ {
-		topMost := -1
-		for py := 0; py < c.ph; py++ {
-			if c.grid[py*c.pw+px] == seriesIdx {
-				topMost = py
-				break
-			}
-		}
-		if topMost >= 0 {
-			for py := topMost; py < c.ph; py++ {
-				if c.grid[py*c.pw+px] < 0 {
-					c.grid[py*c.pw+px] = seriesIdx
-				}
-			}
-		}
-	}
-}
-
 func (c *brailleCanvas) render(colors []lipgloss.Color) []string {
 	lines := make([]string, c.ch)
 	for cy := 0; cy < c.ch; cy++ {

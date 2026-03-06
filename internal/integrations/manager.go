@@ -3,7 +3,6 @@ package integrations
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -133,33 +132,6 @@ func hasCommandHook(root map[string]any, eventName, commandNeedle string) bool {
 func stringOrEmpty(value any) string {
 	text, _ := value.(string)
 	return text
-}
-
-func entriesContainCommand(entries []any, command string) bool {
-	for _, entry := range entries {
-		entryMap, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		hooksList, ok := entryMap["hooks"].([]any)
-		if !ok {
-			continue
-		}
-		for _, hook := range hooksList {
-			hookMap, ok := hook.(map[string]any)
-			if !ok {
-				continue
-			}
-			if strings.TrimSpace(stringOrEmpty(hookMap["type"])) != "command" {
-				continue
-			}
-			cmd := strings.TrimSpace(stringOrEmpty(hookMap["command"]))
-			if cmd == command || strings.Contains(cmd, filepath.Base(command)) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func escapeForShellString(value string) string {

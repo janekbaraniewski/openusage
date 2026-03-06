@@ -317,13 +317,6 @@ func ProviderColor(providerID string) lipgloss.Color {
 	return modelColorPalette[h%len(modelColorPalette)]
 }
 
-func ModelColor(idx int) lipgloss.Color {
-	if idx < 0 {
-		idx = 0
-	}
-	return modelColorPalette[idx%len(modelColorPalette)]
-}
-
 func stableModelColor(modelName, providerID string) lipgloss.Color {
 	key := providerID + ":" + modelName
 	h := 0

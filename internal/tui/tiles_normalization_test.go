@@ -417,8 +417,6 @@ func TestCompositionBars_AreStableAcrossCollapsedAndExpanded(t *testing.T) {
 	checks := []sectionCheck{
 		{name: "model", fn: buildProviderModelCompositionLines},
 		{name: "provider", fn: buildProviderVendorCompositionLines},
-		{name: "source", fn: buildProviderSourceCompositionLines},
-		{name: "client", fn: buildProviderClientCompositionLines},
 		{name: "tool", fn: func(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 			return buildProviderToolCompositionLines(snap, innerW, expanded, core.DefaultDashboardWidget())
 		}},

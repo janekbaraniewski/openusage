@@ -148,8 +148,8 @@ type Model struct {
 
 	daemon daemonState
 
-	providerOrder   []string
-	providerEnabled map[string]bool
+	providerOrder    []string
+	providerEnabled  map[string]bool
 	accountProviders map[string]string
 
 	settings       settingsState
@@ -178,7 +178,7 @@ func NewModel(
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
-		daemon: daemonState{status: DaemonConnecting},
+		daemon:                daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
 	}
 
@@ -2249,10 +2249,6 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 	return info
 }
 
-func providerSummary(snap core.UsageSnapshot) string {
-	return computeDisplayInfo(snap, dashboardWidget(snap.ProviderID)).summary
-}
-
 // windowActivityLine returns a subtle summary of time-windowed telemetry activity.
 // Returns "" when there is no telemetry data for the current window.
 func windowActivityLine(snap core.UsageSnapshot, tw core.TimeWindow) string {
@@ -2280,32 +2276,6 @@ func metricWindowTag(met core.Metric) string {
 		return ""
 	}
 	return w
-}
-
-func bestMetricPercent(snap core.UsageSnapshot) float64 {
-	hasSpendLimit := false
-	if m, ok := snap.Metrics["spend_limit"]; ok && m.Limit != nil && *m.Limit > 0 {
-		hasSpendLimit = true
-	}
-
-	worstRemaining := float64(100)
-	found := false
-	for key, m := range snap.Metrics {
-		if hasSpendLimit && (key == "plan_percent_used" || key == "plan_spend") {
-			continue
-		}
-		p := m.Percent()
-		if p >= 0 {
-			found = true
-			if p < worstRemaining {
-				worstRemaining = p
-			}
-		}
-	}
-	if !found {
-		return -1
-	}
-	return 100 - worstRemaining
 }
 
 func (m Model) renderDetailPanel(w, h int) string {

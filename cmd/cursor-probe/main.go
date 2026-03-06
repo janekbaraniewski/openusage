@@ -118,16 +118,6 @@ func prettyJSON(data interface{}) string {
 	return string(b)
 }
 
-func formatDollars(cents float64) string {
-	return fmt.Sprintf("$%.2f", cents/100.0)
-}
-
-func formatTokens(s string) string {
-	s = strings.ReplaceAll(s, ",", "")
-	s = strings.ReplaceAll(s, "_", "")
-	return s
-}
-
 // ────────────────────── paths ──────────────────────
 
 func homeDir() string {
