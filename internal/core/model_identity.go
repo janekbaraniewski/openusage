@@ -97,31 +97,31 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 	switch family {
 	case "claude":
 		claude := canonicalizeClaude(tokens)
-		identity.Vendor = firstNonEmpty(identity.Vendor, "anthropic")
+		identity.Vendor = FirstNonEmpty(identity.Vendor, "anthropic")
 		identity.Family = "claude"
-		identity.Variant = firstNonEmpty(claude.variant, identity.Variant)
+		identity.Variant = FirstNonEmpty(claude.variant, identity.Variant)
 		identity.LineageID = identity.Vendor + "/" + claude.lineage
 		identity.Confidence = claude.confidence
 		identity.Reason = claude.reason
-		identity.Canonical = "anthropic/claude-" + firstNonEmpty(claude.variant, "unknown")
+		identity.Canonical = "anthropic/claude-" + FirstNonEmpty(claude.variant, "unknown")
 	case "gpt":
 		gpt := canonicalizeGPT(tokens)
-		identity.Vendor = firstNonEmpty(identity.Vendor, "openai")
+		identity.Vendor = FirstNonEmpty(identity.Vendor, "openai")
 		identity.Family = "gpt"
-		identity.Variant = firstNonEmpty(gpt.variant, identity.Variant)
+		identity.Variant = FirstNonEmpty(gpt.variant, identity.Variant)
 		identity.LineageID = identity.Vendor + "/" + gpt.lineage
 		identity.Confidence = gpt.confidence
 		identity.Reason = gpt.reason
-		identity.Canonical = "openai/gpt-" + firstNonEmpty(gpt.variant, "unknown")
+		identity.Canonical = "openai/gpt-" + FirstNonEmpty(gpt.variant, "unknown")
 	case "gemini":
 		gem := canonicalizeGemini(tokens)
-		identity.Vendor = firstNonEmpty(identity.Vendor, "google")
+		identity.Vendor = FirstNonEmpty(identity.Vendor, "google")
 		identity.Family = "gemini"
-		identity.Variant = firstNonEmpty(gem.variant, identity.Variant)
+		identity.Variant = FirstNonEmpty(gem.variant, identity.Variant)
 		identity.LineageID = identity.Vendor + "/" + gem.lineage
 		identity.Confidence = gem.confidence
 		identity.Reason = gem.reason
-		identity.Canonical = "google/gemini-" + firstNonEmpty(gem.variant, "unknown")
+		identity.Canonical = "google/gemini-" + FirstNonEmpty(gem.variant, "unknown")
 	default:
 		v := identity.Vendor
 		if v == "" {
@@ -494,10 +494,11 @@ func firstMatch(tokens []string, candidates ...string) string {
 	return ""
 }
 
-func firstNonEmpty(values ...string) string {
+// FirstNonEmpty returns the first non-blank string from values (trimmed).
+func FirstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
-			return v
+			return strings.TrimSpace(v)
 		}
 	}
 	return ""

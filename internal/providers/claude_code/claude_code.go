@@ -1347,7 +1347,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	if todayCostUSD > 0 {
 		snap.Metrics["today_api_cost"] = core.Metric{
-			Used:   floatPtr(todayCostUSD),
+			Used:   core.Float64Ptr(todayCostUSD),
 			Unit:   "USD",
 			Window: "since midnight",
 		}
@@ -1437,7 +1437,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	if weeklyCostUSD > 0 {
 		snap.Metrics["7d_api_cost"] = core.Metric{
-			Used:   floatPtr(weeklyCostUSD),
+			Used:   core.Float64Ptr(weeklyCostUSD),
 			Unit:   "USD",
 			Window: "rolling 7 days",
 		}
@@ -1543,7 +1543,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	if inCurrentBlock {
 		snap.Metrics["5h_block_cost"] = core.Metric{
-			Used:   floatPtr(blockCostUSD),
+			Used:   core.Float64Ptr(blockCostUSD),
 			Unit:   "USD",
 			Window: fmt.Sprintf("%s – %s", currentBlockStart.Format("15:04"), currentBlockEnd.Format("15:04")),
 		}
@@ -1596,7 +1596,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		if elapsed > time.Minute && blockCostUSD > 0 {
 			burnRate := blockCostUSD / elapsed.Hours()
 			snap.Metrics["burn_rate"] = core.Metric{
-				Used:   floatPtr(burnRate),
+				Used:   core.Float64Ptr(burnRate),
 				Unit:   "USD/h",
 				Window: "current 5h block",
 			}
@@ -1606,7 +1606,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	if allTimeCostUSD > 0 {
 		snap.Metrics["all_time_api_cost"] = core.Metric{
-			Used:   floatPtr(allTimeCostUSD),
+			Used:   core.Float64Ptr(allTimeCostUSD),
 			Unit:   "USD",
 			Window: "all-time estimate",
 		}
@@ -2158,9 +2158,6 @@ func sanitizeModelName(model string) string {
 	return out
 }
 
-func floatPtr(v float64) *float64 {
-	return &v
-}
 
 func setMetricMax(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	if value <= 0 {

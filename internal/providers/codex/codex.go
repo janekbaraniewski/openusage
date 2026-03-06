@@ -370,7 +370,7 @@ func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, 
 	req.Header.Set("Authorization", "Bearer "+auth.Tokens.AccessToken)
 	req.Header.Set("Accept", "application/json")
 
-	accountID := firstNonEmpty(auth.Tokens.AccountID, auth.AccountID)
+	accountID := core.FirstNonEmpty(auth.Tokens.AccountID, auth.AccountID)
 	if accountID == "" && acct.ExtraData != nil {
 		accountID = acct.ExtraData["account_id"]
 	}
@@ -455,7 +455,7 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApp
 func applyUsageAdditionalLimits(additional []usageAdditionalLimit, snap *core.UsageSnapshot) int {
 	applied := 0
 	for _, extra := range additional {
-		limitID := sanitizeMetricName(firstNonEmpty(extra.MeteredFeature, extra.LimitName))
+		limitID := sanitizeMetricName(core.FirstNonEmpty(extra.MeteredFeature, extra.LimitName))
 		if limitID == "" || limitID == "codex" {
 			continue
 		}
@@ -700,14 +700,6 @@ func usageURLForBase(baseURL string) string {
 	return baseURL + "/api/codex/usage"
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
 
 func truncateForError(value string, max int) string {
 	return shared.Truncate(strings.TrimSpace(value), max)

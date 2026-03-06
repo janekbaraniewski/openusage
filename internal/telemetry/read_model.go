@@ -202,8 +202,8 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 	}
 
 	s := core.UsageSnapshot{
-		ProviderID:  firstNonEmptyNonBlank(envelope.Snapshot.ProviderID, providerID),
-		AccountID:   firstNonEmptyNonBlank(envelope.Snapshot.AccountID, accountID),
+		ProviderID:  core.FirstNonEmpty(envelope.Snapshot.ProviderID, providerID),
+		AccountID:   core.FirstNonEmpty(envelope.Snapshot.AccountID, accountID),
 		Status:      mapCoreStatus(envelope.Snapshot.Status),
 		Message:     strings.TrimSpace(envelope.Snapshot.Message),
 		Metrics:     make(map[string]core.Metric, len(envelope.Snapshot.Metrics)),
@@ -239,8 +239,8 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 
 func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) core.UsageSnapshot {
 	merged := base
-	merged.ProviderID = firstNonEmptyNonBlank(root.ProviderID, merged.ProviderID)
-	merged.AccountID = firstNonEmptyNonBlank(root.AccountID, merged.AccountID)
+	merged.ProviderID = core.FirstNonEmpty(root.ProviderID, merged.ProviderID)
+	merged.AccountID = core.FirstNonEmpty(root.AccountID, merged.AccountID)
 	if !root.Timestamp.IsZero() {
 		merged.Timestamp = root.Timestamp
 	}

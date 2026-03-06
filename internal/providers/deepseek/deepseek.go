@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
@@ -147,36 +146,5 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 }
 
 func (p *Provider) fetchRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("creating models request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("models request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	for k, v := range parsers.RedactHeaders(resp.Header) {
-		snap.Raw[k] = v
-	}
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
-		return nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
-	}
-
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm", "requests", "1m",
-		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests")
-	parsers.ApplyRateLimitGroup(resp.Header, snap, "tpm", "tokens", "1m",
-		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
-
-	return nil
+	return shared.ProbeRateLimits(ctx, url, apiKey, snap)
 }

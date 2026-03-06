@@ -258,22 +258,22 @@ func TestUpdate_AppUpdateMsgStoresNotice(t *testing.T) {
 	if !ok {
 		t.Fatalf("updated model type = %T, want tui.Model", updated)
 	}
-	if got.appUpdateCurrent != "v0.4.0" {
-		t.Fatalf("appUpdateCurrent = %q, want v0.4.0", got.appUpdateCurrent)
+	if got.daemon.appUpdateCurrent != "v0.4.0" {
+		t.Fatalf("appUpdateCurrent = %q, want v0.4.0", got.daemon.appUpdateCurrent)
 	}
-	if got.appUpdateLatest != "v0.5.0" {
-		t.Fatalf("appUpdateLatest = %q, want v0.5.0", got.appUpdateLatest)
+	if got.daemon.appUpdateLatest != "v0.5.0" {
+		t.Fatalf("appUpdateLatest = %q, want v0.5.0", got.daemon.appUpdateLatest)
 	}
-	if got.appUpdateHint != "brew upgrade janekbaraniewski/tap/openusage" {
-		t.Fatalf("appUpdateHint = %q", got.appUpdateHint)
+	if got.daemon.appUpdateHint != "brew upgrade janekbaraniewski/tap/openusage" {
+		t.Fatalf("appUpdateHint = %q", got.daemon.appUpdateHint)
 	}
 }
 
 func TestRenderFooterStatusLine_ShowsAppUpdateWhenIdle(t *testing.T) {
 	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
-	m.appUpdateCurrent = "v0.4.0"
-	m.appUpdateLatest = "v0.5.0"
-	m.appUpdateHint = "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest"
+	m.daemon.appUpdateCurrent = "v0.4.0"
+	m.daemon.appUpdateLatest = "v0.5.0"
+	m.daemon.appUpdateHint = "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest"
 
 	line := m.renderFooterStatusLine(180)
 

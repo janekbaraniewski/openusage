@@ -40,7 +40,7 @@ func (b Base) Spec() core.ProviderSpec {
 
 func (b Base) DashboardWidget() core.DashboardWidget {
 	cfg := b.spec.Dashboard
-	if isZeroDashboardWidget(cfg) {
+	if cfg.IsZero() {
 		cfg = core.DefaultDashboardWidget()
 	}
 	return cfg
@@ -51,33 +51,6 @@ func (b Base) DetailWidget() core.DetailWidget {
 		return core.DefaultDetailWidget()
 	}
 	return b.spec.Detail
-}
-
-func isZeroDashboardWidget(w core.DashboardWidget) bool {
-	return w.DisplayStyle == "" &&
-		w.ResetStyle == "" &&
-		w.ColorRole == "" &&
-		!w.ShowClientComposition &&
-		!w.ShowToolComposition &&
-		w.APIKeyEnv == "" &&
-		w.DefaultAccountID == "" &&
-		w.ResetCompactThreshold == 0 &&
-		len(w.GaugePriority) == 0 &&
-		w.GaugeMaxLines == 0 &&
-		len(w.CompactRows) == 0 &&
-		len(w.RawGroups) == 0 &&
-		len(w.MetricLabelOverrides) == 0 &&
-		len(w.MetricGroupOverrides) == 0 &&
-		len(w.CompactMetricLabelOverrides) == 0 &&
-		len(w.HideMetricKeys) == 0 &&
-		len(w.HideMetricPrefixes) == 0 &&
-		!w.HideCreditsWhenBalancePresent &&
-		len(w.SuppressZeroMetricKeys) == 0 &&
-		!w.SuppressZeroNonUsageMetrics &&
-		len(w.StandardSectionOrder) == 0 &&
-		len(w.DataSpec.RequiredMetricKeys) == 0 &&
-		len(w.DataSpec.OptionalMetricKeys) == 0 &&
-		len(w.DataSpec.MetricPrefixes) == 0
 }
 
 type DashboardOption func(*core.DashboardWidget)

@@ -78,13 +78,49 @@ type daemonInstallResultMsg struct {
 	err error
 }
 
+// filterState is a reusable text filter for list views.
+type filterState struct {
+	text   string
+	active bool
+}
+
+// daemonState tracks daemon connection and app update status.
+type daemonState struct {
+	status      DaemonStatus
+	message     string
+	installing  bool
+	installDone bool // true after a successful install in this session
+
+	appUpdateCurrent string
+	appUpdateLatest  string
+	appUpdateHint    string
+}
+
+// settingsState tracks the settings modal state.
+type settingsState struct {
+	show              bool
+	tab               settingsModalTab
+	cursor            int
+	bodyOffset        int
+	themeCursor       int
+	viewCursor        int
+	sectionRowCursor  int
+	previewOffset     int
+	status            string
+	integrationStatus []integrations.Status
+
+	apiKeyEditing       bool
+	apiKeyInput         string
+	apiKeyEditAccountID string
+	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
+}
+
 type Model struct {
 	snapshots map[string]core.UsageSnapshot
 	sortedIDs []string
 	cursor    int
 	mode      viewMode
-	filter    string
-	filtering bool
+	filter    filterState
 	showHelp  bool
 	width     int
 	height    int
@@ -101,9 +137,8 @@ type Model struct {
 
 	dashboardView dashboardViewMode
 
-	analyticsFilter    string
-	analyticsFiltering bool
-	analyticsSortBy    int // 0=cost↓, 1=name↑, 2=tokens↓
+	analyticsFilter filterState
+	analyticsSortBy int // 0=cost↓, 1=name↑, 2=tokens↓
 
 	animFrame  int  // monotonically increasing frame counter
 	refreshing bool // true when a manual refresh is in progress
@@ -111,34 +146,14 @@ type Model struct {
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
-	daemonStatus      DaemonStatus
-	daemonMessage     string
-	daemonInstalling  bool
-	daemonInstallDone bool // true after a successful install in this session
-	appUpdateCurrent  string
-	appUpdateLatest   string
-	appUpdateHint     string
+	daemon daemonState
 
-	providerOrder            []string
-	providerEnabled          map[string]bool
-	accountProviders         map[string]string
-	showSettingsModal        bool
-	settingsModalTab         settingsModalTab
-	settingsCursor           int
-	settingsBodyOffset       int
-	settingsThemeCursor      int
-	settingsViewCursor       int
-	settingsSectionRowCursor int
-	settingsPreviewOffset    int
-	settingsStatus           string
-	integrationStatuses      []integrations.Status
+	providerOrder   []string
+	providerEnabled map[string]bool
+	accountProviders map[string]string
 
+	settings       settingsState
 	widgetSections []config.DashboardWidgetSection
-
-	apiKeyEditing       bool
-	apiKeyInput         string
-	apiKeyEditAccountID string
-	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 
 	timeWindow core.TimeWindow
 
@@ -163,7 +178,7 @@ func NewModel(
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
-		daemonStatus:          DaemonConnecting,
+		daemon: daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
 	}
 
@@ -357,27 +372,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DaemonStatusMsg:
-		m.daemonStatus = msg.Status
-		m.daemonMessage = msg.Message
+		m.daemon.status = msg.Status
+		m.daemon.message = msg.Message
 		if msg.Status == DaemonRunning {
-			m.daemonInstalling = false
+			m.daemon.installing = false
 		}
 		return m, nil
 
 	case AppUpdateMsg:
-		m.appUpdateCurrent = strings.TrimSpace(msg.CurrentVersion)
-		m.appUpdateLatest = strings.TrimSpace(msg.LatestVersion)
-		m.appUpdateHint = strings.TrimSpace(msg.UpgradeHint)
+		m.daemon.appUpdateCurrent = strings.TrimSpace(msg.CurrentVersion)
+		m.daemon.appUpdateLatest = strings.TrimSpace(msg.LatestVersion)
+		m.daemon.appUpdateHint = strings.TrimSpace(msg.UpgradeHint)
 		return m, nil
 
 	case daemonInstallResultMsg:
-		m.daemonInstalling = false
+		m.daemon.installing = false
 		if msg.err != nil {
-			m.daemonStatus = DaemonError
-			m.daemonMessage = msg.err.Error()
+			m.daemon.status = DaemonError
+			m.daemon.message = msg.err.Error()
 		} else {
-			m.daemonInstallDone = true
-			m.daemonStatus = DaemonStarting
+			m.daemon.installDone = true
+			m.daemon.status = DaemonStarting
 		}
 		return m, nil
 
@@ -392,7 +407,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshing = false
 		if len(msg) > 0 || snapshotsReady(msg) {
 			m.hasData = true
-			m.daemonStatus = DaemonRunning
+			m.daemon.status = DaemonRunning
 		}
 		// Stamp display decision into snapshot diagnostics for the Info tab.
 		for id, snap := range m.snapshots {
@@ -409,67 +424,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dashboardPrefsPersistedMsg:
 		if msg.err != nil {
-			m.settingsStatus = "save failed"
+			m.settings.status = "save failed"
 		} else {
-			m.settingsStatus = "saved"
+			m.settings.status = "saved"
 		}
 		return m, nil
 
 	case dashboardViewPersistedMsg:
 		if msg.err != nil {
-			m.settingsStatus = "view save failed"
+			m.settings.status = "view save failed"
 		} else {
-			m.settingsStatus = "view saved"
+			m.settings.status = "view saved"
 		}
 		return m, nil
 
 	case dashboardWidgetSectionsPersistedMsg:
 		if msg.err != nil {
-			m.settingsStatus = "section save failed"
+			m.settings.status = "section save failed"
 		} else {
-			m.settingsStatus = "sections saved"
+			m.settings.status = "sections saved"
 		}
 		return m, nil
 
 	case themePersistedMsg:
 		if msg.err != nil {
-			m.settingsStatus = "theme save failed"
+			m.settings.status = "theme save failed"
 		} else {
-			m.settingsStatus = "theme saved"
+			m.settings.status = "theme saved"
 		}
 		return m, nil
 
 	case timeWindowPersistedMsg:
 		if msg.err != nil {
-			m.settingsStatus = "time window save failed"
+			m.settings.status = "time window save failed"
 		} else {
-			m.settingsStatus = "time window saved"
+			m.settings.status = "time window saved"
 		}
 		return m, nil
 
 	case validateKeyResultMsg:
 		if msg.Valid {
-			m.apiKeyStatus = "valid ✓ — saving..."
-			return m, m.saveCredentialCmd(msg.AccountID, m.apiKeyInput)
+			m.settings.apiKeyStatus = "valid ✓ — saving..."
+			return m, m.saveCredentialCmd(msg.AccountID, m.settings.apiKeyInput)
 		}
-		m.apiKeyStatus = "invalid ✗"
+		m.settings.apiKeyStatus = "invalid ✗"
 		if msg.Error != "" {
 			errMsg := msg.Error
 			if len(errMsg) > 40 {
 				errMsg = errMsg[:37] + "..."
 			}
-			m.apiKeyStatus = "invalid: " + errMsg
+			m.settings.apiKeyStatus = "invalid: " + errMsg
 		}
 		return m, nil
 
 	case credentialSavedMsg:
 		if msg.Err != nil {
-			m.apiKeyStatus = "save failed"
+			m.settings.apiKeyStatus = "save failed"
 		} else {
-			m.apiKeyStatus = "saved ✓"
-			apiKey := m.apiKeyInput
-			m.apiKeyEditing = false
-			m.apiKeyInput = ""
+			m.settings.apiKeyStatus = "saved ✓"
+			apiKey := m.settings.apiKeyInput
+			m.settings.apiKeyEditing = false
+			m.settings.apiKeyInput = ""
 
 			// Register account with engine if callback is set
 			if m.onAddAccount != nil {
@@ -494,22 +509,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case credentialDeletedMsg:
 		if msg.Err != nil {
-			m.settingsStatus = "delete failed"
+			m.settings.status = "delete failed"
 		} else {
-			m.settingsStatus = "key deleted"
+			m.settings.status = "key deleted"
 		}
 		return m, nil
 
 	case integrationInstallResultMsg:
-		m.integrationStatuses = msg.Statuses
+		m.settings.integrationStatus = msg.Statuses
 		if msg.Err != nil {
 			errMsg := msg.Err.Error()
 			if len(errMsg) > 80 {
 				errMsg = errMsg[:77] + "..."
 			}
-			m.settingsStatus = "integration install failed: " + errMsg
+			m.settings.status = "integration install failed: " + errMsg
 		} else {
-			m.settingsStatus = "integration installed"
+			m.settings.status = "integration installed"
 		}
 		return m, nil
 
@@ -529,9 +544,9 @@ func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "enter":
-		if (m.daemonStatus == DaemonNotInstalled || m.daemonStatus == DaemonOutdated) && !m.daemonInstalling {
-			m.daemonInstalling = true
-			m.daemonMessage = "Setting up background helper..."
+		if (m.daemon.status == DaemonNotInstalled || m.daemon.status == DaemonOutdated) && !m.daemon.installing {
+			m.daemon.installing = true
+			m.daemon.message = "Setting up background helper..."
 			return m, m.installDaemonCmd()
 		}
 	}
@@ -539,13 +554,13 @@ func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.showSettingsModal {
+	if m.settings.show {
 		return m.handleSettingsMouse(msg)
 	}
 	if m.showHelp {
 		return m, nil
 	}
-	if m.filtering || m.analyticsFiltering {
+	if m.filter.active || m.analyticsFilter.active {
 		return m, nil
 	}
 	if msg.Action != tea.MouseActionPress {
@@ -621,7 +636,7 @@ func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
-	if m.settingsModalTab != settingsTabWidgetSections {
+	if m.settings.tab != settingsTabWidgetSections {
 		return m, nil
 	}
 
@@ -635,9 +650,9 @@ func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.settingsPreviewOffset += scroll
-	if m.settingsPreviewOffset < 0 {
-		m.settingsPreviewOffset = 0
+	m.settings.previewOffset += scroll
+	if m.settings.previewOffset < 0 {
+		m.settings.previewOffset = 0
 	}
 	return m, nil
 }
@@ -768,7 +783,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "?" && !m.filtering && !m.analyticsFiltering && !m.showSettingsModal {
+	if msg.String() == "?" && !m.filter.active && !m.analyticsFilter.active && !m.settings.show {
 		m.showHelp = !m.showHelp
 		return m, nil
 	}
@@ -777,11 +792,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.showSettingsModal {
+	if m.settings.show {
 		return m.handleSettingsModalKey(msg)
 	}
 
-	if !m.filtering && !m.analyticsFiltering {
+	if !m.filter.active && !m.analyticsFilter.active {
 		switch msg.String() {
 		case ",", "S":
 			m.openSettingsModal()
@@ -825,7 +840,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDashboardTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.filtering {
+	if m.filter.active {
 		return m.handleFilterKey(msg)
 	}
 	if m.mode == modeDetail {
@@ -838,7 +853,7 @@ func (m Model) handleDashboardTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.analyticsFiltering {
+	if m.analyticsFilter.active {
 		return m.handleAnalyticsFilterKey(msg)
 	}
 
@@ -848,11 +863,11 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.analyticsSortBy = (m.analyticsSortBy + 1) % analyticsSortCount
 	case "/":
-		m.analyticsFiltering = true
-		m.analyticsFilter = ""
+		m.analyticsFilter.active = true
+		m.analyticsFilter.text = ""
 	case "esc":
-		if m.analyticsFilter != "" {
-			m.analyticsFilter = ""
+		if m.analyticsFilter.text != "" {
+			m.analyticsFilter.text = ""
 		}
 	case "r":
 		m = m.requestRefresh()
@@ -863,17 +878,17 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.analyticsFiltering = false
+		m.analyticsFilter.active = false
 	case "esc":
-		m.analyticsFiltering = false
-		m.analyticsFilter = ""
+		m.analyticsFilter.active = false
+		m.analyticsFilter.text = ""
 	case "backspace":
-		if len(m.analyticsFilter) > 0 {
-			m.analyticsFilter = m.analyticsFilter[:len(m.analyticsFilter)-1]
+		if len(m.analyticsFilter.text) > 0 {
+			m.analyticsFilter.text = m.analyticsFilter.text[:len(m.analyticsFilter.text)-1]
 		}
 	default:
 		if len(msg.String()) == 1 {
-			m.analyticsFilter += msg.String()
+			m.analyticsFilter.text += msg.String()
 		}
 	}
 	return m, nil
@@ -939,8 +954,8 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeDetail
 		m.detailOffset = 0
 	case "/":
-		m.filtering = true
-		m.filter = ""
+		m.filter.active = true
+		m.filter.text = ""
 	case "r":
 		m = m.requestRefresh()
 	}
@@ -982,21 +997,21 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.filtering = false
+		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
 	case "esc":
-		m.filter = ""
-		m.filtering = false
+		m.filter.text = ""
+		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
 	case "backspace":
-		if len(m.filter) > 0 {
-			m.filter = m.filter[:len(m.filter)-1]
+		if len(m.filter.text) > 0 {
+			m.filter.text = m.filter.text[:len(m.filter.text)-1]
 		}
 	default:
 		if len(msg.String()) == 1 {
-			m.filter += msg.String()
+			m.filter.text += msg.String()
 		}
 	}
 	return m, nil
@@ -1056,11 +1071,11 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeDetail
 		m.detailOffset = 0
 	case "/":
-		m.filtering = true
-		m.filter = ""
+		m.filter.active = true
+		m.filter.text = ""
 	case "esc":
-		if m.filter != "" {
-			m.filter = ""
+		if m.filter.text != "" {
+			m.filter.text = ""
 			m.cursor = 0
 			m.tileOffset = 0
 		}
@@ -1191,7 +1206,7 @@ func (m Model) View() string {
 		return m.renderHelpOverlay(m.width, m.height)
 	}
 	view := m.renderDashboard()
-	if m.showSettingsModal {
+	if m.settings.show {
 		return m.renderSettingsModalOverlay()
 	}
 	return view
@@ -1285,28 +1300,28 @@ func (m Model) renderHeader(w int) string {
 
 	var info string
 
-	if m.showSettingsModal {
+	if m.settings.show {
 		info = m.settingsModalInfo()
 	} else {
 		switch m.screen {
 		case screenAnalytics:
 			info = dimStyle.Render("spend analysis")
-			if m.analyticsFilter != "" {
+			if m.analyticsFilter.text != "" {
 				info += " (filtered)"
 			}
 		default:
 			info = fmt.Sprintf("⊞ %d providers", len(ids))
-			if m.filter != "" {
+			if m.filter.text != "" {
 				info += " (filtered)"
 			}
 			info += " · " + m.dashboardViewStatusLabel()
 		}
 	}
-	if !m.showSettingsModal {
+	if !m.settings.show {
 		twLabel := m.timeWindow.Label()
 		info += " · " + twLabel
 	}
-	if !m.showSettingsModal && len(unmappedProviders) > 0 {
+	if !m.settings.show && len(unmappedProviders) > 0 {
 		info += " · detected additional providers, check settings"
 	}
 
@@ -1380,26 +1395,26 @@ func (m Model) renderFooterStatusLine(w int) string {
 	searchStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 
 	switch {
-	case m.showSettingsModal:
-		if m.settingsStatus != "" {
-			return " " + dimStyle.Render(m.settingsStatus)
+	case m.settings.show:
+		if m.settings.status != "" {
+			return " " + dimStyle.Render(m.settings.status)
 		}
 		return " " + helpStyle.Render("? help")
 	case m.screen == screenAnalytics:
-		if m.analyticsFiltering {
+		if m.analyticsFilter.active {
 			cursor := PulseChar("█", "▌", m.animFrame)
-			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.analyticsFilter+cursor)
+			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.analyticsFilter.text+cursor)
 		}
-		if m.analyticsFilter != "" {
-			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter)
+		if m.analyticsFilter.text != "" {
+			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter.text)
 		}
 	default:
-		if m.filtering {
+		if m.filter.active {
 			cursor := PulseChar("█", "▌", m.animFrame)
-			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.filter+cursor)
+			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.filter.text+cursor)
 		}
-		if m.filter != "" {
-			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter)
+		if m.filter.text != "" {
+			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter.text)
 		}
 		if m.activeDashboardView() == dashboardViewTabs && m.mode == modeList {
 			return " " + dimStyle.Render("tabs view · \u2190/\u2192 switch tab · PgUp/PgDn scroll widget · Enter detail")
@@ -1419,7 +1434,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 	}
 
 	if m.hasAppUpdateNotice() {
-		msg := "Update available: " + m.appUpdateCurrent + " -> " + m.appUpdateLatest
+		msg := "Update available: " + m.daemon.appUpdateCurrent + " -> " + m.daemon.appUpdateLatest
 		if action := m.appUpdateAction(); action != "" {
 			msg += " · " + action
 		}
@@ -1433,18 +1448,18 @@ func (m Model) renderFooterStatusLine(w int) string {
 }
 
 func (m Model) hasAppUpdateNotice() bool {
-	return strings.TrimSpace(m.appUpdateCurrent) != "" && strings.TrimSpace(m.appUpdateLatest) != ""
+	return strings.TrimSpace(m.daemon.appUpdateCurrent) != "" && strings.TrimSpace(m.daemon.appUpdateLatest) != ""
 }
 
 func (m Model) appUpdateHeadline() string {
 	if !m.hasAppUpdateNotice() {
 		return ""
 	}
-	return "OpenUsage update available: " + m.appUpdateCurrent + " -> " + m.appUpdateLatest
+	return "OpenUsage update available: " + m.daemon.appUpdateCurrent + " -> " + m.daemon.appUpdateLatest
 }
 
 func (m Model) appUpdateAction() string {
-	hint := strings.TrimSpace(m.appUpdateHint)
+	hint := strings.TrimSpace(m.daemon.appUpdateHint)
 	if hint == "" {
 		return ""
 	}
@@ -2595,7 +2610,7 @@ func (m Model) configuredProviderIDs() []string {
 
 func (m *Model) refreshIntegrationStatuses() {
 	manager := integrations.NewDefaultManager()
-	m.integrationStatuses = manager.ListStatuses()
+	m.settings.integrationStatus = manager.ListStatuses()
 }
 
 func (m Model) dashboardConfigProviders() []config.DashboardProviderConfig {
@@ -2658,10 +2673,10 @@ func (m *Model) rebuildSortedIDs() {
 }
 
 func (m Model) filteredIDs() []string {
-	if m.filter == "" {
+	if m.filter.text == "" {
 		return m.sortedIDs
 	}
-	lower := strings.ToLower(m.filter)
+	lower := strings.ToLower(m.filter.text)
 	return lo.Filter(m.sortedIDs, func(id string, _ int) bool {
 		snap := m.snapshots[id]
 		return strings.Contains(strings.ToLower(id), lower) ||

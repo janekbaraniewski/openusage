@@ -329,25 +329,25 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	modelCostTotal := 0.0
 	for _, model := range agg.Models {
 		mk := sanitizeMetricID(model.Model)
-		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: float64Ptr(model.InputTokens), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: float64Ptr(model.OutputTokens), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: float64Ptr(model.CachedTokens), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(model.Reasoning), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: float64Ptr(model.CostUSD), Unit: "USD", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: float64Ptr(model.Requests), Unit: "requests", Window: timeWindow}
-		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
+		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: core.Float64Ptr(model.InputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: core.Float64Ptr(model.OutputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: core.Float64Ptr(model.CachedTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: core.Float64Ptr(model.Reasoning), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: core.Float64Ptr(model.CostUSD), Unit: "USD", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: core.Float64Ptr(model.Requests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["model_"+mk+"_requests_today"] = core.Metric{Used: core.Float64Ptr(model.Requests1d), Unit: "requests", Window: "1d"}
 		modelCostTotal += model.CostUSD
 		snap.ModelUsage = append(snap.ModelUsage, core.ModelUsageRecord{
 			RawModelID:      model.Model,
 			RawSource:       "telemetry",
 			Window:          timeWindow,
-			InputTokens:     float64Ptr(model.InputTokens),
-			OutputTokens:    float64Ptr(model.OutputTokens),
-			CachedTokens:    float64Ptr(model.CachedTokens),
-			ReasoningTokens: float64Ptr(model.Reasoning),
-			TotalTokens:     float64Ptr(model.TotalTokens),
-			CostUSD:         float64Ptr(model.CostUSD),
-			Requests:        float64Ptr(model.Requests),
+			InputTokens:     core.Float64Ptr(model.InputTokens),
+			OutputTokens:    core.Float64Ptr(model.OutputTokens),
+			CachedTokens:    core.Float64Ptr(model.CachedTokens),
+			ReasoningTokens: core.Float64Ptr(model.Reasoning),
+			TotalTokens:     core.Float64Ptr(model.TotalTokens),
+			CostUSD:         core.Float64Ptr(model.CostUSD),
+			Requests:        core.Float64Ptr(model.Requests),
 		})
 	}
 	// When telemetry events lack cost attribution but the provider's API
@@ -368,7 +368,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		// it as "unattributed" would be misleading for the selected time range.
 		if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
 			uk := "model_unattributed"
-			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: core.Float64Ptr(delta), Unit: "USD", Window: timeWindow}
 			snap.SetDiagnostic("telemetry_unattributed_model_cost_usd", fmt.Sprintf("%.6f", delta))
 		}
 	}
@@ -377,15 +377,15 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		providerCostTotal := 0.0
 		for _, provider := range agg.Providers {
 			pk := sanitizeMetricID(provider.Provider)
-			snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: float64Ptr(provider.CostUSD), Unit: "USD", Window: timeWindow}
-			snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: float64Ptr(provider.Input), Unit: "tokens", Window: timeWindow}
-			snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: float64Ptr(provider.Output), Unit: "tokens", Window: timeWindow}
-			snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: float64Ptr(provider.Requests), Unit: "requests", Window: timeWindow}
+			snap.Metrics["provider_"+pk+"_cost_usd"] = core.Metric{Used: core.Float64Ptr(provider.CostUSD), Unit: "USD", Window: timeWindow}
+			snap.Metrics["provider_"+pk+"_input_tokens"] = core.Metric{Used: core.Float64Ptr(provider.Input), Unit: "tokens", Window: timeWindow}
+			snap.Metrics["provider_"+pk+"_output_tokens"] = core.Metric{Used: core.Float64Ptr(provider.Output), Unit: "tokens", Window: timeWindow}
+			snap.Metrics["provider_"+pk+"_requests"] = core.Metric{Used: core.Float64Ptr(provider.Requests), Unit: "requests", Window: timeWindow}
 			providerCostTotal += provider.CostUSD
 		}
 		if delta := authoritativeCost - providerCostTotal; authoritativeCost > 0 && delta > 0.000001 {
 			uk := "provider_unattributed"
-			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: float64Ptr(delta), Unit: "USD", Window: timeWindow}
+			snap.Metrics[uk+"_cost_usd"] = core.Metric{Used: core.Float64Ptr(delta), Unit: "USD", Window: timeWindow}
 			snap.SetDiagnostic("telemetry_unattributed_provider_cost_usd", fmt.Sprintf("%.6f", delta))
 		}
 	}
@@ -396,15 +396,15 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		// source_*_requests is intentionally omitted: client_*_requests covers the
 		// same data, and emitting both causes the TUI to double-count requests due
 		// to Go's random map iteration order.
-		snap.Metrics["source_"+sk+"_requests_today"] = core.Metric{Used: float64Ptr(source.Requests1d), Unit: "requests", Window: "1d"}
+		snap.Metrics["source_"+sk+"_requests_today"] = core.Metric{Used: core.Float64Ptr(source.Requests1d), Unit: "requests", Window: "1d"}
 
-		snap.Metrics["client_"+sk+"_total_tokens"] = core.Metric{Used: float64Ptr(source.Tokens), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_input_tokens"] = core.Metric{Used: float64Ptr(source.Input), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_output_tokens"] = core.Metric{Used: float64Ptr(source.Output), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_cached_tokens"] = core.Metric{Used: float64Ptr(source.Cached), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_reasoning_tokens"] = core.Metric{Used: float64Ptr(source.Reasoning), Unit: "tokens", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_requests"] = core.Metric{Used: float64Ptr(source.Requests), Unit: "requests", Window: timeWindow}
-		snap.Metrics["client_"+sk+"_sessions"] = core.Metric{Used: float64Ptr(source.Sessions), Unit: "sessions", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_total_tokens"] = core.Metric{Used: core.Float64Ptr(source.Tokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_input_tokens"] = core.Metric{Used: core.Float64Ptr(source.Input), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_output_tokens"] = core.Metric{Used: core.Float64Ptr(source.Output), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_cached_tokens"] = core.Metric{Used: core.Float64Ptr(source.Cached), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_reasoning_tokens"] = core.Metric{Used: core.Float64Ptr(source.Reasoning), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_requests"] = core.Metric{Used: core.Float64Ptr(source.Requests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["client_"+sk+"_sessions"] = core.Metric{Used: core.Float64Ptr(source.Sessions), Unit: "sessions", Window: timeWindow}
 	}
 
 	var totalToolCalls float64
@@ -413,81 +413,81 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	var totalToolCallsAborted float64
 	for _, tool := range agg.Tools {
 		tk := sanitizeMetricID(tool.Tool)
-		snap.Metrics["tool_"+tk] = core.Metric{Used: float64Ptr(tool.Calls), Unit: "calls", Window: timeWindow}
-		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
+		snap.Metrics["tool_"+tk] = core.Metric{Used: core.Float64Ptr(tool.Calls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_"+tk+"_today"] = core.Metric{Used: core.Float64Ptr(tool.Calls1d), Unit: "calls", Window: "1d"}
 		totalToolCalls += tool.Calls
 		totalToolCallsOK += tool.CallsOK
 		totalToolCallsError += tool.CallsError
 		totalToolCallsAborted += tool.CallsAborted
 	}
 	if totalToolCalls > 0 {
-		snap.Metrics["tool_calls_total"] = core.Metric{Used: float64Ptr(totalToolCalls), Unit: "calls", Window: timeWindow}
-		snap.Metrics["tool_completed"] = core.Metric{Used: float64Ptr(totalToolCallsOK), Unit: "calls", Window: timeWindow}
-		snap.Metrics["tool_errored"] = core.Metric{Used: float64Ptr(totalToolCallsError), Unit: "calls", Window: timeWindow}
-		snap.Metrics["tool_cancelled"] = core.Metric{Used: float64Ptr(totalToolCallsAborted), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_calls_total"] = core.Metric{Used: core.Float64Ptr(totalToolCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_completed"] = core.Metric{Used: core.Float64Ptr(totalToolCallsOK), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_errored"] = core.Metric{Used: core.Float64Ptr(totalToolCallsError), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_cancelled"] = core.Metric{Used: core.Float64Ptr(totalToolCallsAborted), Unit: "calls", Window: timeWindow}
 		successRate := 0.0
 		if totalToolCalls > 0 {
 			successRate = (totalToolCallsOK / totalToolCalls) * 100
 		}
-		snap.Metrics["tool_success_rate"] = core.Metric{Used: float64Ptr(successRate), Unit: "%", Window: timeWindow}
+		snap.Metrics["tool_success_rate"] = core.Metric{Used: core.Float64Ptr(successRate), Unit: "%", Window: timeWindow}
 	}
 
 	// MCP server metrics.
 	var mcpTotalCalls, mcpTotalCalls1d float64
 	for _, srv := range agg.MCPServers {
 		sk := sanitizeMetricID(srv.Server)
-		snap.Metrics["mcp_"+sk+"_total"] = core.Metric{Used: float64Ptr(srv.Calls), Unit: "calls", Window: timeWindow}
-		snap.Metrics["mcp_"+sk+"_total_today"] = core.Metric{Used: float64Ptr(srv.Calls1d), Unit: "calls", Window: "1d"}
+		snap.Metrics["mcp_"+sk+"_total"] = core.Metric{Used: core.Float64Ptr(srv.Calls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["mcp_"+sk+"_total_today"] = core.Metric{Used: core.Float64Ptr(srv.Calls1d), Unit: "calls", Window: "1d"}
 		mcpTotalCalls += srv.Calls
 		mcpTotalCalls1d += srv.Calls1d
 		for _, fn := range srv.Functions {
 			fk := sanitizeMetricID(fn.Function)
-			snap.Metrics["mcp_"+sk+"_"+fk] = core.Metric{Used: float64Ptr(fn.Calls), Unit: "calls", Window: timeWindow}
+			snap.Metrics["mcp_"+sk+"_"+fk] = core.Metric{Used: core.Float64Ptr(fn.Calls), Unit: "calls", Window: timeWindow}
 		}
 	}
 	if mcpTotalCalls > 0 {
-		snap.Metrics["mcp_calls_total"] = core.Metric{Used: float64Ptr(mcpTotalCalls), Unit: "calls", Window: timeWindow}
-		snap.Metrics["mcp_calls_total_today"] = core.Metric{Used: float64Ptr(mcpTotalCalls1d), Unit: "calls", Window: "1d"}
-		snap.Metrics["mcp_servers_active"] = core.Metric{Used: float64Ptr(float64(len(agg.MCPServers))), Unit: "servers", Window: timeWindow}
+		snap.Metrics["mcp_calls_total"] = core.Metric{Used: core.Float64Ptr(mcpTotalCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["mcp_calls_total_today"] = core.Metric{Used: core.Float64Ptr(mcpTotalCalls1d), Unit: "calls", Window: "1d"}
+		snap.Metrics["mcp_servers_active"] = core.Metric{Used: core.Float64Ptr(float64(len(agg.MCPServers))), Unit: "servers", Window: timeWindow}
 	}
 
 	for _, lang := range agg.Languages {
 		lk := sanitizeMetricID(lang.Language)
-		snap.Metrics["lang_"+lk] = core.Metric{Used: float64Ptr(lang.Requests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["lang_"+lk] = core.Metric{Used: core.Float64Ptr(lang.Requests), Unit: "requests", Window: timeWindow}
 	}
 
 	// Emit windowed activity metrics.
 	act := agg.Activity
 	if act.Messages > 0 {
-		snap.Metrics["messages_today"] = core.Metric{Used: float64Ptr(act.Messages), Unit: "messages", Window: timeWindow}
+		snap.Metrics["messages_today"] = core.Metric{Used: core.Float64Ptr(act.Messages), Unit: "messages", Window: timeWindow}
 	}
 	if act.Sessions > 0 {
-		snap.Metrics["sessions_today"] = core.Metric{Used: float64Ptr(act.Sessions), Unit: "sessions", Window: timeWindow}
+		snap.Metrics["sessions_today"] = core.Metric{Used: core.Float64Ptr(act.Sessions), Unit: "sessions", Window: timeWindow}
 	}
 	if act.ToolCalls > 0 {
-		snap.Metrics["tool_calls_today"] = core.Metric{Used: float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
-		snap.Metrics["7d_tool_calls"] = core.Metric{Used: float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["tool_calls_today"] = core.Metric{Used: core.Float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
+		snap.Metrics["7d_tool_calls"] = core.Metric{Used: core.Float64Ptr(act.ToolCalls), Unit: "calls", Window: timeWindow}
 	}
 	if act.InputTokens > 0 {
-		snap.Metrics["today_input_tokens"] = core.Metric{Used: float64Ptr(act.InputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["today_input_tokens"] = core.Metric{Used: core.Float64Ptr(act.InputTokens), Unit: "tokens", Window: timeWindow}
 	}
 	if act.OutputTokens > 0 {
-		snap.Metrics["today_output_tokens"] = core.Metric{Used: float64Ptr(act.OutputTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["today_output_tokens"] = core.Metric{Used: core.Float64Ptr(act.OutputTokens), Unit: "tokens", Window: timeWindow}
 	}
 	if act.TotalCost > 0 {
-		snap.Metrics["today_api_cost"] = core.Metric{Used: float64Ptr(act.TotalCost), Unit: "USD", Window: timeWindow}
+		snap.Metrics["today_api_cost"] = core.Metric{Used: core.Float64Ptr(act.TotalCost), Unit: "USD", Window: timeWindow}
 	}
 
 	// Emit windowed code stats.
 	cs := agg.CodeStats
 	if cs.FilesChanged > 0 {
-		snap.Metrics["composer_files_changed"] = core.Metric{Used: float64Ptr(cs.FilesChanged), Unit: "files", Window: timeWindow}
+		snap.Metrics["composer_files_changed"] = core.Metric{Used: core.Float64Ptr(cs.FilesChanged), Unit: "files", Window: timeWindow}
 	}
 	if cs.LinesAdded > 0 {
-		snap.Metrics["composer_lines_added"] = core.Metric{Used: float64Ptr(cs.LinesAdded), Unit: "lines", Window: timeWindow}
+		snap.Metrics["composer_lines_added"] = core.Metric{Used: core.Float64Ptr(cs.LinesAdded), Unit: "lines", Window: timeWindow}
 	}
 	if cs.LinesRemoved > 0 {
-		snap.Metrics["composer_lines_removed"] = core.Metric{Used: float64Ptr(cs.LinesRemoved), Unit: "lines", Window: timeWindow}
+		snap.Metrics["composer_lines_removed"] = core.Metric{Used: core.Float64Ptr(cs.LinesRemoved), Unit: "lines", Window: timeWindow}
 	}
 
 	// Emit window-level aggregate metrics for the TUI header/tile display.
@@ -498,13 +498,13 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		windowTokens += model.TotalTokens
 	}
 	if windowRequests > 0 {
-		snap.Metrics["window_requests"] = core.Metric{Used: float64Ptr(windowRequests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["window_requests"] = core.Metric{Used: core.Float64Ptr(windowRequests), Unit: "requests", Window: timeWindow}
 	}
 	if windowCost > 0 {
-		snap.Metrics["window_cost"] = core.Metric{Used: float64Ptr(windowCost), Unit: "USD", Window: timeWindow}
+		snap.Metrics["window_cost"] = core.Metric{Used: core.Float64Ptr(windowCost), Unit: "USD", Window: timeWindow}
 	}
 	if windowTokens > 0 {
-		snap.Metrics["window_tokens"] = core.Metric{Used: float64Ptr(windowTokens), Unit: "tokens", Window: timeWindow}
+		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowTokens), Unit: "tokens", Window: timeWindow}
 	}
 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(v telemetryDayPoint) float64 { return v.CostUSD })

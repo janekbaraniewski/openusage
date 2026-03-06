@@ -335,12 +335,12 @@ func (m Model) splashProgressLines() []string {
 	}
 
 	// Step 3+: Helper lifecycle — show accumulated progress.
-	switch m.daemonStatus {
+	switch m.daemon.status {
 	case DaemonConnecting:
 		lines = append(lines, spin("Connecting to background helper..."))
 
 	case DaemonNotInstalled:
-		if m.daemonInstalling {
+		if m.daemon.installing {
 			lines = append(lines, spin("Setting up background helper..."))
 		} else {
 			lines = append(lines, "")
@@ -352,7 +352,7 @@ func (m Model) splashProgressLines() []string {
 		}
 
 	case DaemonOutdated:
-		if m.daemonInstalling {
+		if m.daemon.installing {
 			lines = append(lines, spin("Updating background helper..."))
 		} else {
 			lines = append(lines, "  "+warn.Render("Background helper needs an update."))
@@ -361,18 +361,18 @@ func (m Model) splashProgressLines() []string {
 		}
 
 	case DaemonStarting:
-		if m.daemonInstallDone {
+		if m.daemon.installDone {
 			lines = append(lines, done("Background helper installed"))
 		}
 		lines = append(lines, spin("Starting background helper..."))
 
 	case DaemonError:
-		if m.daemonInstallDone {
+		if m.daemon.installDone {
 			lines = append(lines, done("Background helper installed"))
 		}
 		msg := "Could not connect to background helper."
-		if m.daemonMessage != "" {
-			msg = m.daemonMessage
+		if m.daemon.message != "" {
+			msg = m.daemon.message
 			if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
 				msg = msg[:idx]
 			}
@@ -385,7 +385,7 @@ func (m Model) splashProgressLines() []string {
 		lines = append(lines, "  "+dim.Render("If needed: openusage telemetry daemon install"))
 
 	default: // DaemonRunning or any other state.
-		if m.daemonInstallDone {
+		if m.daemon.installDone {
 			lines = append(lines, done("Background helper installed"))
 		}
 		lines = append(lines, done("Background helper running"))

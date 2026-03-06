@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -224,7 +225,7 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 		code, msg := parseAPIError(body)
 		if code != "" || msg != "" {
 			snap.Status = core.StatusError
-			snap.Message = fmt.Sprintf("models error (HTTP %d): %s", resp.StatusCode, firstNonEmpty(msg, code))
+			snap.Message = fmt.Sprintf("models error (HTTP %d): %s", resp.StatusCode, core.FirstNonEmpty(msg, code))
 			return nil
 		}
 		snap.Status = core.StatusError
@@ -246,7 +247,7 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 			return nil
 		}
 		snap.Status = core.StatusError
-		snap.Message = firstNonEmpty(payload.Error.Message, "models API returned an error")
+		snap.Message = core.FirstNonEmpty(payload.Error.Message, "models API returned an error")
 		return nil
 	}
 
@@ -298,7 +299,7 @@ func (p *Provider) fetchQuotaLimit(ctx context.Context, monitorBase, apiKey stri
 	if envelope.Error != nil && code == "" {
 		code = anyToString(envelope.Error.Code)
 	}
-	if isNoPackageCode(code, firstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
+	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
 		state.limited = true
 		state.noPackage = true
 		state.limitedReason = "Insufficient balance or no active coding package"
@@ -356,7 +357,7 @@ func (p *Provider) fetchModelUsage(ctx context.Context, monitorBase, apiKey stri
 	if envelope.Error != nil && code == "" {
 		code = anyToString(envelope.Error.Code)
 	}
-	if isNoPackageCode(code, firstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
+	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
 		state.noPackage = true
 		state.limited = true
 		state.limitedReason = "Insufficient balance or no active coding package"
@@ -409,7 +410,7 @@ func (p *Provider) fetchToolUsage(ctx context.Context, monitorBase, apiKey strin
 	if envelope.Error != nil && code == "" {
 		code = anyToString(envelope.Error.Code)
 	}
-	if isNoPackageCode(code, firstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
+	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
 		state.noPackage = true
 		state.limited = true
 		state.limitedReason = "Insufficient balance or no active coding package"
@@ -681,7 +682,7 @@ func (p *Provider) finalizeStatusAndMessage(snap *core.UsageSnapshot, state *pro
 	if state.limited {
 		snap.Status = core.StatusLimited
 		if snap.Message == "" {
-			snap.Message = firstNonEmpty(state.limitedReason, "Insufficient balance or no active coding package")
+			snap.Message = core.FirstNonEmpty(state.limitedReason, "Insufficient balance or no active coding package")
 		}
 		return
 	}
@@ -1725,11 +1726,7 @@ func mapsFromArray(values []any) []map[string]any {
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in)+2)
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return maps.Clone(in)
 }
 
 func looksLikeUsageRow(row map[string]any) bool {
@@ -1977,7 +1974,7 @@ func parseAPIError(body []byte) (code, msg string) {
 		code = anyToString(payload.Code)
 	}
 	if msg == "" {
-		msg = firstNonEmpty(payload.Message, payload.Msg)
+		msg = core.FirstNonEmpty(payload.Message, payload.Msg)
 	}
 	return code, msg
 }
@@ -2482,15 +2479,6 @@ func clamp(value, minVal, maxVal float64) float64 {
 	return math.Min(math.Max(value, minVal), maxVal)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
 
 func apiErrorMessage(err *apiError) string {
 	if err == nil {

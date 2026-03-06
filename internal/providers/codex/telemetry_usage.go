@@ -324,57 +324,57 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 	}
 
 	occurredAt := time.Now().UTC()
-	if ts := codexFirstPathNumber(root,
+	if ts := shared.FirstPathNumber(root,
 		[]string{"timestamp"},
 		[]string{"occurred_at"},
 		[]string{"time"},
 	); ts != nil {
 		occurredAt = shared.UnixAuto(int64(*ts))
-	} else if rawTs := codexFirstPathString(root, []string{"timestamp"}, []string{"occurred_at"}, []string{"time"}); rawTs != "" {
+	} else if rawTs := shared.FirstPathString(root, []string{"timestamp"}, []string{"occurred_at"}, []string{"time"}); rawTs != "" {
 		if parsed, ok := shared.ParseFlexibleTimestamp(rawTs); ok {
 			occurredAt = shared.UnixAuto(parsed)
 		}
 	}
 
-	sessionID := codexFirstPathString(root,
+	sessionID := shared.FirstPathString(root,
 		[]string{"session_id"},
 		[]string{"sessionID"},
 		[]string{"session", "id"},
 	)
-	turnID := codexFirstPathString(root,
+	turnID := shared.FirstPathString(root,
 		[]string{"turn_id"},
 		[]string{"turnID"},
 		[]string{"request_id"},
 		[]string{"requestID"},
 	)
-	messageID := codexFirstPathString(root,
+	messageID := shared.FirstPathString(root,
 		[]string{"message_id"},
 		[]string{"messageID"},
 		[]string{"last_assistant_message", "id"},
 	)
 	upstreamProviderID := shared.FirstNonEmpty(
-		codexFirstPathString(root, []string{"provider_id"}, []string{"providerID"}, []string{"provider"}),
+		shared.FirstPathString(root, []string{"provider_id"}, []string{"providerID"}, []string{"provider"}),
 		codexTelemetryUpstreamModel,
 	)
-	modelRaw := codexFirstPathString(root,
+	modelRaw := shared.FirstPathString(root,
 		[]string{"model"},
 		[]string{"model_id"},
 		[]string{"modelID"},
 		[]string{"last_assistant_message", "model"},
 	)
-	workspaceID := shared.SanitizeWorkspace(codexFirstPathString(root,
+	workspaceID := shared.SanitizeWorkspace(shared.FirstPathString(root,
 		[]string{"cwd"},
 		[]string{"workspace_id"},
 		[]string{"workspaceID"},
 	))
 	accountID := shared.FirstNonEmpty(
 		strings.TrimSpace(opts.Path("account_id", "")),
-		codexFirstPathString(root, []string{"account_id"}, []string{"accountID"}),
+		shared.FirstPathString(root, []string{"account_id"}, []string{"accountID"}),
 		"codex-cli",
 	)
 	eventStatus := codexHookEventStatus(root)
-	hookSource := strings.TrimSpace(codexFirstPathString(root, []string{"source"}))
-	hookOriginator := strings.TrimSpace(codexFirstPathString(root, []string{"originator"}))
+	hookSource := strings.TrimSpace(shared.FirstPathString(root, []string{"source"}))
+	hookOriginator := strings.TrimSpace(shared.FirstPathString(root, []string{"originator"}))
 	if hookSource != "" || hookOriginator != "" {
 		root["client"] = classifyClient(hookSource, hookOriginator)
 		if hookSource != "" {
@@ -416,7 +416,7 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 	}
 
 	usage := codexExtractHookUsage(root)
-	if codexHasHookUsage(usage) {
+	if shared.HasHookUsage(usage) {
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion:    "codex_notify_v1",
 			Channel:          shared.TelemetryChannelHook,
@@ -466,172 +466,59 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 	}}, nil
 }
 
-type codexHookUsage struct {
-	InputTokens      *int64
-	OutputTokens     *int64
-	ReasoningTokens  *int64
-	CacheReadTokens  *int64
-	CacheWriteTokens *int64
-	TotalTokens      *int64
-	CostUSD          *float64
-}
-
-func codexExtractHookUsage(root map[string]any) codexHookUsage {
-	input := codexFirstPathNumber(root,
+func codexExtractHookUsage(root map[string]any) shared.HookUsage {
+	input := shared.FirstPathNumber(root,
 		[]string{"usage", "input_tokens"},
 		[]string{"usage", "inputTokens"},
 		[]string{"info", "total_token_usage", "input_tokens"},
 		[]string{"last_assistant_message", "usage", "input_tokens"},
 	)
-	output := codexFirstPathNumber(root,
+	output := shared.FirstPathNumber(root,
 		[]string{"usage", "output_tokens"},
 		[]string{"usage", "outputTokens"},
 		[]string{"info", "total_token_usage", "output_tokens"},
 		[]string{"last_assistant_message", "usage", "output_tokens"},
 	)
-	reasoning := codexFirstPathNumber(root,
+	reasoning := shared.FirstPathNumber(root,
 		[]string{"usage", "reasoning_tokens"},
 		[]string{"usage", "reasoning_output_tokens"},
 		[]string{"info", "total_token_usage", "reasoning_output_tokens"},
 		[]string{"last_assistant_message", "usage", "reasoning_tokens"},
 	)
-	cacheRead := codexFirstPathNumber(root,
+	cacheRead := shared.FirstPathNumber(root,
 		[]string{"usage", "cache_read_tokens"},
 		[]string{"usage", "cached_input_tokens"},
 		[]string{"info", "total_token_usage", "cached_input_tokens"},
 		[]string{"last_assistant_message", "usage", "cached_input_tokens"},
 	)
-	cacheWrite := codexFirstPathNumber(root,
+	cacheWrite := shared.FirstPathNumber(root,
 		[]string{"usage", "cache_write_tokens"},
 		[]string{"last_assistant_message", "usage", "cache_write_tokens"},
 	)
-	total := codexFirstPathNumber(root,
+	total := shared.FirstPathNumber(root,
 		[]string{"usage", "total_tokens"},
 		[]string{"usage", "totalTokens"},
 		[]string{"info", "total_token_usage", "total_tokens"},
 		[]string{"last_assistant_message", "usage", "total_tokens"},
 	)
-	cost := codexFirstPathNumber(root,
+	cost := shared.FirstPathNumber(root,
 		[]string{"usage", "cost_usd"},
 		[]string{"usage", "costUSD"},
 		[]string{"cost_usd"},
 		[]string{"costUSD"},
 	)
 
-	out := codexHookUsage{
-		InputTokens:      codexNumberToInt64Ptr(input),
-		OutputTokens:     codexNumberToInt64Ptr(output),
-		ReasoningTokens:  codexNumberToInt64Ptr(reasoning),
-		CacheReadTokens:  codexNumberToInt64Ptr(cacheRead),
-		CacheWriteTokens: codexNumberToInt64Ptr(cacheWrite),
-		TotalTokens:      codexNumberToInt64Ptr(total),
-		CostUSD:          codexNumberToFloat64Ptr(cost),
+	out := shared.HookUsage{
+		InputTokens:      shared.NumberToInt64Ptr(input),
+		OutputTokens:     shared.NumberToInt64Ptr(output),
+		ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
+		CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
+		CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
+		TotalTokens:      shared.NumberToInt64Ptr(total),
+		CostUSD:          shared.NumberToFloat64Ptr(cost),
 	}
-	if out.TotalTokens == nil {
-		var combined int64
-		hasAny := false
-		for _, part := range []*int64{out.InputTokens, out.OutputTokens, out.ReasoningTokens, out.CacheReadTokens, out.CacheWriteTokens} {
-			if part != nil {
-				combined += *part
-				hasAny = true
-			}
-		}
-		if hasAny {
-			out.TotalTokens = shared.Int64Ptr(combined)
-		}
-	}
+	out.SumTotalTokens()
 	return out
-}
-
-func codexHasHookUsage(u codexHookUsage) bool {
-	for _, field := range []*int64{u.InputTokens, u.OutputTokens, u.ReasoningTokens, u.CacheReadTokens, u.CacheWriteTokens, u.TotalTokens} {
-		if field != nil && *field > 0 {
-			return true
-		}
-	}
-	return u.CostUSD != nil && *u.CostUSD > 0
-}
-
-func codexFirstPathString(root map[string]any, paths ...[]string) string {
-	for _, path := range paths {
-		if value, ok := codexPathValue(root, path...); ok {
-			switch v := value.(type) {
-			case string:
-				if trimmed := strings.TrimSpace(v); trimmed != "" {
-					return trimmed
-				}
-			case json.Number:
-				if trimmed := strings.TrimSpace(v.String()); trimmed != "" {
-					return trimmed
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func codexFirstPathNumber(root map[string]any, paths ...[]string) *float64 {
-	for _, path := range paths {
-		if value, ok := codexPathValue(root, path...); ok {
-			if parsed, ok := codexNumberFromAny(value); ok {
-				return &parsed
-			}
-		}
-	}
-	return nil
-}
-
-func codexPathValue(root map[string]any, path ...string) (any, bool) {
-	var current any = root
-	for _, segment := range path {
-		node, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		next, ok := node[segment]
-		if !ok {
-			return nil, false
-		}
-		current = next
-	}
-	return current, true
-}
-
-func codexNumberFromAny(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case json.Number:
-		parsed, err := v.Float64()
-		return parsed, err == nil
-	case string:
-		parsed, err := json.Number(strings.TrimSpace(v)).Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func codexNumberToInt64Ptr(v *float64) *int64 {
-	if v == nil {
-		return nil
-	}
-	return shared.Int64Ptr(int64(*v))
-}
-
-func codexNumberToFloat64Ptr(v *float64) *float64 {
-	if v == nil {
-		return nil
-	}
-	return shared.Float64Ptr(*v)
 }
 
 func codexBuildToolPayload(sourcePath string, lineNumber int, item responseItemPayload) map[string]any {
@@ -728,7 +615,7 @@ func codexFirstFileFromPatchStats(stats patchStats) string {
 }
 
 func codexHookEventStatus(root map[string]any) shared.TelemetryStatus {
-	switch strings.ToLower(strings.TrimSpace(codexFirstPathString(root,
+	switch strings.ToLower(strings.TrimSpace(shared.FirstPathString(root,
 		[]string{"status"},
 		[]string{"result"},
 		[]string{"outcome"},
@@ -746,24 +633,24 @@ func codexHookEventStatus(root map[string]any) shared.TelemetryStatus {
 
 func codexExtractHookTool(root map[string]any) (toolName, toolCallID string, ok bool) {
 	eventName := strings.ToLower(shared.FirstNonEmpty(
-		codexFirstPathString(root, []string{"hook_event_name"}),
-		codexFirstPathString(root, []string{"hook_event"}),
-		codexFirstPathString(root, []string{"event"}),
-		codexFirstPathString(root, []string{"type"}),
+		shared.FirstPathString(root, []string{"hook_event_name"}),
+		shared.FirstPathString(root, []string{"hook_event"}),
+		shared.FirstPathString(root, []string{"event"}),
+		shared.FirstPathString(root, []string{"type"}),
 	))
-	toolName = strings.TrimSpace(codexFirstPathString(root,
+	toolName = strings.TrimSpace(shared.FirstPathString(root,
 		[]string{"tool_name"},
 		[]string{"toolName"},
 		[]string{"tool", "name"},
 		[]string{"tool"},
 	))
 	if toolName == "" && strings.Contains(eventName, "tool") {
-		toolName = strings.TrimSpace(codexFirstPathString(root, []string{"name"}))
+		toolName = strings.TrimSpace(shared.FirstPathString(root, []string{"name"}))
 	}
 	if toolName == "" {
 		return "", "", false
 	}
-	toolCallID = strings.TrimSpace(codexFirstPathString(root,
+	toolCallID = strings.TrimSpace(shared.FirstPathString(root,
 		[]string{"tool_call_id"},
 		[]string{"toolCallID"},
 		[]string{"tool_call", "id"},

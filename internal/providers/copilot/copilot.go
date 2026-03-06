@@ -522,9 +522,9 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 			used = 0
 		}
 		snap.Metrics[key] = core.Metric{
-			Limit:     float64Ptr(*limit),
-			Remaining: float64Ptr(*remaining),
-			Used:      float64Ptr(used),
+			Limit:     core.Float64Ptr(*limit),
+			Remaining: core.Float64Ptr(*remaining),
+			Used:      core.Float64Ptr(used),
 			Unit:      unit,
 			Window:    "month",
 		}
@@ -534,15 +534,15 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 		used := 100 - pct
 		snap.Metrics[key] = core.Metric{
 			Limit:     &limitPct,
-			Remaining: float64Ptr(pct),
-			Used:      float64Ptr(used),
+			Remaining: core.Float64Ptr(pct),
+			Used:      core.Float64Ptr(used),
 			Unit:      "%",
 			Window:    "month",
 		}
 		return true
 	case remaining != nil:
 		snap.Metrics[key] = core.Metric{
-			Used:   float64Ptr(*remaining),
+			Used:   core.Float64Ptr(*remaining),
 			Unit:   unit,
 			Window: "month",
 		}
@@ -703,20 +703,20 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 
 	if len(activeUsers) > 0 {
 		lastActive := activeUsers[len(activeUsers)-1].Value
-		snap.Metrics[prefix+"active_users"] = core.Metric{Used: float64Ptr(lastActive), Unit: "users", Window: "day"}
+		snap.Metrics[prefix+"active_users"] = core.Metric{Used: core.Float64Ptr(lastActive), Unit: "users", Window: "day"}
 	}
 	if len(engagedUsers) > 0 {
 		lastEngaged := engagedUsers[len(engagedUsers)-1].Value
-		snap.Metrics[prefix+"engaged_users"] = core.Metric{Used: float64Ptr(lastEngaged), Unit: "users", Window: "day"}
+		snap.Metrics[prefix+"engaged_users"] = core.Metric{Used: core.Float64Ptr(lastEngaged), Unit: "users", Window: "day"}
 	}
 	if aggSuggestions > 0 {
-		snap.Metrics[prefix+"suggestions"] = core.Metric{Used: float64Ptr(aggSuggestions), Unit: "suggestions", Window: "series"}
+		snap.Metrics[prefix+"suggestions"] = core.Metric{Used: core.Float64Ptr(aggSuggestions), Unit: "suggestions", Window: "series"}
 	}
 	if aggAcceptances > 0 {
-		snap.Metrics[prefix+"acceptances"] = core.Metric{Used: float64Ptr(aggAcceptances), Unit: "acceptances", Window: "series"}
+		snap.Metrics[prefix+"acceptances"] = core.Metric{Used: core.Float64Ptr(aggAcceptances), Unit: "acceptances", Window: "series"}
 	}
 	if aggChats > 0 {
-		snap.Metrics[prefix+"chats"] = core.Metric{Used: float64Ptr(aggChats), Unit: "chats", Window: "series"}
+		snap.Metrics[prefix+"chats"] = core.Metric{Used: core.Float64Ptr(aggChats), Unit: "chats", Window: "series"}
 	}
 }
 
@@ -864,7 +864,7 @@ func (p *Provider) readLogs(copilotDir string, snap *core.UsageSnapshot) logSumm
 		snap.Metrics["context_window"] = core.Metric{
 			Limit:     &limit,
 			Used:      &used,
-			Remaining: float64Ptr(limit - used),
+			Remaining: core.Float64Ptr(limit - used),
 			Unit:      "tokens",
 			Window:    "session",
 		}
@@ -1410,8 +1410,8 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 			}
 			snap.Metrics["premium_interactions_quota"] = core.Metric{
 				Limit:     &entitlement,
-				Used:      float64Ptr(used),
-				Remaining: float64Ptr(remaining),
+				Used:      core.Float64Ptr(used),
+				Remaining: core.Float64Ptr(remaining),
 				Unit:      "requests",
 				Window:    "billing-cycle",
 			}
@@ -1608,8 +1608,8 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 				limit := float64(r.tokenTotal)
 				snap.Metrics["context_window"] = core.Metric{
 					Limit:     &limit,
-					Used:      float64Ptr(sessionTokens),
-					Remaining: float64Ptr(maxFloat(limit-sessionTokens, 0)),
+					Used:      core.Float64Ptr(sessionTokens),
+					Remaining: core.Float64Ptr(maxFloat(limit-sessionTokens, 0)),
 					Unit:      "tokens",
 					Window:    "session",
 				}
@@ -2341,7 +2341,6 @@ func setRawStr(snap *core.UsageSnapshot, key, v string) {
 	}
 }
 
-func float64Ptr(v float64) *float64 { return &v }
 
 func firstNonNilFloat(values ...*float64) *float64 {
 	for _, v := range values {

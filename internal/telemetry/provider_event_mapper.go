@@ -1,12 +1,15 @@
 package telemetry
 
-import "github.com/janekbaraniewski/openusage/internal/providers/shared"
+import (
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+)
 
 func mapProviderEvent(sourceSystem string, ev shared.TelemetryEvent, accountOverride string) IngestRequest {
 	req := IngestRequest{
 		SourceSystem:        SourceSystem(sourceSystem),
 		SourceChannel:       mapProviderChannel(ev.Channel),
-		SourceSchemaVersion: firstNonEmptyNonBlank(ev.SchemaVersion, "v1"),
+		SourceSchemaVersion: core.FirstNonEmpty(ev.SchemaVersion, "v1"),
 		OccurredAt:          ev.OccurredAt,
 		WorkspaceID:         ev.WorkspaceID,
 		SessionID:           ev.SessionID,
@@ -14,8 +17,8 @@ func mapProviderEvent(sourceSystem string, ev shared.TelemetryEvent, accountOver
 		MessageID:           ev.MessageID,
 		ToolCallID:          ev.ToolCallID,
 		ProviderID:          ev.ProviderID,
-		AccountID:           firstNonEmptyNonBlank(accountOverride, ev.AccountID, ev.ProviderID, sourceSystem),
-		AgentName:           firstNonEmptyNonBlank(ev.AgentName, sourceSystem),
+		AccountID:           core.FirstNonEmpty(accountOverride, ev.AccountID, ev.ProviderID, sourceSystem),
+		AgentName:           core.FirstNonEmpty(ev.AgentName, sourceSystem),
 		EventType:           mapProviderEventType(ev.EventType),
 		ModelRaw:            ev.ModelRaw,
 		InputTokens:         ev.InputTokens,

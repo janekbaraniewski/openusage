@@ -13,6 +13,8 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+func float64Ptr(v float64) *float64 { return &v }
+
 func TestParseSimpleYAML(t *testing.T) {
 	input := `id: abc-123
 cwd: /home/user/project

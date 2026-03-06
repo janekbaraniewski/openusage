@@ -94,10 +94,8 @@ func TestHandleKey_CyclesDashboardView(t *testing.T) {
 
 func TestSettingsModalKey_ViewTabAppliesSelection(t *testing.T) {
 	m := Model{
-		showSettingsModal:  true,
-		settingsModalTab:   settingsTabView,
-		dashboardView:      dashboardViewGrid,
-		settingsViewCursor: 1,
+		settings:      settingsState{show: true, tab: settingsTabView, viewCursor: 1},
+		dashboardView: dashboardViewGrid,
 	}
 
 	updated, cmd := m.handleSettingsModalKey(tea.KeyMsg{Type: tea.KeyEnter})

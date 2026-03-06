@@ -277,13 +277,6 @@ func normalizeDashboardWidgetSections(in []DashboardWidgetSection) []DashboardWi
 	if len(in) == 0 {
 		return nil
 	}
-	return normalizeDashboardWidgetSectionEntries(in)
-}
-
-func normalizeDashboardWidgetSectionEntries(in []DashboardWidgetSection) []DashboardWidgetSection {
-	if len(in) == 0 {
-		return nil
-	}
 
 	normalized := make([]DashboardWidgetSection, 0, len(in))
 	seenSections := make(map[core.DashboardStandardSection]bool, len(in))
@@ -332,12 +325,8 @@ func SaveTo(path string, cfg Config) error {
 	return nil
 }
 
-// SaveTheme persists a theme name into the config file (read-modify-write).
-func SaveTheme(theme string) error {
-	return SaveThemeTo(ConfigPath(), theme)
-}
-
-func SaveThemeTo(path string, theme string) error {
+// modifyConfig performs an atomic read-modify-write on the config file at path.
+func modifyConfig(path string, mutate func(*Config)) error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
 
@@ -345,8 +334,17 @@ func SaveThemeTo(path string, theme string) error {
 	if err != nil {
 		cfg = DefaultConfig()
 	}
-	cfg.Theme = theme
+	mutate(&cfg)
 	return SaveTo(path, cfg)
+}
+
+// SaveTheme persists a theme name into the config file (read-modify-write).
+func SaveTheme(theme string) error {
+	return SaveThemeTo(ConfigPath(), theme)
+}
+
+func SaveThemeTo(path string, theme string) error {
+	return modifyConfig(path, func(cfg *Config) { cfg.Theme = theme })
 }
 
 // SaveDashboardProviders persists dashboard provider preferences into the config file (read-modify-write).
@@ -355,15 +353,9 @@ func SaveDashboardProviders(providers []DashboardProviderConfig) error {
 }
 
 func SaveDashboardProvidersTo(path string, providers []DashboardProviderConfig) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	cfg.Dashboard.Providers = normalizeDashboardProviders(providers)
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.Providers = normalizeDashboardProviders(providers)
+	})
 }
 
 // SaveDashboardView persists dashboard view preference into the config file (read-modify-write).
@@ -372,15 +364,9 @@ func SaveDashboardView(view string) error {
 }
 
 func SaveDashboardViewTo(path string, view string) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	cfg.Dashboard.View = normalizeDashboardView(view)
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.View = normalizeDashboardView(view)
+	})
 }
 
 // SaveDashboardWidgetSections persists dashboard widget section preferences
@@ -390,15 +376,9 @@ func SaveDashboardWidgetSections(sections []DashboardWidgetSection) error {
 }
 
 func SaveDashboardWidgetSectionsTo(path string, sections []DashboardWidgetSection) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(sections)
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(sections)
+	})
 }
 
 // SaveAutoDetected persists auto-detected accounts into the config file (read-modify-write).
@@ -407,15 +387,7 @@ func SaveAutoDetected(accounts []core.AccountConfig) error {
 }
 
 func SaveAutoDetectedTo(path string, accounts []core.AccountConfig) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	cfg.AutoDetectedAccounts = accounts
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) { cfg.AutoDetectedAccounts = accounts })
 }
 
 // SaveTimeWindow persists a time window into the config file (read-modify-write).
@@ -424,15 +396,9 @@ func SaveTimeWindow(window string) error {
 }
 
 func SaveTimeWindowTo(path string, window string) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	cfg.Data.TimeWindow = string(core.ParseTimeWindow(window))
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Data.TimeWindow = string(core.ParseTimeWindow(window))
+	})
 }
 
 // SaveIntegrationState persists an integration state into the config file (read-modify-write).
@@ -441,16 +407,10 @@ func SaveIntegrationState(id string, state IntegrationState) error {
 }
 
 func SaveIntegrationStateTo(path string, id string, state IntegrationState) error {
-	saveMu.Lock()
-	defer saveMu.Unlock()
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		cfg = DefaultConfig()
-	}
-	if cfg.Integrations == nil {
-		cfg.Integrations = make(map[string]IntegrationState)
-	}
-	cfg.Integrations[id] = state
-	return SaveTo(path, cfg)
+	return modifyConfig(path, func(cfg *Config) {
+		if cfg.Integrations == nil {
+			cfg.Integrations = make(map[string]IntegrationState)
+		}
+		cfg.Integrations[id] = state
+	})
 }

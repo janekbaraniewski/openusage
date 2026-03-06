@@ -20,8 +20,7 @@ func TestHandleSettingsModalKey_WidgetSectionsToggle(t *testing.T) {
 	t.Cleanup(func() { setDashboardWidgetSectionOverrides(nil) })
 
 	m := Model{
-		showSettingsModal: true,
-		settingsModalTab:  settingsTabWidgetSections,
+		settings: settingsState{show: true, tab: settingsTabWidgetSections},
 		widgetSections: []config.DashboardWidgetSection{
 			{ID: core.DashboardSectionTopUsageProgress, Enabled: true},
 			{ID: core.DashboardSectionOtherData, Enabled: true},
@@ -43,8 +42,7 @@ func TestHandleSettingsModalKey_WidgetSectionsMoveRow(t *testing.T) {
 	t.Cleanup(func() { setDashboardWidgetSectionOverrides(nil) })
 
 	m := Model{
-		showSettingsModal: true,
-		settingsModalTab:  settingsTabWidgetSections,
+		settings: settingsState{show: true, tab: settingsTabWidgetSections},
 		widgetSections: []config.DashboardWidgetSection{
 			{ID: core.DashboardSectionTopUsageProgress, Enabled: true},
 			{ID: core.DashboardSectionOtherData, Enabled: true},
@@ -57,8 +55,8 @@ func TestHandleSettingsModalKey_WidgetSectionsMoveRow(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected persist command when moving widget section")
 	}
-	if got.settingsSectionRowCursor != 1 {
-		t.Fatalf("settingsSectionRowCursor = %d, want 1", got.settingsSectionRowCursor)
+	if got.settings.sectionRowCursor != 1 {
+		t.Fatalf("settingsSectionRowCursor = %d, want 1", got.settings.sectionRowCursor)
 	}
 	if got.widgetSections[0].ID != core.DashboardSectionOtherData {
 		t.Fatalf("first section ID = %q, want %q", got.widgetSections[0].ID, core.DashboardSectionOtherData)
@@ -78,16 +76,16 @@ func TestHandleSettingsModalKey_WidgetSectionsReorderAffectsRenderedWidget(t *te
 		},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
 
 	updated, cmd := m.handleSettingsModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("J")})
 	got := updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected persist command when reordering widget sections")
 	}
-	if got.settingsSectionRowCursor != 1 {
-		t.Fatalf("settingsSectionRowCursor = %d, want 1", got.settingsSectionRowCursor)
+	if got.settings.sectionRowCursor != 1 {
+		t.Fatalf("settingsSectionRowCursor = %d, want 1", got.settings.sectionRowCursor)
 	}
 
 	order := dashboardWidget("openai").EffectiveStandardSectionOrder()
@@ -110,8 +108,8 @@ func TestRenderSettingsWidgetSectionsBody_RendersListOnly(t *testing.T) {
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
 
 	body := stripANSI(m.renderSettingsWidgetSectionsBody(96, 20))
 	if !strings.Contains(body, "Global Dashboard Widget Sections") {
@@ -133,8 +131,8 @@ func TestRenderSettingsModalOverlay_WidgetSectionsIncludesSeparatePreviewPanel(t
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
 	m.width = 180
 	m.height = 50
 
@@ -161,20 +159,20 @@ func TestHandleSettingsModalKey_WidgetSectionsPreviewScroll(t *testing.T) {
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
-	m.settingsPreviewOffset = 0
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
+	m.settings.previewOffset = 0
 
 	updatedDown, _ := m.handleSettingsModalKey(tea.KeyMsg{Type: tea.KeyPgDown})
 	gotDown := updatedDown.(Model)
-	if gotDown.settingsPreviewOffset <= 0 {
-		t.Fatalf("expected preview offset to increase on PgDown, got %d", gotDown.settingsPreviewOffset)
+	if gotDown.settings.previewOffset <= 0 {
+		t.Fatalf("expected preview offset to increase on PgDown, got %d", gotDown.settings.previewOffset)
 	}
 
 	updatedUp, _ := gotDown.handleSettingsModalKey(tea.KeyMsg{Type: tea.KeyPgUp})
 	gotUp := updatedUp.(Model)
-	if gotUp.settingsPreviewOffset >= gotDown.settingsPreviewOffset {
-		t.Fatalf("expected preview offset to decrease on PgUp, got before=%d after=%d", gotDown.settingsPreviewOffset, gotUp.settingsPreviewOffset)
+	if gotUp.settings.previewOffset >= gotDown.settings.previewOffset {
+		t.Fatalf("expected preview offset to decrease on PgUp, got before=%d after=%d", gotDown.settings.previewOffset, gotUp.settings.previewOffset)
 	}
 }
 

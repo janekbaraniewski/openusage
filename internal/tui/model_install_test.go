@@ -10,8 +10,8 @@ import (
 
 func TestDaemonInstallResultSuccess(t *testing.T) {
 	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
-	m.daemonStatus = DaemonNotInstalled
-	m.daemonInstalling = true
+	m.daemon.status = DaemonNotInstalled
+	m.daemon.installing = true
 
 	updated, _ := m.Update(daemonInstallResultMsg{err: nil})
 	got, ok := updated.(Model)
@@ -19,21 +19,21 @@ func TestDaemonInstallResultSuccess(t *testing.T) {
 		t.Fatalf("updated model type = %T, want tui.Model", updated)
 	}
 
-	if got.daemonInstalling {
+	if got.daemon.installing {
 		t.Fatal("expected daemonInstalling=false after successful install")
 	}
-	if got.daemonStatus != DaemonStarting {
-		t.Fatalf("daemonStatus = %q, want %q", got.daemonStatus, DaemonStarting)
+	if got.daemon.status != DaemonStarting {
+		t.Fatalf("daemonStatus = %q, want %q", got.daemon.status, DaemonStarting)
 	}
-	if !got.daemonInstallDone {
+	if !got.daemon.installDone {
 		t.Fatal("expected daemonInstallDone=true after successful install")
 	}
 }
 
 func TestDaemonInstallResultFailure(t *testing.T) {
 	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
-	m.daemonStatus = DaemonNotInstalled
-	m.daemonInstalling = true
+	m.daemon.status = DaemonNotInstalled
+	m.daemon.installing = true
 
 	installErr := errors.New("failed to install daemon")
 	updated, _ := m.Update(daemonInstallResultMsg{err: installErr})
@@ -42,13 +42,13 @@ func TestDaemonInstallResultFailure(t *testing.T) {
 		t.Fatalf("updated model type = %T, want tui.Model", updated)
 	}
 
-	if got.daemonInstalling {
+	if got.daemon.installing {
 		t.Fatal("expected daemonInstalling=false after failed install")
 	}
-	if got.daemonStatus != DaemonError {
-		t.Fatalf("daemonStatus = %q, want %q", got.daemonStatus, DaemonError)
+	if got.daemon.status != DaemonError {
+		t.Fatalf("daemonStatus = %q, want %q", got.daemon.status, DaemonError)
 	}
-	if got.daemonMessage != "failed to install daemon" {
-		t.Fatalf("daemonMessage = %q, want %q", got.daemonMessage, "failed to install daemon")
+	if got.daemon.message != "failed to install daemon" {
+		t.Fatalf("daemonMessage = %q, want %q", got.daemon.message, "failed to install daemon")
 	}
 }

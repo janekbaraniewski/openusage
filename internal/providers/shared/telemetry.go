@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/samber/lo"
 )
 
@@ -109,19 +110,11 @@ func Int64Ptr(v int64) *int64 {
 	return &vv
 }
 
-func Float64Ptr(v float64) *float64 {
-	vv := v
-	return &vv
-}
+// Float64Ptr delegates to core.Float64Ptr for backwards compatibility.
+var Float64Ptr = core.Float64Ptr
 
-func FirstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
+// FirstNonEmpty delegates to core.FirstNonEmpty for backwards compatibility.
+var FirstNonEmpty = core.FirstNonEmpty
 
 var timestampLayouts = []string{
 	time.RFC3339Nano,

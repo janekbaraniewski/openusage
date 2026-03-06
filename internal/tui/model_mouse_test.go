@@ -102,14 +102,14 @@ func TestMouseWheelScrollsSettingsWidgetPreview(t *testing.T) {
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
 
 	updated, _ := m.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelDown,
 	})
-	got := updated.(Model).settingsPreviewOffset
+	got := updated.(Model).settings.previewOffset
 	if got <= 0 {
 		t.Fatalf("settingsPreviewOffset = %d, want > 0", got)
 	}
@@ -124,15 +124,15 @@ func TestMouseWheelUpClampsSettingsWidgetPreviewOffsetAtZero(t *testing.T) {
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabWidgetSections
-	m.settingsPreviewOffset = 1
+	m.settings.show = true
+	m.settings.tab = settingsTabWidgetSections
+	m.settings.previewOffset = 1
 
 	updated, _ := m.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelUp,
 	})
-	got := updated.(Model).settingsPreviewOffset
+	got := updated.(Model).settings.previewOffset
 	if got != 0 {
 		t.Fatalf("settingsPreviewOffset = %d, want 0", got)
 	}
@@ -147,15 +147,15 @@ func TestMouseWheelDoesNotScrollSettingsPreviewOutsideWidgetSectionsTab(t *testi
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
 	)
-	m.showSettingsModal = true
-	m.settingsModalTab = settingsTabTheme
-	m.settingsPreviewOffset = 0
+	m.settings.show = true
+	m.settings.tab = settingsTabTheme
+	m.settings.previewOffset = 0
 
 	updated, _ := m.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelDown,
 	})
-	got := updated.(Model).settingsPreviewOffset
+	got := updated.(Model).settings.previewOffset
 	if got != 0 {
 		t.Fatalf("settingsPreviewOffset = %d, want 0", got)
 	}

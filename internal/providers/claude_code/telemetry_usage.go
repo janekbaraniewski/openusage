@@ -258,7 +258,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	}
 
 	occurredAt := time.Now().UTC()
-	if rawTs := claudeFirstPathString(root,
+	if rawTs := shared.FirstPathString(root,
 		[]string{"timestamp"},
 		[]string{"occurred_at"},
 		[]string{"time"},
@@ -266,51 +266,51 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 		if ts, ok := shared.ParseFlexibleTimestamp(rawTs); ok {
 			occurredAt = shared.UnixAuto(ts)
 		}
-	} else if ts := claudeFirstPathNumber(root, []string{"timestamp"}); ts != nil {
+	} else if ts := shared.FirstPathNumber(root, []string{"timestamp"}); ts != nil {
 		occurredAt = shared.UnixAuto(int64(*ts))
 	}
 
 	eventName := strings.ToLower(shared.FirstNonEmpty(
-		claudeFirstPathString(root, []string{"hook_event_name"}),
-		claudeFirstPathString(root, []string{"hook_event"}),
-		claudeFirstPathString(root, []string{"event"}),
-		claudeFirstPathString(root, []string{"type"}),
+		shared.FirstPathString(root, []string{"hook_event_name"}),
+		shared.FirstPathString(root, []string{"hook_event"}),
+		shared.FirstPathString(root, []string{"event"}),
+		shared.FirstPathString(root, []string{"type"}),
 		"hook",
 	))
-	sessionID := claudeFirstPathString(root,
+	sessionID := shared.FirstPathString(root,
 		[]string{"session_id"},
 		[]string{"sessionId"},
 		[]string{"session", "id"},
 	)
-	turnID := claudeFirstPathString(root,
+	turnID := shared.FirstPathString(root,
 		[]string{"request_id"},
 		[]string{"requestId"},
 		[]string{"turn_id"},
 		[]string{"turnId"},
 	)
-	messageID := claudeFirstPathString(root,
+	messageID := shared.FirstPathString(root,
 		[]string{"message", "id"},
 		[]string{"message_id"},
 		[]string{"messageId"},
 	)
-	modelRaw := claudeFirstPathString(root,
+	modelRaw := shared.FirstPathString(root,
 		[]string{"model"},
 		[]string{"model_id"},
 		[]string{"message", "model"},
 	)
 	accountID := shared.FirstNonEmpty(
 		strings.TrimSpace(opts.Path("account_id", "")),
-		claudeFirstPathString(root, []string{"account_id"}, []string{"accountId"}),
+		shared.FirstPathString(root, []string{"account_id"}, []string{"accountId"}),
 		"claude-code",
 	)
-	workspaceID := shared.SanitizeWorkspace(claudeFirstPathString(root,
+	workspaceID := shared.SanitizeWorkspace(shared.FirstPathString(root,
 		[]string{"cwd"},
 		[]string{"workspace_id"},
 		[]string{"workspaceId"},
 	))
 
 	usage := claudeExtractHookUsage(root)
-	if claudeHasHookUsage(usage) {
+	if shared.HasHookUsage(usage) {
 		return []shared.TelemetryEvent{{
 			SchemaVersion:    "claude_hook_v1",
 			Channel:          shared.TelemetryChannelHook,
@@ -339,13 +339,13 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 
 	if strings.Contains(eventName, "tool") {
 		toolName := strings.ToLower(shared.FirstNonEmpty(
-			claudeFirstPathString(root, []string{"tool_name"}),
-			claudeFirstPathString(root, []string{"tool", "name"}),
-			claudeFirstPathString(root, []string{"tool_input", "name"}),
-			claudeFirstPathString(root, []string{"tool"}),
+			shared.FirstPathString(root, []string{"tool_name"}),
+			shared.FirstPathString(root, []string{"tool", "name"}),
+			shared.FirstPathString(root, []string{"tool_input", "name"}),
+			shared.FirstPathString(root, []string{"tool"}),
 			"unknown",
 		))
-		toolCallID := claudeFirstPathString(root,
+		toolCallID := shared.FirstPathString(root,
 			[]string{"tool_call_id"},
 			[]string{"toolUseID"},
 			[]string{"tool_use_id"},
@@ -372,7 +372,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	}
 
 	status := shared.TelemetryStatusOK
-	switch strings.ToLower(strings.TrimSpace(claudeFirstPathString(root, []string{"decision"}, []string{"status"}))) {
+	switch strings.ToLower(strings.TrimSpace(shared.FirstPathString(root, []string{"decision"}, []string{"status"}))) {
 	case "block", "blocked", "error", "failed":
 		status = shared.TelemetryStatusError
 	}
@@ -396,158 +396,45 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	}}, nil
 }
 
-type claudeHookUsage struct {
-	InputTokens      *int64
-	OutputTokens     *int64
-	ReasoningTokens  *int64
-	CacheReadTokens  *int64
-	CacheWriteTokens *int64
-	TotalTokens      *int64
-	CostUSD          *float64
-}
-
-func claudeExtractHookUsage(root map[string]any) claudeHookUsage {
-	input := claudeFirstPathNumber(root,
+func claudeExtractHookUsage(root map[string]any) shared.HookUsage {
+	input := shared.FirstPathNumber(root,
 		[]string{"usage", "input_tokens"},
 		[]string{"message", "usage", "input_tokens"},
 	)
-	output := claudeFirstPathNumber(root,
+	output := shared.FirstPathNumber(root,
 		[]string{"usage", "output_tokens"},
 		[]string{"message", "usage", "output_tokens"},
 	)
-	reasoning := claudeFirstPathNumber(root,
+	reasoning := shared.FirstPathNumber(root,
 		[]string{"usage", "reasoning_tokens"},
 		[]string{"message", "usage", "reasoning_tokens"},
 	)
-	cacheRead := claudeFirstPathNumber(root,
+	cacheRead := shared.FirstPathNumber(root,
 		[]string{"usage", "cache_read_input_tokens"},
 		[]string{"message", "usage", "cache_read_input_tokens"},
 	)
-	cacheWrite := claudeFirstPathNumber(root,
+	cacheWrite := shared.FirstPathNumber(root,
 		[]string{"usage", "cache_creation_input_tokens"},
 		[]string{"message", "usage", "cache_creation_input_tokens"},
 	)
-	total := claudeFirstPathNumber(root,
+	total := shared.FirstPathNumber(root,
 		[]string{"usage", "total_tokens"},
 		[]string{"message", "usage", "total_tokens"},
 	)
-	cost := claudeFirstPathNumber(root,
+	cost := shared.FirstPathNumber(root,
 		[]string{"usage", "cost_usd"},
 		[]string{"cost_usd"},
 	)
 
-	out := claudeHookUsage{
-		InputTokens:      claudeNumberToInt64Ptr(input),
-		OutputTokens:     claudeNumberToInt64Ptr(output),
-		ReasoningTokens:  claudeNumberToInt64Ptr(reasoning),
-		CacheReadTokens:  claudeNumberToInt64Ptr(cacheRead),
-		CacheWriteTokens: claudeNumberToInt64Ptr(cacheWrite),
-		TotalTokens:      claudeNumberToInt64Ptr(total),
-		CostUSD:          claudeNumberToFloat64Ptr(cost),
+	out := shared.HookUsage{
+		InputTokens:      shared.NumberToInt64Ptr(input),
+		OutputTokens:     shared.NumberToInt64Ptr(output),
+		ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
+		CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
+		CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
+		TotalTokens:      shared.NumberToInt64Ptr(total),
+		CostUSD:          shared.NumberToFloat64Ptr(cost),
 	}
-	if out.TotalTokens == nil {
-		var total int64
-		hasAny := false
-		for _, tokenPart := range []*int64{out.InputTokens, out.OutputTokens, out.ReasoningTokens, out.CacheReadTokens, out.CacheWriteTokens} {
-			if tokenPart != nil {
-				total += *tokenPart
-				hasAny = true
-			}
-		}
-		if hasAny {
-			out.TotalTokens = shared.Int64Ptr(total)
-		}
-	}
+	out.SumTotalTokens()
 	return out
-}
-
-func claudeHasHookUsage(u claudeHookUsage) bool {
-	for _, tokenPart := range []*int64{u.InputTokens, u.OutputTokens, u.ReasoningTokens, u.CacheReadTokens, u.CacheWriteTokens, u.TotalTokens} {
-		if tokenPart != nil && *tokenPart > 0 {
-			return true
-		}
-	}
-	return u.CostUSD != nil && *u.CostUSD > 0
-}
-
-func claudeFirstPathString(root map[string]any, paths ...[]string) string {
-	for _, path := range paths {
-		if value, ok := claudePathValue(root, path...); ok {
-			switch v := value.(type) {
-			case string:
-				if trimmed := strings.TrimSpace(v); trimmed != "" {
-					return trimmed
-				}
-			case json.Number:
-				if trimmed := strings.TrimSpace(v.String()); trimmed != "" {
-					return trimmed
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func claudeFirstPathNumber(root map[string]any, paths ...[]string) *float64 {
-	for _, path := range paths {
-		if value, ok := claudePathValue(root, path...); ok {
-			if parsed, ok := claudeNumberFromAny(value); ok {
-				return &parsed
-			}
-		}
-	}
-	return nil
-}
-
-func claudePathValue(root map[string]any, path ...string) (any, bool) {
-	var current any = root
-	for _, segment := range path {
-		node, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		next, ok := node[segment]
-		if !ok {
-			return nil, false
-		}
-		current = next
-	}
-	return current, true
-}
-
-func claudeNumberFromAny(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case json.Number:
-		parsed, err := v.Float64()
-		return parsed, err == nil
-	case string:
-		parsed, err := json.Number(strings.TrimSpace(v)).Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func claudeNumberToInt64Ptr(v *float64) *int64 {
-	if v == nil {
-		return nil
-	}
-	return shared.Int64Ptr(int64(*v))
-}
-
-func claudeNumberToFloat64Ptr(v *float64) *float64 {
-	if v == nil {
-		return nil
-	}
-	return shared.Float64Ptr(*v)
 }

@@ -11,7 +11,7 @@ func joinLines(lines []string) string {
 
 func TestSplashProgressConnecting(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonConnecting,
+		daemon:        daemonState{status: DaemonConnecting},
 		providerOrder: []string{"openai", "anthropic", "cursor"},
 		animFrame:     0,
 	}
@@ -31,10 +31,9 @@ func TestSplashProgressConnecting(t *testing.T) {
 
 func TestSplashProgressNotInstalled(t *testing.T) {
 	m := Model{
-		daemonStatus:     DaemonNotInstalled,
-		daemonInstalling: false,
-		providerOrder:    []string{"openai"},
-		animFrame:        0,
+		daemon:        daemonState{status: DaemonNotInstalled, installing: false},
+		providerOrder: []string{"openai"},
+		animFrame:     0,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -52,10 +51,9 @@ func TestSplashProgressNotInstalled(t *testing.T) {
 
 func TestSplashProgressInstalling(t *testing.T) {
 	m := Model{
-		daemonStatus:     DaemonNotInstalled,
-		daemonInstalling: true,
-		providerOrder:    []string{"openai"},
-		animFrame:        3,
+		daemon:        daemonState{status: DaemonNotInstalled, installing: true},
+		providerOrder: []string{"openai"},
+		animFrame:     3,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -70,7 +68,7 @@ func TestSplashProgressInstalling(t *testing.T) {
 
 func TestSplashProgressStarting(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonStarting,
+		daemon:        daemonState{status: DaemonStarting},
 		providerOrder: []string{"openai", "cursor"},
 		animFrame:     5,
 	}
@@ -90,7 +88,7 @@ func TestSplashProgressStarting(t *testing.T) {
 
 func TestSplashProgressRunning(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonRunning,
+		daemon:        daemonState{status: DaemonRunning},
 		hasData:       false,
 		providerOrder: []string{"openai"},
 		animFrame:     2,
@@ -111,7 +109,7 @@ func TestSplashProgressRunning(t *testing.T) {
 
 func TestSplashProgressRunningWithData(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonRunning,
+		daemon:        daemonState{status: DaemonRunning},
 		hasData:       true,
 		providerOrder: []string{"openai"},
 		animFrame:     2,
@@ -129,8 +127,7 @@ func TestSplashProgressRunningWithData(t *testing.T) {
 
 func TestSplashProgressError(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonError,
-		daemonMessage: "socket timeout after 5s",
+		daemon:        daemonState{status: DaemonError, message: "socket timeout after 5s"},
 		providerOrder: []string{"openai"},
 		animFrame:     0,
 	}
@@ -150,8 +147,7 @@ func TestSplashProgressError(t *testing.T) {
 
 func TestSplashProgressErrorDefault(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonError,
-		daemonMessage: "",
+		daemon:        daemonState{status: DaemonError, message: ""},
 		providerOrder: []string{},
 		animFrame:     0,
 	}
@@ -168,10 +164,9 @@ func TestSplashProgressErrorDefault(t *testing.T) {
 
 func TestSplashProgressOutdated(t *testing.T) {
 	m := Model{
-		daemonStatus:     DaemonOutdated,
-		daemonInstalling: false,
-		providerOrder:    []string{"openai", "anthropic"},
-		animFrame:        0,
+		daemon:        daemonState{status: DaemonOutdated, installing: false},
+		providerOrder: []string{"openai", "anthropic"},
+		animFrame:     0,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -189,10 +184,9 @@ func TestSplashProgressOutdated(t *testing.T) {
 
 func TestSplashProgressOutdatedInstalling(t *testing.T) {
 	m := Model{
-		daemonStatus:     DaemonOutdated,
-		daemonInstalling: true,
-		providerOrder:    []string{"openai"},
-		animFrame:        7,
+		daemon:        daemonState{status: DaemonOutdated, installing: true},
+		providerOrder: []string{"openai"},
+		animFrame:     7,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -207,7 +201,7 @@ func TestSplashProgressOutdatedInstalling(t *testing.T) {
 
 func TestSplashProgressNoProviders(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonConnecting,
+		daemon:        daemonState{status: DaemonConnecting},
 		providerOrder: nil,
 		animFrame:     0,
 	}
@@ -221,12 +215,14 @@ func TestSplashProgressNoProviders(t *testing.T) {
 
 func TestSplashProgressShowsAppUpdateNotice(t *testing.T) {
 	m := Model{
-		daemonStatus:     DaemonConnecting,
-		providerOrder:    []string{"openai"},
-		appUpdateCurrent: "v0.4.0",
-		appUpdateLatest:  "v0.5.0",
-		appUpdateHint:    "brew upgrade janekbaraniewski/tap/openusage",
-		animFrame:        0,
+		daemon: daemonState{
+			status:           DaemonConnecting,
+			appUpdateCurrent: "v0.4.0",
+			appUpdateLatest:  "v0.5.0",
+			appUpdateHint:    "brew upgrade janekbaraniewski/tap/openusage",
+		},
+		providerOrder: []string{"openai"},
+		animFrame:     0,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -241,10 +237,9 @@ func TestSplashProgressShowsAppUpdateNotice(t *testing.T) {
 
 func TestSplashProgressStartingAfterInstall(t *testing.T) {
 	m := Model{
-		daemonStatus:      DaemonStarting,
-		daemonInstallDone: true,
-		providerOrder:     []string{"openai"},
-		animFrame:         0,
+		daemon:        daemonState{status: DaemonStarting, installDone: true},
+		providerOrder: []string{"openai"},
+		animFrame:     0,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -259,11 +254,10 @@ func TestSplashProgressStartingAfterInstall(t *testing.T) {
 
 func TestSplashProgressRunningAfterInstall(t *testing.T) {
 	m := Model{
-		daemonStatus:      DaemonRunning,
-		daemonInstallDone: true,
-		hasData:           false,
-		providerOrder:     []string{"openai"},
-		animFrame:         0,
+		daemon:        daemonState{status: DaemonRunning, installDone: true},
+		hasData:       false,
+		providerOrder: []string{"openai"},
+		animFrame:     0,
 	}
 	lines := m.splashProgressLines()
 	combined := joinLines(lines)
@@ -281,8 +275,7 @@ func TestSplashProgressRunningAfterInstall(t *testing.T) {
 
 func TestSplashProgressErrorMultilineMessage(t *testing.T) {
 	m := Model{
-		daemonStatus:  DaemonError,
-		daemonMessage: "context deadline exceeded\nsocket_path=/Users/test/.openusage/socket\nstatus_cmd=launchctl print",
+		daemon:        daemonState{status: DaemonError, message: "context deadline exceeded\nsocket_path=/Users/test/.openusage/socket\nstatus_cmd=launchctl print"},
 		providerOrder: []string{"openai"},
 		animFrame:     0,
 	}

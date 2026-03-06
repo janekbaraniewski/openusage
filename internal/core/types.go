@@ -1,6 +1,7 @@
 package core
 
 import (
+	"maps"
 	"time"
 
 	"github.com/samber/lo"
@@ -26,6 +27,8 @@ type Metric struct {
 	Window    string   `json:"window"` // "1m", "1d", "month", "rolling-5h", etc.
 }
 
+// Percent returns the remaining percentage (0–100) or -1 if unknown.
+// For used percentage, use MetricUsedPercent which is context-aware.
 func (m Metric) Percent() float64 {
 	if m.Limit != nil && m.Remaining != nil && *m.Limit > 0 {
 		return (*m.Remaining / *m.Limit) * 100
@@ -58,12 +61,14 @@ type UsageSnapshot struct {
 
 func NewUsageSnapshot(providerID, accountID string) UsageSnapshot {
 	return UsageSnapshot{
-		ProviderID: providerID,
-		AccountID:  accountID,
-		Timestamp:  time.Now(),
-		Metrics:    make(map[string]Metric),
-		Resets:     make(map[string]time.Time),
-		Raw:        make(map[string]string),
+		ProviderID:  providerID,
+		AccountID:   accountID,
+		Timestamp:   time.Now(),
+		Metrics:     make(map[string]Metric),
+		Resets:      make(map[string]time.Time),
+		Attributes:  make(map[string]string),
+		Diagnostics: make(map[string]string),
+		Raw:         make(map[string]string),
 	}
 }
 
@@ -138,16 +143,16 @@ func (s UsageSnapshot) MetaValue(key string) (string, bool) {
 func (s UsageSnapshot) DeepClone() UsageSnapshot {
 	clone := s
 	clone.Metrics = deepCloneMetrics(s.Metrics)
-	clone.Resets = deepCloneTimeMap(s.Resets)
-	clone.Attributes = deepCloneStringMap(s.Attributes)
-	clone.Diagnostics = deepCloneStringMap(s.Diagnostics)
-	clone.Raw = deepCloneStringMap(s.Raw)
+	clone.Resets = maps.Clone(s.Resets)
+	clone.Attributes = maps.Clone(s.Attributes)
+	clone.Diagnostics = maps.Clone(s.Diagnostics)
+	clone.Raw = maps.Clone(s.Raw)
 
 	if s.ModelUsage != nil {
 		clone.ModelUsage = make([]ModelUsageRecord, len(s.ModelUsage))
 		for i, rec := range s.ModelUsage {
 			clone.ModelUsage[i] = rec
-			clone.ModelUsage[i].Dimensions = deepCloneStringMap(rec.Dimensions)
+			clone.ModelUsage[i].Dimensions = maps.Clone(rec.Dimensions)
 			clone.ModelUsage[i].InputTokens = cloneFloat64Ptr(rec.InputTokens)
 			clone.ModelUsage[i].OutputTokens = cloneFloat64Ptr(rec.OutputTokens)
 			clone.ModelUsage[i].CachedTokens = cloneFloat64Ptr(rec.CachedTokens)
@@ -196,28 +201,6 @@ func deepCloneMetrics(m map[string]Metric) map[string]Metric {
 			Unit:      v.Unit,
 			Window:    v.Window,
 		}
-	}
-	return out
-}
-
-func deepCloneTimeMap(m map[string]time.Time) map[string]time.Time {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]time.Time, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
-func deepCloneStringMap(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
 	}
 	return out
 }

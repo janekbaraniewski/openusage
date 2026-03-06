@@ -47,8 +47,8 @@ func BuildLimitSnapshotRequests(snaps map[string]core.UsageSnapshot) []IngestReq
 	for _, accountID := range accountIDs {
 		snap := snaps[accountID]
 
-		providerID := firstNonEmptyNonBlank(snap.ProviderID, "unknown")
-		effectiveAccountID := firstNonEmptyNonBlank(snap.AccountID, accountID, "default")
+		providerID := core.FirstNonEmpty(snap.ProviderID, "unknown")
+		effectiveAccountID := core.FirstNonEmpty(snap.AccountID, accountID, "default")
 		occurredAt := snap.Timestamp.UTC()
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()

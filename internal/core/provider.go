@@ -11,10 +11,19 @@ type AccountConfig struct {
 	Auth       string            `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token"
 	APIKeyEnv  string            `json:"api_key_env,omitempty"` // env var name holding the API key
 	ProbeModel string            `json:"probe_model,omitempty"` // model to use for probe requests
-	Binary     string            `json:"binary,omitempty"`      // path to CLI binary
-	BaseURL    string            `json:"base_url,omitempty"`    // custom API base URL (e.g. for OpenRouter)
-	Token      string            `json:"-"`                     // runtime-only: access token (never persisted)
-	ExtraData  map[string]string `json:"-"`                     // runtime-only: extra detection data
+
+	// Binary is the path to a CLI binary for CLI-based providers (copilot, gemini_cli).
+	// For local-file providers it is repurposed as a data file path
+	// (e.g. cursor tracking DB, claude_code stats-cache.json).
+	Binary string `json:"binary,omitempty"`
+
+	// BaseURL is the custom API base URL for HTTP providers (openrouter, codex, ollama).
+	// For local-file providers it is repurposed as a secondary data file path
+	// (e.g. cursor state.vscdb, claude_code .claude.json).
+	BaseURL string `json:"base_url,omitempty"`
+
+	Token     string            `json:"-"` // runtime-only: access token (never persisted)
+	ExtraData map[string]string `json:"-"` // runtime-only: extra detection data (never persisted)
 }
 
 func (c AccountConfig) ResolveAPIKey() string {

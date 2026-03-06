@@ -48,9 +48,7 @@ type Service struct {
 	logMu      sync.Mutex
 	lastLogAt  map[string]time.Time
 
-	readModelMu       sync.RWMutex
-	readModelCache    map[string]cachedReadModelEntry
-	readModelInFlight map[string]bool
+	rmCache *readModelCache
 }
 
 func RunServer(cfg Config) error {
@@ -110,15 +108,14 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	svc := &Service{
-		cfg:               cfg,
-		store:             store,
-		pipeline:          telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:       telemetry.NewQuotaSnapshotIngestor(store),
-		collectors:        buildCollectors(),
-		providerByID:      providersByID(),
-		lastLogAt:         map[string]time.Time{},
-		readModelCache:    map[string]cachedReadModelEntry{},
-		readModelInFlight: map[string]bool{},
+		cfg:          cfg,
+		store:        store,
+		pipeline:     telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
+		collectors:   buildCollectors(),
+		providerByID: providersByID(),
+		lastLogAt:    map[string]time.Time{},
+		rmCache:      newReadModelCache(),
 	}
 
 	svc.infof(
@@ -258,58 +255,6 @@ func (s *Service) shouldLog(key string, interval time.Duration) bool {
 
 // --- Read-model cache ---
 
-func (s *Service) readModelCacheGet(cacheKey string, timeWindow string) (map[string]core.UsageSnapshot, time.Time, bool) {
-	if s == nil || strings.TrimSpace(cacheKey) == "" {
-		return nil, time.Time{}, false
-	}
-	s.readModelMu.RLock()
-	entry, ok := s.readModelCache[cacheKey]
-	s.readModelMu.RUnlock()
-	if !ok || len(entry.snapshots) == 0 {
-		return nil, time.Time{}, false
-	}
-	// Time window mismatch → treat as cache miss so gauge data is always fresh.
-	if entry.timeWindow != timeWindow {
-		return nil, time.Time{}, false
-	}
-	return core.DeepCloneSnapshots(entry.snapshots), entry.updatedAt, true
-}
-
-func (s *Service) readModelCacheSet(cacheKey string, snapshots map[string]core.UsageSnapshot, timeWindow string) {
-	if s == nil || strings.TrimSpace(cacheKey) == "" || len(snapshots) == 0 {
-		return
-	}
-	s.readModelMu.Lock()
-	s.readModelCache[cacheKey] = cachedReadModelEntry{
-		snapshots:  core.DeepCloneSnapshots(snapshots),
-		updatedAt:  time.Now().UTC(),
-		timeWindow: timeWindow,
-	}
-	s.readModelMu.Unlock()
-}
-
-func (s *Service) beginReadModelRefresh(cacheKey string) bool {
-	if s == nil || strings.TrimSpace(cacheKey) == "" {
-		return false
-	}
-	s.readModelMu.Lock()
-	defer s.readModelMu.Unlock()
-	if s.readModelInFlight[cacheKey] {
-		return false
-	}
-	s.readModelInFlight[cacheKey] = true
-	return true
-}
-
-func (s *Service) endReadModelRefresh(cacheKey string) {
-	if s == nil || strings.TrimSpace(cacheKey) == "" {
-		return
-	}
-	s.readModelMu.Lock()
-	delete(s.readModelInFlight, cacheKey)
-	s.readModelMu.Unlock()
-}
-
 func (s *Service) computeReadModel(
 	ctx context.Context,
 	req ReadModelRequest,
@@ -336,11 +281,11 @@ func (s *Service) refreshReadModelCacheAsync(
 	req ReadModelRequest,
 	timeout time.Duration,
 ) {
-	if !s.beginReadModelRefresh(cacheKey) {
+	if !s.rmCache.beginRefresh(cacheKey) {
 		return
 	}
 	go func() {
-		defer s.endReadModelRefresh(cacheKey)
+		defer s.rmCache.endRefresh(cacheKey)
 		refreshCtx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		snapshots, err := s.computeReadModel(refreshCtx, req)
@@ -350,7 +295,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			}
 			return
 		}
-		s.readModelCacheSet(cacheKey, snapshots, req.TimeWindow)
+		s.rmCache.set(cacheKey, snapshots, req.TimeWindow)
 	}()
 }
 
@@ -1134,7 +1079,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheKey := ReadModelRequestKey(req)
-	if cached, cachedAt, ok := s.readModelCacheGet(cacheKey, req.TimeWindow); ok {
+	if cached, cachedAt, ok := s.rmCache.get(cacheKey, req.TimeWindow); ok {
 		core.Tracef("[read_model] cache hit key=%s age=%s providers=%d", cacheKey, time.Since(cachedAt).Round(time.Millisecond), len(cached))
 		for id, snap := range cached {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
@@ -1150,7 +1095,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
-		s.readModelCacheSet(cacheKey, snapshots, req.TimeWindow)
+		s.rmCache.set(cacheKey, snapshots, req.TimeWindow)
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 		return
 	}

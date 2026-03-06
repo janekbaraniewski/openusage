@@ -735,21 +735,13 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 	return n, nil
 }
 
+// newUUID generates a random UUID v4 string.
 func newUUID() (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
 		return "", err
 	}
-
-	buf[6] = (buf[6] & 0x0f) | 0x40
-	buf[8] = (buf[8] & 0x3f) | 0x80
-
-	encoded := hex.EncodeToString(buf)
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		encoded[0:8],
-		encoded[8:12],
-		encoded[12:16],
-		encoded[16:20],
-		encoded[20:32],
-	), nil
+	buf[6] = (buf[6] & 0x0f) | 0x40 // version 4
+	buf[8] = (buf[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16]), nil
 }

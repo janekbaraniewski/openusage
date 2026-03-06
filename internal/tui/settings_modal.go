@@ -39,37 +39,37 @@ var settingsTabNames = []string{
 }
 
 func (m *Model) openSettingsModal() {
-	m.showSettingsModal = true
-	m.settingsStatus = ""
-	m.settingsModalTab = settingsTabProviders
-	m.apiKeyEditing = false
-	m.apiKeyInput = ""
-	m.apiKeyStatus = ""
-	m.settingsBodyOffset = 0
+	m.settings.show = true
+	m.settings.status = ""
+	m.settings.tab = settingsTabProviders
+	m.settings.apiKeyEditing = false
+	m.settings.apiKeyInput = ""
+	m.settings.apiKeyStatus = ""
+	m.settings.bodyOffset = 0
 	if len(m.providerOrder) > 0 {
-		m.settingsCursor = clamp(m.settingsCursor, 0, len(m.providerOrder)-1)
+		m.settings.cursor = clamp(m.settings.cursor, 0, len(m.providerOrder)-1)
 	}
-	m.settingsSectionRowCursor = 0
-	m.settingsPreviewOffset = 0
+	m.settings.sectionRowCursor = 0
+	m.settings.previewOffset = 0
 	themes := AvailableThemes()
 	if len(themes) > 0 {
-		m.settingsThemeCursor = clamp(ActiveThemeIndex(), 0, len(themes)-1)
+		m.settings.themeCursor = clamp(ActiveThemeIndex(), 0, len(themes)-1)
 	} else {
-		m.settingsThemeCursor = 0
+		m.settings.themeCursor = 0
 	}
-	m.settingsViewCursor = dashboardViewIndex(m.configuredDashboardView())
+	m.settings.viewCursor = dashboardViewIndex(m.configuredDashboardView())
 	m.refreshIntegrationStatuses()
 }
 
 func (m *Model) closeSettingsModal() {
-	m.showSettingsModal = false
-	m.settingsStatus = ""
-	m.apiKeyEditing = false
-	m.apiKeyInput = ""
-	m.apiKeyStatus = ""
-	m.settingsBodyOffset = 0
-	m.settingsSectionRowCursor = 0
-	m.settingsPreviewOffset = 0
+	m.settings.show = false
+	m.settings.status = ""
+	m.settings.apiKeyEditing = false
+	m.settings.apiKeyInput = ""
+	m.settings.apiKeyStatus = ""
+	m.settings.bodyOffset = 0
+	m.settings.sectionRowCursor = 0
+	m.settings.previewOffset = 0
 }
 
 func (m Model) settingsModalInfo() string {
@@ -82,24 +82,24 @@ func (m Model) settingsModalInfo() string {
 	}
 
 	tabName := "Settings"
-	if int(m.settingsModalTab) >= 0 && int(m.settingsModalTab) < len(settingsTabNames) {
-		tabName = settingsTabNames[m.settingsModalTab]
+	if int(m.settings.tab) >= 0 && int(m.settings.tab) < len(settingsTabNames) {
+		tabName = settingsTabNames[m.settings.tab]
 	}
 
 	info := fmt.Sprintf("⚙ %s · %d/%d active", tabName, active, len(ids))
-	if m.settingsStatus != "" {
-		info += " · " + m.settingsStatus
+	if m.settings.status != "" {
+		info += " · " + m.settings.status
 	}
 	return info
 }
 
 func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.apiKeyEditing {
+	if m.settings.apiKeyEditing {
 		return m.handleAPIKeyEditKey(msg)
 	}
 
 	ids := m.settingsIDs()
-	if m.settingsModalTab == settingsTabAPIKeys {
+	if m.settings.tab == settingsTabAPIKeys {
 		ids = m.apiKeysTabIDs()
 	}
 
@@ -110,19 +110,19 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeSettingsModal()
 		return m, nil
 	case "tab", "right", "l", "]":
-		m.settingsModalTab = (m.settingsModalTab + 1) % settingsTabCount
-		m.settingsBodyOffset = 0
+		m.settings.tab = (m.settings.tab + 1) % settingsTabCount
+		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
 		return m, nil
 	case "shift+tab", "left", "h", "[":
-		m.settingsModalTab = (m.settingsModalTab + settingsTabCount - 1) % settingsTabCount
-		m.settingsBodyOffset = 0
+		m.settings.tab = (m.settings.tab + settingsTabCount - 1) % settingsTabCount
+		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
 		return m, nil
 	case "r":
-		if m.settingsModalTab == settingsTabIntegrations {
+		if m.settings.tab == settingsTabIntegrations {
 			m.refreshIntegrationStatuses()
-			m.settingsStatus = "integration status refreshed"
+			m.settings.status = "integration status refreshed"
 			return m, nil
 		}
 		m = m.requestRefresh()
@@ -133,24 +133,24 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if key >= '1' && key <= '9' {
 			idx := int(key - '1')
 			if idx >= 0 && idx < int(settingsTabCount) {
-				m.settingsModalTab = settingsModalTab(idx)
-				m.settingsBodyOffset = 0
+				m.settings.tab = settingsModalTab(idx)
+				m.settings.bodyOffset = 0
 				m.resetSettingsCursorForTab()
 				return m, nil
 			}
 		}
 	}
 
-	switch m.settingsModalTab {
+	switch m.settings.tab {
 	case settingsTabProviders:
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsCursor > 0 {
-				m.settingsCursor--
+			if m.settings.cursor > 0 {
+				m.settings.cursor--
 			}
 		case "down", "j":
-			if m.settingsCursor < len(ids)-1 {
-				m.settingsCursor++
+			if m.settings.cursor < len(ids)-1 {
+				m.settings.cursor++
 			}
 		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
 			cmd := m.moveSelectedProvider(ids, -1)
@@ -166,22 +166,22 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(ids) == 0 {
 				return m, nil
 			}
-			id := ids[clamp(m.settingsCursor, 0, len(ids)-1)]
+			id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
 			m.providerEnabled[id] = !m.isProviderEnabled(id)
 			m.rebuildSortedIDs()
-			m.settingsStatus = "saving settings..."
+			m.settings.status = "saving settings..."
 			return m, m.persistDashboardPrefsCmd()
 		}
 	case settingsTabWidgetSections:
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsSectionRowCursor > 0 {
-				m.settingsSectionRowCursor--
+			if m.settings.sectionRowCursor > 0 {
+				m.settings.sectionRowCursor--
 			}
 		case "down", "j":
 			entries := m.widgetSectionEntries()
-			if m.settingsSectionRowCursor < len(entries)-1 {
-				m.settingsSectionRowCursor++
+			if m.settings.sectionRowCursor < len(entries)-1 {
+				m.settings.sectionRowCursor++
 			}
 		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
 			cmd := m.moveSelectedWidgetSection(-1)
@@ -199,76 +199,76 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		case "pgup", "ctrl+u":
-			m.settingsPreviewOffset -= 4
-			if m.settingsPreviewOffset < 0 {
-				m.settingsPreviewOffset = 0
+			m.settings.previewOffset -= 4
+			if m.settings.previewOffset < 0 {
+				m.settings.previewOffset = 0
 			}
 		case "pgdown", "ctrl+d":
-			m.settingsPreviewOffset += 4
+			m.settings.previewOffset += 4
 		}
 	case settingsTabTheme:
 		themes := AvailableThemes()
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsThemeCursor > 0 {
-				m.settingsThemeCursor--
+			if m.settings.themeCursor > 0 {
+				m.settings.themeCursor--
 			}
 		case "down", "j":
-			if m.settingsThemeCursor < len(themes)-1 {
-				m.settingsThemeCursor++
+			if m.settings.themeCursor < len(themes)-1 {
+				m.settings.themeCursor++
 			}
 		case " ", "enter":
 			if len(themes) == 0 {
 				return m, nil
 			}
-			m.settingsThemeCursor = clamp(m.settingsThemeCursor, 0, len(themes)-1)
-			name := themes[m.settingsThemeCursor].Name
+			m.settings.themeCursor = clamp(m.settings.themeCursor, 0, len(themes)-1)
+			name := themes[m.settings.themeCursor].Name
 			if SetThemeByName(name) {
-				m.settingsStatus = "saving theme..."
+				m.settings.status = "saving theme..."
 				return m, m.persistThemeCmd(name)
 			}
 		}
 	case settingsTabView:
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsViewCursor > 0 {
-				m.settingsViewCursor--
+			if m.settings.viewCursor > 0 {
+				m.settings.viewCursor--
 			}
 		case "down", "j":
-			if m.settingsViewCursor < len(dashboardViewOptions)-1 {
-				m.settingsViewCursor++
+			if m.settings.viewCursor < len(dashboardViewOptions)-1 {
+				m.settings.viewCursor++
 			}
 		case " ", "enter":
 			if len(dashboardViewOptions) == 0 {
 				return m, nil
 			}
-			selected := dashboardViewByIndex(m.settingsViewCursor)
+			selected := dashboardViewByIndex(m.settings.viewCursor)
 			m.setDashboardView(selected)
-			m.settingsViewCursor = dashboardViewIndex(selected)
-			m.settingsStatus = "saving view..."
+			m.settings.viewCursor = dashboardViewIndex(selected)
+			m.settings.status = "saving view..."
 			return m, m.persistDashboardViewCmd()
 		}
 	case settingsTabAPIKeys:
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsCursor > 0 {
-				m.settingsCursor--
+			if m.settings.cursor > 0 {
+				m.settings.cursor--
 			}
 		case "down", "j":
-			if m.settingsCursor < len(ids)-1 {
-				m.settingsCursor++
+			if m.settings.cursor < len(ids)-1 {
+				m.settings.cursor++
 			}
 		case " ", "enter":
 			if len(ids) == 0 {
 				return m, nil
 			}
-			id := ids[clamp(m.settingsCursor, 0, len(ids)-1)]
+			id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
 			providerID := providerForAccountID(id, m.accountProviders)
 			if isAPIKeyProvider(providerID) {
-				m.apiKeyEditing = true
-				m.apiKeyInput = ""
-				m.apiKeyEditAccountID = id
-				m.apiKeyStatus = ""
+				m.settings.apiKeyEditing = true
+				m.settings.apiKeyInput = ""
+				m.settings.apiKeyEditAccountID = id
+				m.settings.apiKeyStatus = ""
 				// Ensure the provider mapping exists (for unregistered providers)
 				m.accountProviders[id] = providerID
 			}
@@ -276,10 +276,10 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(ids) == 0 {
 				return m, nil
 			}
-			id := ids[clamp(m.settingsCursor, 0, len(ids)-1)]
+			id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
 			providerID := providerForAccountID(id, m.accountProviders)
 			if isAPIKeyProvider(providerID) {
-				m.settingsStatus = "deleting key..."
+				m.settings.status = "deleting key..."
 				return m, m.deleteCredentialCmd(id)
 			}
 		}
@@ -287,16 +287,16 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		twCount := len(core.ValidTimeWindows)
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsCursor > 0 {
-				m.settingsCursor--
+			if m.settings.cursor > 0 {
+				m.settings.cursor--
 			}
 		case "down", "j":
-			if m.settingsCursor < twCount-1 {
-				m.settingsCursor++
+			if m.settings.cursor < twCount-1 {
+				m.settings.cursor++
 			}
 		case " ", "enter":
-			if m.settingsCursor >= 0 && m.settingsCursor < twCount {
-				tw := core.ValidTimeWindows[m.settingsCursor]
+			if m.settings.cursor >= 0 && m.settings.cursor < twCount {
+				tw := core.ValidTimeWindows[m.settings.cursor]
 				m.timeWindow = tw
 				if m.onTimeWindowChange != nil {
 					m.onTimeWindowChange(string(tw))
@@ -305,46 +305,46 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if m.onRefresh != nil {
 					m.onRefresh()
 				}
-				m.settingsStatus = "saving time window..."
+				m.settings.status = "saving time window..."
 				return m, m.persistTimeWindowCmd(string(tw))
 			}
 		case "pgup", "ctrl+u":
-			m.settingsBodyOffset -= 4
-			if m.settingsBodyOffset < 0 {
-				m.settingsBodyOffset = 0
+			m.settings.bodyOffset -= 4
+			if m.settings.bodyOffset < 0 {
+				m.settings.bodyOffset = 0
 			}
 		case "pgdown", "ctrl+d":
-			m.settingsBodyOffset += 4
+			m.settings.bodyOffset += 4
 		}
 	case settingsTabIntegrations:
 		switch msg.String() {
 		case "up", "k":
-			if m.settingsCursor > 0 {
-				m.settingsCursor--
+			if m.settings.cursor > 0 {
+				m.settings.cursor--
 			}
 		case "down", "j":
-			if m.settingsCursor < len(m.integrationStatuses)-1 {
-				m.settingsCursor++
+			if m.settings.cursor < len(m.settings.integrationStatus)-1 {
+				m.settings.cursor++
 			}
 		case "i", " ", "enter":
-			if len(m.integrationStatuses) == 0 {
+			if len(m.settings.integrationStatus) == 0 {
 				return m, nil
 			}
-			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
-			entry := m.integrationStatuses[cursor]
-			m.settingsStatus = "installing integration..."
+			cursor := clamp(m.settings.cursor, 0, len(m.settings.integrationStatus)-1)
+			entry := m.settings.integrationStatus[cursor]
+			m.settings.status = "installing integration..."
 			return m, m.installIntegrationCmd(entry.ID)
 		case "u":
-			if len(m.integrationStatuses) == 0 {
+			if len(m.settings.integrationStatus) == 0 {
 				return m, nil
 			}
-			cursor := clamp(m.settingsCursor, 0, len(m.integrationStatuses)-1)
-			entry := m.integrationStatuses[cursor]
+			cursor := clamp(m.settings.cursor, 0, len(m.settings.integrationStatus)-1)
+			entry := m.settings.integrationStatus[cursor]
 			if !entry.NeedsUpgrade {
-				m.settingsStatus = "selected integration is already current"
+				m.settings.status = "selected integration is already current"
 				return m, nil
 			}
-			m.settingsStatus = "upgrading integration..."
+			m.settings.status = "upgrading integration..."
 			return m, m.installIntegrationCmd(entry.ID)
 		}
 	}
@@ -356,7 +356,7 @@ func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {
 	if m == nil || len(ids) == 0 || delta == 0 {
 		return nil
 	}
-	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
 	target := cursor + delta
 	if target < 0 || target >= len(ids) {
 		return nil
@@ -371,9 +371,9 @@ func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {
 	}
 
 	m.providerOrder[currIdx], m.providerOrder[swapIdx] = m.providerOrder[swapIdx], m.providerOrder[currIdx]
-	m.settingsCursor = target
+	m.settings.cursor = target
 	m.rebuildSortedIDs()
-	m.settingsStatus = "saving order..."
+	m.settings.status = "saving order..."
 	return m.persistDashboardPrefsCmd()
 }
 
@@ -386,15 +386,15 @@ func (m *Model) moveSelectedWidgetSection(delta int) tea.Cmd {
 		return nil
 	}
 
-	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
 	target := cursor + delta
 	if target < 0 || target >= len(entries) {
 		return nil
 	}
 	entries[cursor], entries[target] = entries[target], entries[cursor]
-	m.settingsSectionRowCursor = target
+	m.settings.sectionRowCursor = target
 	m.setWidgetSectionEntries(entries)
-	m.settingsStatus = "saving sections..."
+	m.settings.status = "saving sections..."
 	return m.persistDashboardWidgetSectionsCmd()
 }
 
@@ -406,24 +406,24 @@ func (m *Model) toggleSelectedWidgetSection() tea.Cmd {
 	if len(entries) == 0 {
 		return nil
 	}
-	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
 	entries[cursor].Enabled = !entries[cursor].Enabled
 	m.setWidgetSectionEntries(entries)
-	m.settingsStatus = "saving sections..."
+	m.settings.status = "saving sections..."
 	return m.persistDashboardWidgetSectionsCmd()
 }
 
 func (m *Model) resetSettingsCursorForTab() {
-	switch m.settingsModalTab {
+	switch m.settings.tab {
 	case settingsTabTelemetry:
-		m.settingsCursor = m.currentTimeWindowIndex()
+		m.settings.cursor = m.currentTimeWindowIndex()
 	case settingsTabView:
-		m.settingsViewCursor = dashboardViewIndex(m.configuredDashboardView())
+		m.settings.viewCursor = dashboardViewIndex(m.configuredDashboardView())
 	case settingsTabWidgetSections:
-		m.settingsSectionRowCursor = 0
-		m.settingsPreviewOffset = 0
+		m.settings.sectionRowCursor = 0
+		m.settings.previewOffset = 0
 	default:
-		m.settingsCursor = 0
+		m.settings.cursor = 0
 	}
 }
 
@@ -465,8 +465,8 @@ func (m Model) renderSettingsModalOverlay() string {
 	hint := dimStyle.Render(m.settingsModalHint())
 
 	status := ""
-	if m.settingsStatus != "" {
-		status = lipgloss.NewStyle().Foreground(colorSapphire).Render(m.settingsStatus)
+	if m.settings.status != "" {
+		status = lipgloss.NewStyle().Foreground(colorSapphire).Render(m.settings.status)
 	}
 
 	lines := []string{
@@ -488,7 +488,7 @@ func (m Model) renderSettingsModalOverlay() string {
 		Padding(1, 2).
 		Width(contentW).
 		Render(strings.Join(lines, "\n"))
-	if m.settingsModalTab != settingsTabWidgetSections {
+	if m.settings.tab != settingsTabWidgetSections {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	}
 
@@ -519,7 +519,7 @@ func (m Model) renderSettingsModalTabs() string {
 	parts := make([]string, 0, len(settingsTabNames))
 	for i, name := range settingsTabNames {
 		label := fmt.Sprintf("%d:%s", i+1, name)
-		if settingsModalTab(i) == m.settingsModalTab {
+		if settingsModalTab(i) == m.settings.tab {
 			parts = append(parts, screenTabActiveStyle.Render(label))
 		} else {
 			parts = append(parts, screenTabInactiveStyle.Render(label))
@@ -529,13 +529,13 @@ func (m Model) renderSettingsModalTabs() string {
 }
 
 func (m Model) settingsModalHint() string {
-	switch m.settingsModalTab {
+	switch m.settings.tab {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabWidgetSections:
 		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:
-		if m.apiKeyEditing {
+		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
@@ -551,7 +551,7 @@ func (m Model) settingsModalHint() string {
 }
 
 func (m Model) renderSettingsModalBody(w, h int) string {
-	switch m.settingsModalTab {
+	switch m.settings.tab {
 	case settingsTabProviders:
 		return m.renderSettingsProvidersBody(w, h)
 	case settingsTabWidgetSections:
@@ -575,7 +575,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		return padToSize(dimStyle.Render("No providers available."), w, h)
 	}
 
-	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
 	start, end := listWindow(len(ids), cursor, h)
 	lines := make([]string, 0, h)
 
@@ -617,7 +617,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 		return padToSize(dimStyle.Render("No dashboard sections available."), w, h)
 	}
 
-	cursor := clamp(m.settingsSectionRowCursor, 0, len(entries)-1)
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
 	headerLines := 4
 	listHeight := h - headerLines
 	if listHeight < 1 {
@@ -683,7 +683,7 @@ func (m Model) renderSettingsWidgetSectionsPreview(w, h int) string {
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	offset := clamp(m.settingsPreviewOffset, 0, maxOffset)
+	offset := clamp(m.settings.previewOffset, 0, maxOffset)
 	visible := all
 	if len(visible) > h {
 		visible = visible[offset:]
@@ -933,7 +933,7 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 		return padToSize(dimStyle.Render("No themes available."), w, h)
 	}
 
-	cursor := clamp(m.settingsThemeCursor, 0, len(themes)-1)
+	cursor := clamp(m.settings.themeCursor, 0, len(themes)-1)
 	start, end := listWindow(len(themes), cursor, h)
 	activeThemeIdx := ActiveThemeIndex()
 	lines := make([]string, 0, h)
@@ -960,7 +960,7 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 		return padToSize(dimStyle.Render("No dashboard views available."), w, h)
 	}
 
-	cursor := clamp(m.settingsViewCursor, 0, len(dashboardViewOptions)-1)
+	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
 	start, end := listWindow(len(dashboardViewOptions), cursor, h)
 	lines := make([]string, 0, h)
 	configured := m.configuredDashboardView()
@@ -1039,7 +1039,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		return padToSize(dimStyle.Render("No API-key providers available."), w, h)
 	}
 
-	cursor := clamp(m.settingsCursor, 0, len(ids)-1)
+	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
 	start, end := listWindow(len(ids), cursor, h)
 	lines := make([]string, 0, h)
 
@@ -1082,13 +1082,13 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			envLabel = "  " + dimStyle.Render(envVar)
 		}
 
-		if m.apiKeyEditing && i == cursor {
-			masked := maskAPIKey(m.apiKeyInput)
+		if m.settings.apiKeyEditing && i == cursor {
+			masked := maskAPIKey(m.settings.apiKeyInput)
 			inputStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 			cursorChar := PulseChar("█", "▌", m.animFrame)
 			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, id, inputStyle.Render(masked+cursorChar))
-			if m.apiKeyStatus != "" {
-				line += "  " + dimStyle.Render(m.apiKeyStatus)
+			if m.settings.apiKeyStatus != "" {
+				line += "  " + dimStyle.Render(m.settings.apiKeyStatus)
 			}
 			lines = append(lines, line)
 		} else {
@@ -1108,7 +1108,7 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 	lines = append(lines, "")
 	for i, tw := range core.ValidTimeWindows {
 		prefix := "  "
-		if i == m.settingsCursor {
+		if i == m.settings.cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 		current := "  "
@@ -1146,17 +1146,17 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 		}
 	}
 
-	start, end := listWindow(len(lines), m.settingsBodyOffset, h)
+	start, end := listWindow(len(lines), m.settings.bodyOffset, h)
 	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
 }
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {
-	statuses := m.integrationStatuses
+	statuses := m.settings.integrationStatus
 	if len(statuses) == 0 {
 		return padToSize(dimStyle.Render("No integration status available yet. Press r to refresh."), w, h)
 	}
 
-	cursor := clamp(m.settingsCursor, 0, len(statuses)-1)
+	cursor := clamp(m.settings.cursor, 0, len(statuses)-1)
 	start, end := listWindow(len(statuses), cursor, h-4)
 	lines := make([]string, 0, h)
 
@@ -1204,28 +1204,28 @@ func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.apiKeyEditing = false
-		m.apiKeyInput = ""
-		m.apiKeyStatus = ""
+		m.settings.apiKeyEditing = false
+		m.settings.apiKeyInput = ""
+		m.settings.apiKeyStatus = ""
 		return m, nil
 	case "enter":
-		if m.apiKeyInput == "" || m.apiKeyStatus == "validating..." {
+		if m.settings.apiKeyInput == "" || m.settings.apiKeyStatus == "validating..." {
 			return m, nil
 		}
-		id := m.apiKeyEditAccountID
+		id := m.settings.apiKeyEditAccountID
 		providerID := m.accountProviders[id]
-		m.apiKeyStatus = "validating..."
-		return m, m.validateKeyCmd(id, providerID, m.apiKeyInput)
+		m.settings.apiKeyStatus = "validating..."
+		return m, m.validateKeyCmd(id, providerID, m.settings.apiKeyInput)
 	case "backspace":
-		if len(m.apiKeyInput) > 0 {
-			m.apiKeyInput = m.apiKeyInput[:len(m.apiKeyInput)-1]
+		if len(m.settings.apiKeyInput) > 0 {
+			m.settings.apiKeyInput = m.settings.apiKeyInput[:len(m.settings.apiKeyInput)-1]
 		}
-		m.apiKeyStatus = ""
+		m.settings.apiKeyStatus = ""
 		return m, nil
 	default:
 		if msg.Type == tea.KeyRunes {
-			m.apiKeyInput += string(msg.Runes)
-			m.apiKeyStatus = ""
+			m.settings.apiKeyInput += string(msg.Runes)
+			m.settings.apiKeyStatus = ""
 		}
 		return m, nil
 	}
