@@ -16,6 +16,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -72,6 +73,15 @@ type copilotTelemetryToolContext struct {
 
 // System returns the telemetry system identifier for the copilot provider.
 func (p *Provider) System() string { return p.ID() }
+
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"sessions_dir":     defaultCopilotSessionsDir(),
+			"session_store_db": defaultCopilotSessionStoreDB(),
+		},
+	}
+}
 
 // Collect scans copilot session-state directories for events.jsonl files and
 // extracts usage telemetry events from assistant.usage entries.
@@ -233,7 +243,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 			}
 
 			messageID := copilotTelemetryMessageID(sessionID, lineNum+1, msg.MessageID, evt.ID)
-			turnID := shared.FirstNonEmpty(messageID, fmt.Sprintf("%s:line:%d", sessionID, lineNum+1))
+			turnID := core.FirstNonEmpty(messageID, fmt.Sprintf("%s:line:%d", sessionID, lineNum+1))
 
 			for reqIdx, rawReq := range toolRequests {
 				req, ok := parseCopilotTelemetryToolRequest(rawReq)
@@ -318,10 +328,12 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 					AgentName:     "copilot",
 					EventType:     shared.TelemetryEventTypeToolUsage,
 					ModelRaw:      model,
-					ToolName:      toolName,
-					Requests:      shared.Int64Ptr(1),
-					Status:        shared.TelemetryStatusUnknown,
-					Payload:       payload,
+					TokenUsage: core.TokenUsage{
+						Requests: core.Int64Ptr(1),
+					},
+					ToolName: toolName,
+					Status:   shared.TelemetryStatusUnknown,
+					Payload:  payload,
 				})
 
 				if explicitCallID {
@@ -404,8 +416,8 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				payload["upstream_provider"] = upstream
 			}
 
-			messageID := shared.FirstNonEmpty(ctx.MessageID, fmt.Sprintf("%s:%d", sessionID, lineNum+1))
-			turnID := shared.FirstNonEmpty(ctx.TurnID, messageID)
+			messageID := core.FirstNonEmpty(ctx.MessageID, fmt.Sprintf("%s:%d", sessionID, lineNum+1))
+			turnID := core.FirstNonEmpty(ctx.TurnID, messageID)
 
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: telemetrySchemaVersion,
@@ -421,10 +433,12 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      model,
-				ToolName:      toolName,
-				Requests:      shared.Int64Ptr(1),
-				Status:        shared.TelemetryStatusUnknown,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: toolName,
+				Status:   shared.TelemetryStatusUnknown,
+				Payload:  payload,
 			})
 
 			if explicitCallID {
@@ -506,8 +520,8 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 			}
 
 			status := copilotTelemetryToolStatus(complete.Success, complete.Status, errorCode, errorMessage)
-			messageID := shared.FirstNonEmpty(ctx.MessageID, fmt.Sprintf("%s:%d", sessionID, lineNum+1))
-			turnID := shared.FirstNonEmpty(ctx.TurnID, messageID)
+			messageID := core.FirstNonEmpty(ctx.MessageID, fmt.Sprintf("%s:%d", sessionID, lineNum+1))
+			turnID := core.FirstNonEmpty(ctx.TurnID, messageID)
 
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: telemetrySchemaVersion,
@@ -523,10 +537,12 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      model,
-				ToolName:      toolName,
-				Requests:      shared.Int64Ptr(1),
-				Status:        status,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: toolName,
+				Status:   status,
+				Payload:  payload,
 			})
 
 			if explicitCallID {
@@ -582,10 +598,12 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      model,
-				ToolName:      "workspace_file_" + op,
-				Requests:      shared.Int64Ptr(0),
-				Status:        shared.TelemetryStatusOK,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(0),
+				},
+				ToolName: "workspace_file_" + op,
+				Status:   shared.TelemetryStatusOK,
+				Payload:  payload,
 			})
 
 		case "assistant.turn_start":
@@ -597,7 +615,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 			if assistantUsageSeen || currentModel == "" {
 				continue
 			}
-			turnID := shared.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:synth:%d", sessionID, turnIndex))
+			turnID := core.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:synth:%d", sessionID, turnIndex))
 			messageID := fmt.Sprintf("%s:%d", sessionID, lineNum+1)
 			payload := copilotTelemetryBasePayload(path, lineNum+1, clientLabel, repo, cwd, "assistant.turn_end")
 			payload["synthetic"] = true
@@ -615,9 +633,11 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
 				ModelRaw:      currentModel,
-				Requests:      shared.Int64Ptr(1),
-				Status:        shared.TelemetryStatusOK,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				Status:  shared.TelemetryStatusOK,
+				Payload: payload,
 			})
 
 		case "assistant.usage":
@@ -637,7 +657,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 
 			turnIndex++
 
-			turnID := shared.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:usage:%d", sessionID, turnIndex))
+			turnID := core.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:usage:%d", sessionID, turnIndex))
 			messageID := fmt.Sprintf("%s:%d", sessionID, lineNum+1)
 
 			totalTokens := int64(usage.InputTokens + usage.OutputTokens)
@@ -666,22 +686,24 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
 				ModelRaw:      model,
-				InputTokens:   shared.Int64Ptr(int64(usage.InputTokens)),
-				OutputTokens:  shared.Int64Ptr(int64(usage.OutputTokens)),
-				TotalTokens:   shared.Int64Ptr(totalTokens),
-				Requests:      shared.Int64Ptr(1),
-				Status:        shared.TelemetryStatusOK,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					InputTokens:  core.Int64Ptr(int64(usage.InputTokens)),
+					OutputTokens: core.Int64Ptr(int64(usage.OutputTokens)),
+					TotalTokens:  core.Int64Ptr(totalTokens),
+					Requests:     core.Int64Ptr(1),
+				},
+				Status:  shared.TelemetryStatusOK,
+				Payload: payload,
 			}
 
 			if usage.CacheReadTokens > 0 {
-				te.CacheReadTokens = shared.Int64Ptr(int64(usage.CacheReadTokens))
+				te.CacheReadTokens = core.Int64Ptr(int64(usage.CacheReadTokens))
 			}
 			if usage.CacheWriteTokens > 0 {
-				te.CacheWriteTokens = shared.Int64Ptr(int64(usage.CacheWriteTokens))
+				te.CacheWriteTokens = core.Int64Ptr(int64(usage.CacheWriteTokens))
 			}
 			if usage.Cost > 0 {
-				te.CostUSD = shared.Float64Ptr(usage.Cost)
+				te.CostUSD = core.Float64Ptr(usage.Cost)
 			}
 
 			out = append(out, te)
@@ -692,7 +714,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				continue
 			}
 
-			shutdownTurnID := shared.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:shutdown", sessionID))
+			shutdownTurnID := core.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:shutdown", sessionID))
 			shutdownMessageID := fmt.Sprintf("%s:shutdown:%d", sessionID, lineNum+1)
 
 			shutdownPayload := copilotTelemetryBasePayload(path, lineNum+1, clientLabel, repo, cwd, "session.shutdown")
@@ -720,7 +742,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				ProviderID:    "copilot",
 				AgentName:     "copilot",
 				EventType:     shared.TelemetryEventTypeTurnCompleted,
-				ModelRaw:      shared.FirstNonEmpty(strings.TrimSpace(currentModel), "unknown"),
+				ModelRaw:      core.FirstNonEmpty(strings.TrimSpace(currentModel), "unknown"),
 				Status:        shared.TelemetryStatusOK,
 				Payload:       shutdownPayload,
 			})
@@ -739,7 +761,7 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				modelMetric := shutdown.ModelMetrics[model]
 				model = strings.TrimSpace(model)
 				if model == "" {
-					model = shared.FirstNonEmpty(strings.TrimSpace(currentModel), "unknown")
+					model = core.FirstNonEmpty(strings.TrimSpace(currentModel), "unknown")
 				}
 
 				inputTokens := int64(modelMetric.Usage.InputTokens)
@@ -782,23 +804,25 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 					AgentName:     "copilot",
 					EventType:     shared.TelemetryEventTypeMessageUsage,
 					ModelRaw:      model,
-					InputTokens:   shared.Int64Ptr(inputTokens),
-					OutputTokens:  shared.Int64Ptr(outputTokens),
-					TotalTokens:   shared.Int64Ptr(totalTokens),
-					Status:        shared.TelemetryStatusOK,
-					Payload:       payload,
+					TokenUsage: core.TokenUsage{
+						InputTokens:  core.Int64Ptr(inputTokens),
+						OutputTokens: core.Int64Ptr(outputTokens),
+						TotalTokens:  core.Int64Ptr(totalTokens),
+					},
+					Status:  shared.TelemetryStatusOK,
+					Payload: payload,
 				}
 				if requests > 0 {
-					usageEvent.Requests = shared.Int64Ptr(requests)
+					usageEvent.Requests = core.Int64Ptr(requests)
 				}
 				if cacheReadTokens > 0 {
-					usageEvent.CacheReadTokens = shared.Int64Ptr(cacheReadTokens)
+					usageEvent.CacheReadTokens = core.Int64Ptr(cacheReadTokens)
 				}
 				if cacheWriteTokens > 0 {
-					usageEvent.CacheWriteTokens = shared.Int64Ptr(cacheWriteTokens)
+					usageEvent.CacheWriteTokens = core.Int64Ptr(cacheWriteTokens)
 				}
 				if cost > 0 {
-					usageEvent.CostUSD = shared.Float64Ptr(cost)
+					usageEvent.CostUSD = core.Float64Ptr(cost)
 				}
 
 				out = append(out, usageEvent)
@@ -833,7 +857,7 @@ func parseCopilotTelemetryToolRequest(raw json.RawMessage) (copilotTelemetryTool
 
 	out := copilotTelemetryToolRequest{
 		ToolCallID: strings.TrimSpace(anyToString(reqMap["toolCallId"])),
-		RawName:    shared.FirstNonEmpty(anyToString(reqMap["name"]), anyToString(reqMap["toolName"]), anyToString(reqMap["tool"])),
+		RawName:    core.FirstNonEmpty(anyToString(reqMap["name"]), anyToString(reqMap["toolName"]), anyToString(reqMap["tool"])),
 	}
 	if out.RawName == "" {
 		out.RawName = extractCopilotToolName(raw)
@@ -1423,9 +1447,11 @@ func parseCopilotTelemetrySessionStore(ctx context.Context, dbPath string, skipS
 			AgentName:     "copilot",
 			EventType:     shared.TelemetryEventTypeMessageUsage,
 			ModelRaw:      model,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
-			Payload:       payload,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status:  shared.TelemetryStatusOK,
+			Payload: payload,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1523,10 +1549,12 @@ func parseCopilotTelemetrySessionStore(ctx context.Context, dbPath string, skipS
 					AgentName:     "copilot",
 					EventType:     shared.TelemetryEventTypeToolUsage,
 					ModelRaw:      "unknown",
-					ToolName:      toolName,
-					Requests:      shared.Int64Ptr(1),
-					Status:        shared.TelemetryStatusOK,
-					Payload:       payload,
+					TokenUsage: core.TokenUsage{
+						Requests: core.Int64Ptr(1),
+					},
+					ToolName: toolName,
+					Status:   shared.TelemetryStatusOK,
+					Payload:  payload,
 				})
 			}
 		}
@@ -1640,7 +1668,7 @@ func enrichSyntheticTokenEstimates(events []shared.TelemetryEvent, deltas []logT
 			}
 		}
 		if bestDelta != nil {
-			ev.InputTokens = shared.Int64Ptr(bestDelta.Used)
+			ev.InputTokens = core.Int64Ptr(bestDelta.Used)
 			ev.Payload["estimated_tokens"] = true
 		}
 	}

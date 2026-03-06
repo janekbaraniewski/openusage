@@ -3,6 +3,8 @@ package telemetry
 import (
 	"testing"
 	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestBuildDedupKey_StableIDPriorityUsesToolCallID(t *testing.T) {
@@ -36,10 +38,11 @@ func TestBuildDedupKey_StableIDIgnoresTimestampAndMetrics(t *testing.T) {
 		SessionID:    "session-1",
 		MessageID:    "msg-1",
 		EventType:    EventTypeMessageUsage,
-		InputTokens:  &inputA,
+		TokenUsage: core.TokenUsage{
+			InputTokens: &inputA,
+		},
 	}
 	two := one
-	two.OccurredAt = time.Date(2026, time.February, 22, 13, 5, 0, 0, time.UTC)
 	two.InputTokens = &inputB
 
 	if BuildDedupKey(one) != BuildDedupKey(two) {
@@ -113,7 +116,9 @@ func TestBuildDedupKey_FallbackFingerprintIncludesTokenTuple(t *testing.T) {
 		SourceSystem: SourceSystem("opencode"),
 		OccurredAt:   now,
 		EventType:    EventTypeMessageUsage,
-		InputTokens:  &inputA,
+		TokenUsage: core.TokenUsage{
+			InputTokens: &inputA,
+		},
 	}
 	b := a
 	b.InputTokens = &inputB
@@ -128,8 +133,10 @@ func TestNormalizeRequest_InferTotalTokens(t *testing.T) {
 	out := int64(6)
 	norm := normalizeRequest(IngestRequest{
 		SourceSystem: SourceSystem("claude_code"),
-		InputTokens:  &in,
-		OutputTokens: &out,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &in,
+			OutputTokens: &out,
+		},
 	}, time.Date(2026, time.February, 22, 13, 2, 0, 0, time.UTC))
 
 	if norm.TotalTokens == nil {

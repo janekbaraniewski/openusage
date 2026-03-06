@@ -72,6 +72,7 @@ func (o TelemetryCollectOptions) PathsFor(key string, fallback []string) []strin
 
 type TelemetrySource interface {
 	System() string
+	DefaultCollectOptions() TelemetryCollectOptions
 	Collect(ctx context.Context, opts TelemetryCollectOptions) ([]TelemetryEvent, error)
 	ParseHookPayload(raw []byte, opts TelemetryCollectOptions) ([]TelemetryEvent, error)
 }
@@ -91,30 +92,12 @@ type TelemetryEvent struct {
 	EventType     TelemetryEventType
 	ModelRaw      string
 
-	InputTokens      *int64
-	OutputTokens     *int64
-	ReasoningTokens  *int64
-	CacheReadTokens  *int64
-	CacheWriteTokens *int64
-	TotalTokens      *int64
-	CostUSD          *float64
-	Requests         *int64
+	core.TokenUsage
 
 	ToolName string
 	Status   TelemetryStatus
 	Payload  map[string]any
 }
-
-func Int64Ptr(v int64) *int64 {
-	vv := v
-	return &vv
-}
-
-// Float64Ptr delegates to core.Float64Ptr for backwards compatibility.
-var Float64Ptr = core.Float64Ptr
-
-// FirstNonEmpty delegates to core.FirstNonEmpty for backwards compatibility.
-var FirstNonEmpty = core.FirstNonEmpty
 
 var timestampLayouts = []string{
 	time.RFC3339Nano,

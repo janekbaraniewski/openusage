@@ -47,10 +47,12 @@ func TestConcurrentIngestAndReadModel_NoLockErrors(t *testing.T) {
 				EventType:     EventTypeMessageUsage,
 				MessageID:     msgID,
 				ModelRaw:      "qwen/qwen3-coder-flash",
-				InputTokens:   &in,
-				OutputTokens:  &out,
-				TotalTokens:   &total,
-				Requests:      int64Ptr(1),
+				TokenUsage: core.TokenUsage{
+					InputTokens:  &in,
+					OutputTokens: &out,
+					TotalTokens:  &total,
+					Requests:     int64Ptr(1),
+				},
 			})
 		}
 	}()

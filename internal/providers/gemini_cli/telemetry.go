@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -20,6 +21,14 @@ const (
 
 // System implements shared.TelemetrySource.
 func (p *Provider) System() string { return p.ID() }
+
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"sessions_dir": defaultGeminiSessionsDir(),
+		},
+	}
+}
 
 // Collect implements shared.TelemetrySource. It reads Gemini CLI local session
 // files and produces normalized telemetry events for token usage and tool calls.
@@ -162,10 +171,12 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 				AgentName:     "gemini_cli",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      normalizeModelName(msg.Model),
-				ToolName:      toolName,
-				Requests:      shared.Int64Ptr(1),
-				Status:        status,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: toolName,
+				Status:   status,
+				Payload:  payload,
 			})
 		}
 
@@ -196,23 +207,25 @@ func parseGeminiTelemetrySessionFile(path string) ([]shared.TelemetryEvent, erro
 		}
 
 		out = append(out, shared.TelemetryEvent{
-			SchemaVersion:   telemetrySchemaVersion,
-			Channel:         shared.TelemetryChannelJSONL,
-			OccurredAt:      messageOccurredAt,
-			AccountID:       "gemini_cli",
-			SessionID:       sessionID,
-			TurnID:          tokenTurnID,
-			MessageID:       messageID,
-			ProviderID:      "gemini_cli",
-			AgentName:       "gemini_cli",
-			EventType:       shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:        normalizeModelName(msg.Model),
-			InputTokens:     shared.Int64Ptr(int64(delta.InputTokens)),
-			OutputTokens:    shared.Int64Ptr(int64(delta.OutputTokens)),
-			ReasoningTokens: shared.Int64Ptr(int64(delta.ReasoningTokens)),
-			CacheReadTokens: shared.Int64Ptr(int64(delta.CachedInputTokens)),
-			TotalTokens:     shared.Int64Ptr(int64(delta.TotalTokens)),
-			Status:          shared.TelemetryStatusOK,
+			SchemaVersion: telemetrySchemaVersion,
+			Channel:       shared.TelemetryChannelJSONL,
+			OccurredAt:    messageOccurredAt,
+			AccountID:     "gemini_cli",
+			SessionID:     sessionID,
+			TurnID:        tokenTurnID,
+			MessageID:     messageID,
+			ProviderID:    "gemini_cli",
+			AgentName:     "gemini_cli",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      normalizeModelName(msg.Model),
+			TokenUsage: core.TokenUsage{
+				InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
+				OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),
+				ReasoningTokens: core.Int64Ptr(int64(delta.ReasoningTokens)),
+				CacheReadTokens: core.Int64Ptr(int64(delta.CachedInputTokens)),
+				TotalTokens:     core.Int64Ptr(int64(delta.TotalTokens)),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"source_file":       path,
 				"tool_tokens":       delta.ToolTokens,

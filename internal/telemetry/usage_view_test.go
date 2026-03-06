@@ -35,11 +35,13 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(0.012),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(0.012),
+			Requests:     int64Ptr(1),
+		},
 	})
 	if err != nil {
 		t.Fatalf("ingest message event: %v", err)
@@ -57,7 +59,9 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		MessageID:     "msg-1",
 		ToolCallID:    "tool-1",
 		ToolName:      "shell",
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			Requests: int64Ptr(1),
+		},
 	})
 	if err != nil {
 		t.Fatalf("ingest tool event: %v", err)
@@ -125,11 +129,13 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(0.012),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(0.012),
+			Requests:     int64Ptr(1),
+		},
 	})
 	if err != nil {
 		t.Fatalf("ingest canonical event: %v", err)
@@ -238,11 +244,13 @@ func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *tes
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(9.99),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(9.99),
+			Requests:     int64Ptr(1),
+		},
 	})
 	if err != nil {
 		t.Fatalf("ingest message event: %v", err)
@@ -311,9 +319,11 @@ func TestApplyCanonicalUsageView_FallsBackToProviderScopeForAccountView(t *testi
 		SessionID:     "sess-a",
 		MessageID:     "msg-a",
 		ModelRaw:      "claude-4.6-opus-high-thinking",
-		InputTokens:   &input,
-		TotalTokens:   &total,
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest usage event: %v", err)
 	}
@@ -365,11 +375,13 @@ func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(0.012),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(0.012),
+			Requests:     int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest message event: %v", err)
 	}
@@ -431,11 +443,13 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(0.012),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(0.012),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"_normalized": map[string]any{
 				"upstream_provider": "deepinfra",
@@ -530,11 +544,13 @@ func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissi
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen-qwen3-coder-flash",
-		InputTokens:   int64Ptr(120),
-		OutputTokens:  int64Ptr(40),
-		TotalTokens:   int64Ptr(160),
-		CostUSD:       float64Ptr(0.012),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(120),
+			OutputTokens: int64Ptr(40),
+			TotalTokens:  int64Ptr(160),
+			CostUSD:      float64Ptr(0.012),
+			Requests:     int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest message event: %v", err)
 	}
@@ -581,8 +597,10 @@ func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *test
 		SessionID:     "sess-codex-1",
 		ToolCallID:    "tool-ok-1",
 		ToolName:      "exec_command",
-		Requests:      int64Ptr(1),
-		Status:        EventStatusOK,
+		TokenUsage: core.TokenUsage{
+			Requests: int64Ptr(1),
+		},
+		Status: EventStatusOK,
 	}); err != nil {
 		t.Fatalf("ingest ok tool event: %v", err)
 	}
@@ -597,8 +615,10 @@ func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *test
 		SessionID:     "sess-codex-1",
 		ToolCallID:    "tool-err-1",
 		ToolName:      "mcp__gopls__go_workspace",
-		Requests:      int64Ptr(1),
-		Status:        EventStatusError,
+		TokenUsage: core.TokenUsage{
+			Requests: int64Ptr(1),
+		},
+		Status: EventStatusError,
 	}); err != nil {
 		t.Fatalf("ingest errored mcp tool event: %v", err)
 	}
@@ -676,11 +696,13 @@ func TestApplyCanonicalUsageView_SkipsProviderBurnMetricsForCodex(t *testing.T) 
 		SessionID:     "sess-codex-2",
 		MessageID:     "msg-1",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(10),
-		OutputTokens:  int64Ptr(5),
-		TotalTokens:   int64Ptr(15),
-		CostUSD:       float64Ptr(0.01),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(10),
+			OutputTokens: int64Ptr(5),
+			TotalTokens:  int64Ptr(15),
+			CostUSD:      float64Ptr(0.01),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"upstream_provider": "openai",
 		},
@@ -730,11 +752,13 @@ func TestApplyCanonicalUsageView_DedupsCodexMessageUsageByTurnID(t *testing.T) {
 		TurnID:        "turn-dedup-1",
 		MessageID:     "sess-dedup-1:101",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(10),
-		OutputTokens:  int64Ptr(5),
-		TotalTokens:   int64Ptr(15),
-		Requests:      int64Ptr(1),
-		Status:        EventStatusOK,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(10),
+			OutputTokens: int64Ptr(5),
+			TotalTokens:  int64Ptr(15),
+			Requests:     int64Ptr(1),
+		},
+		Status: EventStatusOK,
 	}); err != nil {
 		t.Fatalf("ingest first codex message event: %v", err)
 	}
@@ -751,11 +775,13 @@ func TestApplyCanonicalUsageView_DedupsCodexMessageUsageByTurnID(t *testing.T) {
 		TurnID:        "turn-dedup-1",
 		MessageID:     "sess-dedup-1:102",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(15),
-		OutputTokens:  int64Ptr(9),
-		TotalTokens:   int64Ptr(24),
-		Requests:      int64Ptr(1),
-		Status:        EventStatusOK,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(15),
+			OutputTokens: int64Ptr(9),
+			TotalTokens:  int64Ptr(24),
+			Requests:     int64Ptr(1),
+		},
+		Status: EventStatusOK,
 	}); err != nil {
 		t.Fatalf("ingest second codex message event: %v", err)
 	}
@@ -805,10 +831,12 @@ func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing
 		SessionID:     "sess-clients-1",
 		MessageID:     "msg-clients-1",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(10),
-		OutputTokens:  int64Ptr(5),
-		TotalTokens:   int64Ptr(15),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(10),
+			OutputTokens: int64Ptr(5),
+			TotalTokens:  int64Ptr(15),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"client": "CLI",
 		},
@@ -827,10 +855,12 @@ func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing
 		SessionID:     "sess-clients-1",
 		MessageID:     "msg-clients-2",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(12),
-		OutputTokens:  int64Ptr(6),
-		TotalTokens:   int64Ptr(18),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(12),
+			OutputTokens: int64Ptr(6),
+			TotalTokens:  int64Ptr(18),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"client": "Desktop App",
 		},
@@ -883,10 +913,12 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 		SessionID:     "sess-projects-1",
 		MessageID:     "msg-projects-1",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(10),
-		OutputTokens:  int64Ptr(5),
-		TotalTokens:   int64Ptr(15),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(10),
+			OutputTokens: int64Ptr(5),
+			TotalTokens:  int64Ptr(15),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"client": "CLI",
 		},
@@ -905,10 +937,12 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 		SessionID:     "sess-projects-2",
 		MessageID:     "msg-projects-2",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(12),
-		OutputTokens:  int64Ptr(6),
-		TotalTokens:   int64Ptr(18),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(12),
+			OutputTokens: int64Ptr(6),
+			TotalTokens:  int64Ptr(18),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"client": "CLI",
 		},
@@ -926,10 +960,12 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 		SessionID:     "sess-projects-3",
 		MessageID:     "msg-projects-3",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   int64Ptr(8),
-		OutputTokens:  int64Ptr(4),
-		TotalTokens:   int64Ptr(12),
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(8),
+			OutputTokens: int64Ptr(4),
+			TotalTokens:  int64Ptr(12),
+			Requests:     int64Ptr(1),
+		},
 		Payload: map[string]any{
 			"client": "CLI",
 		},

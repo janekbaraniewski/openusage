@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -64,10 +66,12 @@ func TestStoreIngest_IdempotentByDedupKey(t *testing.T) {
 		MessageID:           "msg-1",
 		EventType:           EventTypeMessageUsage,
 		ModelRaw:            "gpt-5-codex",
-		InputTokens:         &input,
-		OutputTokens:        &output,
-		CostUSD:             &cost,
-		Payload:             payload,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &input,
+			OutputTokens: &output,
+			CostUSD:      &cost,
+		},
+		Payload: payload,
 	}
 
 	first, err := store.Ingest(context.Background(), req)
@@ -157,9 +161,11 @@ func TestStoreIngest_DedupEnrichesMissingFields(t *testing.T) {
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   &in,
-		OutputTokens:  &out,
-		TotalTokens:   &total,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &in,
+			OutputTokens: &out,
+			TotalTokens:  &total,
+		},
 	}
 	second, err := store.Ingest(context.Background(), secondReq)
 	if err != nil {
@@ -219,9 +225,11 @@ func TestStoreIngest_DedupHookOverridesLowerPriorityAttribution(t *testing.T) {
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
 		ModelRaw:      "anthropic/claude-sonnet-4.5",
-		InputTokens:   &firstIn,
-		OutputTokens:  &firstOut,
-		TotalTokens:   &firstTotal,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &firstIn,
+			OutputTokens: &firstOut,
+			TotalTokens:  &firstTotal,
+		},
 	}
 	if _, err := store.Ingest(context.Background(), firstReq); err != nil {
 		t.Fatalf("first ingest: %v", err)
@@ -240,9 +248,11 @@ func TestStoreIngest_DedupHookOverridesLowerPriorityAttribution(t *testing.T) {
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   &secondIn,
-		OutputTokens:  &secondOut,
-		TotalTokens:   &secondTotal,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &secondIn,
+			OutputTokens: &secondOut,
+			TotalTokens:  &secondTotal,
+		},
 	}
 	second, err := store.Ingest(context.Background(), secondReq)
 	if err != nil {
@@ -299,9 +309,11 @@ func TestStoreIngest_DedupStableIDIgnoresAccountProviderAgentDrift(t *testing.T)
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
-		InputTokens:   &in,
-		OutputTokens:  &out,
-		TotalTokens:   &total,
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &in,
+			OutputTokens: &out,
+			TotalTokens:  &total,
+		},
 	}
 	first, err := store.Ingest(context.Background(), firstReq)
 	if err != nil {
@@ -360,7 +372,9 @@ func TestStoreIngest_DedupCanonicalMCPToolNameWins(t *testing.T) {
 		ToolCallID:    "tool-call-1",
 		EventType:     EventTypeToolUsage,
 		ToolName:      "github_mcp_server_list_issues",
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			Requests: int64Ptr(1),
+		},
 	}
 	if _, err := store.Ingest(context.Background(), firstReq); err != nil {
 		t.Fatalf("first ingest: %v", err)
@@ -512,10 +526,12 @@ func TestStorePruneOrphanRawEvents_RemovesOnlyUnreferencedRows(t *testing.T) {
 		SessionID:     "sess-1",
 		MessageID:     "msg-1",
 		EventType:     EventTypeMessageUsage,
-		InputTokens:   int64Ptr(12),
-		OutputTokens:  int64Ptr(3),
-		TotalTokens:   int64Ptr(15),
-		Payload:       map[string]any{"ok": true},
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(12),
+			OutputTokens: int64Ptr(3),
+			TotalTokens:  int64Ptr(15),
+		},
+		Payload: map[string]any{"ok": true},
 	}
 	if _, err := store.Ingest(context.Background(), req); err != nil {
 		t.Fatalf("ingest canonical event: %v", err)

@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -750,10 +751,12 @@ func TestEnrichSyntheticTokenEstimates(t *testing.T) {
 		},
 		{
 			// Real event — should not be modified
-			EventType:   shared.TelemetryEventTypeMessageUsage,
-			OccurredAt:  ts,
-			InputTokens: shared.Int64Ptr(500),
-			Payload:     map[string]any{},
+			EventType:  shared.TelemetryEventTypeMessageUsage,
+			OccurredAt: ts,
+			TokenUsage: core.TokenUsage{
+				InputTokens: core.Int64Ptr(500),
+			},
+			Payload: map[string]any{},
 		},
 	}
 

@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -22,6 +23,15 @@ const (
 
 // System implements shared.TelemetrySource.
 func (p *Provider) System() string { return p.ID() }
+
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"tracking_db": defaultTrackingDBPath(),
+			"state_db":    defaultStateDBPath(),
+		},
+	}
+}
 
 // Collect implements shared.TelemetrySource. It reads from both the Cursor
 // tracking DB (ai_code_hashes) and state DB (composerData, bubbleId) to
@@ -201,9 +211,11 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 			AgentName:     cursorAgentName(source),
 			EventType:     shared.TelemetryEventTypeMessageUsage,
 			ModelRaw:      model,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
-			Payload:       payload,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status:  shared.TelemetryStatusOK,
+			Payload: payload,
 		})
 	}
 
@@ -405,10 +417,12 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 				AgentName:     "cursor",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
 				ModelRaw:      model,
-				CostUSD:       shared.Float64Ptr(costUSD),
-				Requests:      shared.Int64Ptr(int64(mu.Amount)),
-				Status:        shared.TelemetryStatusOK,
-				Payload:       payload,
+				TokenUsage: core.TokenUsage{
+					CostUSD:  core.Float64Ptr(costUSD),
+					Requests: core.Int64Ptr(int64(mu.Amount)),
+				},
+				Status:  shared.TelemetryStatusOK,
+				Payload: payload,
 			})
 		}
 	}
@@ -490,9 +504,11 @@ func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared
 			ProviderID:    "cursor",
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeToolUsage,
-			ToolName:      strings.ToLower(toolName),
-			Requests:      shared.Int64Ptr(1),
-			Status:        status,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			ToolName: strings.ToLower(toolName),
+			Status:   status,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
@@ -735,10 +751,10 @@ func collectBubbleTokenEvents(ctx context.Context, db *sql.DB, dbPath string) ([
 
 		var inTok, outTok *int64
 		if inputTokens.Valid && inputTokens.Int64 > 0 {
-			inTok = shared.Int64Ptr(inputTokens.Int64)
+			inTok = core.Int64Ptr(inputTokens.Int64)
 		}
 		if outputTokens.Valid && outputTokens.Int64 > 0 {
-			outTok = shared.Int64Ptr(outputTokens.Int64)
+			outTok = core.Int64Ptr(outputTokens.Int64)
 		}
 
 		out = append(out, shared.TelemetryEvent{
@@ -751,10 +767,12 @@ func collectBubbleTokenEvents(ctx context.Context, db *sql.DB, dbPath string) ([
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeMessageUsage,
 			ModelRaw:      modelRaw,
-			InputTokens:   inTok,
-			OutputTokens:  outTok,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
+			TokenUsage: core.TokenUsage{
+				InputTokens:  inTok,
+				OutputTokens: outTok,
+				Requests:     core.Int64Ptr(1),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
@@ -816,8 +834,10 @@ func collectDailyStatsEvents(ctx context.Context, db *sql.DB, dbPath string) ([]
 			ProviderID:    "cursor",
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeRawEnvelope,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
@@ -899,8 +919,10 @@ func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string) ([]share
 			ProviderID:    "cursor",
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeRawEnvelope,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,

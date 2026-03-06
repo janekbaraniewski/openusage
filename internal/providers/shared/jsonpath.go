@@ -3,6 +3,8 @@ package shared
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 // PathValue traverses a nested map[string]any by the given path segments,
@@ -105,7 +107,7 @@ func NumberToInt64Ptr(v *float64) *int64 {
 	if v == nil {
 		return nil
 	}
-	return Int64Ptr(int64(*v))
+	return core.Int64Ptr(int64(*v))
 }
 
 // NumberToFloat64Ptr returns nil for nil input, otherwise a copy of the value.
@@ -113,5 +115,5 @@ func NumberToFloat64Ptr(v *float64) *float64 {
 	if v == nil {
 		return nil
 	}
-	return Float64Ptr(*v)
+	return core.Float64Ptr(*v)
 }

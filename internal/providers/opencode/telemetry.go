@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -115,17 +116,27 @@ type partSummary struct {
 
 func (p *Provider) System() string { return p.ID() }
 
-func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
 	home, _ := os.UserHomeDir()
-	defaultDirs := []string{
-		filepath.Join(home, ".opencode", "events"),
-		filepath.Join(home, ".opencode", "logs"),
-		filepath.Join(home, ".local", "state", "opencode", "events"),
-		filepath.Join(home, ".local", "state", "opencode", "logs"),
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"db_path": filepath.Join(home, ".local", "share", "opencode", "opencode.db"),
+		},
+		PathLists: map[string][]string{
+			"events_dirs": {
+				filepath.Join(home, ".opencode", "events"),
+				filepath.Join(home, ".opencode", "logs"),
+				filepath.Join(home, ".local", "state", "opencode", "events"),
+				filepath.Join(home, ".local", "state", "opencode", "logs"),
+			},
+		},
 	}
+}
 
-	dbPath := shared.ExpandHome(opts.Path("db_path", ""))
-	eventsDirs := opts.PathsFor("events_dirs", defaultDirs)
+func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
+	defaults := p.DefaultCollectOptions()
+	dbPath := shared.ExpandHome(opts.Path("db_path", defaults.Paths["db_path"]))
+	eventsDirs := opts.PathsFor("events_dirs", defaults.PathLists["events_dirs"])
 	eventsFile := opts.Path("events_file", "")
 	accountID := strings.TrimSpace(opts.Path("account_id", ""))
 
@@ -166,7 +177,7 @@ func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOpti
 	}
 	accountID := strings.TrimSpace(opts.Path("account_id", ""))
 	for i := range events {
-		events[i].AccountID = shared.FirstNonEmpty(accountID, events[i].AccountID)
+		events[i].AccountID = core.FirstNonEmpty(accountID, events[i].AccountID)
 	}
 	return events, nil
 }
@@ -222,26 +233,28 @@ func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
 			}
 
 			out = append(out, shared.TelemetryEvent{
-				SchemaVersion:    telemetryEventSchema,
-				Channel:          shared.TelemetryChannelJSONL,
-				OccurredAt:       occurred,
-				AccountID:        "",
-				WorkspaceID:      shared.SanitizeWorkspace(info.Path.CWD),
-				SessionID:        strings.TrimSpace(info.SessionID),
-				TurnID:           strings.TrimSpace(info.ParentID),
-				MessageID:        messageID,
-				ProviderID:       providerID,
-				AgentName:        "opencode",
-				EventType:        shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:         strings.TrimSpace(info.ModelID),
-				InputTokens:      shared.Int64Ptr(info.Tokens.Input),
-				OutputTokens:     shared.Int64Ptr(info.Tokens.Output),
-				ReasoningTokens:  shared.Int64Ptr(info.Tokens.Reasoning),
-				CacheReadTokens:  shared.Int64Ptr(info.Tokens.Cache.Read),
-				CacheWriteTokens: shared.Int64Ptr(info.Tokens.Cache.Write),
-				TotalTokens:      shared.Int64Ptr(total),
-				CostUSD:          shared.Float64Ptr(info.Cost),
-				Status:           shared.TelemetryStatusOK,
+				SchemaVersion: telemetryEventSchema,
+				Channel:       shared.TelemetryChannelJSONL,
+				OccurredAt:    occurred,
+				AccountID:     "",
+				WorkspaceID:   shared.SanitizeWorkspace(info.Path.CWD),
+				SessionID:     strings.TrimSpace(info.SessionID),
+				TurnID:        strings.TrimSpace(info.ParentID),
+				MessageID:     messageID,
+				ProviderID:    providerID,
+				AgentName:     "opencode",
+				EventType:     shared.TelemetryEventTypeMessageUsage,
+				ModelRaw:      strings.TrimSpace(info.ModelID),
+				TokenUsage: core.TokenUsage{
+					InputTokens:      core.Int64Ptr(info.Tokens.Input),
+					OutputTokens:     core.Int64Ptr(info.Tokens.Output),
+					ReasoningTokens:  core.Int64Ptr(info.Tokens.Reasoning),
+					CacheReadTokens:  core.Int64Ptr(info.Tokens.Cache.Read),
+					CacheWriteTokens: core.Int64Ptr(info.Tokens.Cache.Write),
+					TotalTokens:      core.Int64Ptr(total),
+					CostUSD:          core.Float64Ptr(info.Cost),
+				},
+				Status: shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"file": path,
 					"line": lineNumber,
@@ -293,9 +306,11 @@ func ParseTelemetryEventFile(path string) ([]shared.TelemetryEvent, error) {
 				ProviderID:    "opencode",
 				AgentName:     "opencode",
 				EventType:     shared.TelemetryEventTypeToolUsage,
-				ToolName:      strings.ToLower(name),
-				Requests:      shared.Int64Ptr(1),
-				Status:        shared.TelemetryStatusOK,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: strings.ToLower(name),
+				Status:   shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"source_file": path,
 					"line":        lineNumber,
@@ -376,15 +391,15 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 					continue
 				}
 
-				messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDDB), shared.FirstPathString(messagePayload, []string{"id"}), shared.FirstPathString(messagePayload, []string{"messageID"}))
+				messageID := core.FirstNonEmpty(strings.TrimSpace(messageIDDB), shared.FirstPathString(messagePayload, []string{"id"}), shared.FirstPathString(messagePayload, []string{"messageID"}))
 				if messageID == "" || seenMessages[messageID] {
 					continue
 				}
 
-				sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDDB), shared.FirstPathString(messagePayload, []string{"sessionID"}))
-				turnID := shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"parentID"}), shared.FirstPathString(messagePayload, []string{"turnID"}))
-				providerID := shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"providerID"}), shared.FirstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
-				modelRaw := shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"modelID"}), shared.FirstPathString(messagePayload, []string{"model", "modelID"}))
+				sessionID := core.FirstNonEmpty(strings.TrimSpace(sessionIDDB), shared.FirstPathString(messagePayload, []string{"sessionID"}))
+				turnID := core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"parentID"}), shared.FirstPathString(messagePayload, []string{"turnID"}))
+				providerID := core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"providerID"}), shared.FirstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
+				modelRaw := core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"modelID"}), shared.FirstPathString(messagePayload, []string{"model", "modelID"}))
 				upstreamProvider := extractUpstreamProviderFromMaps(partPayload, messagePayload)
 
 				occurredAt := shared.UnixAuto(timeUpdated)
@@ -407,27 +422,29 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				}
 
 				out = append(out, shared.TelemetryEvent{
-					SchemaVersion:    telemetrySQLiteSchema,
-					Channel:          shared.TelemetryChannelSQLite,
-					OccurredAt:       occurredAt,
-					AccountID:        "",
-					WorkspaceID:      shared.SanitizeWorkspace(shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"path", "cwd"}), shared.FirstPathString(messagePayload, []string{"path", "root"}), strings.TrimSpace(sessionDir))),
-					SessionID:        sessionID,
-					TurnID:           turnID,
-					MessageID:        messageID,
-					ProviderID:       providerID,
-					AgentName:        shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"agent"}), "opencode"),
-					EventType:        shared.TelemetryEventTypeMessageUsage,
-					ModelRaw:         modelRaw,
-					InputTokens:      u.InputTokens,
-					OutputTokens:     u.OutputTokens,
-					ReasoningTokens:  u.ReasoningTokens,
-					CacheReadTokens:  u.CacheReadTokens,
-					CacheWriteTokens: u.CacheWriteTokens,
-					TotalTokens:      u.TotalTokens,
-					CostUSD:          u.CostUSD,
-					Requests:         shared.Int64Ptr(1),
-					Status:           eventStatus,
+					SchemaVersion: telemetrySQLiteSchema,
+					Channel:       shared.TelemetryChannelSQLite,
+					OccurredAt:    occurredAt,
+					AccountID:     "",
+					WorkspaceID:   shared.SanitizeWorkspace(core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"path", "cwd"}), shared.FirstPathString(messagePayload, []string{"path", "root"}), strings.TrimSpace(sessionDir))),
+					SessionID:     sessionID,
+					TurnID:        turnID,
+					MessageID:     messageID,
+					ProviderID:    providerID,
+					AgentName:     core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"agent"}), "opencode"),
+					EventType:     shared.TelemetryEventTypeMessageUsage,
+					ModelRaw:      modelRaw,
+					TokenUsage: core.TokenUsage{
+						InputTokens:      u.InputTokens,
+						OutputTokens:     u.OutputTokens,
+						ReasoningTokens:  u.ReasoningTokens,
+						CacheReadTokens:  u.CacheReadTokens,
+						CacheWriteTokens: u.CacheWriteTokens,
+						TotalTokens:      u.TotalTokens,
+						CostUSD:          u.CostUSD,
+						Requests:         core.Int64Ptr(1),
+					},
+					Status: eventStatus,
 					Payload: map[string]any{
 						"source": map[string]any{
 							"db_path": dbPath,
@@ -497,7 +514,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				continue
 			}
 
-			messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDRaw), shared.FirstPathString(payload, []string{"id"}), shared.FirstPathString(payload, []string{"messageID"}))
+			messageID := core.FirstNonEmpty(strings.TrimSpace(messageIDRaw), shared.FirstPathString(payload, []string{"id"}), shared.FirstPathString(payload, []string{"messageID"}))
 			if messageID == "" || seenMessages[messageID] {
 				continue
 			}
@@ -506,11 +523,11 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				continue
 			}
 
-			providerID := shared.FirstNonEmpty(shared.FirstPathString(payload, []string{"providerID"}), shared.FirstPathString(payload, []string{"model", "providerID"}), "opencode")
-			modelRaw := shared.FirstNonEmpty(shared.FirstPathString(payload, []string{"modelID"}), shared.FirstPathString(payload, []string{"model", "modelID"}))
+			providerID := core.FirstNonEmpty(shared.FirstPathString(payload, []string{"providerID"}), shared.FirstPathString(payload, []string{"model", "providerID"}), "opencode")
+			modelRaw := core.FirstNonEmpty(shared.FirstPathString(payload, []string{"modelID"}), shared.FirstPathString(payload, []string{"model", "modelID"}))
 			upstreamProvider := extractUpstreamProviderFromMaps(payload)
-			sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDRaw), shared.FirstPathString(payload, []string{"sessionID"}))
-			turnID := shared.FirstNonEmpty(shared.FirstPathString(payload, []string{"parentID"}), shared.FirstPathString(payload, []string{"turnID"}))
+			sessionID := core.FirstNonEmpty(strings.TrimSpace(sessionIDRaw), shared.FirstPathString(payload, []string{"sessionID"}))
+			turnID := core.FirstNonEmpty(shared.FirstPathString(payload, []string{"parentID"}), shared.FirstPathString(payload, []string{"turnID"}))
 
 			occurredAt := shared.UnixAuto(timeUpdated)
 			switch {
@@ -544,27 +561,29 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			}
 
 			out = append(out, shared.TelemetryEvent{
-				SchemaVersion:    telemetrySQLiteSchema,
-				Channel:          shared.TelemetryChannelSQLite,
-				OccurredAt:       occurredAt,
-				AccountID:        "",
-				WorkspaceID:      shared.SanitizeWorkspace(shared.FirstNonEmpty(shared.FirstPathString(payload, []string{"path", "cwd"}), shared.FirstPathString(payload, []string{"path", "root"}), strings.TrimSpace(sessionDir))),
-				SessionID:        sessionID,
-				TurnID:           turnID,
-				MessageID:        messageID,
-				ProviderID:       providerID,
-				AgentName:        shared.FirstNonEmpty(shared.FirstPathString(payload, []string{"agent"}), "opencode"),
-				EventType:        shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:         modelRaw,
-				InputTokens:      u.InputTokens,
-				OutputTokens:     u.OutputTokens,
-				ReasoningTokens:  u.ReasoningTokens,
-				CacheReadTokens:  u.CacheReadTokens,
-				CacheWriteTokens: u.CacheWriteTokens,
-				TotalTokens:      u.TotalTokens,
-				CostUSD:          u.CostUSD,
-				Requests:         shared.Int64Ptr(1),
-				Status:           eventStatus,
+				SchemaVersion: telemetrySQLiteSchema,
+				Channel:       shared.TelemetryChannelSQLite,
+				OccurredAt:    occurredAt,
+				AccountID:     "",
+				WorkspaceID:   shared.SanitizeWorkspace(core.FirstNonEmpty(shared.FirstPathString(payload, []string{"path", "cwd"}), shared.FirstPathString(payload, []string{"path", "root"}), strings.TrimSpace(sessionDir))),
+				SessionID:     sessionID,
+				TurnID:        turnID,
+				MessageID:     messageID,
+				ProviderID:    providerID,
+				AgentName:     core.FirstNonEmpty(shared.FirstPathString(payload, []string{"agent"}), "opencode"),
+				EventType:     shared.TelemetryEventTypeMessageUsage,
+				ModelRaw:      modelRaw,
+				TokenUsage: core.TokenUsage{
+					InputTokens:      u.InputTokens,
+					OutputTokens:     u.OutputTokens,
+					ReasoningTokens:  u.ReasoningTokens,
+					CacheReadTokens:  u.CacheReadTokens,
+					CacheWriteTokens: u.CacheWriteTokens,
+					TotalTokens:      u.TotalTokens,
+					CostUSD:          u.CostUSD,
+					Requests:         core.Int64Ptr(1),
+				},
+				Status: eventStatus,
 				Payload: map[string]any{
 					"source": map[string]any{
 						"db_path": dbPath,
@@ -632,7 +651,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		partPayload := decodeJSONMap([]byte(partJSON))
 		messagePayload := decodeJSONMap([]byte(messageJSON))
 
-		toolCallID := shared.FirstNonEmpty(shared.FirstPathString(partPayload, []string{"callID"}), shared.FirstPathString(partPayload, []string{"call_id"}), strings.TrimSpace(partID))
+		toolCallID := core.FirstNonEmpty(shared.FirstPathString(partPayload, []string{"callID"}), shared.FirstPathString(partPayload, []string{"call_id"}), strings.TrimSpace(partID))
 		if toolCallID == "" || seenTools[toolCallID] {
 			continue
 		}
@@ -644,11 +663,11 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		}
 		seenTools[toolCallID] = true
 
-		toolName := strings.ToLower(shared.FirstNonEmpty(shared.FirstPathString(partPayload, []string{"tool"}), shared.FirstPathString(partPayload, []string{"name"}), "unknown"))
-		sessionID := shared.FirstNonEmpty(strings.TrimSpace(sessionIDDB), shared.FirstPathString(partPayload, []string{"sessionID"}), shared.FirstPathString(messagePayload, []string{"sessionID"}))
-		messageID := shared.FirstNonEmpty(strings.TrimSpace(messageIDDB), shared.FirstPathString(partPayload, []string{"messageID"}), shared.FirstPathString(messagePayload, []string{"id"}))
-		providerID := shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"providerID"}), shared.FirstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
-		modelRaw := shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"modelID"}), shared.FirstPathString(messagePayload, []string{"model", "modelID"}))
+		toolName := strings.ToLower(core.FirstNonEmpty(shared.FirstPathString(partPayload, []string{"tool"}), shared.FirstPathString(partPayload, []string{"name"}), "unknown"))
+		sessionID := core.FirstNonEmpty(strings.TrimSpace(sessionIDDB), shared.FirstPathString(partPayload, []string{"sessionID"}), shared.FirstPathString(messagePayload, []string{"sessionID"}))
+		messageID := core.FirstNonEmpty(strings.TrimSpace(messageIDDB), shared.FirstPathString(partPayload, []string{"messageID"}), shared.FirstPathString(messagePayload, []string{"id"}))
+		providerID := core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"providerID"}), shared.FirstPathString(messagePayload, []string{"model", "providerID"}), "opencode")
+		modelRaw := core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"modelID"}), shared.FirstPathString(messagePayload, []string{"model", "modelID"}))
 		upstreamProvider := extractUpstreamProviderFromMaps(partPayload, messagePayload)
 
 		occurredAt := shared.UnixAuto(timeUpdated)
@@ -681,7 +700,7 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			Channel:       shared.TelemetryChannelSQLite,
 			OccurredAt:    occurredAt,
 			AccountID:     "",
-			WorkspaceID: shared.SanitizeWorkspace(shared.FirstNonEmpty(
+			WorkspaceID: shared.SanitizeWorkspace(core.FirstNonEmpty(
 				shared.FirstPathString(messagePayload, []string{"path", "cwd"}),
 				shared.FirstPathString(messagePayload, []string{"path", "root"}),
 				strings.TrimSpace(sessionDir),
@@ -690,12 +709,14 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			MessageID:  messageID,
 			ToolCallID: toolCallID,
 			ProviderID: providerID,
-			AgentName:  shared.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"agent"}), "opencode"),
+			AgentName:  core.FirstNonEmpty(shared.FirstPathString(messagePayload, []string{"agent"}), "opencode"),
 			EventType:  shared.TelemetryEventTypeToolUsage,
 			ModelRaw:   modelRaw,
-			ToolName:   toolName,
-			Requests:   shared.Int64Ptr(1),
-			Status:     status,
+			ToolName: toolName,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status: status,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
@@ -790,7 +811,7 @@ func parseEventJSON(raw []byte, rawPayload map[string]any, includeUnknown bool) 
 			}
 			return nil, nil
 		}
-		providerID := shared.FirstNonEmpty(strings.TrimSpace(info.ProviderID), "opencode")
+		providerID := core.FirstNonEmpty(strings.TrimSpace(info.ProviderID), "opencode")
 		occurredAt := shared.UnixAuto(info.Time.Created)
 		if info.Time.Completed > 0 {
 			occurredAt = shared.UnixAuto(info.Time.Completed)
@@ -798,26 +819,28 @@ func parseEventJSON(raw []byte, rawPayload map[string]any, includeUnknown bool) 
 		totalTokens := info.Tokens.Input + info.Tokens.Output + info.Tokens.Reasoning + info.Tokens.Cache.Read + info.Tokens.Cache.Write
 
 		return []shared.TelemetryEvent{{
-			SchemaVersion:    telemetryEventSchema,
-			Channel:          shared.TelemetryChannelHook,
-			OccurredAt:       occurredAt,
-			AccountID:        "",
-			WorkspaceID:      shared.SanitizeWorkspace(info.Path.CWD),
-			SessionID:        strings.TrimSpace(info.SessionID),
-			TurnID:           strings.TrimSpace(info.ParentID),
-			MessageID:        messageID,
-			ProviderID:       providerID,
-			AgentName:        "opencode",
-			EventType:        shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:         strings.TrimSpace(info.ModelID),
-			InputTokens:      shared.Int64Ptr(info.Tokens.Input),
-			OutputTokens:     shared.Int64Ptr(info.Tokens.Output),
-			ReasoningTokens:  shared.Int64Ptr(info.Tokens.Reasoning),
-			CacheReadTokens:  shared.Int64Ptr(info.Tokens.Cache.Read),
-			CacheWriteTokens: shared.Int64Ptr(info.Tokens.Cache.Write),
-			TotalTokens:      shared.Int64Ptr(totalTokens),
-			CostUSD:          shared.Float64Ptr(info.Cost),
-			Status:           shared.TelemetryStatusOK,
+			SchemaVersion: telemetryEventSchema,
+			Channel:       shared.TelemetryChannelHook,
+			OccurredAt:    occurredAt,
+			AccountID:     "",
+			WorkspaceID:   shared.SanitizeWorkspace(info.Path.CWD),
+			SessionID:     strings.TrimSpace(info.SessionID),
+			TurnID:        strings.TrimSpace(info.ParentID),
+			MessageID:     messageID,
+			ProviderID:    providerID,
+			AgentName:     "opencode",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      strings.TrimSpace(info.ModelID),
+			TokenUsage: core.TokenUsage{
+				InputTokens:      core.Int64Ptr(info.Tokens.Input),
+				OutputTokens:     core.Int64Ptr(info.Tokens.Output),
+				ReasoningTokens:  core.Int64Ptr(info.Tokens.Reasoning),
+				CacheReadTokens:  core.Int64Ptr(info.Tokens.Cache.Read),
+				CacheWriteTokens: core.Int64Ptr(info.Tokens.Cache.Write),
+				TotalTokens:      core.Int64Ptr(totalTokens),
+				CostUSD:          core.Float64Ptr(info.Cost),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: mergePayload(rawPayload, map[string]any{
 				"event_type": "message.updated",
 			}),
@@ -841,7 +864,7 @@ func parseEventJSON(raw []byte, rawPayload map[string]any, includeUnknown bool) 
 			}
 			return nil, nil
 		}
-		toolName := strings.ToLower(shared.FirstNonEmpty(strings.TrimSpace(payload.ToolName), strings.TrimSpace(payload.Name), "unknown"))
+		toolName := strings.ToLower(core.FirstNonEmpty(strings.TrimSpace(payload.ToolName), strings.TrimSpace(payload.Name), "unknown"))
 
 		return []shared.TelemetryEvent{{
 			SchemaVersion: telemetryEventSchema,
@@ -855,8 +878,10 @@ func parseEventJSON(raw []byte, rawPayload map[string]any, includeUnknown bool) 
 			AgentName:     "opencode",
 			EventType:     shared.TelemetryEventTypeToolUsage,
 			ToolName:      toolName,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: mergePayload(rawPayload, map[string]any{
 				"event_type": "tool.execute.after",
 			}),
@@ -885,7 +910,7 @@ func parseToolExecuteAfterHook(root map[string]json.RawMessage, rawPayload map[s
 	if toolCallID == "" {
 		return []shared.TelemetryEvent{buildRawEnvelope(rawPayload, telemetryHookSchema, "tool.execute.after")}, nil
 	}
-	toolName := strings.ToLower(shared.FirstNonEmpty(strings.TrimSpace(input.Tool), "unknown"))
+	toolName := strings.ToLower(core.FirstNonEmpty(strings.TrimSpace(input.Tool), "unknown"))
 
 	return []shared.TelemetryEvent{{
 		SchemaVersion: telemetryHookSchema,
@@ -898,8 +923,10 @@ func parseToolExecuteAfterHook(root map[string]json.RawMessage, rawPayload map[s
 		AgentName:     "opencode",
 		EventType:     shared.TelemetryEventTypeToolUsage,
 		ToolName:      toolName,
-		Requests:      shared.Int64Ptr(1),
-		Status:        shared.TelemetryStatusOK,
+		TokenUsage: core.TokenUsage{
+			Requests: core.Int64Ptr(1),
+		},
+		Status: shared.TelemetryStatusOK,
 		Payload: mergePayload(rawPayload, map[string]any{
 			"hook":  "tool.execute.after",
 			"title": strings.TrimSpace(output.Title),
@@ -923,9 +950,9 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 		_ = json.Unmarshal(rawOutput, &outputMap)
 	}
 
-	sessionID := shared.FirstNonEmpty(input.SessionID, output.Message.SessionID)
-	turnID := shared.FirstNonEmpty(input.MessageID, output.Message.ID)
-	messageID := shared.FirstNonEmpty(output.Message.ID, input.MessageID)
+	sessionID := core.FirstNonEmpty(input.SessionID, output.Message.SessionID)
+	turnID := core.FirstNonEmpty(input.MessageID, output.Message.ID)
+	messageID := core.FirstNonEmpty(output.Message.ID, input.MessageID)
 	outputProviderID := shared.FirstPathString(outputMap,
 		[]string{"message", "model", "providerID"},
 		[]string{"message", "model", "provider_id"},
@@ -955,13 +982,13 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 		[]string{"message", "model_id"},
 	)
 	u := extractUsage(outputMap)
-	providerID := shared.FirstNonEmpty(outputProviderID, input.Model.ProviderID, "opencode")
+	providerID := core.FirstNonEmpty(outputProviderID, input.Model.ProviderID, "opencode")
 	modelRaw := strings.TrimSpace(outputModelID)
 	if !hasUsage(u) {
-		providerID = shared.FirstNonEmpty(outputProviderID, input.Model.ProviderID, "opencode")
-		modelRaw = shared.FirstNonEmpty(outputModelID, strings.TrimSpace(input.Model.ModelID))
+		providerID = core.FirstNonEmpty(outputProviderID, input.Model.ProviderID, "opencode")
+		modelRaw = core.FirstNonEmpty(outputModelID, strings.TrimSpace(input.Model.ModelID))
 	}
-	upstreamProvider := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+	upstreamProvider := sanitizeUpstreamProviderCandidate(core.FirstNonEmpty(
 		shared.FirstPathString(outputMap,
 			[]string{"upstream_provider"},
 			[]string{"upstreamProvider"},
@@ -989,7 +1016,7 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 		),
 	))
 	if upstreamProvider == "" {
-		modelProviderHint := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+		modelProviderHint := sanitizeUpstreamProviderCandidate(core.FirstNonEmpty(
 			shared.FirstPathString(outputMap,
 				[]string{"message", "model", "provider"},
 				[]string{"message", "model", "provider_name"},
@@ -1022,27 +1049,29 @@ func parseChatMessageHook(root map[string]json.RawMessage, rawPayload map[string
 	}
 
 	return []shared.TelemetryEvent{{
-		SchemaVersion:    telemetryHookSchema,
-		Channel:          shared.TelemetryChannelHook,
-		OccurredAt:       parseHookTimestamp(root),
-		AccountID:        "",
-		SessionID:        sessionID,
-		TurnID:           turnID,
-		MessageID:        messageID,
-		ProviderID:       providerID,
-		AgentName:        "opencode",
-		EventType:        shared.TelemetryEventTypeMessageUsage,
-		ModelRaw:         modelRaw,
-		InputTokens:      u.InputTokens,
-		OutputTokens:     u.OutputTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
-		TotalTokens:      u.TotalTokens,
-		CostUSD:          u.CostUSD,
-		Requests:         shared.Int64Ptr(1),
-		Status:           shared.TelemetryStatusOK,
-		Payload:          mergePayload(rawPayload, normalized),
+		SchemaVersion: telemetryHookSchema,
+		Channel:       shared.TelemetryChannelHook,
+		OccurredAt:    parseHookTimestamp(root),
+		AccountID:     "",
+		SessionID:     sessionID,
+		TurnID:        turnID,
+		MessageID:     messageID,
+		ProviderID:    providerID,
+		AgentName:     "opencode",
+		EventType:     shared.TelemetryEventTypeMessageUsage,
+		ModelRaw:      modelRaw,
+		TokenUsage: core.TokenUsage{
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			ReasoningTokens:  u.ReasoningTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+			TotalTokens:      u.TotalTokens,
+			CostUSD:          u.CostUSD,
+			Requests:         core.Int64Ptr(1),
+		},
+		Status:  shared.TelemetryStatusOK,
+		Payload: mergePayload(rawPayload, normalized),
 	}}, nil
 }
 
@@ -1064,7 +1093,7 @@ func extractUpstreamProviderFromMaps(payloads ...map[string]any) string {
 		if len(payload) == 0 {
 			continue
 		}
-		candidate := sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+		candidate := sanitizeUpstreamProviderCandidate(core.FirstNonEmpty(
 			shared.FirstPathString(payload,
 				[]string{"upstream_provider"},
 				[]string{"upstreamProvider"},
@@ -1104,7 +1133,7 @@ func extractUpstreamProviderFromMaps(payloads ...map[string]any) string {
 			return candidate
 		}
 
-		rawResponseBody := shared.FirstNonEmpty(
+		rawResponseBody := core.FirstNonEmpty(
 			shared.FirstPathString(payload, []string{"error", "data", "responseBody"}),
 			shared.FirstPathString(payload, []string{"error", "responseBody"}),
 		)
@@ -1112,7 +1141,7 @@ func extractUpstreamProviderFromMaps(payloads ...map[string]any) string {
 			continue
 		}
 		responseBodyPayload := decodeJSONMap([]byte(rawResponseBody))
-		candidate = sanitizeUpstreamProviderCandidate(shared.FirstNonEmpty(
+		candidate = sanitizeUpstreamProviderCandidate(core.FirstNonEmpty(
 			shared.FirstPathString(responseBodyPayload,
 				[]string{"error", "metadata", "provider_name"},
 				[]string{"error", "metadata", "providerName"},
@@ -1133,7 +1162,7 @@ func extractUpstreamProviderFromMaps(payloads ...map[string]any) string {
 
 func buildRawEnvelope(rawPayload map[string]any, schemaVersion, detectedType string) shared.TelemetryEvent {
 	occurredAt := parseHookTimestampAny(rawPayload)
-	providerID := shared.FirstNonEmpty(
+	providerID := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload,
 			[]string{"provider_id"},
 			[]string{"providerID"},
@@ -1186,7 +1215,7 @@ func buildRawEnvelope(rawPayload map[string]any, schemaVersion, detectedType str
 		[]string{"workspaceID"},
 		[]string{"event", "properties", "info", "path", "cwd"},
 	))
-	eventName := shared.FirstNonEmpty(
+	eventName := core.FirstNonEmpty(
 		detectedType,
 		shared.FirstPathString(rawPayload, []string{"hook"}),
 		shared.FirstPathString(rawPayload, []string{"type"}),
@@ -1300,12 +1329,12 @@ func appendDedupTelemetryEvents(
 	accountID string,
 ) {
 	for _, ev := range events {
-		ev.AccountID = shared.FirstNonEmpty(accountID, ev.AccountID)
+		ev.AccountID = core.FirstNonEmpty(accountID, ev.AccountID)
 		switch ev.EventType {
 		case shared.TelemetryEventTypeToolUsage:
-			key := shared.FirstNonEmpty(strings.TrimSpace(ev.ToolCallID))
+			key := core.FirstNonEmpty(strings.TrimSpace(ev.ToolCallID))
 			if key == "" {
-				key = shared.FirstNonEmpty(strings.TrimSpace(ev.SessionID), strings.TrimSpace(ev.MessageID)) + "|" + strings.ToLower(strings.TrimSpace(ev.ToolName))
+				key = core.FirstNonEmpty(strings.TrimSpace(ev.SessionID), strings.TrimSpace(ev.MessageID)) + "|" + strings.ToLower(strings.TrimSpace(ev.ToolName))
 			}
 			if key != "" {
 				if seenTools[key] {
@@ -1314,9 +1343,9 @@ func appendDedupTelemetryEvents(
 				seenTools[key] = true
 			}
 		case shared.TelemetryEventTypeMessageUsage:
-			key := shared.FirstNonEmpty(strings.TrimSpace(ev.MessageID))
+			key := core.FirstNonEmpty(strings.TrimSpace(ev.MessageID))
 			if key == "" {
-				key = shared.FirstNonEmpty(strings.TrimSpace(ev.SessionID), strings.TrimSpace(ev.TurnID))
+				key = core.FirstNonEmpty(strings.TrimSpace(ev.SessionID), strings.TrimSpace(ev.TurnID))
 			}
 			if key != "" {
 				if seenMessage[key] {
@@ -1401,7 +1430,7 @@ func extractUsage(output map[string]any) usage {
 			}
 		}
 		if hasAny {
-			result.TotalTokens = shared.Int64Ptr(combined)
+			result.TotalTokens = core.Int64Ptr(combined)
 		}
 	}
 	return result
@@ -1515,14 +1544,14 @@ func summarizeRawPayload(rawPayload map[string]any) map[string]any {
 		out["type"] = typ
 	}
 
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"hook"}),
 		shared.FirstPathString(rawPayload, []string{"event"}),
 		shared.FirstPathString(rawPayload, []string{"type"}),
 	); value != "" {
 		out["event"] = value
 	}
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"sessionID"}),
 		shared.FirstPathString(rawPayload, []string{"session_id"}),
 		shared.FirstPathString(rawPayload, []string{"input", "sessionID"}),
@@ -1530,7 +1559,7 @@ func summarizeRawPayload(rawPayload map[string]any) map[string]any {
 	); value != "" {
 		out["session_id"] = value
 	}
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"messageID"}),
 		shared.FirstPathString(rawPayload, []string{"message_id"}),
 		shared.FirstPathString(rawPayload, []string{"input", "messageID"}),
@@ -1538,14 +1567,14 @@ func summarizeRawPayload(rawPayload map[string]any) map[string]any {
 	); value != "" {
 		out["message_id"] = value
 	}
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"toolCallID"}),
 		shared.FirstPathString(rawPayload, []string{"tool_call_id"}),
 		shared.FirstPathString(rawPayload, []string{"input", "callID"}),
 	); value != "" {
 		out["tool_call_id"] = value
 	}
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"providerID"}),
 		shared.FirstPathString(rawPayload, []string{"provider_id"}),
 		shared.FirstPathString(rawPayload, []string{"input", "model", "providerID"}),
@@ -1553,7 +1582,7 @@ func summarizeRawPayload(rawPayload map[string]any) map[string]any {
 	); value != "" {
 		out["provider_id"] = value
 	}
-	if value := shared.FirstNonEmpty(
+	if value := core.FirstNonEmpty(
 		shared.FirstPathString(rawPayload, []string{"modelID"}),
 		shared.FirstPathString(rawPayload, []string{"model_id"}),
 		shared.FirstPathString(rawPayload, []string{"input", "model", "modelID"}),

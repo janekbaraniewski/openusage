@@ -10,12 +10,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const telemetryScannerBufferSize = 8 * 1024 * 1024
 
 func (p *Provider) System() string { return p.ID() }
+
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	primary, alt := DefaultTelemetryProjectsDirs()
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"projects_dir":     primary,
+			"alt_projects_dir": alt,
+		},
+	}
+}
 
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	defaultProjectsDir, defaultAltProjectsDir := DefaultTelemetryProjectsDirs()
@@ -109,7 +120,7 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 		)
 		cost := estimateCost(model, usage)
 
-		turnID := shared.FirstNonEmpty(entry.RequestID, entry.Message.ID)
+		turnID := core.FirstNonEmpty(entry.RequestID, entry.Message.ID)
 		if turnID == "" {
 			turnID = fmt.Sprintf("%s:%d", strings.TrimSpace(entry.SessionID), lineNumber)
 		}
@@ -119,26 +130,28 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 		}
 
 		out = append(out, shared.TelemetryEvent{
-			SchemaVersion:    "claude_jsonl_v1",
-			Channel:          shared.TelemetryChannelJSONL,
-			OccurredAt:       ts,
-			AccountID:        "claude-code",
-			WorkspaceID:      shared.SanitizeWorkspace(entry.CWD),
-			SessionID:        strings.TrimSpace(entry.SessionID),
-			TurnID:           turnID,
-			MessageID:        messageID,
-			ProviderID:       "anthropic",
-			AgentName:        "claude_code",
-			EventType:        shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:         model,
-			InputTokens:      shared.Int64Ptr(int64(usage.InputTokens)),
-			OutputTokens:     shared.Int64Ptr(int64(usage.OutputTokens)),
-			ReasoningTokens:  shared.Int64Ptr(int64(usage.ReasoningTokens)),
-			CacheReadTokens:  shared.Int64Ptr(int64(usage.CacheReadInputTokens)),
-			CacheWriteTokens: shared.Int64Ptr(int64(usage.CacheCreationInputTokens)),
-			TotalTokens:      shared.Int64Ptr(totalTokens),
-			CostUSD:          shared.Float64Ptr(cost),
-			Status:           shared.TelemetryStatusOK,
+			SchemaVersion: "claude_jsonl_v1",
+			Channel:       shared.TelemetryChannelJSONL,
+			OccurredAt:    ts,
+			AccountID:     "claude-code",
+			WorkspaceID:   shared.SanitizeWorkspace(entry.CWD),
+			SessionID:     strings.TrimSpace(entry.SessionID),
+			TurnID:        turnID,
+			MessageID:     messageID,
+			ProviderID:    "anthropic",
+			AgentName:     "claude_code",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      model,
+			TokenUsage: core.TokenUsage{
+				InputTokens:      core.Int64Ptr(int64(usage.InputTokens)),
+				OutputTokens:     core.Int64Ptr(int64(usage.OutputTokens)),
+				ReasoningTokens:  core.Int64Ptr(int64(usage.ReasoningTokens)),
+				CacheReadTokens:  core.Int64Ptr(int64(usage.CacheReadInputTokens)),
+				CacheWriteTokens: core.Int64Ptr(int64(usage.CacheCreationInputTokens)),
+				TotalTokens:      core.Int64Ptr(totalTokens),
+				CostUSD:          core.Float64Ptr(cost),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"file": path,
 				"line": lineNumber,
@@ -182,9 +195,11 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				AgentName:     "claude_code",
 				EventType:     shared.TelemetryEventTypeToolUsage,
 				ModelRaw:      model,
-				ToolName:      toolName,
-				Requests:      shared.Int64Ptr(1),
-				Status:        shared.TelemetryStatusOK,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: toolName,
+				Status:   shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"source_file": path,
 					"line":        lineNumber,
@@ -270,7 +285,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 		occurredAt = shared.UnixAuto(int64(*ts))
 	}
 
-	eventName := strings.ToLower(shared.FirstNonEmpty(
+	eventName := strings.ToLower(core.FirstNonEmpty(
 		shared.FirstPathString(root, []string{"hook_event_name"}),
 		shared.FirstPathString(root, []string{"hook_event"}),
 		shared.FirstPathString(root, []string{"event"}),
@@ -298,7 +313,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 		[]string{"model_id"},
 		[]string{"message", "model"},
 	)
-	accountID := shared.FirstNonEmpty(
+	accountID := core.FirstNonEmpty(
 		strings.TrimSpace(opts.Path("account_id", "")),
 		shared.FirstPathString(root, []string{"account_id"}, []string{"accountId"}),
 		"claude-code",
@@ -312,33 +327,35 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	usage := claudeExtractHookUsage(root)
 	if shared.HasHookUsage(usage) {
 		return []shared.TelemetryEvent{{
-			SchemaVersion:    "claude_hook_v1",
-			Channel:          shared.TelemetryChannelHook,
-			OccurredAt:       occurredAt,
-			AccountID:        accountID,
-			WorkspaceID:      workspaceID,
-			SessionID:        sessionID,
-			TurnID:           turnID,
-			MessageID:        messageID,
-			ProviderID:       "anthropic",
-			AgentName:        "claude_code",
-			EventType:        shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:         modelRaw,
-			InputTokens:      usage.InputTokens,
-			OutputTokens:     usage.OutputTokens,
-			ReasoningTokens:  usage.ReasoningTokens,
-			CacheReadTokens:  usage.CacheReadTokens,
-			CacheWriteTokens: usage.CacheWriteTokens,
-			TotalTokens:      usage.TotalTokens,
-			CostUSD:          usage.CostUSD,
-			Requests:         shared.Int64Ptr(1),
-			Status:           shared.TelemetryStatusOK,
-			Payload:          root,
+			SchemaVersion: "claude_hook_v1",
+			Channel:       shared.TelemetryChannelHook,
+			OccurredAt:    occurredAt,
+			AccountID:     accountID,
+			WorkspaceID:   workspaceID,
+			SessionID:     sessionID,
+			TurnID:        turnID,
+			MessageID:     messageID,
+			ProviderID:    "anthropic",
+			AgentName:     "claude_code",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      modelRaw,
+			TokenUsage: core.TokenUsage{
+				InputTokens:      usage.InputTokens,
+				OutputTokens:     usage.OutputTokens,
+				ReasoningTokens:  usage.ReasoningTokens,
+				CacheReadTokens:  usage.CacheReadTokens,
+				CacheWriteTokens: usage.CacheWriteTokens,
+				TotalTokens:      usage.TotalTokens,
+				CostUSD:          usage.CostUSD,
+				Requests:         core.Int64Ptr(1),
+			},
+			Status:  shared.TelemetryStatusOK,
+			Payload: root,
 		}}, nil
 	}
 
 	if strings.Contains(eventName, "tool") {
-		toolName := strings.ToLower(shared.FirstNonEmpty(
+		toolName := strings.ToLower(core.FirstNonEmpty(
 			shared.FirstPathString(root, []string{"tool_name"}),
 			shared.FirstPathString(root, []string{"tool", "name"}),
 			shared.FirstPathString(root, []string{"tool_input", "name"}),
@@ -364,10 +381,12 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 			AgentName:     "claude_code",
 			EventType:     shared.TelemetryEventTypeToolUsage,
 			ModelRaw:      modelRaw,
-			ToolName:      toolName,
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
-			Payload:       root,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			ToolName: toolName,
+			Status:   shared.TelemetryStatusOK,
+			Payload:  root,
 		}}, nil
 	}
 
@@ -390,9 +409,11 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 		AgentName:     "claude_code",
 		EventType:     shared.TelemetryEventTypeTurnCompleted,
 		ModelRaw:      modelRaw,
-		Requests:      shared.Int64Ptr(1),
-		Status:        status,
-		Payload:       root,
+		TokenUsage: core.TokenUsage{
+			Requests: core.Int64Ptr(1),
+		},
+		Status:  status,
+		Payload: root,
 	}}, nil
 }
 
@@ -427,13 +448,15 @@ func claudeExtractHookUsage(root map[string]any) shared.HookUsage {
 	)
 
 	out := shared.HookUsage{
-		InputTokens:      shared.NumberToInt64Ptr(input),
-		OutputTokens:     shared.NumberToInt64Ptr(output),
-		ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
-		CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
-		CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
-		TotalTokens:      shared.NumberToInt64Ptr(total),
-		CostUSD:          shared.NumberToFloat64Ptr(cost),
+		TokenUsage: core.TokenUsage{
+			InputTokens:      shared.NumberToInt64Ptr(input),
+			OutputTokens:     shared.NumberToInt64Ptr(output),
+			ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
+			CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
+			CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
+			TotalTokens:      shared.NumberToInt64Ptr(total),
+			CostUSD:          shared.NumberToFloat64Ptr(cost),
+		},
 	}
 	out.SumTotalTokens()
 	return out

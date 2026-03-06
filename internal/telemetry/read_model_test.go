@@ -55,11 +55,13 @@ func TestApplyCanonicalTelemetryView_HydratesRootAndUsage(t *testing.T) {
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-1",
 		ModelRaw:      "qwen/qwen3-coder-flash",
-		InputTokens:   &input,
-		OutputTokens:  &output,
-		TotalTokens:   &total,
-		CostUSD:       &cost,
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens:  &input,
+			OutputTokens: &output,
+			TotalTokens:  &total,
+			CostUSD:      &cost,
+			Requests:     int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest usage event: %v", err)
 	}
@@ -227,9 +229,11 @@ func TestApplyCanonicalTelemetryView_FlagsUnmappedTelemetryProviders(t *testing.
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-telemetry-only-1",
 		ModelRaw:      "claude-opus-4-6",
-		InputTokens:   &input,
-		TotalTokens:   &input,
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &input,
+			Requests:    int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest telemetry-only usage: %v", err)
 	}
@@ -273,9 +277,11 @@ func TestApplyCanonicalTelemetryView_UsesProviderLinksForCanonicalUsage(t *testi
 		EventType:     EventTypeMessageUsage,
 		MessageID:     "msg-link-1",
 		ModelRaw:      "claude-opus-4-6",
-		InputTokens:   &input,
-		TotalTokens:   &input,
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &input,
+			Requests:    int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest linked usage: %v", err)
 	}
@@ -329,9 +335,11 @@ func TestApplyCanonicalTelemetryView_RepairsLegacyCodexProviderID(t *testing.T) 
 		SessionID:     "sess-codex-fix-1",
 		MessageID:     "msg-codex-fix-1",
 		ModelRaw:      "gpt-5-codex",
-		InputTokens:   &input,
-		TotalTokens:   &total,
-		Requests:      int64Ptr(1),
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    int64Ptr(1),
+		},
 	}); err != nil {
 		t.Fatalf("ingest legacy codex usage: %v", err)
 	}
@@ -346,8 +354,10 @@ func TestApplyCanonicalTelemetryView_RepairsLegacyCodexProviderID(t *testing.T) 
 		SessionID:     "sess-codex-fix-1",
 		ToolCallID:    "tool-codex-fix-1",
 		ToolName:      "mcp__gopls__go_workspace",
-		Requests:      int64Ptr(1),
-		Status:        EventStatusOK,
+		TokenUsage: core.TokenUsage{
+			Requests: int64Ptr(1),
+		},
+		Status: EventStatusOK,
 	}); err != nil {
 		t.Fatalf("ingest legacy codex tool usage: %v", err)
 	}

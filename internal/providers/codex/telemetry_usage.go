@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
@@ -52,6 +53,14 @@ const (
 )
 
 func (p *Provider) System() string { return p.ID() }
+
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"sessions_dir": DefaultTelemetrySessionsDir(),
+		},
+	}
+}
 
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	sessionsDir := shared.ExpandHome(opts.Path("sessions_dir", DefaultTelemetrySessionsDir()))
@@ -130,7 +139,7 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 		case "session_meta":
 			var meta telemetrySessionMeta
 			if json.Unmarshal(ev.Payload, &meta) == nil {
-				sid := shared.FirstNonEmpty(meta.SessionID, meta.ID)
+				sid := core.FirstNonEmpty(meta.SessionID, meta.ID)
 				if sid != "" {
 					sessionID = sid
 				}
@@ -197,24 +206,26 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			}
 
 			out = append(out, shared.TelemetryEvent{
-				SchemaVersion:   "codex_session_v1",
-				Channel:         shared.TelemetryChannelJSONL,
-				OccurredAt:      occurredAt,
-				AccountID:       "codex",
-				WorkspaceID:     workspaceID,
-				SessionID:       sessionID,
-				TurnID:          turnID,
-				MessageID:       messageID,
-				ProviderID:      codexTelemetryProviderID,
-				AgentName:       "codex",
-				EventType:       shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:        model,
-				InputTokens:     shared.Int64Ptr(int64(delta.InputTokens)),
-				OutputTokens:    shared.Int64Ptr(int64(delta.OutputTokens)),
-				ReasoningTokens: shared.Int64Ptr(int64(delta.ReasoningOutputTokens)),
-				CacheReadTokens: shared.Int64Ptr(int64(delta.CachedInputTokens)),
-				TotalTokens:     shared.Int64Ptr(int64(delta.TotalTokens)),
-				Status:          shared.TelemetryStatusOK,
+				SchemaVersion: "codex_session_v1",
+				Channel:       shared.TelemetryChannelJSONL,
+				OccurredAt:    occurredAt,
+				AccountID:     "codex",
+				WorkspaceID:   workspaceID,
+				SessionID:     sessionID,
+				TurnID:        turnID,
+				MessageID:     messageID,
+				ProviderID:    codexTelemetryProviderID,
+				AgentName:     "codex",
+				EventType:     shared.TelemetryEventTypeMessageUsage,
+				ModelRaw:      model,
+				TokenUsage: core.TokenUsage{
+					InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
+					OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),
+					ReasoningTokens: core.Int64Ptr(int64(delta.ReasoningOutputTokens)),
+					CacheReadTokens: core.Int64Ptr(int64(delta.CachedInputTokens)),
+					TotalTokens:     core.Int64Ptr(int64(delta.TotalTokens)),
+				},
+				Status: shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"source_file":       path,
 					"line":              lineNumber,
@@ -250,7 +261,7 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 					turnID = strings.TrimSpace(currentTurnID)
 				}
 				callID := strings.TrimSpace(item.CallID)
-				messageID := shared.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", sessionID, lineNumber))
+				messageID := core.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", sessionID, lineNumber))
 				eventPayload := codexBuildToolPayload(path, lineNumber, item)
 				if strings.TrimSpace(upstreamProviderID) != "" {
 					eventPayload["upstream_provider"] = strings.TrimSpace(upstreamProviderID)
@@ -277,10 +288,12 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 					AgentName:     "codex",
 					EventType:     shared.TelemetryEventTypeToolUsage,
 					ModelRaw:      model,
-					ToolName:      toolName,
-					Requests:      shared.Int64Ptr(1),
-					Status:        shared.TelemetryStatusOK,
-					Payload:       eventPayload,
+					TokenUsage: core.TokenUsage{
+						Requests: core.Int64Ptr(1),
+					},
+					ToolName: toolName,
+					Status:   shared.TelemetryStatusOK,
+					Payload:  eventPayload,
 				})
 				if callID != "" {
 					toolByCallID[callID] = len(out) - 1
@@ -352,7 +365,7 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 		[]string{"messageID"},
 		[]string{"last_assistant_message", "id"},
 	)
-	upstreamProviderID := shared.FirstNonEmpty(
+	upstreamProviderID := core.FirstNonEmpty(
 		shared.FirstPathString(root, []string{"provider_id"}, []string{"providerID"}, []string{"provider"}),
 		codexTelemetryUpstreamModel,
 	)
@@ -367,7 +380,7 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 		[]string{"workspace_id"},
 		[]string{"workspaceID"},
 	))
-	accountID := shared.FirstNonEmpty(
+	accountID := core.FirstNonEmpty(
 		strings.TrimSpace(opts.Path("account_id", "")),
 		shared.FirstPathString(root, []string{"account_id"}, []string{"accountID"}),
 		"codex-cli",
@@ -408,38 +421,42 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 			AgentName:     "codex",
 			EventType:     shared.TelemetryEventTypeToolUsage,
 			ModelRaw:      modelRaw,
-			ToolName:      toolName,
-			Requests:      shared.Int64Ptr(1),
-			Status:        eventStatus,
-			Payload:       root,
+			TokenUsage: core.TokenUsage{
+				Requests: core.Int64Ptr(1),
+			},
+			ToolName: toolName,
+			Status:   eventStatus,
+			Payload:  root,
 		})
 	}
 
 	usage := codexExtractHookUsage(root)
 	if shared.HasHookUsage(usage) {
 		out = append(out, shared.TelemetryEvent{
-			SchemaVersion:    "codex_notify_v1",
-			Channel:          shared.TelemetryChannelHook,
-			OccurredAt:       occurredAt,
-			AccountID:        accountID,
-			WorkspaceID:      workspaceID,
-			SessionID:        sessionID,
-			TurnID:           turnID,
-			MessageID:        messageID,
-			ProviderID:       codexTelemetryProviderID,
-			AgentName:        "codex",
-			EventType:        shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:         modelRaw,
-			InputTokens:      usage.InputTokens,
-			OutputTokens:     usage.OutputTokens,
-			ReasoningTokens:  usage.ReasoningTokens,
-			CacheReadTokens:  usage.CacheReadTokens,
-			CacheWriteTokens: usage.CacheWriteTokens,
-			TotalTokens:      usage.TotalTokens,
-			CostUSD:          usage.CostUSD,
-			Requests:         shared.Int64Ptr(1),
-			Status:           shared.TelemetryStatusOK,
-			Payload:          root,
+			SchemaVersion: "codex_notify_v1",
+			Channel:       shared.TelemetryChannelHook,
+			OccurredAt:    occurredAt,
+			AccountID:     accountID,
+			WorkspaceID:   workspaceID,
+			SessionID:     sessionID,
+			TurnID:        turnID,
+			MessageID:     messageID,
+			ProviderID:    codexTelemetryProviderID,
+			AgentName:     "codex",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      modelRaw,
+			TokenUsage: core.TokenUsage{
+				InputTokens:      usage.InputTokens,
+				OutputTokens:     usage.OutputTokens,
+				ReasoningTokens:  usage.ReasoningTokens,
+				CacheReadTokens:  usage.CacheReadTokens,
+				CacheWriteTokens: usage.CacheWriteTokens,
+				TotalTokens:      usage.TotalTokens,
+				CostUSD:          usage.CostUSD,
+				Requests:         core.Int64Ptr(1),
+			},
+			Status:  shared.TelemetryStatusOK,
+			Payload: root,
 		})
 	}
 
@@ -460,9 +477,11 @@ func ParseTelemetryNotifyPayload(raw []byte, opts shared.TelemetryCollectOptions
 		AgentName:     "codex",
 		EventType:     shared.TelemetryEventTypeTurnCompleted,
 		ModelRaw:      modelRaw,
-		Requests:      shared.Int64Ptr(1),
-		Status:        eventStatus,
-		Payload:       root,
+		TokenUsage: core.TokenUsage{
+			Requests: core.Int64Ptr(1),
+		},
+		Status:  eventStatus,
+		Payload: root,
 	}}, nil
 }
 
@@ -509,13 +528,15 @@ func codexExtractHookUsage(root map[string]any) shared.HookUsage {
 	)
 
 	out := shared.HookUsage{
-		InputTokens:      shared.NumberToInt64Ptr(input),
-		OutputTokens:     shared.NumberToInt64Ptr(output),
-		ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
-		CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
-		CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
-		TotalTokens:      shared.NumberToInt64Ptr(total),
-		CostUSD:          shared.NumberToFloat64Ptr(cost),
+		TokenUsage: core.TokenUsage{
+			InputTokens:      shared.NumberToInt64Ptr(input),
+			OutputTokens:     shared.NumberToInt64Ptr(output),
+			ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
+			CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
+			CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
+			TotalTokens:      shared.NumberToInt64Ptr(total),
+			CostUSD:          shared.NumberToFloat64Ptr(cost),
+		},
 	}
 	out.SumTotalTokens()
 	return out
@@ -632,7 +653,7 @@ func codexHookEventStatus(root map[string]any) shared.TelemetryStatus {
 }
 
 func codexExtractHookTool(root map[string]any) (toolName, toolCallID string, ok bool) {
-	eventName := strings.ToLower(shared.FirstNonEmpty(
+	eventName := strings.ToLower(core.FirstNonEmpty(
 		shared.FirstPathString(root, []string{"hook_event_name"}),
 		shared.FirstPathString(root, []string{"hook_event"}),
 		shared.FirstPathString(root, []string{"event"}),

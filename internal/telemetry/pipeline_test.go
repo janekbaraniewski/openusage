@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -31,8 +33,10 @@ func TestPipeline_EnqueueAndFlush(t *testing.T) {
 			SessionID:     "sess-1",
 			TurnID:        "turn-1",
 			EventType:     EventTypeMessageUsage,
-			InputTokens:   int64Ptr(10),
-			OutputTokens:  int64Ptr(2),
+			TokenUsage: core.TokenUsage{
+				InputTokens:  int64Ptr(10),
+				OutputTokens: int64Ptr(2),
+			},
 		},
 		{
 			SourceSystem:  SourceSystem("codex"),
@@ -40,8 +44,10 @@ func TestPipeline_EnqueueAndFlush(t *testing.T) {
 			SessionID:     "sess-1",
 			TurnID:        "turn-1",
 			EventType:     EventTypeMessageUsage,
-			InputTokens:   int64Ptr(10),
-			OutputTokens:  int64Ptr(2),
+			TokenUsage: core.TokenUsage{
+				InputTokens:  int64Ptr(10),
+				OutputTokens: int64Ptr(2),
+			},
 		},
 	}
 

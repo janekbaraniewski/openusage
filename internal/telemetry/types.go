@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 type SourceSystem string
@@ -64,14 +66,7 @@ type IngestRequest struct {
 	ModelRaw             string      `json:"model_raw,omitempty"`
 	ModelCanonical       string      `json:"model_canonical,omitempty"`
 	ModelLineageID       string      `json:"model_lineage_id,omitempty"`
-	InputTokens          *int64      `json:"input_tokens,omitempty"`
-	OutputTokens         *int64      `json:"output_tokens,omitempty"`
-	ReasoningTokens      *int64      `json:"reasoning_tokens,omitempty"`
-	CacheReadTokens      *int64      `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens     *int64      `json:"cache_write_tokens,omitempty"`
-	TotalTokens          *int64      `json:"total_tokens,omitempty"`
-	CostUSD              *float64    `json:"cost_usd,omitempty"`
-	Requests             *int64      `json:"requests,omitempty"`
+	core.TokenUsage
 	ToolName             string      `json:"tool_name,omitempty"`
 	Status               EventStatus `json:"status,omitempty"`
 	NormalizationVersion string      `json:"normalization_version,omitempty"`
@@ -94,14 +89,7 @@ type CanonicalEvent struct {
 	ModelRaw             string      `json:"model_raw,omitempty"`
 	ModelCanonical       string      `json:"model_canonical,omitempty"`
 	ModelLineageID       string      `json:"model_lineage_id,omitempty"`
-	InputTokens          *int64      `json:"input_tokens,omitempty"`
-	OutputTokens         *int64      `json:"output_tokens,omitempty"`
-	ReasoningTokens      *int64      `json:"reasoning_tokens,omitempty"`
-	CacheReadTokens      *int64      `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens     *int64      `json:"cache_write_tokens,omitempty"`
-	TotalTokens          *int64      `json:"total_tokens,omitempty"`
-	CostUSD              *float64    `json:"cost_usd,omitempty"`
-	Requests             *int64      `json:"requests,omitempty"`
+	core.TokenUsage
 	ToolName             string      `json:"tool_name,omitempty"`
 	Status               EventStatus `json:"status"`
 	DedupKey             string      `json:"dedup_key"`
@@ -155,19 +143,7 @@ func normalizeRequest(req IngestRequest, now time.Time) IngestRequest {
 	if norm.SourceSchemaVersion == "" {
 		norm.SourceSchemaVersion = "v1"
 	}
-	if norm.TotalTokens == nil {
-		total := int64(0)
-		hasAny := false
-		for _, v := range []*int64{norm.InputTokens, norm.OutputTokens, norm.ReasoningTokens, norm.CacheReadTokens, norm.CacheWriteTokens} {
-			if v != nil {
-				total += *v
-				hasAny = true
-			}
-		}
-		if hasAny {
-			norm.TotalTokens = &total
-		}
-	}
+	norm.TokenUsage.SumTotalTokens()
 	return norm
 }
 

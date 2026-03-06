@@ -20,6 +20,14 @@ const (
 // System implements shared.TelemetrySource.
 func (p *Provider) System() string { return p.ID() }
 
+func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
+	return shared.TelemetryCollectOptions{
+		Paths: map[string]string{
+			"db_path": defaultDesktopDBPath(),
+		},
+	}
+}
+
 // Collect implements shared.TelemetrySource. It reads the Ollama desktop
 // SQLite database and emits TelemetryEvent records for assistant messages
 // and tool calls.
@@ -42,7 +50,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 
 	if accountID != "" {
 		for i := range events {
-			events[i].AccountID = shared.FirstNonEmpty(accountID, events[i].AccountID)
+			events[i].AccountID = core.FirstNonEmpty(accountID, events[i].AccountID)
 		}
 	}
 
@@ -181,11 +189,13 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			AgentName:     "ollama",
 			EventType:     shared.TelemetryEventTypeMessageUsage,
 			ModelRaw:      model,
-			InputTokens:   shared.Int64Ptr(inputTokens),
-			OutputTokens:  shared.Int64Ptr(outputTokens),
-			TotalTokens:   shared.Int64Ptr(totalTokens),
-			Requests:      shared.Int64Ptr(1),
-			Status:        shared.TelemetryStatusOK,
+			TokenUsage: core.TokenUsage{
+				InputTokens:  core.Int64Ptr(inputTokens),
+				OutputTokens: core.Int64Ptr(outputTokens),
+				TotalTokens:  core.Int64Ptr(totalTokens),
+				Requests:     core.Int64Ptr(1),
+			},
+			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
@@ -255,9 +265,11 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 					ProviderID:    "ollama",
 					AgentName:     "ollama",
 					EventType:     shared.TelemetryEventTypeToolUsage,
-					ToolName:      strings.ToLower(functionName),
-					Requests:      shared.Int64Ptr(1),
-					Status:        shared.TelemetryStatusOK,
+					TokenUsage: core.TokenUsage{
+						Requests: core.Int64Ptr(1),
+					},
+					ToolName: strings.ToLower(functionName),
+					Status:   shared.TelemetryStatusOK,
 					Payload: map[string]any{
 						"source": map[string]any{
 							"db_path": dbPath,
