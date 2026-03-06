@@ -49,7 +49,7 @@ func CodingToolSectionOrder() []core.DashboardStandardSection {
 		core.DashboardSectionTopUsageProgress,
 		core.DashboardSectionModelBurn,
 		core.DashboardSectionClientBurn,
-		core.DashboardSectionActualToolUsage,
+		core.DashboardSectionToolUsage,
 		core.DashboardSectionMCPUsage,
 		core.DashboardSectionLanguageBurn,
 		core.DashboardSectionCodeStats,

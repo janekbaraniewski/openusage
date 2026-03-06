@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -89,5 +90,73 @@ func TestMouseWheelScrollsWidgetInSplitView(t *testing.T) {
 	got := updated.(Model).tileOffset
 	if got <= 0 {
 		t.Fatalf("tileOffset = %d, want > 0", got)
+	}
+}
+
+func TestMouseWheelScrollsSettingsWidgetPreview(t *testing.T) {
+	m := NewModel(
+		0.2,
+		0.05,
+		false,
+		config.DashboardConfig{},
+		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
+		core.TimeWindow7d,
+	)
+	m.showSettingsModal = true
+	m.settingsModalTab = settingsTabWidgetSections
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	got := updated.(Model).settingsPreviewOffset
+	if got <= 0 {
+		t.Fatalf("settingsPreviewOffset = %d, want > 0", got)
+	}
+}
+
+func TestMouseWheelUpClampsSettingsWidgetPreviewOffsetAtZero(t *testing.T) {
+	m := NewModel(
+		0.2,
+		0.05,
+		false,
+		config.DashboardConfig{},
+		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
+		core.TimeWindow7d,
+	)
+	m.showSettingsModal = true
+	m.settingsModalTab = settingsTabWidgetSections
+	m.settingsPreviewOffset = 1
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelUp,
+	})
+	got := updated.(Model).settingsPreviewOffset
+	if got != 0 {
+		t.Fatalf("settingsPreviewOffset = %d, want 0", got)
+	}
+}
+
+func TestMouseWheelDoesNotScrollSettingsPreviewOutsideWidgetSectionsTab(t *testing.T) {
+	m := NewModel(
+		0.2,
+		0.05,
+		false,
+		config.DashboardConfig{},
+		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
+		core.TimeWindow7d,
+	)
+	m.showSettingsModal = true
+	m.settingsModalTab = settingsTabTheme
+	m.settingsPreviewOffset = 0
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	got := updated.(Model).settingsPreviewOffset
+	if got != 0 {
+		t.Fatalf("settingsPreviewOffset = %d, want 0", got)
 	}
 }

@@ -31,7 +31,7 @@ func dashboardWidget() core.DashboardWidget {
 			core.DashboardSectionModelBurn,
 			core.DashboardSectionClientBurn,
 			core.DashboardSectionUpstreamProviders,
-			core.DashboardSectionActualToolUsage,
+			core.DashboardSectionToolUsage,
 			core.DashboardSectionLanguageBurn,
 			core.DashboardSectionDailyUsage,
 			core.DashboardSectionOtherData,

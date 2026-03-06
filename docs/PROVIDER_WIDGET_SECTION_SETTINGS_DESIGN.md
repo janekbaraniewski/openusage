@@ -1,17 +1,17 @@
 # Provider Widget Section Settings Design
 
-Date: 2026-03-05
+Date: 2026-03-06
 Status: Proposed
 Author: Codex
 
 ## 0. Pre-Design Quiz Answers
 
-1. Problem solved: provider tiles have hardcoded section ordering/visibility, so users cannot tailor what they see globally.
+1. Problem solved: provider tiles have hardcoded section ordering/visibility, and users cannot preview section changes while editing settings.
 2. Beneficiaries: primarily end users; secondarily contributors (clearer widget configuration contract).
 3. Affected subsystems: core types, providers, TUI, config.
 4. Out of scope: changing telemetry ingestion/metrics semantics; redesigning detail panel sections.
 5. Overlapping docs: `MCP_USAGE_SECTION_DESIGN.md` (adds MCP section usage), `DETAIL_PAGE_REDESIGN_DESIGN.md` (detail page only, not tile settings).
-6. MVP: settings tab that edits a single global dashboard tile section visibility/order configuration, persisted to `settings.json`.
+6. MVP: settings tab that edits a single global dashboard tile section visibility/order configuration, persisted to `settings.json`, with a live preview panel.
 7. Public interfaces changed: config JSON schema (`dashboard.widget_sections`) and core helper exports for dashboard sections.
 8. Backward compatibility: additive config only; missing field falls back to current provider defaults.
 
@@ -25,6 +25,7 @@ Provider widgets expose standardized tile sections, but section visibility/order
 2. Persist global widget section preferences in config.
 3. Apply preferences at render time without changing provider fetch logic.
 4. Strengthen provider/widget interface consistency with explicit validation around standardized section usage.
+5. Provide a live preview as a separate sibling panel (not nested inside the sections list body) so users can evaluate changes instantly.
 
 ## 3. Non-Goals
 
@@ -40,7 +41,7 @@ Provider widgets expose standardized tile sections, but section visibility/order
 |-----------|--------|---------|
 | core types | minor | Export canonical dashboard section list helpers for UI/config normalization |
 | providers | minor | Add provider/widget consistency test coverage using existing interfaces |
-| TUI | major | New Settings tab for section configuration + runtime widget override application |
+| TUI | major | Widget Sections controls + runtime override + separate live preview panel in settings overlay |
 | config | major | New persisted dashboard widget section config schema and save helpers |
 | detect | none | No changes |
 | daemon | none | No changes |
@@ -105,12 +106,18 @@ Implementation approach:
 - Extend `internal/tui/provider_widget.go` with thread-safe in-memory global override state.
 - Add setter used by model initialization/update whenever config changes.
 
-### 5.4 Settings Modal: “Widget Sections” Tab
+### 5.4 Settings Modal: “Widget Sections” Tab + Separate Preview Panel
 
 Add new tab in `settings_modal.go`:
 
 - Top line: global scope indicator.
 - Body: all canonical dashboard sections (excluding header) with checkbox (`enabled`) and ordered index.
+- Render a separate preview panel (sibling to the Settings modal panel) for live widget preview.
+- Preview uses `provider_id: claude_code` with deterministic synthetic snapshot data.
+- Preview updates immediately from in-memory state on toggle/reorder actions.
+- Responsive panel layout:
+  - Side-by-side when terminal width allows.
+  - Stacked (settings panel above preview panel) on narrower terminals.
 - Controls:
   - `Up/Down`: select section row.
   - `Space/Enter`: toggle section enabled.
@@ -150,40 +157,19 @@ Rejected for MVP to avoid significantly larger settings surface/state. Global co
 
 ## 7. Implementation Tasks
 
-### Task 1: Core + Config schema for widget section preferences
-Files: `internal/core/widget.go`, `internal/config/config.go`, `internal/config/config_test.go`, `configs/example_settings.json`
-Depends on: none
-Description: Export canonical dashboard section helper(s). Add dashboard widget section config structs/normalization and save functions. Ensure loading defaults preserve legacy behavior. Update example config with a global widget section override.
-Tests: Extend config tests for normalization, persistence, and backward compatibility with missing `widget_sections`.
+### Task 1: Separate live preview panel for Widget Sections
+Files: `internal/tui/settings_modal.go`, `internal/tui/settings_widget_sections_test.go`
+Depends on: existing widget section settings/runtime override implementation
+Description: Keep Widget Sections list body focused on controls; render live preview as a separate sibling panel in the modal overlay. Use Claude preset synthetic snapshot and responsive side-by-side/stacked layout.
+Tests: Add/update TUI tests for panel separation and preview behavior.
 
-### Task 2: TUI runtime support for section overrides
-Files: `internal/tui/provider_widget.go`, `internal/tui/model.go`
-Depends on: Task 1
-Description: Add model-held global widget section preferences and plumbing to pass normalized global overrides into the widget lookup path. Apply override order/visibility on top of provider defaults before rendering.
-Tests: Add focused tests in `internal/tui` to verify overridden section order and visibility are honored.
-
-### Task 3: Settings modal tab for widget sections
-Files: `internal/tui/settings_modal.go`, `internal/tui/model.go`, `internal/tui/telemetry_mapping_test.go` (or new settings modal test file)
-Depends on: Task 2
-Description: Add new “Widget Sections” tab, key handling, section toggle/reorder UI, and persistence command wiring. Keep existing settings tab behavior unchanged.
-Tests: Add tab rendering and key-interaction tests for toggle, reorder, and persisted-save command emission.
-
-### Task 4: Provider/widget interface consistency coverage
-Files: `internal/providers/registry_test.go` (new or existing)
-Depends on: none
-Description: Add provider abstraction compliance tests covering provider IDs, spec alignment, and valid dashboard standard section usage.
-Tests: New table-driven tests over `AllProviders()`.
-
-### Task 5: Integration verification
+### Task 2: Integration verification
 Files: none (test/build only)
-Depends on: Tasks 1-4
+Depends on: Task 1
 Description: Run build/tests/lint/vet for changed areas and verify no regressions in dashboard rendering and settings navigation.
 Tests: `make build`, `go test ./internal/config ./internal/tui ./internal/providers -race`, `make vet`, `make lint` (skip if unavailable).
 
 ### Dependency Graph
 
-- Task 1: foundational
-- Task 4: parallel with Task 1
+- Task 1: preview panel implementation
 - Task 2: depends on Task 1
-- Task 3: depends on Task 2
-- Task 5: depends on Tasks 1-4

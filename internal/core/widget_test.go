@@ -11,13 +11,37 @@ func TestDefaultDashboardWidget_StandardSectionOrder(t *testing.T) {
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
-		DashboardSectionActualToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
 		DashboardSectionCodeStats,
 		DashboardSectionDailyUsage,
 		DashboardSectionProviderBurn,
 		DashboardSectionUpstreamProviders,
+		DashboardSectionOtherData,
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("section count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("section[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDashboardWidget_EffectiveStandardSectionOrderNormalizesLegacyToolUsageAlias(t *testing.T) {
+	w := DashboardWidget{
+		StandardSectionOrder: []DashboardStandardSection{
+			DashboardSectionActualToolUsage,
+			DashboardSectionToolUsage,
+			DashboardSectionOtherData,
+		},
+	}
+
+	got := w.EffectiveStandardSectionOrder()
+	want := []DashboardStandardSection{
+		DashboardSectionToolUsage,
 		DashboardSectionOtherData,
 	}
 

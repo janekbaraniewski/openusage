@@ -89,11 +89,13 @@ type WidgetDataSpec struct {
 type DashboardStandardSection string
 
 const (
-	DashboardSectionHeader            DashboardStandardSection = "header"
-	DashboardSectionTopUsageProgress  DashboardStandardSection = "top_usage_progress"
-	DashboardSectionModelBurn         DashboardStandardSection = "model_burn"
-	DashboardSectionClientBurn        DashboardStandardSection = "client_burn"
-	DashboardSectionToolUsage         DashboardStandardSection = "tool_usage"
+	DashboardSectionHeader           DashboardStandardSection = "header"
+	DashboardSectionTopUsageProgress DashboardStandardSection = "top_usage_progress"
+	DashboardSectionModelBurn        DashboardStandardSection = "model_burn"
+	DashboardSectionClientBurn       DashboardStandardSection = "client_burn"
+	DashboardSectionToolUsage        DashboardStandardSection = "tool_usage"
+	// DashboardSectionActualToolUsage is a legacy section ID kept for backward compatibility.
+	// It is normalized to DashboardSectionToolUsage at runtime and config load.
 	DashboardSectionActualToolUsage   DashboardStandardSection = "actual_tool_usage"
 	DashboardSectionMCPUsage          DashboardStandardSection = "mcp_usage"
 	DashboardSectionLanguageBurn      DashboardStandardSection = "language_burn"
@@ -111,7 +113,6 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
-		DashboardSectionActualToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
 		DashboardSectionCodeStats,
@@ -122,14 +123,24 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 	}
 }
 
+// NormalizeDashboardStandardSection maps legacy aliases to canonical section IDs.
+func NormalizeDashboardStandardSection(section DashboardStandardSection) DashboardStandardSection {
+	switch section {
+	case DashboardSectionActualToolUsage:
+		return DashboardSectionToolUsage
+	default:
+		return section
+	}
+}
+
 func isKnownDashboardSection(section DashboardStandardSection) bool {
+	section = NormalizeDashboardStandardSection(section)
 	switch section {
 	case DashboardSectionHeader,
 		DashboardSectionTopUsageProgress,
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
 		DashboardSectionToolUsage,
-		DashboardSectionActualToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
 		DashboardSectionCodeStats,
@@ -330,6 +341,7 @@ func (w DashboardWidget) EffectiveStandardSectionOrder() []DashboardStandardSect
 	seen := make(map[DashboardStandardSection]bool, len(w.StandardSectionOrder))
 	out := make([]DashboardStandardSection, 0, len(w.StandardSectionOrder))
 	for _, section := range w.StandardSectionOrder {
+		section = NormalizeDashboardStandardSection(section)
 		if !isKnownDashboardSection(section) || seen[section] {
 			continue
 		}

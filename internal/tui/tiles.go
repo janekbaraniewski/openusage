@@ -568,9 +568,6 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var toolBurnKeys map[string]bool
 	if widget.ShowToolComposition {
 		toolBurnLines, toolBurnKeys = buildProviderToolCompositionLines(snap, innerW, modelMixExpanded, widget)
-		if len(toolBurnLines) > 0 {
-			sectionsByID[core.DashboardSectionToolUsage] = section{withSectionPadding(toolBurnLines)}
-		}
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, toolBurnKeys)
 
@@ -578,11 +575,13 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	var actualToolKeys map[string]bool
 	if widget.ShowActualToolUsage {
 		actualToolLines, actualToolKeys = buildActualToolUsageLines(snap, innerW, modelMixExpanded)
-		if len(actualToolLines) > 0 {
-			sectionsByID[core.DashboardSectionActualToolUsage] = section{withSectionPadding(actualToolLines)}
-		}
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, actualToolKeys)
+	if len(actualToolLines) > 0 {
+		sectionsByID[core.DashboardSectionToolUsage] = section{withSectionPadding(actualToolLines)}
+	} else if len(toolBurnLines) > 0 {
+		sectionsByID[core.DashboardSectionToolUsage] = section{withSectionPadding(toolBurnLines)}
+	}
 
 	var mcpUsageLines []string
 	var mcpUsageKeys map[string]bool

@@ -290,6 +290,7 @@ func normalizeDashboardWidgetSectionEntries(in []DashboardWidgetSection) []Dashb
 
 	for _, section := range in {
 		sectionID := core.DashboardStandardSection(strings.ToLower(strings.TrimSpace(string(section.ID))))
+		sectionID = core.NormalizeDashboardStandardSection(sectionID)
 		if sectionID == core.DashboardSectionHeader || !core.IsKnownDashboardStandardSection(sectionID) || seenSections[sectionID] {
 			continue
 		}

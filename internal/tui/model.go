@@ -129,6 +129,7 @@ type Model struct {
 	settingsThemeCursor      int
 	settingsViewCursor       int
 	settingsSectionRowCursor int
+	settingsPreviewOffset    int
 	settingsStatus           string
 	integrationStatuses      []integrations.Status
 
@@ -538,7 +539,10 @@ func (m Model) handleSplashKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.showHelp || m.showSettingsModal {
+	if m.showSettingsModal {
+		return m.handleSettingsMouse(msg)
+	}
+	if m.showHelp {
 		return m, nil
 	}
 	if m.filtering || m.analyticsFiltering {
@@ -610,6 +614,31 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.cursor = next
 	}
 
+	return m, nil
+}
+
+func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+	if m.settingsModalTab != settingsTabWidgetSections {
+		return m, nil
+	}
+
+	scroll := 0
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		scroll = -m.mouseScrollStep()
+	case tea.MouseButtonWheelDown:
+		scroll = m.mouseScrollStep()
+	default:
+		return m, nil
+	}
+
+	m.settingsPreviewOffset += scroll
+	if m.settingsPreviewOffset < 0 {
+		m.settingsPreviewOffset = 0
+	}
 	return m, nil
 }
 
@@ -2430,6 +2459,7 @@ func normalizeWidgetSectionEntries(entries []config.DashboardWidgetSection) []co
 	seen := make(map[core.DashboardStandardSection]bool, len(entries))
 	for _, entry := range entries {
 		sectionID := core.DashboardStandardSection(strings.ToLower(strings.TrimSpace(string(entry.ID))))
+		sectionID = core.NormalizeDashboardStandardSection(sectionID)
 		if sectionID == core.DashboardSectionHeader || !core.IsKnownDashboardStandardSection(sectionID) || seen[sectionID] {
 			continue
 		}
