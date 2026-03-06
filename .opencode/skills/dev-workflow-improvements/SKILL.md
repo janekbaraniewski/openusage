@@ -1,6 +1,6 @@
 ---
 name: dev-workflow-improvements
-description: Audit and improve the development workflow, sync tool configs
+description: "Audit and improve the development workflow, sync tool configs"
 ---
 
 # Skill: Dev Workflow Improvements

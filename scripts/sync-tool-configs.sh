@@ -87,6 +87,28 @@ title_case() {
   echo "$1" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1'
 }
 
+# yaml_quote <value>
+# Returns a YAML double-quoted scalar with minimal escaping.
+yaml_quote() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  printf '"%s"' "$value"
+}
+
+# validate_skill_frontmatter <path>
+# Verifies that a generated SKILL.md has parseable YAML frontmatter.
+validate_skill_frontmatter() {
+  local file="$1"
+  ruby -ryaml -e '
+content = File.read(ARGV[0])
+match = content.match(/\A---\n(.*?)\n---\n/m)
+abort("missing YAML frontmatter") unless match
+YAML.safe_load(match[1])
+' "$file" >/dev/null
+}
+
 echo "Syncing tool configs from template..."
 echo ""
 
@@ -118,6 +140,7 @@ done
 
 for skill_name in "${SKILL_NAMES[@]}"; do
   desc=$(skill_description "$skill_name")
+  desc_yaml=$(yaml_quote "$desc")
   pretty_name=$(title_case "$skill_name")
   skill_doc=$(skill_doc_path "$skill_name")
   target_dir="$OPENCODE_DIR/$skill_name"
@@ -128,7 +151,7 @@ for skill_name in "${SKILL_NAMES[@]}"; do
   cat > "$target_file" <<EOF
 ---
 name: $skill_name
-description: $desc
+description: $desc_yaml
 ---
 
 # Skill: $pretty_name
@@ -137,6 +160,11 @@ description: $desc
 
 Read and follow the full skill specification in \`$skill_doc\`.
 EOF
+
+  if ! validate_skill_frontmatter "$target_file"; then
+    echo "Error: invalid YAML frontmatter in $target_file" >&2
+    exit 1
+  fi
 
   echo "  Generated: $target_file"
 done
@@ -147,6 +175,7 @@ echo "Syncing Codex skill stubs..."
 
 for skill_name in "${SKILL_NAMES[@]}"; do
   desc=$(skill_description "$skill_name")
+  desc_yaml=$(yaml_quote "$desc")
   pretty_name=$(title_case "$skill_name")
   skill_doc=$(skill_doc_path "$skill_name")
   target_dir="$CODEX_DIR/$skill_name"
@@ -157,7 +186,7 @@ for skill_name in "${SKILL_NAMES[@]}"; do
   cat > "$target_file" <<EOF
 ---
 name: $skill_name
-description: $desc
+description: $desc_yaml
 ---
 
 # Skill: $pretty_name
@@ -166,6 +195,11 @@ description: $desc
 
 Read and follow the full skill specification in \`$skill_doc\`.
 EOF
+
+  if ! validate_skill_frontmatter "$target_file"; then
+    echo "Error: invalid YAML frontmatter in $target_file" >&2
+    exit 1
+  fi
 
   echo "  Generated: $target_file"
 done

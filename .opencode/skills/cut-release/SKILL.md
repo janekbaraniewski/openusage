@@ -1,6 +1,6 @@
 ---
 name: cut-release
-description: Tag, push, and publish a GitHub release with hand-crafted notes
+description: "Tag, push, and publish a GitHub release with hand-crafted notes"
 ---
 
 # Skill: Cut Release

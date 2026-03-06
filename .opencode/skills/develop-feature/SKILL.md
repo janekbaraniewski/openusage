@@ -1,6 +1,6 @@
 ---
 name: develop-feature
-description: Develop a feature end-to-end from design to pull request
+description: "Develop a feature end-to-end from design to pull request"
 ---
 
 # Skill: Develop Feature

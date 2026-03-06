@@ -1,6 +1,6 @@
 ---
 name: implement-feature
-description: Implement a feature from its design doc with tests
+description: "Implement a feature from its design doc with tests"
 ---
 
 # Skill: Implement Feature

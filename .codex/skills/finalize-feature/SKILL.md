@@ -1,6 +1,6 @@
 ---
 name: finalize-feature
-description: Finalize a feature: create branch, commit, open PR
+description: "Finalize a feature: create branch, commit, open PR"
 ---
 
 # Skill: Finalize Feature

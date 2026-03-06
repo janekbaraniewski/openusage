@@ -1,6 +1,6 @@
 ---
 name: add-new-provider
-description: Add a new AI provider to the dashboard
+description: "Add a new AI provider to the dashboard"
 ---
 
 # Skill: Add New Provider
