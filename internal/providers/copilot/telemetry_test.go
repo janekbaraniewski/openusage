@@ -533,3 +533,250 @@ func findToolEventByName(events []shared.TelemetryEvent, toolName string) (share
 	}
 	return shared.TelemetryEvent{}, false
 }
+
+func TestSyntheticMessageUsageFromTurnEnd(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionID := "session-synth-1"
+	eventsPath := filepath.Join(tmpDir, "events.jsonl")
+
+	events := []map[string]any{
+		{
+			"type":      "session.start",
+			"timestamp": "2026-03-01T10:00:00Z",
+			"data": map[string]any{
+				"sessionId":      sessionID,
+				"copilotVersion": "0.0.500",
+				"startTime":      "2026-03-01T10:00:00Z",
+				"selectedModel":  "claude-sonnet-4.5",
+			},
+		},
+		{
+			"type":      "assistant.turn_start",
+			"timestamp": "2026-03-01T10:00:10Z",
+			"data":      map[string]any{},
+		},
+		{
+			"type":      "assistant.turn_end",
+			"timestamp": "2026-03-01T10:00:20Z",
+			"id":        "turn-end-1",
+			"data":      map[string]any{},
+		},
+		{
+			"type":      "assistant.turn_start",
+			"timestamp": "2026-03-01T10:01:00Z",
+			"data":      map[string]any{},
+		},
+		{
+			"type":      "assistant.turn_end",
+			"timestamp": "2026-03-01T10:01:30Z",
+			"id":        "turn-end-2",
+			"data":      map[string]any{},
+		},
+	}
+	writeCopilotTelemetryEvents(t, eventsPath, events)
+
+	result, err := parseCopilotTelemetrySessionFile(eventsPath, sessionID)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var syntheticEvents []shared.TelemetryEvent
+	for _, ev := range result {
+		if ev.EventType == shared.TelemetryEventTypeMessageUsage {
+			syntheticEvents = append(syntheticEvents, ev)
+		}
+	}
+
+	if len(syntheticEvents) != 2 {
+		t.Fatalf("expected 2 synthetic message_usage events, got %d", len(syntheticEvents))
+	}
+
+	for i, ev := range syntheticEvents {
+		if ev.ModelRaw != "claude-sonnet-4.5" {
+			t.Errorf("event %d: expected model claude-sonnet-4.5, got %s", i, ev.ModelRaw)
+		}
+		if ev.Requests == nil || *ev.Requests != 1 {
+			t.Errorf("event %d: expected Requests=1", i)
+		}
+		if ev.InputTokens != nil {
+			t.Errorf("event %d: expected InputTokens=nil for unenriched event", i)
+		}
+		syn, _ := ev.Payload["synthetic"].(bool)
+		if !syn {
+			t.Errorf("event %d: expected synthetic=true in payload", i)
+		}
+	}
+}
+
+func TestSyntheticMessageUsage_SuppressedByRealUsage(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionID := "session-synth-suppress"
+	eventsPath := filepath.Join(tmpDir, "events.jsonl")
+
+	events := []map[string]any{
+		{
+			"type":      "session.start",
+			"timestamp": "2026-03-01T10:00:00Z",
+			"data": map[string]any{
+				"sessionId":      sessionID,
+				"copilotVersion": "0.0.500",
+				"startTime":      "2026-03-01T10:00:00Z",
+				"selectedModel":  "gpt-4o",
+			},
+		},
+		{
+			"type":      "assistant.usage",
+			"timestamp": "2026-03-01T10:00:15Z",
+			"id":        "usage-1",
+			"data": map[string]any{
+				"model":        "gpt-4o",
+				"inputTokens":  500,
+				"outputTokens": 100,
+			},
+		},
+		{
+			"type":      "assistant.turn_end",
+			"timestamp": "2026-03-01T10:00:20Z",
+			"id":        "turn-end-1",
+			"data":      map[string]any{},
+		},
+	}
+	writeCopilotTelemetryEvents(t, eventsPath, events)
+
+	result, err := parseCopilotTelemetrySessionFile(eventsPath, sessionID)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var messageUsageEvents []shared.TelemetryEvent
+	for _, ev := range result {
+		if ev.EventType == shared.TelemetryEventTypeMessageUsage {
+			messageUsageEvents = append(messageUsageEvents, ev)
+		}
+	}
+
+	// Should have exactly 1 event from assistant.usage, not a synthetic one from turn_end
+	if len(messageUsageEvents) != 1 {
+		t.Fatalf("expected 1 message_usage event (from real assistant.usage), got %d", len(messageUsageEvents))
+	}
+	if messageUsageEvents[0].InputTokens == nil || *messageUsageEvents[0].InputTokens != 500 {
+		t.Error("expected real assistant.usage event with InputTokens=500")
+	}
+}
+
+func TestSelectedModelFromSessionStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionID := "session-model-seed"
+	eventsPath := filepath.Join(tmpDir, "events.jsonl")
+
+	events := []map[string]any{
+		{
+			"type":      "session.start",
+			"timestamp": "2026-03-01T10:00:00Z",
+			"data": map[string]any{
+				"sessionId":      sessionID,
+				"copilotVersion": "0.0.500",
+				"startTime":      "2026-03-01T10:00:00Z",
+				"selectedModel":  "o3-mini",
+			},
+		},
+		{
+			"type":      "assistant.turn_end",
+			"timestamp": "2026-03-01T10:00:20Z",
+			"id":        "turn-end-1",
+			"data":      map[string]any{},
+		},
+	}
+	writeCopilotTelemetryEvents(t, eventsPath, events)
+
+	result, err := parseCopilotTelemetrySessionFile(eventsPath, sessionID)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	var found bool
+	for _, ev := range result {
+		if ev.EventType == shared.TelemetryEventTypeMessageUsage && ev.ModelRaw == "o3-mini" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected synthetic message_usage event with model=o3-mini from selectedModel")
+	}
+}
+
+func TestParseCopilotLogTokenDeltas(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	logContent := `2026-02-21T19:45:41.056Z [INFO] CompactionProcessor: Utilization 16.0% (20465/128000 tokens) below threshold 80%
+2026-02-21T19:45:44.145Z [INFO] CompactionProcessor: Utilization 16.5% (21063/128000 tokens) below threshold 80%
+2026-02-21T19:45:46.896Z [INFO] CompactionProcessor: Utilization 21.5% (27463/128000 tokens) below threshold 80%
+2026-02-21T19:46:05.556Z [INFO] Some other log line
+2026-02-21T19:46:20.897Z [INFO] CompactionProcessor: Utilization 21.6% (27708/128000 tokens) below threshold 80%
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "process-1.log"), []byte(logContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deltas := parseCopilotLogTokenDeltas(tmpDir)
+	if len(deltas) == 0 {
+		t.Fatal("expected non-empty deltas")
+	}
+
+	// 4 observations → up to 3 deltas (only positive ones)
+	// Delta 1: 21063 - 20465 = 598
+	// Delta 2: 27463 - 21063 = 6400
+	// Delta 3: 27708 - 27463 = 245
+	expectedDeltas := []int64{598, 6400, 245}
+	if len(deltas) != len(expectedDeltas) {
+		t.Fatalf("expected %d deltas, got %d", len(expectedDeltas), len(deltas))
+	}
+	for i, d := range deltas {
+		if d.Used != expectedDeltas[i] {
+			t.Errorf("delta %d: expected %d, got %d", i, expectedDeltas[i], d.Used)
+		}
+	}
+}
+
+func TestEnrichSyntheticTokenEstimates(t *testing.T) {
+	ts := shared.FlexParseTime("2026-02-21T19:45:44Z")
+
+	events := []shared.TelemetryEvent{
+		{
+			EventType:  shared.TelemetryEventTypeMessageUsage,
+			OccurredAt: ts,
+			Payload:    map[string]any{"synthetic": true},
+		},
+		{
+			// Real event — should not be modified
+			EventType:   shared.TelemetryEventTypeMessageUsage,
+			OccurredAt:  ts,
+			InputTokens: shared.Int64Ptr(500),
+			Payload:     map[string]any{},
+		},
+	}
+
+	deltas := []logTokenDelta{
+		{Timestamp: shared.FlexParseTime("2026-02-21T19:45:44.145Z"), Used: 598, Limit: 128000},
+		{Timestamp: shared.FlexParseTime("2026-02-21T19:45:46.896Z"), Used: 6400, Limit: 128000},
+	}
+
+	enrichSyntheticTokenEstimates(events, deltas)
+
+	if events[0].InputTokens == nil {
+		t.Fatal("expected synthetic event to be enriched with InputTokens")
+	}
+	if *events[0].InputTokens != 598 {
+		t.Errorf("expected InputTokens=598 (closest delta), got %d", *events[0].InputTokens)
+	}
+	est, _ := events[0].Payload["estimated_tokens"].(bool)
+	if !est {
+		t.Error("expected estimated_tokens=true in payload")
+	}
+
+	// Real event should be untouched
+	if *events[1].InputTokens != 500 {
+		t.Errorf("real event should still have InputTokens=500, got %d", *events[1].InputTokens)
+	}
+}

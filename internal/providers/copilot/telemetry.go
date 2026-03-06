@@ -1,13 +1,16 @@
 package copilot
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ const (
 	telemetrySchemaVersion   = "copilot_v2"
 	defaultCopilotSessionDir = ".copilot/session-state"
 	defaultCopilotStoreDB    = ".copilot/session-store.db"
+	defaultCopilotLogsDir    = ".copilot/logs"
 )
 
 type copilotTelemetryAssistantMessageData struct {
@@ -107,6 +111,14 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	if err == nil {
 		out = append(out, storeEvents...)
 	}
+
+	// Enrich synthetic message_usage events with estimated token counts from
+	// CompactionProcessor log entries.
+	logsDir := shared.ExpandHome(opts.Path("logs_dir", defaultCopilotLogsPath()))
+	if deltas := parseCopilotLogTokenDeltas(logsDir); len(deltas) > 0 {
+		enrichSyntheticTokenEstimates(out, deltas)
+	}
+
 	return out, nil
 }
 
@@ -177,6 +189,9 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 					workspaceID = shared.SanitizeWorkspace(start.Context.CWD)
 				}
 				clientLabel = normalizeCopilotClient(repo, cwd)
+				if currentModel == "" && start.SelectedModel != "" {
+					currentModel = start.SelectedModel
+				}
 			}
 
 		case "session.context_changed":
@@ -569,6 +584,38 @@ func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.Telemetr
 				ModelRaw:      model,
 				ToolName:      "workspace_file_" + op,
 				Requests:      shared.Int64Ptr(0),
+				Status:        shared.TelemetryStatusOK,
+				Payload:       payload,
+			})
+
+		case "assistant.turn_start":
+			// Track turn starts; actual metric emission happens at turn_end.
+			continue
+
+		case "assistant.turn_end":
+			turnIndex++
+			if assistantUsageSeen || currentModel == "" {
+				continue
+			}
+			turnID := shared.FirstNonEmpty(strings.TrimSpace(evt.ID), fmt.Sprintf("%s:synth:%d", sessionID, turnIndex))
+			messageID := fmt.Sprintf("%s:%d", sessionID, lineNum+1)
+			payload := copilotTelemetryBasePayload(path, lineNum+1, clientLabel, repo, cwd, "assistant.turn_end")
+			payload["synthetic"] = true
+			payload["upstream_provider"] = copilotUpstreamProviderForModel(currentModel)
+			out = append(out, shared.TelemetryEvent{
+				SchemaVersion: telemetrySchemaVersion,
+				Channel:       shared.TelemetryChannelJSONL,
+				OccurredAt:    occurredAt,
+				AccountID:     "copilot",
+				WorkspaceID:   workspaceID,
+				SessionID:     sessionID,
+				TurnID:        turnID,
+				MessageID:     messageID,
+				ProviderID:    "copilot",
+				AgentName:     "copilot",
+				EventType:     shared.TelemetryEventTypeMessageUsage,
+				ModelRaw:      currentModel,
+				Requests:      shared.Int64Ptr(1),
 				Status:        shared.TelemetryStatusOK,
 				Payload:       payload,
 			})
@@ -1486,6 +1533,125 @@ func parseCopilotTelemetrySessionStore(ctx context.Context, dbPath string, skipS
 	}
 
 	return out, nil
+}
+
+// logTokenDelta represents a token count observation from CompactionProcessor logs.
+type logTokenDelta struct {
+	Timestamp time.Time
+	Used      int64
+	Limit     int64
+}
+
+// compactionRe matches CompactionProcessor utilization log lines.
+// Example: 2026-02-21T19:45:41.056Z [INFO] CompactionProcessor: Utilization 16.0% (20465/128000 tokens)
+var compactionRe = regexp.MustCompile(
+	`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+\[INFO\]\s+CompactionProcessor:\s+Utilization\s+[\d.]+%\s+\((\d+)/(\d+)\s+tokens\)`,
+)
+
+// parseCopilotLogTokenDeltas parses CompactionProcessor log entries and returns
+// estimated token deltas (positive differences between consecutive entries).
+func parseCopilotLogTokenDeltas(logsDir string) []logTokenDelta {
+	if logsDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(logsDir)
+	if err != nil {
+		return nil
+	}
+
+	var observations []logTokenDelta
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		f, err := os.Open(filepath.Join(logsDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			m := compactionRe.FindStringSubmatch(scanner.Text())
+			if m == nil {
+				continue
+			}
+			ts, err := time.Parse(time.RFC3339Nano, m[1])
+			if err != nil {
+				continue
+			}
+			used, _ := strconv.ParseInt(m[2], 10, 64)
+			limit, _ := strconv.ParseInt(m[3], 10, 64)
+			observations = append(observations, logTokenDelta{Timestamp: ts, Used: used, Limit: limit})
+		}
+		f.Close()
+	}
+
+	if len(observations) < 2 {
+		return nil
+	}
+
+	sort.Slice(observations, func(i, j int) bool {
+		return observations[i].Timestamp.Before(observations[j].Timestamp)
+	})
+
+	// Compute positive deltas — each delta represents approximate tokens consumed
+	// between consecutive CompactionProcessor observations.
+	var deltas []logTokenDelta
+	for i := 1; i < len(observations); i++ {
+		diff := observations[i].Used - observations[i-1].Used
+		if diff > 0 {
+			deltas = append(deltas, logTokenDelta{
+				Timestamp: observations[i].Timestamp,
+				Used:      diff,
+				Limit:     observations[i].Limit,
+			})
+		}
+	}
+	return deltas
+}
+
+// enrichSyntheticTokenEstimates attaches estimated InputTokens to synthetic
+// message_usage events by matching event timestamps to log token deltas.
+func enrichSyntheticTokenEstimates(events []shared.TelemetryEvent, deltas []logTokenDelta) {
+	if len(deltas) == 0 {
+		return
+	}
+	for i := range events {
+		ev := &events[i]
+		if ev.EventType != shared.TelemetryEventTypeMessageUsage || ev.InputTokens != nil {
+			continue
+		}
+		if len(ev.Payload) == 0 {
+			continue
+		}
+		if syn, _ := ev.Payload["synthetic"].(bool); !syn {
+			continue
+		}
+		// Find the closest delta within 30 seconds of the event.
+		var bestDelta *logTokenDelta
+		bestGap := 30 * time.Second
+		for j := range deltas {
+			gap := ev.OccurredAt.Sub(deltas[j].Timestamp)
+			if gap < 0 {
+				gap = -gap
+			}
+			if gap < bestGap {
+				bestGap = gap
+				bestDelta = &deltas[j]
+			}
+		}
+		if bestDelta != nil {
+			ev.InputTokens = shared.Int64Ptr(bestDelta.Used)
+			ev.Payload["estimated_tokens"] = true
+		}
+	}
+}
+
+func defaultCopilotLogsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, defaultCopilotLogsDir)
 }
 
 func copilotTelemetryTableExists(ctx context.Context, db *sql.DB, table string) bool {

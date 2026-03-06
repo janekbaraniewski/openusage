@@ -220,6 +220,7 @@ type sessionStartData struct {
 	SessionID      string `json:"sessionId"`
 	CopilotVersion string `json:"copilotVersion"`
 	StartTime      string `json:"startTime"`
+	SelectedModel  string `json:"selectedModel"`
 	Context        struct {
 		CWD        string `json:"cwd"`
 		GitRoot    string `json:"gitRoot"`
@@ -1071,6 +1072,9 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 						}
 						if si.createdAt.IsZero() {
 							si.createdAt = flexParseTime(start.StartTime)
+						}
+						if currentModel == "" && start.SelectedModel != "" {
+							currentModel = start.SelectedModel
 						}
 					}
 
