@@ -700,7 +700,6 @@ func usageURLForBase(baseURL string) string {
 	return baseURL + "/api/codex/usage"
 }
 
-
 func truncateForError(value string, max int) string {
 	return shared.Truncate(strings.TrimSpace(value), max)
 }

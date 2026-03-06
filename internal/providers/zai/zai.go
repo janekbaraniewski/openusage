@@ -2479,7 +2479,6 @@ func clamp(value, minVal, maxVal float64) float64 {
 	return math.Min(math.Max(value, minVal), maxVal)
 }
 
-
 func apiErrorMessage(err *apiError) string {
 	if err == nil {
 		return ""

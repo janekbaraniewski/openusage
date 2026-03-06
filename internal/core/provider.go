@@ -6,11 +6,11 @@ import (
 )
 
 type AccountConfig struct {
-	ID         string            `json:"id"`
-	Provider   string            `json:"provider"`
-	Auth       string            `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token"
-	APIKeyEnv  string            `json:"api_key_env,omitempty"` // env var name holding the API key
-	ProbeModel string            `json:"probe_model,omitempty"` // model to use for probe requests
+	ID         string `json:"id"`
+	Provider   string `json:"provider"`
+	Auth       string `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token"
+	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
+	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
 	// Binary is the path to a CLI binary for CLI-based providers (copilot, gemini_cli).
 	// For local-file providers it is repurposed as a data file path

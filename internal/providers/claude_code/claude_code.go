@@ -2158,7 +2158,6 @@ func sanitizeModelName(model string) string {
 	return out
 }
 
-
 func setMetricMax(snap *core.UsageSnapshot, key string, value float64, unit, window string) {
 	if value <= 0 {
 		return

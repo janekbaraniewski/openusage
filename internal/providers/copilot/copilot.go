@@ -2341,7 +2341,6 @@ func setRawStr(snap *core.UsageSnapshot, key, v string) {
 	}
 }
 
-
 func firstNonNilFloat(values ...*float64) *float64 {
 	for _, v := range values {
 		if v != nil {
