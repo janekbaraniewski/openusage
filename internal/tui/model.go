@@ -2462,12 +2462,13 @@ func normalizeWidgetSectionEntries(entries []config.DashboardWidgetSection) []co
 }
 
 func (m *Model) applyWidgetSectionOverrides() {
-	if len(m.widgetSections) == 0 {
+	entries := m.resolvedWidgetSectionEntries()
+	if len(entries) == 0 {
 		setDashboardWidgetSectionOverrides(nil)
 		return
 	}
-	visible := make([]core.DashboardStandardSection, 0, len(m.widgetSections))
-	for _, entry := range m.widgetSections {
+	visible := make([]core.DashboardStandardSection, 0, len(entries))
+	for _, entry := range entries {
 		if !entry.Enabled {
 			continue
 		}
@@ -2496,11 +2497,28 @@ func (m Model) defaultWidgetSectionEntries() []config.DashboardWidgetSection {
 }
 
 func (m Model) widgetSectionEntries() []config.DashboardWidgetSection {
+	return m.resolvedWidgetSectionEntries()
+}
+
+func (m Model) resolvedWidgetSectionEntries() []config.DashboardWidgetSection {
 	if len(m.widgetSections) == 0 {
 		return m.defaultWidgetSectionEntries()
 	}
+
 	out := make([]config.DashboardWidgetSection, len(m.widgetSections))
 	copy(out, m.widgetSections)
+
+	seen := make(map[core.DashboardStandardSection]bool, len(out))
+	for _, entry := range out {
+		seen[entry.ID] = true
+	}
+	for _, entry := range m.defaultWidgetSectionEntries() {
+		if seen[entry.ID] {
+			continue
+		}
+		out = append(out, entry)
+	}
+
 	return out
 }
 

@@ -38,6 +38,31 @@ func TestHandleSettingsModalKey_WidgetSectionsToggle(t *testing.T) {
 	}
 }
 
+func TestWidgetSectionEntries_AppendsNewDefaultSectionsForLegacyConfig(t *testing.T) {
+	m := Model{
+		widgetSections: []config.DashboardWidgetSection{
+			{ID: core.DashboardSectionTopUsageProgress, Enabled: true},
+			{ID: core.DashboardSectionOtherData, Enabled: true},
+		},
+	}
+
+	entries := m.widgetSectionEntries()
+	foundProjectBreakdown := false
+	projectBreakdownCount := 0
+	for _, entry := range entries {
+		if entry.ID == core.DashboardSectionProjectBreakdown {
+			foundProjectBreakdown = true
+			projectBreakdownCount++
+		}
+	}
+	if !foundProjectBreakdown {
+		t.Fatalf("expected %q to be present in resolved widget sections, got %#v", core.DashboardSectionProjectBreakdown, entries)
+	}
+	if projectBreakdownCount != 1 {
+		t.Fatalf("expected exactly one %q entry, got %d", core.DashboardSectionProjectBreakdown, projectBreakdownCount)
+	}
+}
+
 func TestHandleSettingsModalKey_WidgetSectionsMoveRow(t *testing.T) {
 	t.Cleanup(func() { setDashboardWidgetSectionOverrides(nil) })
 

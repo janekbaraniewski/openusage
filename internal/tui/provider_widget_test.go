@@ -96,7 +96,25 @@ func TestNewModel_AppliesWidgetSectionOverridesFromConfig(t *testing.T) {
 	)
 
 	got := dashboardWidget("openai").EffectiveStandardSectionOrder()
-	if len(got) != 1 || got[0] != core.DashboardSectionOtherData {
-		t.Fatalf("effective section order = %#v, want [other_data]", got)
+	want := []core.DashboardStandardSection{
+		core.DashboardSectionOtherData,
+		core.DashboardSectionModelBurn,
+		core.DashboardSectionClientBurn,
+		core.DashboardSectionProjectBreakdown,
+		core.DashboardSectionToolUsage,
+		core.DashboardSectionMCPUsage,
+		core.DashboardSectionLanguageBurn,
+		core.DashboardSectionCodeStats,
+		core.DashboardSectionDailyUsage,
+		core.DashboardSectionProviderBurn,
+		core.DashboardSectionUpstreamProviders,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("effective section count = %d, want %d (sections=%#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("effective section[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
