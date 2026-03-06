@@ -8,4 +8,5 @@
 | validate a feature | `docs/skills/validate-feature/SKILL.md` | Verify build, tests, design compliance, code quality |
 | iterate on a feature | `docs/skills/iterate-feature/SKILL.md` | Triage and fix issues from validation or PR review |
 | finalize a feature | `docs/skills/finalize-feature/SKILL.md` | Create branch, commit, open PR |
+| cut a release | `docs/skills/cut-release/SKILL.md` | Tag, push, and publish a GitHub release with hand-crafted notes |
 | improve dev workflow | `docs/skills/dev-workflow-improvements/SKILL.md` | Audit and improve the development workflow, sync tool configs |

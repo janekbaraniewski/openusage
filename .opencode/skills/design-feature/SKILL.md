@@ -1,6 +1,6 @@
 ---
 name: design-feature
-description: Design a feature by quizzing, exploring codebase, and writing design doc with tasks
+description: Design a feature: quiz, explore codebase, write design doc with tasks
 ---
 
 # Skill: Design Feature

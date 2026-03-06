@@ -6,7 +6,7 @@ This skill ensures the development flow is complete, consistent, and propagated 
 
 Follow all phases:
 
-1. **Phase 0 — Audit**: Run `make sync-tools`, check for drift. Validate all skills are registered in skills-table.md, have Claude commands, OpenCode stubs. Check for broken references.
+1. **Phase 0 — Audit**: Run `make sync-tools`, check for drift. Validate all skills are registered in skills-table.md, have Claude commands, OpenCode stubs, and Codex stubs. Check for broken references.
 
 2. **Phase 1 — Fix**: Fix any issues found: sync drift, missing registrations, broken references, CLAUDE.md mismatches.
 

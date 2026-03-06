@@ -61,6 +61,7 @@ skill_description() {
     design-feature)         echo "Design a feature: quiz, explore codebase, write design doc with tasks" ;;
     develop-feature)        echo "Develop a feature end-to-end from design to pull request" ;;
     finalize-feature)       echo "Finalize a feature: create branch, commit, open PR" ;;
+    cut-release)            echo "Tag, push, and publish a GitHub release with hand-crafted notes" ;;
     implement-feature)      echo "Implement a feature from its design doc with tests" ;;
     iterate-feature)        echo "Iterate on a feature to fix issues and address feedback" ;;
     review-design)          echo "Review a design doc against the codebase" ;;
@@ -303,6 +304,20 @@ Follow all phases:
 3. **Phase 2 — Commit**: Draft message, show to user, stage specific files, commit.
 4. **Phase 3 — PR**: Push and create PR via `gh pr create`.
 5. **Phase 4 — Checklist**: Report branch, commit, PR URL.
+CMDEOF
+      ;;
+    cut-release)
+      cat <<'CMDEOF'
+Cut a new release for OpenUsage.
+
+Read and follow the full skill specification in docs/skills/cut-release/SKILL.md.
+
+Follow all phases:
+
+1. **Phase 1 — Version**: Determine next version from tags and changes. Confirm with user.
+2. **Phase 2 — Review**: List all changes since last tag, categorize into release note sections.
+3. **Phase 3 — Release**: Create tag, push, create GitHub release with hand-crafted notes.
+4. **Phase 4 — Verify**: Confirm release workflow started, report URL.
 CMDEOF
       ;;
     add-new-provider)

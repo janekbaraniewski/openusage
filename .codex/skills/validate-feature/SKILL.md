@@ -1,6 +1,6 @@
 ---
 name: validate-feature
-description: "Validate a feature implementation: build, tests, compliance, quality"
+description: Validate a feature implementation: build, tests, compliance, quality
 ---
 
 # Skill: Validate Feature
