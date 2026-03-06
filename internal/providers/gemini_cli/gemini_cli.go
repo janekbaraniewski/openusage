@@ -429,7 +429,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapshot, creds oauthCreds, acct core.AccountConfig) error {
-	accessToken, err := refreshAccessToken(ctx, creds.RefreshToken)
+	client := p.Client()
+	accessToken, err := refreshAccessToken(ctx, creds.RefreshToken, client)
 	if err != nil {
 		snap.Status = core.StatusAuth
 		snap.Message = "OAuth token refresh failed — run `gemini` to re-authenticate"
@@ -447,7 +448,7 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 		projectID = acct.ExtraData["project_id"]
 	}
 
-	loadResp, err := loadCodeAssistDetails(ctx, accessToken, projectID)
+	loadResp, err := loadCodeAssistDetails(ctx, accessToken, projectID, client)
 	if err != nil {
 		return fmt.Errorf("loadCodeAssist: %w", err)
 	}
@@ -463,7 +464,7 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	}
 	snap.Raw["project_id"] = projectID
 
-	quota, method, err := retrieveUserQuota(ctx, accessToken, projectID)
+	quota, method, err := retrieveUserQuota(ctx, accessToken, projectID, client)
 	if err != nil {
 		return fmt.Errorf("retrieveUserQuota: %w", err)
 	}
@@ -484,11 +485,14 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	return nil
 }
 
-func refreshAccessToken(ctx context.Context, refreshToken string) (string, error) {
-	return refreshAccessTokenWithEndpoint(ctx, refreshToken, tokenEndpoint)
+func refreshAccessToken(ctx context.Context, refreshToken string, client *http.Client) (string, error) {
+	return refreshAccessTokenWithEndpoint(ctx, refreshToken, tokenEndpoint, client)
 }
 
-func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint string) (string, error) {
+func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint string, client *http.Client) (string, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	data := url.Values{
 		"client_id":     {oauthClientID},
 		"client_secret": {oauthClientSecret},
@@ -502,7 +506,7 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -524,11 +528,11 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 	return tokenResp.AccessToken, nil
 }
 
-func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string) (*loadCodeAssistResponse, error) {
-	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint)
+func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string, client *http.Client) (*loadCodeAssistResponse, error) {
+	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint, client)
 }
 
-func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string) (*loadCodeAssistResponse, error) {
+func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string, client *http.Client) (*loadCodeAssistResponse, error) {
 	reqBody := loadCodeAssistRequest{
 		CloudAICompanionProject: existingProjectID,
 		Metadata: clientMetadata{
@@ -539,7 +543,7 @@ func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existin
 		},
 	}
 
-	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "loadCodeAssist", reqBody, baseURL)
+	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "loadCodeAssist", reqBody, baseURL, client)
 	if err != nil {
 		return nil, err
 	}
@@ -552,16 +556,16 @@ func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existin
 	return &resp, nil
 }
 
-func retrieveUserQuota(ctx context.Context, accessToken, projectID string) (*retrieveUserQuotaResponse, string, error) {
-	return retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint)
+func retrieveUserQuota(ctx context.Context, accessToken, projectID string, client *http.Client) (*retrieveUserQuotaResponse, string, error) {
+	return retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint, client)
 }
 
-func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string) (*retrieveUserQuotaResponse, string, error) {
+func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string, client *http.Client) (*retrieveUserQuotaResponse, string, error) {
 	reqBody := retrieveUserQuotaRequest{
 		Project: projectID,
 	}
 
-	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL)
+	respBody, err := codeAssistPostWithEndpoint(ctx, accessToken, "retrieveUserQuota", reqBody, baseURL, client)
 	if err != nil {
 		return nil, "", err
 	}
@@ -574,7 +578,10 @@ func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, 
 	return &resp, "retrieveUserQuota", nil
 }
 
-func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string, body interface{}, baseURL string) ([]byte, error) {
+func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string, body interface{}, baseURL string, client *http.Client) ([]byte, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	apiURL := fmt.Sprintf("%s/%s:%s", baseURL, codeAssistAPIVersion, method)
 
 	jsonBody, err := json.Marshal(body)
@@ -589,7 +596,7 @@ func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1630,7 +1637,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 			if entry.Data.ReasoningTokens > 0 {
 				rec.ReasoningTokens = core.Float64Ptr(float64(entry.Data.ReasoningTokens))
 			}
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 	}
 

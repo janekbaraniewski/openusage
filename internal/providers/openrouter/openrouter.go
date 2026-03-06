@@ -352,7 +352,7 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := p.Client().Do(req)
 		if err != nil {
 			return fmt.Errorf("request failed: %w", err)
 		}
@@ -528,7 +528,7 @@ func (p *Provider) fetchCreditsDetail(ctx context.Context, baseURL, apiKey strin
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -591,7 +591,7 @@ func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, sn
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := p.Client().Do(req)
 		if err != nil {
 			return err
 		}
@@ -745,7 +745,7 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 		req.Header.Set("Cache-Control", "no-cache, no-store, max-age=0")
 		req.Header.Set("Pragma", "no-cache")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := p.Client().Do(req)
 		if err != nil {
 			return err
 		}
@@ -1261,7 +1261,7 @@ func emitAnalyticsPerModelMetrics(
 			snap.Metrics[prefix+"_byok_requests"] = core.Metric{Used: &v, Unit: "requests", Window: "activity"}
 		}
 		if rec.InputTokens != nil || rec.OutputTokens != nil || rec.CostUSD != nil || rec.Requests != nil || rec.ReasoningTokens != nil || rec.CachedTokens != nil || rec.TotalTokens != nil {
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 	}
 }
@@ -1940,7 +1940,7 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := p.Client().Do(req)
 		if err != nil {
 			return all, err
 		}
@@ -2196,7 +2196,7 @@ func (p *Provider) fetchGenerationDetail(ctx context.Context, baseURL, apiKey, g
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return generationEntry{}, err
 	}
@@ -2324,7 +2324,7 @@ func emitPerModelMetrics(modelStatsMap map[string]*modelStats, snap *core.UsageS
 			}
 		}
 		if rec.InputTokens != nil || rec.OutputTokens != nil || rec.CostUSD != nil || rec.Requests != nil || rec.ReasoningTokens != nil || rec.CachedTokens != nil {
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 	}
 }

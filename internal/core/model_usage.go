@@ -93,12 +93,6 @@ func (s *UsageSnapshot) AppendModelUsage(rec ModelUsageRecord) {
 	s.ModelUsage = append(s.ModelUsage, rec)
 }
 
-func AppendModelUsageRecord(snap *UsageSnapshot, rec ModelUsageRecord) {
-	if snap == nil {
-		return
-	}
-	snap.AppendModelUsage(rec)
-}
 
 func Float64Ptr(v float64) *float64 {
 	return &v

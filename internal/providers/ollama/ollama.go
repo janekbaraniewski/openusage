@@ -234,7 +234,7 @@ func (p *Provider) fetchLocalAPI(ctx context.Context, baseURL string, snap *core
 
 func (p *Provider) fetchLocalVersion(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
 	var resp versionResponse
-	code, headers, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/version", "", &resp)
+	code, headers, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/version", "", &resp, p.Client())
 	if err != nil {
 		return false, fmt.Errorf("ollama: local version request failed: %w", err)
 	}
@@ -255,7 +255,7 @@ func (p *Provider) fetchLocalVersion(ctx context.Context, baseURL string, snap *
 
 func (p *Provider) fetchLocalStatus(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
 	var resp map[string]any
-	code, _, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/status", "", &resp)
+	code, _, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/status", "", &resp, p.Client())
 	if err != nil {
 		return false, nil
 	}
@@ -285,7 +285,7 @@ func (p *Provider) fetchLocalStatus(ctx context.Context, baseURL string, snap *c
 
 func (p *Provider) fetchLocalMe(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
 	var resp map[string]any
-	code, _, err := doJSONRequest(ctx, http.MethodPost, baseURL+"/api/me", "", &resp)
+	code, _, err := doJSONRequest(ctx, http.MethodPost, baseURL+"/api/me", "", &resp, p.Client())
 	if err != nil {
 		return false, nil
 	}
@@ -309,7 +309,7 @@ func (p *Provider) fetchLocalMe(ctx context.Context, baseURL string, snap *core.
 
 func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *core.UsageSnapshot) ([]tagModel, bool, error) {
 	var resp tagsResponse
-	code, headers, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/tags", "", &resp)
+	code, headers, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/tags", "", &resp, p.Client())
 	if err != nil {
 		return nil, false, fmt.Errorf("ollama: local tags request failed: %w", err)
 	}
@@ -356,7 +356,7 @@ func (p *Provider) fetchLocalTags(ctx context.Context, baseURL string, snap *cor
 
 func (p *Provider) fetchLocalPS(ctx context.Context, baseURL string, snap *core.UsageSnapshot) (bool, error) {
 	var resp processResponse
-	code, _, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/ps", "", &resp)
+	code, _, err := doJSONRequest(ctx, http.MethodGet, baseURL+"/api/ps", "", &resp, p.Client())
 	if err != nil {
 		return false, fmt.Errorf("ollama: local process list request failed: %w", err)
 	}
@@ -412,7 +412,7 @@ func (p *Provider) fetchModelDetails(ctx context.Context, baseURL string, models
 		}
 
 		var show showResponse
-		code, err := doJSONPostRequest(ctx, baseURL+"/api/show", map[string]string{"name": model.Name}, &show)
+		code, err := doJSONPostRequest(ctx, baseURL+"/api/show", map[string]string{"name": model.Name}, &show, p.Client())
 		if err != nil || code != http.StatusOK {
 			continue
 		}
@@ -469,7 +469,7 @@ func (p *Provider) fetchModelDetails(ctx context.Context, baseURL string, models
 		if capSet["thinking"] {
 			rec.SetDimension("capability_thinking", "true")
 		}
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 	}
 
 	setValueMetric(snap, "models_with_tools", float64(toolsCount), "models", "current")
@@ -843,7 +843,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	cloudBaseURL := resolveCloudBaseURL(acct)
 
 	var me map[string]any
-	status, headers, reqErr := doJSONRequest(ctx, http.MethodPost, cloudEndpointURL(cloudBaseURL, "/api/me"), apiKey, &me)
+	status, headers, reqErr := doJSONRequest(ctx, http.MethodPost, cloudEndpointURL(cloudBaseURL, "/api/me"), apiKey, &me, p.Client())
 	if reqErr != nil {
 		return false, false, false, fmt.Errorf("ollama: cloud account request failed: %w", reqErr)
 	}
@@ -869,7 +869,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	}
 
 	var tags tagsResponse
-	tagsStatus, _, tagsErr := doJSONRequest(ctx, http.MethodGet, cloudEndpointURL(cloudBaseURL, "/api/tags"), apiKey, &tags)
+	tagsStatus, _, tagsErr := doJSONRequest(ctx, http.MethodGet, cloudEndpointURL(cloudBaseURL, "/api/tags"), apiKey, &tags, p.Client())
 	if tagsErr != nil {
 		if !hasData {
 			return hasData, authFailed, limited, fmt.Errorf("ollama: cloud tags request failed: %w", tagsErr)
@@ -891,7 +891,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	}
 
 	if _, ok := snap.Metrics["usage_five_hour"]; !ok {
-		if parsed, parseErr := fetchCloudUsageFromSettingsPage(ctx, cloudBaseURL, apiKey, acct, snap); parseErr != nil {
+		if parsed, parseErr := fetchCloudUsageFromSettingsPage(ctx, cloudBaseURL, apiKey, acct, snap, p.Client()); parseErr != nil {
 			snap.SetDiagnostic("cloud_usage_settings_error", parseErr.Error())
 		} else if parsed {
 			hasData = true
@@ -1435,7 +1435,7 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 			Requests:   core.Float64Ptr(count),
 		}
 		rec.SetDimension("provider", "ollama")
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 
 		if len(top) < 6 {
 			top = append(top, fmt.Sprintf("%s=%.0f", model, count))
@@ -1477,7 +1477,7 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 				Requests:   core.Float64Ptr(count),
 			}
 			rec.SetDimension("provider", "ollama")
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 		if err := todayRows.Err(); err != nil {
 			return err
@@ -1716,7 +1716,7 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 		}
 		rec.SetDimension("provider", "ollama")
 		rec.SetDimension("estimation", "chars_div_4")
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 
 		topModels = append(topModels, modelTotal{name: model, tok: totals.input + totals.output})
 	}
@@ -2144,7 +2144,7 @@ func isInferencePath(path string) bool {
 	}
 }
 
-func doJSONRequest(ctx context.Context, method, url, apiKey string, out any) (int, http.Header, error) {
+func doJSONRequest(ctx context.Context, method, url, apiKey string, out any, client *http.Client) (int, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return 0, nil, err
@@ -2154,7 +2154,7 @@ func doJSONRequest(ctx context.Context, method, url, apiKey string, out any) (in
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -2178,7 +2178,7 @@ func doJSONRequest(ctx context.Context, method, url, apiKey string, out any) (in
 	return resp.StatusCode, resp.Header, nil
 }
 
-func doJSONPostRequest(ctx context.Context, url string, body any, out any) (int, error) {
+func doJSONPostRequest(ctx context.Context, url string, body any, out any, client *http.Client) (int, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return 0, err
@@ -2190,7 +2190,7 @@ func doJSONPostRequest(ctx context.Context, url string, body any, out any) (int,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -2278,7 +2278,7 @@ func resolveCloudSessionCookie(acct core.AccountConfig) string {
 	return ""
 }
 
-func fetchCloudUsageFromSettingsPage(ctx context.Context, cloudBaseURL, apiKey string, acct core.AccountConfig, snap *core.UsageSnapshot) (bool, error) {
+func fetchCloudUsageFromSettingsPage(ctx context.Context, cloudBaseURL, apiKey string, acct core.AccountConfig, snap *core.UsageSnapshot, client *http.Client) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cloudEndpointURL(cloudBaseURL, "/settings"), nil)
 	if err != nil {
 		return false, fmt.Errorf("ollama: creating settings request: %w", err)
@@ -2291,7 +2291,7 @@ func fetchCloudUsageFromSettingsPage(ctx context.Context, cloudBaseURL, apiKey s
 		req.Header.Set("Cookie", cookie)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("ollama: cloud settings request failed: %w", err)
 	}

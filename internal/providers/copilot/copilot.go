@@ -1515,7 +1515,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		setUsedMetric(snap, prefix+"_tool_calls", float64(modelToolCalls[model]), "calls", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_response_chars", float64(modelResponseChars[model]), "chars", copilotAllTimeWindow)
 		setUsedMetric(snap, prefix+"_reasoning_chars", float64(modelReasoningChars[model]), "chars", copilotAllTimeWindow)
-		core.AppendModelUsageRecord(snap, rec)
+		snap.AppendModelUsage(rec)
 	}
 
 	topClients := topCopilotClientNames(clientTokens, clientSessions, clientMessages, maxCopilotClients)

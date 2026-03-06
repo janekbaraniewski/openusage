@@ -384,7 +384,7 @@ func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, 
 		req.Header.Set("User-Agent", "codex-cli")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return false, fmt.Errorf("codex: live usage request failed: %w", err)
 	}
@@ -1536,7 +1536,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 			if entry.Data.ReasoningOutputTokens > 0 {
 				rec.ReasoningTokens = core.Float64Ptr(float64(entry.Data.ReasoningOutputTokens))
 			}
-			core.AppendModelUsageRecord(snap, rec)
+			snap.AppendModelUsage(rec)
 		}
 	}
 

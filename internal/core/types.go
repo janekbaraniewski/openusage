@@ -73,13 +73,10 @@ func NewUsageSnapshot(providerID, accountID string) UsageSnapshot {
 }
 
 func NewAuthSnapshot(providerID, accountID, message string) UsageSnapshot {
-	return UsageSnapshot{
-		ProviderID: providerID,
-		AccountID:  accountID,
-		Timestamp:  time.Now(),
-		Status:     StatusAuth,
-		Message:    message,
-	}
+	snap := NewUsageSnapshot(providerID, accountID)
+	snap.Status = StatusAuth
+	snap.Message = message
+	return snap
 }
 
 func MergeAccounts(manual, autoDetected []AccountConfig) []AccountConfig {
