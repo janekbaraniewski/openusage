@@ -93,6 +93,7 @@ const (
 	DashboardSectionTopUsageProgress DashboardStandardSection = "top_usage_progress"
 	DashboardSectionModelBurn        DashboardStandardSection = "model_burn"
 	DashboardSectionClientBurn       DashboardStandardSection = "client_burn"
+	DashboardSectionProjectBreakdown DashboardStandardSection = "project_breakdown"
 	DashboardSectionToolUsage        DashboardStandardSection = "tool_usage"
 	// DashboardSectionActualToolUsage is a legacy section ID kept for backward compatibility.
 	// It is normalized to DashboardSectionToolUsage at runtime and config load.
@@ -112,6 +113,7 @@ func defaultDashboardSectionOrder() []DashboardStandardSection {
 		DashboardSectionTopUsageProgress,
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
+		DashboardSectionProjectBreakdown,
 		DashboardSectionToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,
@@ -140,6 +142,7 @@ func isKnownDashboardSection(section DashboardStandardSection) bool {
 		DashboardSectionTopUsageProgress,
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
+		DashboardSectionProjectBreakdown,
 		DashboardSectionToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,

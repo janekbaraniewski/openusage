@@ -10,6 +10,7 @@ func TestDefaultDashboardWidget_StandardSectionOrder(t *testing.T) {
 		DashboardSectionTopUsageProgress,
 		DashboardSectionModelBurn,
 		DashboardSectionClientBurn,
+		DashboardSectionProjectBreakdown,
 		DashboardSectionToolUsage,
 		DashboardSectionMCPUsage,
 		DashboardSectionLanguageBurn,

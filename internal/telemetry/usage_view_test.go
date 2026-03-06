@@ -862,6 +862,113 @@ func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing
 	}
 }
 
+func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-projects-1",
+		MessageID:     "msg-projects-1",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(10),
+		OutputTokens:  int64Ptr(5),
+		TotalTokens:   int64Ptr(15),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"client": "CLI",
+		},
+	}); err != nil {
+		t.Fatalf("ingest openusage event: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now.Add(1 * time.Second),
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "garage-tracker",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-projects-2",
+		MessageID:     "msg-projects-2",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(12),
+		OutputTokens:  int64Ptr(6),
+		TotalTokens:   int64Ptr(18),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"client": "CLI",
+		},
+	}); err != nil {
+		t.Fatalf("ingest garage-tracker event: %v", err)
+	}
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now.Add(2 * time.Second),
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-projects-3",
+		MessageID:     "msg-projects-3",
+		ModelRaw:      "gpt-5-codex",
+		InputTokens:   int64Ptr(8),
+		OutputTokens:  int64Ptr(4),
+		TotalTokens:   int64Ptr(12),
+		Requests:      int64Ptr(1),
+		Payload: map[string]any{
+			"client": "CLI",
+		},
+	}); err != nil {
+		t.Fatalf("ingest no-workspace event: %v", err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+	snap := merged["codex-cli"]
+
+	if got := metricUsed(snap.Metrics["project_openusage_requests"]); got != 1 {
+		t.Fatalf("project_openusage_requests = %v, want 1", got)
+	}
+	if got := metricUsed(snap.Metrics["project_garage_tracker_requests"]); got != 1 {
+		t.Fatalf("project_garage_tracker_requests = %v, want 1", got)
+	}
+	if _, ok := snap.Metrics["project_unknown_requests"]; ok {
+		t.Fatalf("unexpected unknown project bucket emitted: %+v", snap.Metrics["project_unknown_requests"])
+	}
+
+	day := now.Format("2006-01-02")
+	if got := seriesValueByDate(snap.DailySeries["usage_project_openusage"], day); got != 1 {
+		t.Fatalf("usage_project_openusage[%s] = %v, want 1", day, got)
+	}
+	if got := seriesValueByDate(snap.DailySeries["usage_project_garage_tracker"], day); got != 1 {
+		t.Fatalf("usage_project_garage_tracker[%s] = %v, want 1", day, got)
+	}
+}
+
 func metricUsed(m core.Metric) float64 {
 	if m.Used == nil {
 		return 0

@@ -550,6 +550,12 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, clientBurnKeys)
 
+	projectBreakdownLines, projectBreakdownKeys := buildProviderProjectBreakdownLines(snap, innerW, modelMixExpanded)
+	if len(projectBreakdownLines) > 0 {
+		sectionsByID[core.DashboardSectionProjectBreakdown] = section{withSectionPadding(projectBreakdownLines)}
+	}
+	compactMetricKeys = addUsedKeys(compactMetricKeys, projectBreakdownKeys)
+
 	var toolBurnLines []string
 	var toolBurnKeys map[string]bool
 	if widget.ShowToolComposition {
@@ -2016,6 +2022,13 @@ type clientMixEntry struct {
 	series     []core.TimePoint
 }
 
+type projectMixEntry struct {
+	name       string
+	requests   float64
+	requests1d float64
+	series     []core.TimePoint
+}
+
 type sourceMixEntry struct {
 	name       string
 	requests   float64
@@ -3136,6 +3149,180 @@ func buildProviderClientCompositionLinesWithWidget(snap core.UsageSnapshot, inne
 	}
 
 	return lines, usedKeys
+}
+
+func buildProviderProjectBreakdownLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	allProjects, usedKeys := collectProviderProjectMix(snap)
+	if len(allProjects) == 0 {
+		return nil, nil
+	}
+
+	projects, hiddenCount := limitProjectMix(allProjects, expanded, 6)
+	projectColors := buildProjectColorMap(allProjects, snap.AccountID)
+
+	totalRequests := float64(0)
+	for _, project := range allProjects {
+		totalRequests += project.requests
+	}
+	if totalRequests <= 0 {
+		return nil, nil
+	}
+
+	barW := innerW - 2
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 40 {
+		barW = 40
+	}
+
+	barEntries := make([]toolMixEntry, 0, len(allProjects))
+	for _, project := range allProjects {
+		barEntries = append(barEntries, toolMixEntry{name: project.name, count: project.requests})
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Project Breakdown") +
+			"  " + dimStyle.Render(shortCompact(totalRequests)+" req"),
+		"  " + renderToolMixBar(barEntries, totalRequests, barW, projectColors),
+	}
+
+	for idx, project := range projects {
+		if project.requests <= 0 {
+			continue
+		}
+		pct := project.requests / totalRequests * 100
+		label := project.name
+		projectColor := colorForProject(projectColors, project.name)
+		colorDot := lipgloss.NewStyle().Foreground(projectColor).Render("■")
+
+		maxLabelLen := tableLabelMaxLen(innerW)
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-1] + "…"
+		}
+		displayLabel := fmt.Sprintf("%s %d %s", colorDot, idx+1, label)
+		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(project.requests))
+		if project.requests1d > 0 {
+			valueStr += fmt.Sprintf(" · today %s", shortCompact(project.requests1d))
+		}
+		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	if hiddenCount > 0 {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("+ %d more projects (Ctrl+O)", hiddenCount)))
+	}
+
+	return lines, usedKeys
+}
+
+func collectProviderProjectMix(snap core.UsageSnapshot) ([]projectMixEntry, map[string]bool) {
+	byProject := make(map[string]*projectMixEntry)
+	usedKeys := make(map[string]bool)
+
+	ensure := func(name string) *projectMixEntry {
+		if _, ok := byProject[name]; !ok {
+			byProject[name] = &projectMixEntry{name: name}
+		}
+		return byProject[name]
+	}
+
+	seriesByProject := make(map[string]map[string]float64)
+
+	for key, met := range snap.Metrics {
+		if met.Used == nil {
+			continue
+		}
+		name, field, ok := parseProjectMetricKey(key)
+		if !ok {
+			continue
+		}
+		project := ensure(name)
+		switch field {
+		case "requests":
+			project.requests = *met.Used
+		case "requests_today":
+			project.requests1d = *met.Used
+		}
+		usedKeys[key] = true
+	}
+
+	for key, points := range snap.DailySeries {
+		if !strings.HasPrefix(key, "usage_project_") {
+			continue
+		}
+		name := strings.TrimPrefix(key, "usage_project_")
+		if strings.TrimSpace(name) == "" || len(points) == 0 {
+			continue
+		}
+		mergeSeriesByDay(seriesByProject, name, points)
+	}
+
+	for name, pointsByDay := range seriesByProject {
+		project := ensure(name)
+		project.series = sortedSeriesFromByDay(pointsByDay)
+		if project.requests <= 0 {
+			project.requests = sumSeriesValues(project.series)
+		}
+	}
+
+	projects := make([]projectMixEntry, 0, len(byProject))
+	for _, project := range byProject {
+		if project.requests <= 0 && len(project.series) == 0 {
+			continue
+		}
+		projects = append(projects, *project)
+	}
+
+	sort.Slice(projects, func(i, j int) bool {
+		if projects[i].requests == projects[j].requests {
+			return projects[i].name < projects[j].name
+		}
+		return projects[i].requests > projects[j].requests
+	})
+
+	return projects, usedKeys
+}
+
+func parseProjectMetricKey(key string) (name, field string, ok bool) {
+	const prefix = "project_"
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	if strings.HasSuffix(rest, "_requests_today") {
+		return strings.TrimSuffix(rest, "_requests_today"), "requests_today", true
+	}
+	if strings.HasSuffix(rest, "_requests") {
+		return strings.TrimSuffix(rest, "_requests"), "requests", true
+	}
+	return "", "", false
+}
+
+func limitProjectMix(projects []projectMixEntry, expanded bool, maxVisible int) ([]projectMixEntry, int) {
+	if expanded || maxVisible <= 0 || len(projects) <= maxVisible {
+		return projects, 0
+	}
+	return projects[:maxVisible], len(projects) - maxVisible
+}
+
+func buildProjectColorMap(projects []projectMixEntry, providerID string) map[string]lipgloss.Color {
+	colors := make(map[string]lipgloss.Color, len(projects))
+	if len(projects) == 0 {
+		return colors
+	}
+
+	base := stablePaletteOffset("project", providerID)
+	for i, project := range projects {
+		colors[project.name] = distributedPaletteColor(base, i)
+	}
+	return colors
+}
+
+func colorForProject(colors map[string]lipgloss.Color, name string) lipgloss.Color {
+	if color, ok := colors[name]; ok {
+		return color
+	}
+	return stableModelColor("project:"+name, "project")
 }
 
 func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {

@@ -39,6 +39,12 @@ type telemetrySourceAgg struct {
 	Sessions   float64
 }
 
+type telemetryProjectAgg struct {
+	Project    string
+	Requests   float64
+	Requests1d float64
+}
+
 type telemetryToolAgg struct {
 	Tool           string
 	Calls          float64
@@ -110,6 +116,7 @@ type telemetryUsageAgg struct {
 	Models       []telemetryModelAgg
 	Providers    []telemetryProviderAgg
 	Sources      []telemetrySourceAgg
+	Projects     []telemetryProjectAgg
 	Tools        []telemetryToolAgg
 	MCPServers   []telemetryMCPServerAgg
 	Languages    []telemetryLanguageAgg
@@ -118,6 +125,7 @@ type telemetryUsageAgg struct {
 	Daily        []telemetryDayPoint
 	ModelDaily   map[string][]core.TimePoint
 	SourceDaily  map[string][]core.TimePoint
+	ProjectDaily map[string][]core.TimePoint
 	ClientDaily  map[string][]core.TimePoint
 	ClientTokens map[string][]core.TimePoint
 }
@@ -258,6 +266,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "project_") ||
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "lang_") ||
 			strings.HasPrefix(key, "interface_") ||
@@ -280,6 +289,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "project_") ||
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "lang_") ||
 			strings.HasPrefix(key, "jsonl_") ||
@@ -293,6 +303,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "project_") ||
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "usage_") ||
 			strings.HasPrefix(key, "analytics_") {
@@ -304,6 +315,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			strings.HasPrefix(key, "client_") ||
 			strings.HasPrefix(key, "tool_") ||
 			strings.HasPrefix(key, "model_") ||
+			strings.HasPrefix(key, "project_") ||
 			strings.HasPrefix(key, "provider_") ||
 			strings.HasPrefix(key, "usage_") ||
 			strings.HasPrefix(key, "analytics_") {
@@ -313,6 +325,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	for key := range snap.DailySeries {
 		if strings.HasPrefix(key, "usage_model_") ||
 			strings.HasPrefix(key, "usage_source_") ||
+			strings.HasPrefix(key, "usage_project_") ||
 			strings.HasPrefix(key, "usage_client_") ||
 			strings.HasPrefix(key, "tokens_client_") ||
 			key == "analytics_cost" ||
@@ -405,6 +418,14 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["client_"+sk+"_reasoning_tokens"] = core.Metric{Used: core.Float64Ptr(source.Reasoning), Unit: "tokens", Window: timeWindow}
 		snap.Metrics["client_"+sk+"_requests"] = core.Metric{Used: core.Float64Ptr(source.Requests), Unit: "requests", Window: timeWindow}
 		snap.Metrics["client_"+sk+"_sessions"] = core.Metric{Used: core.Float64Ptr(source.Sessions), Unit: "sessions", Window: timeWindow}
+	}
+	for _, project := range agg.Projects {
+		pk := sanitizeMetricID(project.Project)
+		if pk == "" {
+			continue
+		}
+		snap.Metrics["project_"+pk+"_requests"] = core.Metric{Used: core.Float64Ptr(project.Requests), Unit: "requests", Window: timeWindow}
+		snap.Metrics["project_"+pk+"_requests_today"] = core.Metric{Used: core.Float64Ptr(project.Requests1d), Unit: "requests", Window: "1d"}
 	}
 
 	var totalToolCalls float64
@@ -523,6 +544,9 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	for source, series := range agg.SourceDaily {
 		snap.DailySeries["usage_source_"+sanitizeMetricID(source)] = series
 	}
+	for project, series := range agg.ProjectDaily {
+		snap.DailySeries["usage_project_"+sanitizeMetricID(project)] = series
+	}
 	for client, series := range agg.ClientDaily {
 		snap.DailySeries["usage_client_"+sanitizeMetricID(client)] = series
 	}
@@ -614,6 +638,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg := &telemetryUsageAgg{
 		ModelDaily:   make(map[string][]core.TimePoint),
 		SourceDaily:  make(map[string][]core.TimePoint),
+		ProjectDaily: make(map[string][]core.TimePoint),
 		ClientDaily:  make(map[string][]core.TimePoint),
 		ClientTokens: make(map[string][]core.TimePoint),
 	}
@@ -676,6 +701,12 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if err != nil {
 		return nil, err
 	}
+	done = trace("queryProjectAgg")
+	projects, err := queryProjectAgg(ctx, db, matFilter)
+	done()
+	if err != nil {
+		return nil, err
+	}
 	done = trace("queryToolAgg")
 	tools, err := queryToolAgg(ctx, db, matFilter)
 	done()
@@ -724,6 +755,12 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if err != nil {
 		return nil, err
 	}
+	done = trace("queryDailyByDimension(project)")
+	projectDaily, err := queryDailyByDimension(ctx, db, matFilter, "project")
+	done()
+	if err != nil {
+		return nil, err
+	}
 	done = trace("queryDailyByDimension(client)")
 	clientDaily, err := queryDailyByDimension(ctx, db, matFilter, "client")
 	done()
@@ -740,6 +777,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg.Models = models
 	agg.Providers = providers
 	agg.Sources = sources
+	agg.Projects = projects
 	agg.Tools = tools
 	agg.MCPServers = buildMCPAgg(tools)
 	agg.Languages = languages
@@ -748,6 +786,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	agg.Daily = daily
 	agg.ModelDaily = modelDaily
 	agg.SourceDaily = sourceDaily
+	agg.ProjectDaily = projectDaily
 	agg.ClientDaily = clientDaily
 	agg.ClientTokens = clientTokens
 	core.Tracef("[usage_view_perf] loadUsageViewForFilter TOTAL: %dms (providers=%v)", time.Since(filterStart).Milliseconds(), filter.ProviderIDs)
@@ -851,6 +890,38 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 			&row.Reasoning,
 			&row.Sessions,
 		); err != nil {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProjectAgg, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
+		SELECT
+			COALESCE(NULLIF(TRIM(workspace_id), ''), '') AS project_name,
+			SUM(COALESCE(requests, 1)) AS requests,
+			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
+		FROM deduped_usage
+		WHERE 1=1
+		  AND event_type = 'message_usage'
+		  AND status != 'error'
+		  AND NULLIF(TRIM(workspace_id), '') IS NOT NULL
+		GROUP BY project_name
+		ORDER BY requests DESC
+	`
+	rows, err := db.QueryContext(ctx, query, whereArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("canonical usage project query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []telemetryProjectAgg
+	for rows.Next() {
+		var row telemetryProjectAgg
+		if err := rows.Scan(&row.Project, &row.Requests, &row.Requests1d); err != nil {
 			continue
 		}
 		out = append(out, row)
@@ -1257,6 +1328,18 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 			  AND status != 'error'%s
 			GROUP BY day, dim_key
 		`, dailyTimeFilter)
+	case "project":
+		query = usageCTE + fmt.Sprintf(`
+			SELECT date(occurred_at) AS day,
+			       COALESCE(NULLIF(TRIM(workspace_id), ''), '') AS dim_key,
+			       SUM(COALESCE(requests, 1)) AS value
+			FROM deduped_usage
+			WHERE 1=1
+			  AND event_type = 'message_usage'
+			  AND status != 'error'
+			  AND NULLIF(TRIM(workspace_id), '') IS NOT NULL%s
+			GROUP BY day, dim_key
+		`, dailyTimeFilter)
 	case "client":
 		query = usageCTE + fmt.Sprintf(`
 			SELECT date(occurred_at) AS day,
@@ -1288,6 +1371,9 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 		key = sanitizeMetricID(key)
 		if key == "" {
 			key = "unknown"
+		}
+		if dimension == "project" && key == "unknown" {
+			continue
 		}
 		if byDim[key] == nil {
 			byDim[key] = make(map[string]float64)

@@ -32,6 +32,15 @@ func providerByName(providers []providerMixEntry, name string) (providerMixEntry
 	return providerMixEntry{}, false
 }
 
+func projectByName(projects []projectMixEntry, name string) (projectMixEntry, bool) {
+	for _, project := range projects {
+		if project.name == name {
+			return project, true
+		}
+	}
+	return projectMixEntry{}, false
+}
+
 func TestCollectProviderClientMix_NormalizesSourceIntoClient(t *testing.T) {
 	snap := core.UsageSnapshot{
 		Metrics: map[string]core.Metric{
@@ -246,6 +255,78 @@ func TestCollectProviderClientMix_DoesNotDoubleCountRequestsTodayFallback(t *tes
 	}
 	if cli.requests != 367 {
 		t.Fatalf("cli_agents requests = %.0f, want 367", cli.requests)
+	}
+}
+
+func TestCollectProviderProjectMix_UsesMetricsAndDailySeriesFallback(t *testing.T) {
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"project_openusage_requests":               {Used: float64Ptr(4), Unit: "requests"},
+			"project_openusage_requests_today":         {Used: float64Ptr(1), Unit: "requests"},
+			"project_garage_tracker_requests_today":    {Used: float64Ptr(2), Unit: "requests"},
+			"project_garage_tracker_notes_requests":    {Used: nil, Unit: "requests"},
+			"project_garage_tracker_notes_other_field": {Used: float64Ptr(9), Unit: "count"},
+		},
+		DailySeries: map[string][]core.TimePoint{
+			"usage_project_garage_tracker": {
+				{Date: "2026-03-05", Value: 3},
+				{Date: "2026-03-06", Value: 2},
+			},
+		},
+	}
+
+	projects, usedKeys := collectProviderProjectMix(snap)
+
+	openusage, ok := projectByName(projects, "openusage")
+	if !ok {
+		t.Fatalf("missing openusage project bucket: %+v", projects)
+	}
+	if openusage.requests != 4 {
+		t.Fatalf("openusage requests = %.0f, want 4", openusage.requests)
+	}
+	if openusage.requests1d != 1 {
+		t.Fatalf("openusage requests1d = %.0f, want 1", openusage.requests1d)
+	}
+
+	garageTracker, ok := projectByName(projects, "garage_tracker")
+	if !ok {
+		t.Fatalf("missing garage_tracker project bucket: %+v", projects)
+	}
+	if garageTracker.requests != 5 {
+		t.Fatalf("garage_tracker requests = %.0f, want 5 from daily series fallback", garageTracker.requests)
+	}
+	if garageTracker.requests1d != 2 {
+		t.Fatalf("garage_tracker requests1d = %.0f, want 2", garageTracker.requests1d)
+	}
+
+	if !usedKeys["project_openusage_requests"] || !usedKeys["project_garage_tracker_requests_today"] {
+		t.Fatalf("expected project metric keys to be consumed, got: %+v", usedKeys)
+	}
+}
+
+func TestBuildProviderProjectBreakdownLines_RendersBreakdown(t *testing.T) {
+	snap := core.UsageSnapshot{
+		AccountID: "codex-cli",
+		Metrics: map[string]core.Metric{
+			"project_openusage_requests":            {Used: float64Ptr(2), Unit: "requests"},
+			"project_garage_tracker_requests":       {Used: float64Ptr(3), Unit: "requests"},
+			"project_garage_tracker_requests_today": {Used: float64Ptr(1), Unit: "requests"},
+		},
+	}
+
+	lines, used := buildProviderProjectBreakdownLines(snap, 100, false)
+	if len(lines) < 3 {
+		t.Fatalf("expected project breakdown lines, got %d: %#v", len(lines), lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Project Breakdown") {
+		t.Fatalf("missing project breakdown heading: %q", joined)
+	}
+	if !strings.Contains(joined, "openusage") || !strings.Contains(joined, "garage_tracker") {
+		t.Fatalf("missing project rows in breakdown: %q", joined)
+	}
+	if !used["project_openusage_requests"] || !used["project_garage_tracker_requests"] {
+		t.Fatalf("expected project metric keys to be marked used: %+v", used)
 	}
 }
 
