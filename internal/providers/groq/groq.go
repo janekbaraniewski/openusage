@@ -3,7 +3,6 @@ package groq
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
@@ -51,7 +50,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return core.UsageSnapshot{}, fmt.Errorf("groq: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return core.UsageSnapshot{}, fmt.Errorf("groq: request failed: %w", err)
 	}

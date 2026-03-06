@@ -69,7 +69,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, fmt.Errorf("gemini_api: creating request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return snap, fmt.Errorf("gemini_api: request failed: %w", err)
 	}

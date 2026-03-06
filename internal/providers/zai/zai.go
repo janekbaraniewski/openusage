@@ -188,7 +188,7 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return fmt.Errorf("zai: models request failed: %w", err)
 	}
@@ -656,12 +656,12 @@ func (p *Provider) requestMonitor(ctx context.Context, monitorBase, token, endpo
 		reqURL = withRange
 	}
 
-	status, body, err := doMonitorRequest(ctx, reqURL, token, false)
+	status, body, err := doMonitorRequest(ctx, reqURL, token, false, p.Client())
 	if err != nil {
 		return 0, nil, err
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		status, body, err = doMonitorRequest(ctx, reqURL, token, true)
+		status, body, err = doMonitorRequest(ctx, reqURL, token, true, p.Client())
 	}
 	return status, body, err
 }
@@ -778,7 +778,7 @@ func resolveAPIBases(acct core.AccountConfig) (codingBase, monitorBase, region s
 	return codingBase, monitorBase, region
 }
 
-func doMonitorRequest(ctx context.Context, reqURL, token string, bearer bool) (int, []byte, error) {
+func doMonitorRequest(ctx context.Context, reqURL, token string, bearer bool, client *http.Client) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, nil, fmt.Errorf("creating request: %w", err)
@@ -792,7 +792,7 @@ func doMonitorRequest(ctx context.Context, reqURL, token string, bearer bool) (i
 	req.Header.Set("Accept-Language", "en-US,en")
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("request failed: %w", err)
 	}

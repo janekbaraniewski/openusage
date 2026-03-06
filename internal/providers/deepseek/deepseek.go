@@ -88,7 +88,7 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return fmt.Errorf("balance request failed: %w", err)
 	}
@@ -146,5 +146,5 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 }
 
 func (p *Provider) fetchRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot) error {
-	return shared.ProbeRateLimits(ctx, url, apiKey, snap)
+	return shared.ProbeRateLimits(ctx, url, apiKey, snap, p.Client())
 }

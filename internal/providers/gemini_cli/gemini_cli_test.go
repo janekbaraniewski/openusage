@@ -206,7 +206,7 @@ func TestFetch_UsageAPI(t *testing.T) {
 
 	ctx := context.Background()
 
-	accessToken, err := refreshAccessTokenWithEndpoint(ctx, creds.RefreshToken, server.URL+"/token")
+	accessToken, err := refreshAccessTokenWithEndpoint(ctx, creds.RefreshToken, server.URL+"/token", nil)
 	if err != nil {
 		t.Fatalf("refreshAccessToken() error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestFetch_UsageAPI(t *testing.T) {
 		t.Error("token endpoint was not called")
 	}
 
-	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, "", server.URL)
+	resp, err := loadCodeAssistDetailsWithEndpoint(ctx, accessToken, "", server.URL, nil)
 	if err != nil {
 		t.Fatalf("loadCodeAssist() error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestFetch_UsageAPI(t *testing.T) {
 		t.Error("loadCodeAssist endpoint was not called")
 	}
 
-	quota, method, err := retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, server.URL)
+	quota, method, err := retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, server.URL, nil)
 	if err != nil {
 		t.Fatalf("retrieveUserQuota() error: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestFetch_UsageAPI_DoesNotFallbackToLegacyMethod(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, _, err := retrieveUserQuotaWithEndpoint(context.Background(), "test-token", "test-project", server.URL); err == nil {
+	if _, _, err := retrieveUserQuotaWithEndpoint(context.Background(), "test-token", "test-project", server.URL, nil); err == nil {
 		t.Fatalf("retrieveUserQuotaWithEndpoint() error = nil, want not found error")
 	}
 }

@@ -101,7 +101,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
 	// Fetch quotas data
-	quotasResp, statusCode, err := fetchQuotas(ctx, baseURL, apiKey)
+	quotasResp, statusCode, err := fetchQuotas(ctx, baseURL, apiKey, p.Client())
 	if err != nil {
 		return core.UsageSnapshot{}, fmt.Errorf("alibaba_cloud: fetching quotas: %w", err)
 	}
@@ -241,7 +241,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
-func fetchQuotas(ctx context.Context, baseURL, apiKey string) (*quotasData, int, error) {
+func fetchQuotas(ctx context.Context, baseURL, apiKey string, client *http.Client) (*quotasData, int, error) {
 	url := baseURL + "/quotas"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -251,7 +251,7 @@ func fetchQuotas(ctx context.Context, baseURL, apiKey string) (*quotasData, int,
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	req.Header.Set("User-Agent", "openusage/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}

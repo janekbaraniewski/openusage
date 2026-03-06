@@ -3,7 +3,6 @@ package openai
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
@@ -62,7 +61,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return core.UsageSnapshot{}, fmt.Errorf("openai: creating request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return core.UsageSnapshot{}, fmt.Errorf("openai: request failed: %w", err)
 	}

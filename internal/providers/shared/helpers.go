@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/parsers"
@@ -26,12 +27,18 @@ func CreateStandardRequest(ctx context.Context, baseURL, endpoint, apiKey string
 func ProcessStandardResponse(resp *http.Response, acct core.AccountConfig, providerID string) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(providerID, acct.ID)
 	snap.Raw = parsers.RedactHeaders(resp.Header)
+	applyStatusFromResponse(resp, &snap)
+	return snap, nil
+}
 
+// applyStatusFromResponse sets snap.Status and snap.Message based on the HTTP
+// status code. It centralises the 401/403 → StatusAuth, 429 → StatusLimited
+// mapping used by both ProcessStandardResponse and ProbeRateLimits.
+func applyStatusFromResponse(resp *http.Response, snap *core.UsageSnapshot) {
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		snap.Status = core.StatusAuth
 		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
-		return snap, nil
 	case http.StatusTooManyRequests:
 		snap.Status = core.StatusLimited
 		snap.Message = "rate limited (HTTP 429)"
@@ -39,7 +46,6 @@ func ProcessStandardResponse(resp *http.Response, acct core.AccountConfig, provi
 			snap.Raw["retry_after"] = retryAfter
 		}
 	}
-	return snap, nil
 }
 
 func ApplyStandardRateLimits(resp *http.Response, snap *core.UsageSnapshot) {
@@ -76,16 +82,19 @@ func ResolveBaseURL(acct core.AccountConfig, defaultURL string) string {
 // ProbeRateLimits performs a GET request to the given URL with Bearer auth,
 // copies redacted headers to snap.Raw, applies standard status code handling
 // (401/403 → StatusAuth, 429 → StatusLimited), and parses standard RPM/TPM
-// rate-limit headers. This replaces the identical fetchRateLimits pattern
-// used across deepseek, xai, and similar providers.
-func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot) error {
+// rate-limit headers. If client is nil a default client with a 30-second
+// timeout is used.
+func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot, client *http.Client) error {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -95,14 +104,9 @@ func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSn
 		snap.Raw[k] = v
 	}
 
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
+	applyStatusFromResponse(resp, snap)
+	if snap.Status == core.StatusAuth {
 		return nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
 	}
 
 	ApplyStandardRateLimits(resp, snap)

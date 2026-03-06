@@ -1,6 +1,9 @@
 package providerbase
 
 import (
+	"net/http"
+	"time"
+
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
@@ -8,7 +11,17 @@ import (
 // Base centralizes provider metadata and widget/detail configuration.
 // Provider-specific packages embed this and implement only Fetch().
 type Base struct {
-	spec core.ProviderSpec
+	spec       core.ProviderSpec
+	HTTPClient *http.Client
+}
+
+// Client returns the configured HTTP client, or a default client with a
+// 30-second timeout if none was set.
+func (b Base) Client() *http.Client {
+	if b.HTTPClient != nil {
+		return b.HTTPClient
+	}
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func New(spec core.ProviderSpec) Base {

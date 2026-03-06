@@ -98,7 +98,7 @@ func (p *Provider) fetchSubscription(ctx context.Context, baseURL, apiKey string
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (p *Provider) fetchUsage(ctx context.Context, baseURL, apiKey string, snap 
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, 
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

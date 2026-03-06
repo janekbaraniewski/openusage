@@ -86,7 +86,7 @@ func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, 
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -135,5 +135,5 @@ func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, 
 }
 
 func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
-	return shared.ProbeRateLimits(ctx, baseURL+"/models", apiKey, snap)
+	return shared.ProbeRateLimits(ctx, baseURL+"/models", apiKey, snap, p.Client())
 }
