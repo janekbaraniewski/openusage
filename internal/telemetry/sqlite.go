@@ -35,9 +35,13 @@ func configureSQLiteConnection(db *sql.DB) error {
 		return fmt.Errorf("set wal_autocheckpoint: %w", err)
 	}
 
-	// Keep multiple connections so daemon reads do not stall behind ingest writes.
-	db.SetMaxOpenConns(8)
-	db.SetMaxIdleConns(4)
+	// Two connections: one reader + one writer. WAL mode allows these to
+	// run concurrently without blocking. All daemon writes are already
+	// serialized behind Go mutexes, so extra writer connections never help.
+	// Keeping the pool small ensures WAL auto-checkpoint can make progress
+	// (it stalls when many readers hold the WAL open simultaneously).
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
 	return nil
 }
 
