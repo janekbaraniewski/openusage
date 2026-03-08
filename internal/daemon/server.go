@@ -245,11 +245,28 @@ func (s *Service) shouldLog(key string, interval time.Duration) bool {
 	s.lastLogAt[key] = now
 	// Prevent unbounded growth in long-running daemon.
 	const maxLogKeys = 200
+	const maxLogAge = 10 * time.Minute
 	if len(s.lastLogAt) > maxLogKeys {
+		// First pass: remove stale entries.
 		for k, t := range s.lastLogAt {
-			if now.Sub(t) > 10*time.Minute {
+			if now.Sub(t) > maxLogAge {
 				delete(s.lastLogAt, k)
 			}
+		}
+		// If still over limit, remove oldest entries until at cap.
+		for len(s.lastLogAt) > maxLogKeys {
+			oldestKey := ""
+			oldestTime := now
+			for k, t := range s.lastLogAt {
+				if t.Before(oldestTime) {
+					oldestKey = k
+					oldestTime = t
+				}
+			}
+			if oldestKey == "" {
+				break
+			}
+			delete(s.lastLogAt, oldestKey)
 		}
 	}
 	return true

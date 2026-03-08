@@ -105,10 +105,26 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 	const maxEntries = 50
 	const maxAge = 5 * time.Minute
 	if len(c.entries) > maxEntries {
+		// First pass: remove stale entries.
 		for k, e := range c.entries {
 			if now.Sub(e.updatedAt) > maxAge {
 				delete(c.entries, k)
 			}
+		}
+		// If still over limit, remove oldest entries until at cap.
+		for len(c.entries) > maxEntries {
+			oldestKey := ""
+			oldestTime := now
+			for k, e := range c.entries {
+				if e.updatedAt.Before(oldestTime) {
+					oldestKey = k
+					oldestTime = e.updatedAt
+				}
+			}
+			if oldestKey == "" {
+				break
+			}
+			delete(c.entries, oldestKey)
 		}
 	}
 	c.mu.Unlock()
