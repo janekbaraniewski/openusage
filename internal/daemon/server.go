@@ -582,10 +582,12 @@ func (s *Service) cleanupHookSpool(dir string) {
 	}
 
 	// hard cap
-	for len(remaining) > 500 {
-		_ = os.Remove(remaining[0])
-		remaining = remaining[1:]
-		removed++
+	if len(remaining) > 500 {
+		for _, path := range remaining[:len(remaining)-500] {
+			_ = os.Remove(path)
+			removed++
+		}
+		remaining = remaining[len(remaining)-500:]
 	}
 
 	// clean .tmp files
