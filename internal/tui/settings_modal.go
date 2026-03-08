@@ -109,12 +109,12 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc", "backspace", ",", "S":
 		m.closeSettingsModal()
 		return m, nil
-	case "tab", "right", "l", "]":
+	case "tab", "right", "]":
 		m.settings.tab = (m.settings.tab + 1) % settingsTabCount
 		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
 		return m, nil
-	case "shift+tab", "left", "h", "[":
+	case "shift+tab", "left", "[":
 		m.settings.tab = (m.settings.tab + settingsTabCount - 1) % settingsTabCount
 		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
@@ -198,7 +198,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				return m, cmd
 			}
-		case "H":
+		case "h", "H":
 			m.hideSectionsWithNoData = !m.hideSectionsWithNoData
 			m.settings.status = "saving empty-state..."
 			return m, m.persistDashboardHideSectionsWithNoDataCmd()
@@ -464,7 +464,7 @@ func (m Model) renderSettingsModalOverlay() string {
 	}
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Settings")
-	tabs := m.renderSettingsModalTabs()
+	tabs := m.renderSettingsModalTabs(contentW)
 	body := m.renderSettingsModalBody(contentW, contentH)
 	hint := dimStyle.Render(m.settingsModalHint())
 
@@ -519,17 +519,58 @@ func (m Model) renderSettingsModalOverlay() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, combined)
 }
 
-func (m Model) renderSettingsModalTabs() string {
-	parts := make([]string, 0, len(settingsTabNames))
-	for i, name := range settingsTabNames {
-		label := fmt.Sprintf("%d:%s", i+1, name)
+func (m Model) renderSettingsModalTabs(w int) string {
+	if len(settingsTabNames) == 0 {
+		return ""
+	}
+	if w < 28 {
+		w = 28
+	}
+
+	n := len(settingsTabNames)
+	gap := 1
+	if w < n*6 {
+		gap = 0
+	}
+	cellW := (w - gap*(n-1)) / n
+	if cellW < 4 {
+		cellW = 4
+	}
+
+	fullNames := []string{"Providers", "Widget Sections", "Theme", "View", "API Keys", "Telemetry", "Integrations"}
+	mediumNames := []string{"Providers", "Sections", "Theme", "View", "API Keys", "Telemetry", "Integrations"}
+	shortNames := []string{"Providers", "Sections", "Theme", "View", "API", "Telem", "Integr"}
+	compactNames := []string{"Prov", "Sec", "Theme", "View", "Keys", "Tel", "Int"}
+
+	labels := fullNames
+	switch {
+	case cellW < 7:
+		labels = compactNames
+	case cellW < 9:
+		labels = shortNames
+	case cellW < 12:
+		labels = mediumNames
+	}
+
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent)
+	inactiveStyle := lipgloss.NewStyle().Foreground(colorSubtext).Background(colorSurface0)
+	parts := make([]string, 0, n)
+	for i := range settingsTabNames {
+		base := settingsTabNames[i]
+		if i < len(labels) && labels[i] != "" {
+			base = labels[i]
+		}
+		label := fmt.Sprintf("%d.%s", i+1, base)
+		label = truncateToWidth(label, cellW)
+		label = fmt.Sprintf("%-*s", cellW, label)
+
 		if settingsModalTab(i) == m.settings.tab {
-			parts = append(parts, screenTabActiveStyle.Render(label))
+			parts = append(parts, activeStyle.Render(label))
 		} else {
-			parts = append(parts, screenTabInactiveStyle.Render(label))
+			parts = append(parts, inactiveStyle.Render(label))
 		}
 	}
-	return strings.Join(parts, "")
+	return strings.Join(parts, strings.Repeat(" ", gap))
 }
 
 func (m Model) settingsModalHint() string {
@@ -537,7 +578,7 @@ func (m Model) settingsModalHint() string {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabWidgetSections:
-		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  Shift+H: toggle hide empty sections  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
+		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  h: toggle hide empty sections  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
@@ -573,15 +614,42 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 	}
 }
 
+func settingsBodyHeaderLines(title, subtitle string) []string {
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(title),
+	}
+	if strings.TrimSpace(subtitle) != "" {
+		lines = append(lines, dimStyle.Render(subtitle))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
 func (m Model) renderSettingsProvidersBody(w, h int) string {
 	ids := m.settingsIDs()
+
+	enabledCount := 0
+	for _, id := range ids {
+		if m.isProviderEnabled(id) {
+			enabledCount++
+		}
+	}
+
+	lines := settingsBodyHeaderLines(
+		"Provider Visibility & Order",
+		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle", enabledCount, len(ids)),
+	)
 	if len(ids) == 0 {
-		return padToSize(dimStyle.Render("No providers available."), w, h)
+		lines = append(lines, dimStyle.Render("No providers available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, h)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(ids), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		id := ids[i]
@@ -617,17 +685,6 @@ func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
 
 func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	entries := m.widgetSectionEntries()
-	if len(entries) == 0 {
-		return padToSize(dimStyle.Render("No dashboard sections available."), w, h)
-	}
-
-	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
-	headerLines := 5
-	listHeight := h - headerLines
-	if listHeight < 1 {
-		listHeight = 1
-	}
-	start, end := listWindow(len(entries), cursor, listHeight)
 
 	visibleCount := 0
 	for _, entry := range entries {
@@ -636,18 +693,29 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 		}
 	}
 
-	lines := make([]string, 0, h)
-	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Global Dashboard Widget Sections"))
-	lines = append(lines, dimStyle.Render("Applies to all provider widgets"))
-	lines = append(lines, dimStyle.Render(fmt.Sprintf("%d/%d sections visible", visibleCount, len(entries))))
+	lines := settingsBodyHeaderLines(
+		"Global Widget Sections",
+		fmt.Sprintf("%d/%d sections visible · applies to all providers", visibleCount, len(entries)),
+	)
 	hideBox := "☐"
 	hideBoxStyle := lipgloss.NewStyle().Foreground(colorRed)
 	if m.hideSectionsWithNoData {
 		hideBox = "☑"
 		hideBoxStyle = lipgloss.NewStyle().Foreground(colorGreen)
 	}
-	lines = append(lines, fmt.Sprintf("Hide sections with no data: %s  %s", hideBoxStyle.Render(hideBox), dimStyle.Render("press Shift+H to toggle")))
+	lines = append(lines, fmt.Sprintf("Hide sections with no data: %s  %s", hideBoxStyle.Render(hideBox), dimStyle.Render("press h to toggle")))
 	lines = append(lines, "")
+	if len(entries) == 0 {
+		lines = append(lines, dimStyle.Render("No dashboard sections available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(entries), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		entry := entries[i]
@@ -940,14 +1008,26 @@ func settingsWidgetSectionsPreviewSnapshot() core.UsageSnapshot {
 
 func (m Model) renderSettingsThemeBody(w, h int) string {
 	themes := AvailableThemes()
+	activeThemeIdx := ActiveThemeIndex()
+	activeThemeName := "none"
+	if activeThemeIdx >= 0 && activeThemeIdx < len(themes) {
+		activeThemeName = themes[activeThemeIdx].Name
+	}
+	lines := settingsBodyHeaderLines(
+		"Theme Selection",
+		fmt.Sprintf("%d themes available · active: %s", len(themes), activeThemeName),
+	)
 	if len(themes) == 0 {
-		return padToSize(dimStyle.Render("No themes available."), w, h)
+		lines = append(lines, dimStyle.Render("No themes available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.themeCursor, 0, len(themes)-1)
-	start, end := listWindow(len(themes), cursor, h)
-	activeThemeIdx := ActiveThemeIndex()
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(themes), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		theme := themes[i]
@@ -967,15 +1047,23 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 }
 
 func (m Model) renderSettingsViewBody(w, h int) string {
+	configured := m.configuredDashboardView()
+	active := m.activeDashboardView()
+	lines := settingsBodyHeaderLines(
+		"Dashboard View Mode",
+		fmt.Sprintf("configured: %s · active: %s", configured, active),
+	)
 	if len(dashboardViewOptions) == 0 {
-		return padToSize(dimStyle.Render("No dashboard views available."), w, h)
+		lines = append(lines, dimStyle.Render("No dashboard views available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
-	start, end := listWindow(len(dashboardViewOptions), cursor, h)
-	lines := make([]string, 0, h)
-	configured := m.configuredDashboardView()
-	active := m.activeDashboardView()
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(dashboardViewOptions), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		option := dashboardViewOptions[i]
@@ -1046,13 +1134,37 @@ func maskAPIKey(key string) string {
 
 func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	ids := m.apiKeysTabIDs()
+
+	configuredCount := 0
+	for _, id := range ids {
+		providerID := providerForAccountID(id, m.accountProviders)
+		if !isAPIKeyProvider(providerID) {
+			continue
+		}
+		if envVar := envVarForProvider(providerID); envVar != "" && os.Getenv(envVar) != "" {
+			configuredCount++
+			continue
+		}
+		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
+			configuredCount++
+		}
+	}
+
+	lines := settingsBodyHeaderLines(
+		"API Key Management",
+		fmt.Sprintf("%d/%d configured (env or validated)", configuredCount, len(ids)),
+	)
 	if len(ids) == 0 {
-		return padToSize(dimStyle.Render("No API-key providers available."), w, h)
+		lines = append(lines, dimStyle.Render("No API-key providers available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, h)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(ids), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		id := ids[i]
@@ -1112,7 +1224,10 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
-	var lines []string
+	lines := settingsBodyHeaderLines(
+		"Telemetry & Time Window",
+		"Choose aggregation window and map raw telemetry providers",
+	)
 
 	// Time window selector
 	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Time Window")+"  "+dimStyle.Render("press w or select below"))
@@ -1163,13 +1278,31 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	statuses := m.settings.integrationStatus
+	ready := 0
+	outdated := 0
+	for _, entry := range statuses {
+		if entry.State == "ready" {
+			ready++
+		}
+		if entry.NeedsUpgrade || entry.State == "outdated" {
+			outdated++
+		}
+	}
+	lines := settingsBodyHeaderLines(
+		"Integrations",
+		fmt.Sprintf("%d total · %d ready · %d need attention", len(statuses), ready, outdated),
+	)
 	if len(statuses) == 0 {
-		return padToSize(dimStyle.Render("No integration status available yet. Press r to refresh."), w, h)
+		lines = append(lines, dimStyle.Render("No integration status available yet. Press r to refresh."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(statuses)-1)
-	start, end := listWindow(len(statuses), cursor, h-4)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines) - 4
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(statuses), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		entry := statuses[i]
