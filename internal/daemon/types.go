@@ -94,11 +94,22 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 	if cacheKey == "" || len(snapshots) == 0 {
 		return
 	}
+	now := time.Now().UTC()
 	c.mu.Lock()
 	c.entries[cacheKey] = cachedReadModelEntry{
 		snapshots:  core.DeepCloneSnapshots(snapshots),
-		updatedAt:  time.Now().UTC(),
+		updatedAt:  now,
 		timeWindow: timeWindow,
+	}
+	// Evict stale entries to prevent unbounded growth.
+	const maxEntries = 50
+	const maxAge = 5 * time.Minute
+	if len(c.entries) > maxEntries {
+		for k, e := range c.entries {
+			if now.Sub(e.updatedAt) > maxAge {
+				delete(c.entries, k)
+			}
+		}
 	}
 	c.mu.Unlock()
 }
