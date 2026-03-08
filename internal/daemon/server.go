@@ -35,9 +35,9 @@ type Service struct {
 	collectors   []telemetry.Collector
 	providerByID map[string]core.UsageProvider
 
-	spoolMu sync.Mutex // guards spool filesystem operations (read/write/cleanup)
-	logMu   sync.Mutex
-	lastLogAt  map[string]time.Time
+	spoolMu   sync.Mutex // guards spool filesystem operations (read/write/cleanup)
+	logMu     sync.Mutex
+	lastLogAt map[string]time.Time
 
 	rmCache *readModelCache
 }
