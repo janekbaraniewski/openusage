@@ -325,7 +325,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	))
 
 	usage := claudeExtractHookUsage(root)
-	if shared.HasHookUsage(usage) {
+	if usage.HasTokenData() {
 		return []shared.TelemetryEvent{{
 			SchemaVersion: "claude_hook_v1",
 			Channel:       shared.TelemetryChannelHook,
@@ -417,7 +417,7 @@ func ParseTelemetryHookPayload(raw []byte, opts shared.TelemetryCollectOptions) 
 	}}, nil
 }
 
-func claudeExtractHookUsage(root map[string]any) shared.HookUsage {
+func claudeExtractHookUsage(root map[string]any) core.TokenUsage {
 	input := shared.FirstPathNumber(root,
 		[]string{"usage", "input_tokens"},
 		[]string{"message", "usage", "input_tokens"},
@@ -447,16 +447,14 @@ func claudeExtractHookUsage(root map[string]any) shared.HookUsage {
 		[]string{"cost_usd"},
 	)
 
-	out := shared.HookUsage{
-		TokenUsage: core.TokenUsage{
-			InputTokens:      shared.NumberToInt64Ptr(input),
-			OutputTokens:     shared.NumberToInt64Ptr(output),
-			ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
-			CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
-			CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
-			TotalTokens:      shared.NumberToInt64Ptr(total),
-			CostUSD:          shared.NumberToFloat64Ptr(cost),
-		},
+	out := core.TokenUsage{
+		InputTokens:      shared.NumberToInt64Ptr(input),
+		OutputTokens:     shared.NumberToInt64Ptr(output),
+		ReasoningTokens:  shared.NumberToInt64Ptr(reasoning),
+		CacheReadTokens:  shared.NumberToInt64Ptr(cacheRead),
+		CacheWriteTokens: shared.NumberToInt64Ptr(cacheWrite),
+		TotalTokens:      shared.NumberToInt64Ptr(total),
+		CostUSD:          shared.NumberToFloat64Ptr(cost),
 	}
 	out.SumTotalTokens()
 	return out
