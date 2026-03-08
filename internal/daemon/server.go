@@ -127,7 +127,12 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	go telemetry.RunWALCheckpointLoop(ctx, store.DB(), cfg.DBPath, func(key, level, msg string) {
-		svc.infof(key, "%s", msg)
+		switch level {
+		case "error", "warn":
+			svc.warnf(key, "%s", msg)
+		default:
+			svc.infof(key, "%s", msg)
+		}
 	})
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)

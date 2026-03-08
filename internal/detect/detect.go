@@ -194,13 +194,13 @@ func detectGHCopilot(result *Result) {
 	if ghBin != "" {
 		log.Printf("[detect] Found gh CLI at %s", ghBin)
 		ghCtx, ghCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ghCancel()
 		cmd := exec.CommandContext(ghCtx, ghBin, "copilot", "--version")
 		if err := cmd.Run(); err == nil {
 			ghCopilotOK = true
 		} else {
 			log.Printf("[detect] gh copilot extension not installed or timed out: %v", err)
 		}
-		ghCancel()
 	}
 
 	// If gh copilot works, register it as before.
