@@ -35,9 +35,8 @@ type Service struct {
 	collectors   []telemetry.Collector
 	providerByID map[string]core.UsageProvider
 
-	pipelineMu sync.Mutex
-	ingestMu   sync.Mutex
-	logMu      sync.Mutex
+	spoolMu sync.Mutex // guards spool filesystem operations (read/write/cleanup)
+	logMu   sync.Mutex
 	lastLogAt  map[string]time.Time
 
 	rmCache *readModelCache
@@ -153,8 +152,6 @@ func (s *Service) ingestRequest(ctx context.Context, req telemetry.IngestRequest
 	if s == nil || s.store == nil {
 		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
 	}
-	s.ingestMu.Lock()
-	defer s.ingestMu.Unlock()
 	return s.store.Ingest(ctx, req)
 }
 
@@ -162,8 +159,6 @@ func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string
 	if s == nil || s.quotaIngest == nil {
 		return fmt.Errorf("quota ingestor unavailable")
 	}
-	s.ingestMu.Lock()
-	defer s.ingestMu.Unlock()
 	return s.quotaIngest.Ingest(ctx, snapshots)
 }
 
@@ -191,7 +186,7 @@ func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.Ingest
 	var warnings []string
 	enqueued := 0
 
-	s.pipelineMu.Lock()
+	s.spoolMu.Lock()
 	if len(retryReqs) > 0 {
 		n, err := s.pipeline.EnqueueRequests(retryReqs)
 		if err != nil {
@@ -200,10 +195,8 @@ func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.Ingest
 			enqueued = n
 		}
 	}
-	s.ingestMu.Lock()
 	flush, flushWarnings := FlushInBatches(ctx, s.pipeline, limit)
-	s.ingestMu.Unlock()
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 
 	return flush, enqueued, append(warnings, flushWarnings...)
 }
@@ -383,11 +376,9 @@ func (s *Service) flushSpoolBacklog(ctx context.Context, maxTotal int) {
 		return
 	}
 
-	s.pipelineMu.Lock()
-	s.ingestMu.Lock()
+	s.spoolMu.Lock()
 	flush, warnings := FlushInBatches(ctx, s.pipeline, maxTotal)
-	s.ingestMu.Unlock()
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 
 	if flush.Processed > 0 || flush.Failed > 0 || len(warnings) > 0 {
 		s.infof(
@@ -412,9 +403,9 @@ func (s *Service) cleanupSpool(ctx context.Context) {
 		MaxBytes: 768 << 20, // 768 MB
 	}
 
-	s.pipelineMu.Lock()
+	s.spoolMu.Lock()
 	result, err := telemetry.NewSpool(s.cfg.SpoolDir).Cleanup(policy)
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 	if err != nil {
 		if s.shouldLog("spool_cleanup_error", 20*time.Second) {
 			s.warnf("spool_cleanup_error", "error=%v", err)

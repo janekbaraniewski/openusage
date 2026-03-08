@@ -35,13 +35,13 @@ func configureSQLiteConnection(db *sql.DB) error {
 		return fmt.Errorf("set wal_autocheckpoint: %w", err)
 	}
 
-	// Two connections: one reader + one writer. WAL mode allows these to
-	// run concurrently without blocking. All daemon writes are already
-	// serialized behind Go mutexes, so extra writer connections never help.
-	// Keeping the pool small ensures WAL auto-checkpoint can make progress
-	// (it stalls when many readers hold the WAL open simultaneously).
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
+	// Single connection. SQLite is not a server — connection pooling gives
+	// it nothing. The one connection serializes all DB access through Go's
+	// database/sql pool, which eliminates the need for application-level
+	// write mutexes and ensures WAL auto-checkpoint always succeeds (no
+	// concurrent readers to hold the WAL open).
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	return nil
 }
 
