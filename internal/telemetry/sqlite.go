@@ -45,7 +45,6 @@ func configureSQLiteConnection(db *sql.DB) error {
 	return nil
 }
 
-// WALCheckpoint runs a TRUNCATE checkpoint, folding the WAL back into the
 // quickIntegrityCheck runs PRAGMA quick_check(1) which examines the first
 // page of each B-tree. It catches the most common corruption patterns
 // (duplicate page refs, free-list errors) in O(tables) time rather than the
@@ -58,7 +57,9 @@ func quickIntegrityCheck(db *sql.DB) (corrupt bool, detail string) {
 	defer cancel()
 	var result string
 	if err := db.QueryRowContext(ctx, `PRAGMA quick_check(1);`).Scan(&result); err != nil {
-		return true, fmt.Sprintf("quick_check failed: %v", err)
+		// Transient errors (timeout, context cancellation) should not be
+		// treated as corruption — only a definitive non-"ok" result is.
+		return false, fmt.Sprintf("quick_check query error (not corruption): %v", err)
 	}
 	if strings.TrimSpace(strings.ToLower(result)) == "ok" {
 		return false, ""
@@ -66,6 +67,7 @@ func quickIntegrityCheck(db *sql.DB) (corrupt bool, detail string) {
 	return true, strings.TrimSpace(result)
 }
 
+// WALCheckpoint runs a TRUNCATE checkpoint, folding the WAL back into the
 // main database file and truncating the WAL to zero bytes. It is safe to
 // call concurrently — SQLite serialises checkpoint operations internally.
 func WALCheckpoint(ctx context.Context, db *sql.DB) error {
@@ -115,6 +117,7 @@ func RunWALCheckpointLoop(ctx context.Context, db *sql.DB, dbPath string, logFn 
 		logFn("wal_emergency_checkpoint", "start",
 			fmt.Sprintf("WAL is %d MB, forcing emergency checkpoint", walSize/(1024*1024)))
 		emergencyCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		defer cancel()
 		if err := WALCheckpoint(emergencyCtx, db); err != nil {
 			logFn("wal_emergency_checkpoint", "error", fmt.Sprintf("error=%v", err))
 		} else {
@@ -122,7 +125,6 @@ func RunWALCheckpointLoop(ctx context.Context, db *sql.DB, dbPath string, logFn 
 			logFn("wal_emergency_checkpoint", "done",
 				fmt.Sprintf("WAL reduced from %d MB to %d MB", walSize/(1024*1024), newSize/(1024*1024)))
 		}
-		cancel()
 	}
 
 	ticker := time.NewTicker(walCheckpointInterval)

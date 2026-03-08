@@ -21,6 +21,20 @@ type Store struct {
 	now func() time.Time
 }
 
+// openAndConfigureDB opens a SQLite database at the given path and applies
+// connection pragmas. Caller is responsible for closing on error.
+func openAndConfigureDB(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: opening DB: %w", err)
+	}
+	if err := configureSQLiteConnection(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("telemetry: configure sqlite: %w", err)
+	}
+	return db, nil
+}
+
 func OpenStore(path string) (*Store, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -38,13 +52,9 @@ func OpenStore(path string) (*Store, error) {
 	// referenced via its inode and that process is unaffected.
 	_ = os.Remove(path + "-shm")
 
-	db, err := sql.Open("sqlite3", path)
+	db, err := openAndConfigureDB(path)
 	if err != nil {
-		return nil, fmt.Errorf("telemetry: opening DB: %w", err)
-	}
-	if err := configureSQLiteConnection(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("telemetry: configure sqlite: %w", err)
+		return nil, err
 	}
 
 	// Quick integrity check before proceeding. If the database is corrupt
@@ -54,16 +64,14 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
 		log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
-		_ = os.Rename(path, backupPath)
+		if err := os.Rename(path, backupPath); err != nil {
+			return nil, fmt.Errorf("telemetry: backup corrupt DB: %w", err)
+		}
 		_ = os.Remove(path + "-wal")
 		_ = os.Remove(path + "-shm")
-		db, err = sql.Open("sqlite3", path)
+		db, err = openAndConfigureDB(path)
 		if err != nil {
 			return nil, fmt.Errorf("telemetry: opening fresh DB after corruption: %w", err)
-		}
-		if err := configureSQLiteConnection(db); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("telemetry: configure fresh sqlite: %w", err)
 		}
 	}
 
