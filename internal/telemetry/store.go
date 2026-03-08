@@ -21,12 +21,9 @@ type Store struct {
 	now func() time.Time
 }
 
-func OpenStore(path string) (*Store, error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("telemetry: creating DB dir: %w", err)
-	}
-
+// openAndConfigureDB opens a SQLite database at the given path and applies
+// connection pragmas. Caller is responsible for closing on error.
+func openAndConfigureDB(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: opening DB: %w", err)
@@ -34,6 +31,48 @@ func OpenStore(path string) (*Store, error) {
 	if err := configureSQLiteConnection(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("telemetry: configure sqlite: %w", err)
+	}
+	return db, nil
+}
+
+func OpenStore(path string) (*Store, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("telemetry: creating DB dir: %w", err)
+	}
+
+	// Remove the shared-memory file before opening the database.
+	// After an unclean shutdown (SIGKILL, OOM, crash), the -shm file
+	// retains stale WAL frame indexes and lock counters from the dead
+	// process. If a new process opens the DB and trusts the stale -shm,
+	// it can misread WAL frames, causing duplicate page references and
+	// B-tree corruption. Removing the -shm forces SQLite to rebuild the
+	// WAL index from the checksummed WAL file, which is crash-safe.
+	// If another process holds the DB open, the file is still
+	// referenced via its inode and that process is unaffected.
+	_ = os.Remove(path + "-shm")
+
+	db, err := openAndConfigureDB(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Quick integrity check before proceeding. If the database is corrupt
+	// (e.g. from a previous unclean shutdown that the -shm removal didn't
+	// fully recover), back it up and start fresh rather than serving bad data.
+	if corrupt, detail := quickIntegrityCheck(db); corrupt {
+		_ = db.Close()
+		backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
+		log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
+		if err := os.Rename(path, backupPath); err != nil {
+			return nil, fmt.Errorf("telemetry: backup corrupt DB: %w", err)
+		}
+		_ = os.Remove(path + "-wal")
+		_ = os.Remove(path + "-shm")
+		db, err = openAndConfigureDB(path)
+		if err != nil {
+			return nil, fmt.Errorf("telemetry: opening fresh DB after corruption: %w", err)
+		}
 	}
 
 	store := NewStore(db)
@@ -53,6 +92,15 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// DB returns the underlying database handle for operations that need direct
+// access (e.g. WAL checkpointing).
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
 }
 
 func (s *Store) Init(ctx context.Context) error {
@@ -689,8 +737,9 @@ func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, err
 		WHERE raw_event_id IN (
 			SELECT r.raw_event_id
 			FROM usage_raw_events r
-			LEFT JOIN usage_events e ON e.raw_event_id = r.raw_event_id
-			WHERE e.raw_event_id IS NULL
+			WHERE NOT EXISTS (
+				SELECT 1 FROM usage_events e WHERE e.raw_event_id = r.raw_event_id
+			)
 			ORDER BY r.ingested_at ASC
 			LIMIT ?
 		)
@@ -720,7 +769,7 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 			SELECT raw_event_id
 			FROM usage_raw_events
 			WHERE ingested_at < datetime('now', ?)
-			  AND LENGTH(source_payload) > 2
+			  AND source_payload != '{}'
 			ORDER BY ingested_at ASC
 			LIMIT ?
 		)

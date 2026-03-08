@@ -35,10 +35,9 @@ type Service struct {
 	collectors   []telemetry.Collector
 	providerByID map[string]core.UsageProvider
 
-	pipelineMu sync.Mutex
-	ingestMu   sync.Mutex
-	logMu      sync.Mutex
-	lastLogAt  map[string]time.Time
+	spoolMu   sync.Mutex // guards spool filesystem operations (read/write/cleanup)
+	logMu     sync.Mutex
+	lastLogAt map[string]time.Time
 
 	rmCache *readModelCache
 }
@@ -127,6 +126,14 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		return nil, err
 	}
 
+	go telemetry.RunWALCheckpointLoop(ctx, store.DB(), cfg.DBPath, func(key, level, msg string) {
+		switch level {
+		case "error", "warn":
+			svc.warnf(key, "%s", msg)
+		default:
+			svc.infof(key, "%s", msg)
+		}
+	})
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
@@ -150,8 +157,6 @@ func (s *Service) ingestRequest(ctx context.Context, req telemetry.IngestRequest
 	if s == nil || s.store == nil {
 		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
 	}
-	s.ingestMu.Lock()
-	defer s.ingestMu.Unlock()
 	return s.store.Ingest(ctx, req)
 }
 
@@ -159,8 +164,6 @@ func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string
 	if s == nil || s.quotaIngest == nil {
 		return fmt.Errorf("quota ingestor unavailable")
 	}
-	s.ingestMu.Lock()
-	defer s.ingestMu.Unlock()
 	return s.quotaIngest.Ingest(ctx, snapshots)
 }
 
@@ -188,7 +191,7 @@ func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.Ingest
 	var warnings []string
 	enqueued := 0
 
-	s.pipelineMu.Lock()
+	s.spoolMu.Lock()
 	if len(retryReqs) > 0 {
 		n, err := s.pipeline.EnqueueRequests(retryReqs)
 		if err != nil {
@@ -197,10 +200,8 @@ func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.Ingest
 			enqueued = n
 		}
 	}
-	s.ingestMu.Lock()
 	flush, flushWarnings := FlushInBatches(ctx, s.pipeline, limit)
-	s.ingestMu.Unlock()
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 
 	return flush, enqueued, append(warnings, flushWarnings...)
 }
@@ -242,6 +243,32 @@ func (s *Service) shouldLog(key string, interval time.Duration) bool {
 		}
 	}
 	s.lastLogAt[key] = now
+	// Prevent unbounded growth in long-running daemon.
+	const maxLogKeys = 200
+	const maxLogAge = 10 * time.Minute
+	if len(s.lastLogAt) > maxLogKeys {
+		// First pass: remove stale entries.
+		for k, t := range s.lastLogAt {
+			if now.Sub(t) > maxLogAge {
+				delete(s.lastLogAt, k)
+			}
+		}
+		// If still over limit, remove oldest entries until at cap.
+		for len(s.lastLogAt) > maxLogKeys {
+			oldestKey := ""
+			oldestTime := now
+			for k, t := range s.lastLogAt {
+				if t.Before(oldestTime) {
+					oldestKey = k
+					oldestTime = t
+				}
+			}
+			if oldestKey == "" {
+				break
+			}
+			delete(s.lastLogAt, oldestKey)
+		}
+	}
 	return true
 }
 
@@ -380,11 +407,9 @@ func (s *Service) flushSpoolBacklog(ctx context.Context, maxTotal int) {
 		return
 	}
 
-	s.pipelineMu.Lock()
-	s.ingestMu.Lock()
+	s.spoolMu.Lock()
 	flush, warnings := FlushInBatches(ctx, s.pipeline, maxTotal)
-	s.ingestMu.Unlock()
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 
 	if flush.Processed > 0 || flush.Failed > 0 || len(warnings) > 0 {
 		s.infof(
@@ -409,9 +434,9 @@ func (s *Service) cleanupSpool(ctx context.Context) {
 		MaxBytes: 768 << 20, // 768 MB
 	}
 
-	s.pipelineMu.Lock()
+	s.spoolMu.Lock()
 	result, err := telemetry.NewSpool(s.cfg.SpoolDir).Cleanup(policy)
-	s.pipelineMu.Unlock()
+	s.spoolMu.Unlock()
 	if err != nil {
 		if s.shouldLog("spool_cleanup_error", 20*time.Second) {
 			s.warnf("spool_cleanup_error", "error=%v", err)
@@ -583,10 +608,12 @@ func (s *Service) cleanupHookSpool(dir string) {
 	}
 
 	// hard cap
-	for len(remaining) > 500 {
-		_ = os.Remove(remaining[0])
-		remaining = remaining[1:]
-		removed++
+	if len(remaining) > 500 {
+		for _, path := range remaining[:len(remaining)-500] {
+			_ = os.Remove(path)
+			removed++
+		}
+		remaining = remaining[len(remaining)-500:]
 	}
 
 	// clean .tmp files

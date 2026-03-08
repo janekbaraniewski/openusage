@@ -294,13 +294,14 @@ func annotateUnmappedTelemetryProviders(
 		  AND event_type IN ('message_usage', 'tool_usage')
 		GROUP BY provider_id
 		ORDER BY provider_id ASC
+		LIMIT 200
 	`)
 	if err != nil {
 		return snaps, fmt.Errorf("list telemetry providers for mapping: %w", err)
 	}
 	defer rows.Close()
 
-	unmapped := make([]string, 0)
+	unmapped := make([]string, 0, 32)
 	for rows.Next() {
 		var providerID string
 		if err := rows.Scan(&providerID); err != nil {

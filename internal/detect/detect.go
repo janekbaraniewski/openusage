@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -187,13 +189,17 @@ func detectGHCopilot(result *Result) {
 	ghCopilotOK := false
 
 	// Try gh copilot extension first (existing/deprecated path).
+	// Use a 5-second timeout to prevent hanging if gh CLI is broken,
+	// unauthenticated, or blocked by network/proxy issues.
 	if ghBin != "" {
 		log.Printf("[detect] Found gh CLI at %s", ghBin)
-		cmd := exec.Command(ghBin, "copilot", "--version")
+		ghCtx, ghCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ghCancel()
+		cmd := exec.CommandContext(ghCtx, ghBin, "copilot", "--version")
 		if err := cmd.Run(); err == nil {
 			ghCopilotOK = true
 		} else {
-			log.Printf("[detect] gh copilot extension not installed")
+			log.Printf("[detect] gh copilot extension not installed or timed out: %v", err)
 		}
 	}
 

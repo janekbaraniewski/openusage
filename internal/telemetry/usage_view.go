@@ -284,44 +284,11 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	_, hasFiveHourAfter := snap.Metrics["usage_five_hour"]
 	core.Tracef("[usage_view] %s: cleanup deleted %d/%d metrics, usage_five_hour before=%v after=%v",
 		snap.ProviderID, deletedCount, metricsBefore, hadFiveHourBefore, hasFiveHourAfter)
-	for key := range snap.Raw {
-		if strings.HasPrefix(key, "source_") ||
-			strings.HasPrefix(key, "client_") ||
-			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "project_") ||
-			strings.HasPrefix(key, "provider_") ||
-			strings.HasPrefix(key, "lang_") ||
-			strings.HasPrefix(key, "jsonl_") ||
-			strings.HasPrefix(key, "usage_") ||
-			strings.HasPrefix(key, "analytics_") {
-			delete(snap.Raw, key)
-		}
-	}
-	for key := range snap.Attributes {
-		if strings.HasPrefix(key, "source_") ||
-			strings.HasPrefix(key, "client_") ||
-			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "project_") ||
-			strings.HasPrefix(key, "provider_") ||
-			strings.HasPrefix(key, "usage_") ||
-			strings.HasPrefix(key, "analytics_") {
-			delete(snap.Attributes, key)
-		}
-	}
-	for key := range snap.Diagnostics {
-		if strings.HasPrefix(key, "source_") ||
-			strings.HasPrefix(key, "client_") ||
-			strings.HasPrefix(key, "tool_") ||
-			strings.HasPrefix(key, "model_") ||
-			strings.HasPrefix(key, "project_") ||
-			strings.HasPrefix(key, "provider_") ||
-			strings.HasPrefix(key, "usage_") ||
-			strings.HasPrefix(key, "analytics_") {
-			delete(snap.Diagnostics, key)
-		}
-	}
+	telemetryPrefixes := []string{"source_", "client_", "tool_", "model_", "project_", "provider_", "usage_", "analytics_"}
+	extendedPrefixes := append(telemetryPrefixes, "lang_", "jsonl_")
+	deleteByPrefixes(snap.Raw, extendedPrefixes)
+	deleteByPrefixes(snap.Attributes, telemetryPrefixes)
+	deleteByPrefixes(snap.Diagnostics, telemetryPrefixes)
 	for key := range snap.DailySeries {
 		if strings.HasPrefix(key, "usage_model_") ||
 			strings.HasPrefix(key, "usage_source_") ||
@@ -572,8 +539,11 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 // current time window) from providers that have no telemetry at all.
 func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]bool {
 	out := make(map[string]bool)
+	// Use raw provider_id (no LOWER/TRIM in SQL) so SQLite can resolve
+	// the DISTINCT directly from idx_usage_events_type_provider index
+	// without scanning every matching row.
 	rows, err := db.QueryContext(ctx, `
-		SELECT DISTINCT LOWER(TRIM(provider_id))
+		SELECT DISTINCT provider_id
 		FROM usage_events
 		WHERE event_type IN ('message_usage', 'tool_usage')
 		  AND provider_id IS NOT NULL AND provider_id != ''
@@ -584,8 +554,11 @@ func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]b
 	defer rows.Close()
 	for rows.Next() {
 		var pid string
-		if rows.Scan(&pid) == nil && pid != "" {
-			out[pid] = true
+		if rows.Scan(&pid) == nil {
+			pid = strings.ToLower(strings.TrimSpace(pid))
+			if pid != "" {
+				out[pid] = true
+			}
 		}
 	}
 	return out
@@ -661,7 +634,8 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	}()
 
 	// Create indexes on the temp table for the aggregation queries.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_type ON %s(event_type)", tempTable))
+	// Compound (event_type, status) covers the most common WHERE pattern.
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_status ON %s(event_type, status)", tempTable))
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_occurred ON %s(occurred_at)", tempTable))
 
 	// Count from the materialized table.
@@ -817,6 +791,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 		  AND status != 'error'
 		GROUP BY model_key
 		ORDER BY total_tokens DESC, requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -869,6 +844,7 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 		  AND status != 'error'
 		GROUP BY source_name
 		ORDER BY requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -911,6 +887,7 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 		  AND NULLIF(TRIM(workspace_id), '') IS NOT NULL
 		GROUP BY project_name
 		ORDER BY requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -947,6 +924,7 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 		  AND event_type = 'tool_usage'
 		GROUP BY tool_name
 		ORDER BY calls DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -1168,6 +1146,7 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		  AND status != 'error'
 		GROUP BY provider_name
 		ORDER BY cost_usd DESC, requests DESC
+		LIMIT 200
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -1834,6 +1813,19 @@ func buildMCPAgg(tools []telemetryToolAgg) []telemetryMCPServerAgg {
 		return result[i].Server < result[j].Server
 	})
 	return result
+}
+
+// deleteByPrefixes removes all entries from a string-keyed map whose key
+// matches any of the given prefixes. Works with any map[string]V.
+func deleteByPrefixes[V any](m map[string]V, prefixes []string) {
+	for key := range m {
+		for _, p := range prefixes {
+			if strings.HasPrefix(key, p) {
+				delete(m, key)
+				break
+			}
+		}
+	}
 }
 
 func sanitizeMetricID(raw string) string {
