@@ -446,11 +446,15 @@ func (m Model) renderSettingsModalOverlay() string {
 	}
 
 	contentW := m.width - 24
-	if contentW < 50 {
-		contentW = 50
+	if contentW < 68 {
+		contentW = 68
 	}
 	if contentW > 92 {
 		contentW = 92
+	}
+	panelInnerW := contentW - 4
+	if panelInnerW < 40 {
+		panelInnerW = 40
 	}
 
 	const modalBodyHeight = 20
@@ -464,8 +468,8 @@ func (m Model) renderSettingsModalOverlay() string {
 	}
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Settings")
-	tabs := m.renderSettingsModalTabs(contentW)
-	body := m.renderSettingsModalBody(contentW, contentH)
+	tabs := m.renderSettingsModalTabs(panelInnerW)
+	body := m.renderSettingsModalBody(panelInnerW, contentH)
 	hint := dimStyle.Render(m.settingsModalHint())
 
 	status := ""
@@ -476,9 +480,9 @@ func (m Model) renderSettingsModalOverlay() string {
 	lines := []string{
 		title,
 		tabs,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", contentW)),
+		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
 		body,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", contentW)),
+		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
 		hint,
 	}
 	if status != "" {
@@ -523,54 +527,55 @@ func (m Model) renderSettingsModalTabs(w int) string {
 	if len(settingsTabNames) == 0 {
 		return ""
 	}
-	if w < 28 {
-		w = 28
+	if w < 40 {
+		w = 40
 	}
 
 	n := len(settingsTabNames)
 	gap := 1
-	if w < n*6 {
-		gap = 0
-	}
 	cellW := (w - gap*(n-1)) / n
-	if cellW < 4 {
-		cellW = 4
+	if cellW < 6 {
+		cellW = 6
+		gap = 0
+		cellW = w / n
 	}
 
-	fullNames := []string{"Providers", "Widget Sections", "Theme", "View", "API Keys", "Telemetry", "Integrations"}
-	mediumNames := []string{"Providers", "Sections", "Theme", "View", "API Keys", "Telemetry", "Integrations"}
-	shortNames := []string{"Providers", "Sections", "Theme", "View", "API", "Telem", "Integr"}
-	compactNames := []string{"Prov", "Sec", "Theme", "View", "Keys", "Tel", "Int"}
-
-	labels := fullNames
-	switch {
-	case cellW < 7:
-		labels = compactNames
-	case cellW < 9:
-		labels = shortNames
-	case cellW < 12:
-		labels = mediumNames
+	tabTokens := []string{"PROV", "SECT", "THEME", "VIEW", "KEYS", "TELEM", "INTEG"}
+	if len(tabTokens) < n {
+		tabTokens = append(tabTokens, settingsTabNames[len(tabTokens):]...)
 	}
 
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent)
 	inactiveStyle := lipgloss.NewStyle().Foreground(colorSubtext).Background(colorSurface0)
-	parts := make([]string, 0, n)
-	for i := range settingsTabNames {
-		base := settingsTabNames[i]
-		if i < len(labels) && labels[i] != "" {
-			base = labels[i]
-		}
-		label := fmt.Sprintf("%d.%s", i+1, base)
-		label = truncateToWidth(label, cellW)
-		label = fmt.Sprintf("%-*s", cellW, label)
 
+	parts := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		token := settingsTabNames[i]
+		if i < len(tabTokens) {
+			token = tabTokens[i]
+		}
+		label := fmt.Sprintf("%d %s", i+1, token)
+		if lipgloss.Width(label) > cellW {
+			label = truncateToWidth(label, cellW)
+		}
+		if pad := cellW - lipgloss.Width(label); pad > 0 {
+			left := pad / 2
+			right := pad - left
+			label = strings.Repeat(" ", left) + label + strings.Repeat(" ", right)
+		}
 		if settingsModalTab(i) == m.settings.tab {
 			parts = append(parts, activeStyle.Render(label))
 		} else {
 			parts = append(parts, inactiveStyle.Render(label))
 		}
 	}
-	return strings.Join(parts, strings.Repeat(" ", gap))
+
+	line := strings.Join(parts, strings.Repeat(" ", gap))
+	line = cropAnsiLine(line, 0, w)
+	if pad := w - lipgloss.Width(line); pad > 0 {
+		line += strings.Repeat(" ", pad)
+	}
+	return line
 }
 
 func (m Model) settingsModalHint() string {
@@ -625,6 +630,52 @@ func settingsBodyHeaderLines(title, subtitle string) []string {
 	return lines
 }
 
+func settingsBodyRule(w int) string {
+	if w < 8 {
+		w = 8
+	}
+	return dimStyle.Render(strings.Repeat("─", w-2))
+}
+
+func settingsSectionLabel(id core.DashboardStandardSection) string {
+	switch id {
+	case core.DashboardSectionTopUsageProgress:
+		return "Top Usage Progress"
+	case core.DashboardSectionModelBurn:
+		return "Model Burn"
+	case core.DashboardSectionClientBurn:
+		return "Client Burn"
+	case core.DashboardSectionProjectBreakdown:
+		return "Project Breakdown"
+	case core.DashboardSectionToolUsage:
+		return "Tool Usage"
+	case core.DashboardSectionMCPUsage:
+		return "MCP Usage"
+	case core.DashboardSectionLanguageBurn:
+		return "Language"
+	case core.DashboardSectionCodeStats:
+		return "Code Statistics"
+	case core.DashboardSectionDailyUsage:
+		return "Daily Usage"
+	case core.DashboardSectionProviderBurn:
+		return "Provider Burn"
+	case core.DashboardSectionUpstreamProviders:
+		return "Upstream Providers"
+	case core.DashboardSectionOtherData:
+		return "Other Data"
+	default:
+		raw := strings.TrimSpace(strings.ReplaceAll(string(id), "_", " "))
+		if raw == "" {
+			return "Unknown"
+		}
+		parts := strings.Fields(raw)
+		for i := range parts {
+			parts[i] = titleCase(parts[i])
+		}
+		return strings.Join(parts, " ")
+	}
+}
+
 func (m Model) renderSettingsProvidersBody(w, h int) string {
 	ids := m.settingsIDs()
 
@@ -639,6 +690,17 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		"Provider Visibility & Order",
 		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle", enabledCount, len(ids)),
 	)
+	accountW := 26
+	providerW := w - accountW - 16
+	if providerW < 10 {
+		providerW = 10
+		accountW = w - providerW - 16
+	}
+	if accountW < 12 {
+		accountW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %-*s", "#", "ON", accountW, "ACCOUNT", providerW, "PROVIDER")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No providers available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
@@ -661,18 +723,20 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			providerID = "unknown"
 		}
 
-		box := "☐"
-		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		onText := "OFF"
+		onStyle := lipgloss.NewStyle().Foreground(colorRed)
 		if m.isProviderEnabled(id) {
-			box = "☑"
-			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+			onText = "ON "
+			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
 		}
 
 		prefix := "  "
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
-		line := fmt.Sprintf("%s%s %2d. %s  %s", prefix, boxStyle.Render(box), i+1, id, dimStyle.Render(providerID))
+		account := truncateToWidth(id, accountW)
+		provider := truncateToWidth(providerID, providerW)
+		line := fmt.Sprintf("%s%-3d %s %-*s %-*s", prefix, i+1, onStyle.Render(onText), accountW, account, providerW, dimStyle.Render(provider))
 		lines = append(lines, line)
 	}
 
@@ -705,6 +769,12 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	}
 	lines = append(lines, fmt.Sprintf("Hide sections with no data: %s  %s", hideBoxStyle.Render(hideBox), dimStyle.Render("press h to toggle")))
 	lines = append(lines, "")
+	nameW := w - 24
+	if nameW < 12 {
+		nameW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %s", "#", "ON", nameW, "SECTION", "ID")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(entries) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard sections available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
@@ -724,14 +794,16 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
-		box := "☐"
-		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		onText := "OFF"
+		onStyle := lipgloss.NewStyle().Foreground(colorRed)
 		if entry.Enabled {
-			box = "☑"
-			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+			onText = "ON "
+			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
 		}
 
-		line := fmt.Sprintf("%s%s %2d. %s", prefix, boxStyle.Render(box), i+1, entry.ID)
+		name := settingsSectionLabel(entry.ID)
+		name = truncateToWidth(name, nameW)
+		line := fmt.Sprintf("%s%-3d %s %-*s %s", prefix, i+1, onStyle.Render(onText), nameW, name, dimStyle.Render(string(entry.ID)))
 		lines = append(lines, line)
 	}
 
@@ -1017,6 +1089,12 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 		"Theme Selection",
 		fmt.Sprintf("%d themes available · active: %s", len(themes), activeThemeName),
 	)
+	nameW := w - 16
+	if nameW < 12 {
+		nameW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-3s %-*s", "#", "CUR", "ACT", nameW, "THEME")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(themes) == 0 {
 		lines = append(lines, dimStyle.Render("No themes available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
@@ -1036,11 +1114,16 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
-		current := "  "
+		current := dimStyle.Render("·")
 		if i == activeThemeIdx {
-			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
+			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("●")
 		}
-		lines = append(lines, fmt.Sprintf("%s%s%s %s", prefix, current, theme.Icon, theme.Name))
+		selected := dimStyle.Render("·")
+		if i == cursor {
+			selected = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("◆")
+		}
+		name := truncateToWidth(theme.Icon+" "+theme.Name, nameW)
+		lines = append(lines, fmt.Sprintf("%s%-3d %-3s %-3s %-*s", prefix, i+1, selected, current, nameW, name))
 	}
 
 	return padToSize(strings.Join(lines, "\n"), w, h)
@@ -1053,6 +1136,8 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 		"Dashboard View Mode",
 		fmt.Sprintf("configured: %s · active: %s", configured, active),
 	)
+	lines = append(lines, dimStyle.Render("    CUR  MODE"))
+	lines = append(lines, settingsBodyRule(w))
 	if len(dashboardViewOptions) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard views available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
@@ -1154,6 +1239,17 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		"API Key Management",
 		fmt.Sprintf("%d/%d configured (env or validated)", configuredCount, len(ids)),
 	)
+	accountW := 20
+	envW := w - accountW - 18
+	if envW < 10 {
+		envW = 10
+		accountW = w - envW - 18
+	}
+	if accountW < 10 {
+		accountW = 10
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-5s %-*s %-*s", "#", "STAT", accountW, "ACCOUNT", envW, "ENV VAR")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No API-key providers available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
@@ -1182,40 +1278,47 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		}
 
 		if !isAPIKeyProvider(providerID) {
-			indicator := lipgloss.NewStyle().Foreground(colorDim).Render("○")
-			label := dimStyle.Render("N/A")
-			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, dimStyle.Render(id), label)
+			status := dimStyle.Render("N/A")
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, status, accountW, truncateToWidth(id, accountW), envW, dimStyle.Render("-"))
 			lines = append(lines, line)
 			continue
 		}
 
 		envVar := envVarForProvider(providerID)
 
-		var indicator string
+		var statusText string
+		var statusStyle lipgloss.Style
 		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
-			indicator = lipgloss.NewStyle().Foreground(colorGreen).Render("✓")
+			statusText = "OK"
+			statusStyle = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 		} else if envVar != "" && os.Getenv(envVar) != "" {
-			indicator = lipgloss.NewStyle().Foreground(colorYellow).Render("env")
+			statusText = "ENV"
+			statusStyle = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 		} else {
-			indicator = lipgloss.NewStyle().Foreground(colorRed).Render("✗")
+			statusText = "MISS"
+			statusStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 		}
 
-		envLabel := ""
+		account := truncateToWidth(id, accountW)
+		envLabel := "-"
 		if envVar != "" {
-			envLabel = "  " + dimStyle.Render(envVar)
+			envLabel = envVar
 		}
+		envLabel = truncateToWidth(envLabel, envW)
 
 		if m.settings.apiKeyEditing && i == cursor {
 			masked := maskAPIKey(m.settings.apiKeyInput)
 			inputStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 			cursorChar := PulseChar("█", "▌", m.animFrame)
-			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, id, inputStyle.Render(masked+cursorChar))
-			if m.settings.apiKeyStatus != "" {
-				line += "  " + dimStyle.Render(m.settings.apiKeyStatus)
-			}
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusStyle.Render(statusText), accountW, account, envW, dimStyle.Render(envLabel))
 			lines = append(lines, line)
+			keyLine := fmt.Sprintf("     key: %s", inputStyle.Render(masked+cursorChar))
+			if m.settings.apiKeyStatus != "" {
+				keyLine += "  " + dimStyle.Render(m.settings.apiKeyStatus)
+			}
+			lines = append(lines, keyLine)
 		} else {
-			line := fmt.Sprintf("%s%s %s%s", prefix, indicator, id, envLabel)
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusStyle.Render(statusText), accountW, account, envW, dimStyle.Render(envLabel))
 			lines = append(lines, line)
 		}
 	}
@@ -1228,6 +1331,8 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 		"Telemetry & Time Window",
 		"Choose aggregation window and map raw telemetry providers",
 	)
+	lines = append(lines, settingsBodyRule(w))
+	lines = append(lines, "")
 
 	// Time window selector
 	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Time Window")+"  "+dimStyle.Render("press w or select below"))
@@ -1292,6 +1397,7 @@ func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 		"Integrations",
 		fmt.Sprintf("%d total · %d ready · %d need attention", len(statuses), ready, outdated),
 	)
+	lines = append(lines, settingsBodyRule(w))
 	if len(statuses) == 0 {
 		lines = append(lines, dimStyle.Render("No integration status available yet. Press r to refresh."))
 		return padToSize(strings.Join(lines, "\n"), w, h)

@@ -232,7 +232,7 @@ func TestRenderSettingsModalTabs_AlwaysSingleRow(t *testing.T) {
 		t.Fatalf("expected tabs in a single row, got: %q", tabs)
 	}
 	for i := 1; i <= int(settingsTabCount); i++ {
-		if !strings.Contains(tabs, fmt.Sprintf("%d.", i)) {
+		if !strings.Contains(tabs, fmt.Sprintf("%d ", i)) {
 			t.Fatalf("expected tab index %d to be present, got: %q", i, tabs)
 		}
 	}
