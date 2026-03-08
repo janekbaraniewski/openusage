@@ -571,7 +571,7 @@ func (m Model) renderSettingsModalTabs(w int) string {
 	}
 
 	line := strings.Join(parts, strings.Repeat(" ", gap))
-	return cropAnsiLine(line, 0, w)
+	return line
 }
 
 func (m Model) settingsModalHint() string {
@@ -624,17 +624,6 @@ func settingsBodyHeaderLines(title, subtitle string) []string {
 	}
 	lines = append(lines, "")
 	return lines
-}
-
-func renderSettingsBodyLines(lines []string, w, h int) string {
-	if w < 1 {
-		w = 1
-	}
-	out := make([]string, len(lines))
-	for i, line := range lines {
-		out[i] = cropAnsiLine(line, 0, w)
-	}
-	return padToSize(strings.Join(out, "\n"), w, h)
 }
 
 func settingsBodyRule(w int) string {
@@ -710,7 +699,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No providers available."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
@@ -747,7 +736,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		lines = append(lines, line)
 	}
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
@@ -784,7 +773,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(entries) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard sections available."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
@@ -814,7 +803,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 		lines = append(lines, line)
 	}
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsWidgetSectionsPreview(w, h int) string {
@@ -1104,7 +1093,7 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(themes) == 0 {
 		lines = append(lines, dimStyle.Render("No themes available."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.themeCursor, 0, len(themes)-1)
@@ -1133,7 +1122,7 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 		lines = append(lines, fmt.Sprintf("%s%-3d %-3s %-3s %-*s", prefix, i+1, selected, current, nameW, name))
 	}
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsViewBody(w, h int) string {
@@ -1147,7 +1136,7 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(dashboardViewOptions) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard views available."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
@@ -1179,7 +1168,7 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 		lines = append(lines, "    "+dimStyle.Render(option.Description))
 	}
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 // apiKeysTabIDs returns account IDs for the API Keys tab, including
@@ -1259,7 +1248,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No API-key providers available."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
@@ -1325,7 +1314,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		}
 	}
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
@@ -1380,7 +1369,7 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 	}
 
 	start, end := listWindow(len(lines), m.settings.bodyOffset, h)
-	return renderSettingsBodyLines(lines[start:end], w, h)
+	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
 }
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {
@@ -1402,7 +1391,7 @@ func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(statuses) == 0 {
 		lines = append(lines, dimStyle.Render("No integration status available yet. Press r to refresh."))
-		return renderSettingsBodyLines(lines, w, h)
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(statuses)-1)
@@ -1448,7 +1437,7 @@ func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	}
 	lines = append(lines, "  Install/configure command writes plugin/hook files and updates tool configs automatically.")
 
-	return renderSettingsBodyLines(lines, w, h)
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
