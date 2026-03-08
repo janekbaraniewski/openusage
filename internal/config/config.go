@@ -92,9 +92,10 @@ func (s *DashboardWidgetSection) UnmarshalJSON(data []byte) error {
 }
 
 type DashboardConfig struct {
-	Providers      []DashboardProviderConfig `json:"providers"`
-	View           string                    `json:"view"`
-	WidgetSections []DashboardWidgetSection  `json:"widget_sections,omitempty"`
+	Providers              []DashboardProviderConfig `json:"providers"`
+	View                   string                    `json:"view"`
+	WidgetSections         []DashboardWidgetSection  `json:"widget_sections,omitempty"`
+	HideSectionsWithNoData bool                      `json:"hide_sections_with_no_data,omitempty"`
 }
 
 type IntegrationState struct {
@@ -378,6 +379,18 @@ func SaveDashboardWidgetSections(sections []DashboardWidgetSection) error {
 func SaveDashboardWidgetSectionsTo(path string, sections []DashboardWidgetSection) error {
 	return modifyConfig(path, func(cfg *Config) {
 		cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(sections)
+	})
+}
+
+// SaveDashboardHideSectionsWithNoData persists whether empty dashboard widget
+// sections should be hidden in the config file (read-modify-write).
+func SaveDashboardHideSectionsWithNoData(hide bool) error {
+	return SaveDashboardHideSectionsWithNoDataTo(ConfigPath(), hide)
+}
+
+func SaveDashboardHideSectionsWithNoDataTo(path string, hide bool) error {
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.HideSectionsWithNoData = hide
 	})
 }
 

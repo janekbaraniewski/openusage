@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -137,8 +138,11 @@ func TestRenderSettingsWidgetSectionsBody_RendersListOnly(t *testing.T) {
 	m.settings.tab = settingsTabWidgetSections
 
 	body := stripANSI(m.renderSettingsWidgetSectionsBody(96, 20))
-	if !strings.Contains(body, "Global Dashboard Widget Sections") {
+	if !strings.Contains(body, "Global Widget Sections") {
 		t.Fatalf("expected widget sections list in body, got: %q", body)
+	}
+	if !strings.Contains(body, "Hide sections with no data:") {
+		t.Fatalf("expected hide-empty toggle in body, got: %q", body)
 	}
 	if strings.Contains(body, "Live Preview") {
 		t.Fatalf("expected preview to render outside body panel, got: %q", body)
@@ -198,6 +202,39 @@ func TestHandleSettingsModalKey_WidgetSectionsPreviewScroll(t *testing.T) {
 	gotUp := updatedUp.(Model)
 	if gotUp.settings.previewOffset >= gotDown.settings.previewOffset {
 		t.Fatalf("expected preview offset to decrease on PgUp, got before=%d after=%d", gotDown.settings.previewOffset, gotUp.settings.previewOffset)
+	}
+}
+
+func TestHandleSettingsModalKey_WidgetSectionsToggleHideEmptySections(t *testing.T) {
+	m := Model{
+		settings:               settingsState{show: true, tab: settingsTabWidgetSections},
+		hideSectionsWithNoData: false,
+	}
+
+	updated, cmd := m.handleSettingsModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	got := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected persist command when toggling hide-empty setting")
+	}
+	if !got.hideSectionsWithNoData {
+		t.Fatal("expected hideSectionsWithNoData to be true after pressing h")
+	}
+}
+
+func TestRenderSettingsModalTabs_AlwaysSingleRow(t *testing.T) {
+	m := Model{
+		settings: settingsState{show: true, tab: settingsTabWidgetSections},
+	}
+
+	tabs := stripANSI(m.renderSettingsModalTabs(72))
+	if strings.Contains(tabs, "\n") {
+		t.Fatalf("expected tabs in a single row, got: %q", tabs)
+	}
+	for i := 1; i <= int(settingsTabCount); i++ {
+		if !strings.Contains(tabs, fmt.Sprintf("%d ", i)) {
+			t.Fatalf("expected tab index %d to be present, got: %q", i, tabs)
+		}
 	}
 }
 

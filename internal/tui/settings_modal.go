@@ -109,12 +109,12 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc", "backspace", ",", "S":
 		m.closeSettingsModal()
 		return m, nil
-	case "tab", "right", "l", "]":
+	case "tab", "right", "]":
 		m.settings.tab = (m.settings.tab + 1) % settingsTabCount
 		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
 		return m, nil
-	case "shift+tab", "left", "h", "[":
+	case "shift+tab", "left", "[":
 		m.settings.tab = (m.settings.tab + settingsTabCount - 1) % settingsTabCount
 		m.settings.bodyOffset = 0
 		m.resetSettingsCursorForTab()
@@ -198,6 +198,10 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				return m, cmd
 			}
+		case "h", "H":
+			m.hideSectionsWithNoData = !m.hideSectionsWithNoData
+			m.settings.status = "saving empty-state..."
+			return m, m.persistDashboardHideSectionsWithNoDataCmd()
 		case "pgup", "ctrl+u":
 			m.settings.previewOffset -= 4
 			if m.settings.previewOffset < 0 {
@@ -442,11 +446,15 @@ func (m Model) renderSettingsModalOverlay() string {
 	}
 
 	contentW := m.width - 24
-	if contentW < 50 {
-		contentW = 50
+	if contentW < 68 {
+		contentW = 68
 	}
 	if contentW > 92 {
 		contentW = 92
+	}
+	panelInnerW := contentW - 4
+	if panelInnerW < 40 {
+		panelInnerW = 40
 	}
 
 	const modalBodyHeight = 20
@@ -460,8 +468,8 @@ func (m Model) renderSettingsModalOverlay() string {
 	}
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Settings")
-	tabs := m.renderSettingsModalTabs()
-	body := m.renderSettingsModalBody(contentW, contentH)
+	tabs := m.renderSettingsModalTabs(panelInnerW)
+	body := m.renderSettingsModalBody(panelInnerW, contentH)
 	hint := dimStyle.Render(m.settingsModalHint())
 
 	status := ""
@@ -472,9 +480,9 @@ func (m Model) renderSettingsModalOverlay() string {
 	lines := []string{
 		title,
 		tabs,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", contentW)),
+		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
 		body,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", contentW)),
+		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
 		hint,
 	}
 	if status != "" {
@@ -515,17 +523,55 @@ func (m Model) renderSettingsModalOverlay() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, combined)
 }
 
-func (m Model) renderSettingsModalTabs() string {
-	parts := make([]string, 0, len(settingsTabNames))
-	for i, name := range settingsTabNames {
-		label := fmt.Sprintf("%d:%s", i+1, name)
+func (m Model) renderSettingsModalTabs(w int) string {
+	if len(settingsTabNames) == 0 {
+		return ""
+	}
+	if w < 40 {
+		w = 40
+	}
+
+	n := len(settingsTabNames)
+	gap := 1
+	cellW := (w - gap*(n-1)) / n
+	if cellW < 6 {
+		cellW = 6
+		gap = 0
+		cellW = w / n
+	}
+
+	tabTokens := []string{"PROV", "SECT", "THEME", "VIEW", "KEYS", "TELEM", "INTEG"}
+	if len(tabTokens) < n {
+		tabTokens = append(tabTokens, settingsTabNames[len(tabTokens):]...)
+	}
+
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent)
+	inactiveStyle := lipgloss.NewStyle().Foreground(colorSubtext)
+
+	parts := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		token := settingsTabNames[i]
+		if i < len(tabTokens) {
+			token = tabTokens[i]
+		}
+		label := fmt.Sprintf("%d %s", i+1, token)
+		if lipgloss.Width(label) > cellW {
+			label = truncateToWidth(label, cellW)
+		}
+		if pad := cellW - lipgloss.Width(label); pad > 0 {
+			left := pad / 2
+			right := pad - left
+			label = strings.Repeat(" ", left) + label + strings.Repeat(" ", right)
+		}
 		if settingsModalTab(i) == m.settings.tab {
-			parts = append(parts, screenTabActiveStyle.Render(label))
+			parts = append(parts, activeStyle.Render(label))
 		} else {
-			parts = append(parts, screenTabInactiveStyle.Render(label))
+			parts = append(parts, inactiveStyle.Render(label))
 		}
 	}
-	return strings.Join(parts, "")
+
+	line := strings.Join(parts, strings.Repeat(" ", gap))
+	return line
 }
 
 func (m Model) settingsModalHint() string {
@@ -533,7 +579,7 @@ func (m Model) settingsModalHint() string {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabWidgetSections:
-		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
+		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  h: toggle hide empty sections  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
@@ -569,15 +615,99 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 	}
 }
 
+func settingsBodyHeaderLines(title, subtitle string) []string {
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(title),
+	}
+	if strings.TrimSpace(subtitle) != "" {
+		lines = append(lines, dimStyle.Render(subtitle))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
+func settingsBodyRule(w int) string {
+	if w < 8 {
+		w = 8
+	}
+	return dimStyle.Render(strings.Repeat("─", w-2))
+}
+
+func settingsSectionLabel(id core.DashboardStandardSection) string {
+	switch id {
+	case core.DashboardSectionTopUsageProgress:
+		return "Top Usage Progress"
+	case core.DashboardSectionModelBurn:
+		return "Model Burn"
+	case core.DashboardSectionClientBurn:
+		return "Client Burn"
+	case core.DashboardSectionProjectBreakdown:
+		return "Project Breakdown"
+	case core.DashboardSectionToolUsage:
+		return "Tool Usage"
+	case core.DashboardSectionMCPUsage:
+		return "MCP Usage"
+	case core.DashboardSectionLanguageBurn:
+		return "Language"
+	case core.DashboardSectionCodeStats:
+		return "Code Statistics"
+	case core.DashboardSectionDailyUsage:
+		return "Daily Usage"
+	case core.DashboardSectionProviderBurn:
+		return "Provider Burn"
+	case core.DashboardSectionUpstreamProviders:
+		return "Upstream Providers"
+	case core.DashboardSectionOtherData:
+		return "Other Data"
+	default:
+		raw := strings.TrimSpace(strings.ReplaceAll(string(id), "_", " "))
+		if raw == "" {
+			return "Unknown"
+		}
+		parts := strings.Fields(raw)
+		for i := range parts {
+			parts[i] = titleCase(parts[i])
+		}
+		return strings.Join(parts, " ")
+	}
+}
+
 func (m Model) renderSettingsProvidersBody(w, h int) string {
 	ids := m.settingsIDs()
+
+	enabledCount := 0
+	for _, id := range ids {
+		if m.isProviderEnabled(id) {
+			enabledCount++
+		}
+	}
+
+	lines := settingsBodyHeaderLines(
+		"Provider Visibility & Order",
+		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle", enabledCount, len(ids)),
+	)
+	accountW := 26
+	providerW := w - accountW - 16
+	if providerW < 10 {
+		providerW = 10
+		accountW = w - providerW - 16
+	}
+	if accountW < 12 {
+		accountW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %-*s", "#", "ON", accountW, "ACCOUNT", providerW, "PROVIDER")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
-		return padToSize(dimStyle.Render("No providers available."), w, h)
+		lines = append(lines, dimStyle.Render("No providers available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, h)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(ids), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		id := ids[i]
@@ -589,18 +719,20 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			providerID = "unknown"
 		}
 
-		box := "☐"
-		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		onText := "OFF"
+		onStyle := lipgloss.NewStyle().Foreground(colorRed)
 		if m.isProviderEnabled(id) {
-			box = "☑"
-			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+			onText = "ON "
+			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
 		}
 
 		prefix := "  "
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
-		line := fmt.Sprintf("%s%s %2d. %s  %s", prefix, boxStyle.Render(box), i+1, id, dimStyle.Render(providerID))
+		account := truncateToWidth(id, accountW)
+		provider := truncateToWidth(providerID, providerW)
+		line := fmt.Sprintf("%s%-3d %s %-*s %-*s", prefix, i+1, onStyle.Render(onText), accountW, account, providerW, provider)
 		lines = append(lines, line)
 	}
 
@@ -613,17 +745,6 @@ func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
 
 func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	entries := m.widgetSectionEntries()
-	if len(entries) == 0 {
-		return padToSize(dimStyle.Render("No dashboard sections available."), w, h)
-	}
-
-	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
-	headerLines := 4
-	listHeight := h - headerLines
-	if listHeight < 1 {
-		listHeight = 1
-	}
-	start, end := listWindow(len(entries), cursor, listHeight)
 
 	visibleCount := 0
 	for _, entry := range entries {
@@ -632,11 +753,35 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 		}
 	}
 
-	lines := make([]string, 0, h)
-	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Global Dashboard Widget Sections"))
-	lines = append(lines, dimStyle.Render("Applies to all provider widgets"))
-	lines = append(lines, dimStyle.Render(fmt.Sprintf("%d/%d sections visible", visibleCount, len(entries))))
+	lines := settingsBodyHeaderLines(
+		"Global Widget Sections",
+		fmt.Sprintf("%d/%d sections visible · applies to all providers", visibleCount, len(entries)),
+	)
+	hideBox := "☐"
+	hideBoxStyle := lipgloss.NewStyle().Foreground(colorRed)
+	if m.hideSectionsWithNoData {
+		hideBox = "☑"
+		hideBoxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+	}
+	lines = append(lines, fmt.Sprintf("Hide sections with no data: %s  %s", hideBoxStyle.Render(hideBox), dimStyle.Render("press h to toggle")))
 	lines = append(lines, "")
+	nameW := w - 24
+	if nameW < 12 {
+		nameW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %s", "#", "ON", nameW, "SECTION", "ID")))
+	lines = append(lines, settingsBodyRule(w))
+	if len(entries) == 0 {
+		lines = append(lines, dimStyle.Render("No dashboard sections available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(entries), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		entry := entries[i]
@@ -645,14 +790,16 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
-		box := "☐"
-		boxStyle := lipgloss.NewStyle().Foreground(colorRed)
+		onText := "OFF"
+		onStyle := lipgloss.NewStyle().Foreground(colorRed)
 		if entry.Enabled {
-			box = "☑"
-			boxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+			onText = "ON "
+			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
 		}
 
-		line := fmt.Sprintf("%s%s %2d. %s", prefix, boxStyle.Render(box), i+1, entry.ID)
+		name := settingsSectionLabel(entry.ID)
+		name = truncateToWidth(name, nameW)
+		line := fmt.Sprintf("%s%-3d %s %-*s %s", prefix, i+1, onStyle.Render(onText), nameW, name, dimStyle.Render(string(entry.ID)))
 		lines = append(lines, line)
 	}
 
@@ -929,14 +1076,32 @@ func settingsWidgetSectionsPreviewSnapshot() core.UsageSnapshot {
 
 func (m Model) renderSettingsThemeBody(w, h int) string {
 	themes := AvailableThemes()
+	activeThemeIdx := ActiveThemeIndex()
+	activeThemeName := "none"
+	if activeThemeIdx >= 0 && activeThemeIdx < len(themes) {
+		activeThemeName = themes[activeThemeIdx].Name
+	}
+	lines := settingsBodyHeaderLines(
+		"Theme Selection",
+		fmt.Sprintf("%d themes available · active: %s", len(themes), activeThemeName),
+	)
+	nameW := w - 16
+	if nameW < 12 {
+		nameW = 12
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-3s %-*s", "#", "CUR", "ACT", nameW, "THEME")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(themes) == 0 {
-		return padToSize(dimStyle.Render("No themes available."), w, h)
+		lines = append(lines, dimStyle.Render("No themes available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.themeCursor, 0, len(themes)-1)
-	start, end := listWindow(len(themes), cursor, h)
-	activeThemeIdx := ActiveThemeIndex()
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(themes), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		theme := themes[i]
@@ -945,26 +1110,41 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
-		current := "  "
+		current := "."
 		if i == activeThemeIdx {
-			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
+			current = "*"
 		}
-		lines = append(lines, fmt.Sprintf("%s%s%s %s", prefix, current, theme.Icon, theme.Name))
+		selected := "."
+		if i == cursor {
+			selected = ">"
+		}
+		name := truncateToWidth(theme.Name, nameW)
+		lines = append(lines, fmt.Sprintf("%s%-3d %-3s %-3s %-*s", prefix, i+1, selected, current, nameW, name))
 	}
 
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsViewBody(w, h int) string {
+	configured := m.configuredDashboardView()
+	active := m.activeDashboardView()
+	lines := settingsBodyHeaderLines(
+		"Dashboard View Mode",
+		fmt.Sprintf("configured: %s · active: %s", configured, active),
+	)
+	lines = append(lines, dimStyle.Render("    CUR  MODE"))
+	lines = append(lines, settingsBodyRule(w))
 	if len(dashboardViewOptions) == 0 {
-		return padToSize(dimStyle.Render("No dashboard views available."), w, h)
+		lines = append(lines, dimStyle.Render("No dashboard views available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
-	start, end := listWindow(len(dashboardViewOptions), cursor, h)
-	lines := make([]string, 0, h)
-	configured := m.configuredDashboardView()
-	active := m.activeDashboardView()
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(dashboardViewOptions), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		option := dashboardViewOptions[i]
@@ -1035,13 +1215,48 @@ func maskAPIKey(key string) string {
 
 func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	ids := m.apiKeysTabIDs()
+
+	configuredCount := 0
+	for _, id := range ids {
+		providerID := providerForAccountID(id, m.accountProviders)
+		if !isAPIKeyProvider(providerID) {
+			continue
+		}
+		if envVar := envVarForProvider(providerID); envVar != "" && os.Getenv(envVar) != "" {
+			configuredCount++
+			continue
+		}
+		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
+			configuredCount++
+		}
+	}
+
+	lines := settingsBodyHeaderLines(
+		"API Key Management",
+		fmt.Sprintf("%d/%d configured (env or validated)", configuredCount, len(ids)),
+	)
+	accountW := 20
+	envW := w - accountW - 18
+	if envW < 10 {
+		envW = 10
+		accountW = w - envW - 18
+	}
+	if accountW < 10 {
+		accountW = 10
+	}
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-5s %-*s %-*s", "#", "STAT", accountW, "ACCOUNT", envW, "ENV VAR")))
+	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
-		return padToSize(dimStyle.Render("No API-key providers available."), w, h)
+		lines = append(lines, dimStyle.Render("No API-key providers available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, h)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines)
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(ids), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		id := ids[i]
@@ -1059,40 +1274,42 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		}
 
 		if !isAPIKeyProvider(providerID) {
-			indicator := lipgloss.NewStyle().Foreground(colorDim).Render("○")
-			label := dimStyle.Render("N/A")
-			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, dimStyle.Render(id), label)
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, "-")
 			lines = append(lines, line)
 			continue
 		}
 
 		envVar := envVarForProvider(providerID)
 
-		var indicator string
+		var statusText string
 		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
-			indicator = lipgloss.NewStyle().Foreground(colorGreen).Render("✓")
+			statusText = "OK"
 		} else if envVar != "" && os.Getenv(envVar) != "" {
-			indicator = lipgloss.NewStyle().Foreground(colorYellow).Render("env")
+			statusText = "ENV"
 		} else {
-			indicator = lipgloss.NewStyle().Foreground(colorRed).Render("✗")
+			statusText = "MISS"
 		}
 
-		envLabel := ""
+		account := truncateToWidth(id, accountW)
+		envLabel := "-"
 		if envVar != "" {
-			envLabel = "  " + dimStyle.Render(envVar)
+			envLabel = envVar
 		}
+		envLabel = truncateToWidth(envLabel, envW)
 
 		if m.settings.apiKeyEditing && i == cursor {
 			masked := maskAPIKey(m.settings.apiKeyInput)
 			inputStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 			cursorChar := PulseChar("█", "▌", m.animFrame)
-			line := fmt.Sprintf("%s%s %s  %s", prefix, indicator, id, inputStyle.Render(masked+cursorChar))
-			if m.settings.apiKeyStatus != "" {
-				line += "  " + dimStyle.Render(m.settings.apiKeyStatus)
-			}
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusText, accountW, account, envW, envLabel)
 			lines = append(lines, line)
+			keyLine := fmt.Sprintf("     key: %s", inputStyle.Render(masked+cursorChar))
+			if m.settings.apiKeyStatus != "" {
+				keyLine += "  " + dimStyle.Render(m.settings.apiKeyStatus)
+			}
+			lines = append(lines, keyLine)
 		} else {
-			line := fmt.Sprintf("%s%s %s%s", prefix, indicator, id, envLabel)
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusText, accountW, account, envW, envLabel)
 			lines = append(lines, line)
 		}
 	}
@@ -1101,7 +1318,12 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
-	var lines []string
+	lines := settingsBodyHeaderLines(
+		"Telemetry & Time Window",
+		"Choose aggregation window and map raw telemetry providers",
+	)
+	lines = append(lines, settingsBodyRule(w))
+	lines = append(lines, "")
 
 	// Time window selector
 	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Time Window")+"  "+dimStyle.Render("press w or select below"))
@@ -1152,13 +1374,32 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	statuses := m.settings.integrationStatus
+	ready := 0
+	outdated := 0
+	for _, entry := range statuses {
+		if entry.State == "ready" {
+			ready++
+		}
+		if entry.NeedsUpgrade || entry.State == "outdated" {
+			outdated++
+		}
+	}
+	lines := settingsBodyHeaderLines(
+		"Integrations",
+		fmt.Sprintf("%d total · %d ready · %d need attention", len(statuses), ready, outdated),
+	)
+	lines = append(lines, settingsBodyRule(w))
 	if len(statuses) == 0 {
-		return padToSize(dimStyle.Render("No integration status available yet. Press r to refresh."), w, h)
+		lines = append(lines, dimStyle.Render("No integration status available yet. Press r to refresh."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(statuses)-1)
-	start, end := listWindow(len(statuses), cursor, h-4)
-	lines := make([]string, 0, h)
+	listHeight := h - len(lines) - 4
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	start, end := listWindow(len(statuses), cursor, listHeight)
 
 	for i := start; i < end; i++ {
 		entry := statuses[i]
