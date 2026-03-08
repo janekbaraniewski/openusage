@@ -27,6 +27,17 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("telemetry: creating DB dir: %w", err)
 	}
 
+	// Remove the shared-memory file before opening the database.
+	// After an unclean shutdown (SIGKILL, OOM, crash), the -shm file
+	// retains stale WAL frame indexes and lock counters from the dead
+	// process. If a new process opens the DB and trusts the stale -shm,
+	// it can misread WAL frames, causing duplicate page references and
+	// B-tree corruption. Removing the -shm forces SQLite to rebuild the
+	// WAL index from the checksummed WAL file, which is crash-safe.
+	// If another process holds the DB open, the file is still
+	// referenced via its inode and that process is unaffected.
+	_ = os.Remove(path + "-shm")
+
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: opening DB: %w", err)
@@ -34,6 +45,26 @@ func OpenStore(path string) (*Store, error) {
 	if err := configureSQLiteConnection(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("telemetry: configure sqlite: %w", err)
+	}
+
+	// Quick integrity check before proceeding. If the database is corrupt
+	// (e.g. from a previous unclean shutdown that the -shm removal didn't
+	// fully recover), back it up and start fresh rather than serving bad data.
+	if corrupt, detail := quickIntegrityCheck(db); corrupt {
+		_ = db.Close()
+		backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
+		log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
+		_ = os.Rename(path, backupPath)
+		_ = os.Remove(path + "-wal")
+		_ = os.Remove(path + "-shm")
+		db, err = sql.Open("sqlite3", path)
+		if err != nil {
+			return nil, fmt.Errorf("telemetry: opening fresh DB after corruption: %w", err)
+		}
+		if err := configureSQLiteConnection(db); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("telemetry: configure fresh sqlite: %w", err)
+		}
 	}
 
 	store := NewStore(db)
@@ -53,6 +84,15 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// DB returns the underlying database handle for operations that need direct
+// access (e.g. WAL checkpointing).
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
 }
 
 func (s *Store) Init(ctx context.Context) error {
