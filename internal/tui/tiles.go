@@ -656,10 +656,18 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 			continue
 		}
 		sec, ok := sectionsByID[sectionID]
-		if !ok || len(sec.lines) == 0 {
+		if ok && len(sec.lines) > 0 {
+			sections = append(sections, sec)
 			continue
 		}
-		sections = append(sections, sec)
+		if m.hideSectionsWithNoData {
+			continue
+		}
+		emptyLines := buildEmptyTileSectionLines(sectionID, widget)
+		if len(emptyLines) == 0 {
+			continue
+		}
+		sections = append(sections, section{withSectionPadding(emptyLines)})
 	}
 
 	var fullBody []string
@@ -697,6 +705,56 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 
 	return renderWithBody(body)
+}
+
+func buildEmptyTileSectionLines(sectionID core.DashboardStandardSection, widget core.DashboardWidget) []string {
+	heading, message := emptyTileSectionContent(sectionID, widget)
+	if heading == "" || message == "" {
+		return nil
+	}
+	return []string{
+		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		dimStyle.Render("  " + message),
+	}
+}
+
+func emptyTileSectionContent(sectionID core.DashboardStandardSection, widget core.DashboardWidget) (heading string, message string) {
+	switch sectionID {
+	case core.DashboardSectionTopUsageProgress:
+		return "Usage", "No usage data for this time range"
+	case core.DashboardSectionModelBurn:
+		return "Model Burn", "No model data for this time range"
+	case core.DashboardSectionClientBurn:
+		heading = "Client Burn"
+		if strings.TrimSpace(widget.ClientCompositionHeading) != "" {
+			heading = strings.TrimSpace(widget.ClientCompositionHeading)
+		}
+		return heading, "No client data for this time range"
+	case core.DashboardSectionProjectBreakdown:
+		return "Project Breakdown", "No project data for this time range"
+	case core.DashboardSectionToolUsage:
+		heading = "Tool Usage"
+		if strings.TrimSpace(widget.ToolCompositionHeading) != "" {
+			heading = strings.TrimSpace(widget.ToolCompositionHeading)
+		}
+		return heading, "No tool data for this time range"
+	case core.DashboardSectionMCPUsage:
+		return "MCP Usage", "No MCP data for this time range"
+	case core.DashboardSectionLanguageBurn:
+		return "Language", "No language data for this time range"
+	case core.DashboardSectionCodeStats:
+		return "Code Statistics", "No code stats for this time range"
+	case core.DashboardSectionDailyUsage:
+		return "Daily Usage", "No daily usage data for this time range"
+	case core.DashboardSectionProviderBurn:
+		return "Provider Burn", "No provider data for this time range"
+	case core.DashboardSectionUpstreamProviders:
+		return "Hosting Providers", "No hosting provider data for this time range"
+	case core.DashboardSectionOtherData:
+		return "Other Data", "No additional data for this time range"
+	default:
+		return "", ""
+	}
 }
 
 func (m Model) tileShouldRenderLoading(snap core.UsageSnapshot) bool {

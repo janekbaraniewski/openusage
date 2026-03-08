@@ -2159,14 +2159,7 @@ func colorForTool(colors map[string]lipgloss.Color, name string) lipgloss.Color 
 func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
 	allLangs, usedKeys := collectProviderLanguageMix(snap)
 	if len(allLangs) == 0 {
-		// Show "no data" placeholder when telemetry is active but no language data.
-		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
-			return []string{
-				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Language"),
-				dimStyle.Render("  No language data for this time range"),
-			}, usedKeys
-		}
-		return nil, nil
+		return nil, usedKeys
 	}
 
 	langs, hiddenCount := limitToolMix(allLangs, expanded, 6)
@@ -2289,13 +2282,7 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 	prompts := getVal(cs.Prompts)
 
 	if added <= 0 && removed <= 0 && commits <= 0 && files <= 0 {
-		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
-			return []string{
-				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Code Statistics"),
-				dimStyle.Render("  No code stats for this time range"),
-			}, usedKeys
-		}
-		return nil, nil
+		return nil, usedKeys
 	}
 
 	var codeStatParts []string
@@ -2421,13 +2408,7 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 	}
 
 	if len(byTool) == 0 {
-		if snap.Attributes != nil && snap.Attributes["telemetry_view"] == "canonical" {
-			return []string{
-				lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render("Tool Usage"),
-				dimStyle.Render("  No tool data for this time range"),
-			}, usedKeys
-		}
-		return nil, nil
+		return nil, usedKeys
 	}
 
 	allTools := make([]toolMixEntry, 0, len(byTool))

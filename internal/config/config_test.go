@@ -30,6 +30,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Dashboard.View != DashboardViewGrid {
 		t.Errorf("default dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
 	}
+	if cfg.Dashboard.HideSectionsWithNoData {
+		t.Error("default dashboard.hide_sections_with_no_data should be false")
+	}
 	if !cfg.AutoDetect {
 		t.Error("expected auto_detect to be true by default")
 	}
@@ -667,6 +670,61 @@ func TestSaveDashboardWidgetSectionsTo(t *testing.T) {
 	}
 	if loaded.Dashboard.WidgetSections[1].ID != core.DashboardSectionOtherData || loaded.Dashboard.WidgetSections[1].Enabled {
 		t.Fatalf("section[1] = %#v, want other_data enabled=false", loaded.Dashboard.WidgetSections[1])
+	}
+}
+
+func TestLoadFrom_DashboardHideSectionsWithNoData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	content := `{
+  "dashboard": {
+    "hide_sections_with_no_data": true
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Dashboard.HideSectionsWithNoData {
+		t.Fatal("dashboard.hide_sections_with_no_data = false, want true")
+	}
+}
+
+func TestSaveDashboardHideSectionsWithNoDataTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	cfg := DefaultConfig()
+	cfg.Theme = "Nord"
+	cfg.Dashboard.View = DashboardViewSplit
+	cfg.Dashboard.Providers = []DashboardProviderConfig{
+		{AccountID: "openai-personal", Enabled: true},
+	}
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveDashboardHideSectionsWithNoDataTo(path, true); err != nil {
+		t.Fatalf("SaveDashboardHideSectionsWithNoDataTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Theme != "Nord" {
+		t.Errorf("theme should be preserved, got %q", loaded.Theme)
+	}
+	if loaded.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view should be preserved, got %q", loaded.Dashboard.View)
+	}
+	if len(loaded.Dashboard.Providers) != 1 || loaded.Dashboard.Providers[0].AccountID != "openai-personal" {
+		t.Errorf("dashboard.providers should be preserved, got %#v", loaded.Dashboard.Providers)
+	}
+	if !loaded.Dashboard.HideSectionsWithNoData {
+		t.Fatal("dashboard.hide_sections_with_no_data = false, want true")
 	}
 }
 

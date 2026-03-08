@@ -198,6 +198,10 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				return m, cmd
 			}
+		case "H":
+			m.hideSectionsWithNoData = !m.hideSectionsWithNoData
+			m.settings.status = "saving empty-state..."
+			return m, m.persistDashboardHideSectionsWithNoDataCmd()
 		case "pgup", "ctrl+u":
 			m.settings.previewOffset -= 4
 			if m.settings.previewOffset < 0 {
@@ -533,7 +537,7 @@ func (m Model) settingsModalHint() string {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabWidgetSections:
-		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
+		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  Shift+H: toggle hide empty sections  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
@@ -618,7 +622,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	}
 
 	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
-	headerLines := 4
+	headerLines := 5
 	listHeight := h - headerLines
 	if listHeight < 1 {
 		listHeight = 1
@@ -636,6 +640,13 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Global Dashboard Widget Sections"))
 	lines = append(lines, dimStyle.Render("Applies to all provider widgets"))
 	lines = append(lines, dimStyle.Render(fmt.Sprintf("%d/%d sections visible", visibleCount, len(entries))))
+	hideBox := "☐"
+	hideBoxStyle := lipgloss.NewStyle().Foreground(colorRed)
+	if m.hideSectionsWithNoData {
+		hideBox = "☑"
+		hideBoxStyle = lipgloss.NewStyle().Foreground(colorGreen)
+	}
+	lines = append(lines, fmt.Sprintf("Hide sections with no data: %s  %s", hideBoxStyle.Render(hideBox), dimStyle.Render("press Shift+H to toggle")))
 	lines = append(lines, "")
 
 	for i := start; i < end; i++ {

@@ -152,8 +152,9 @@ type Model struct {
 	providerEnabled  map[string]bool
 	accountProviders map[string]string
 
-	settings       settingsState
-	widgetSections []config.DashboardWidgetSection
+	settings               settingsState
+	widgetSections         []config.DashboardWidgetSection
+	hideSectionsWithNoData bool
 
 	timeWindow core.TimeWindow
 
@@ -215,6 +216,9 @@ type dashboardViewPersistedMsg struct {
 	err error
 }
 type dashboardWidgetSectionsPersistedMsg struct {
+	err error
+}
+type dashboardHideSectionsWithNoDataPersistedMsg struct {
 	err error
 }
 type timeWindowPersistedMsg struct {
@@ -283,6 +287,17 @@ func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
 			log.Printf("dashboard widget sections persist: %v", err)
 		}
 		return dashboardWidgetSectionsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardHideSectionsWithNoDataCmd() tea.Cmd {
+	hide := m.hideSectionsWithNoData
+	return func() tea.Msg {
+		err := config.SaveDashboardHideSectionsWithNoData(hide)
+		if err != nil {
+			log.Printf("dashboard hide sections with no data persist: %v", err)
+		}
+		return dashboardHideSectionsWithNoDataPersistedMsg{err: err}
 	}
 }
 
@@ -443,6 +458,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settings.status = "section save failed"
 		} else {
 			m.settings.status = "sections saved"
+		}
+		return m, nil
+
+	case dashboardHideSectionsWithNoDataPersistedMsg:
+		if msg.err != nil {
+			m.settings.status = "empty-state save failed"
+		} else {
+			m.settings.status = "empty-state saved"
 		}
 		return m, nil
 
@@ -2389,6 +2412,7 @@ func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accoun
 
 	m.providerOrder = order
 	m.setWidgetSections(dashboardCfg.WidgetSections)
+	m.hideSectionsWithNoData = dashboardCfg.HideSectionsWithNoData
 }
 
 func (m *Model) ensureSnapshotProvidersKnown() {
