@@ -546,7 +546,7 @@ func (m Model) renderSettingsModalTabs(w int) string {
 	}
 
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent)
-	inactiveStyle := lipgloss.NewStyle().Foreground(colorSubtext).Background(colorSurface0)
+	inactiveStyle := lipgloss.NewStyle().Foreground(colorSubtext)
 
 	parts := make([]string, 0, n)
 	for i := 0; i < n; i++ {
@@ -571,11 +571,7 @@ func (m Model) renderSettingsModalTabs(w int) string {
 	}
 
 	line := strings.Join(parts, strings.Repeat(" ", gap))
-	line = cropAnsiLine(line, 0, w)
-	if pad := w - lipgloss.Width(line); pad > 0 {
-		line += strings.Repeat(" ", pad)
-	}
-	return line
+	return cropAnsiLine(line, 0, w)
 }
 
 func (m Model) settingsModalHint() string {
@@ -628,6 +624,17 @@ func settingsBodyHeaderLines(title, subtitle string) []string {
 	}
 	lines = append(lines, "")
 	return lines
+}
+
+func renderSettingsBodyLines(lines []string, w, h int) string {
+	if w < 1 {
+		w = 1
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = cropAnsiLine(line, 0, w)
+	}
+	return padToSize(strings.Join(out, "\n"), w, h)
 }
 
 func settingsBodyRule(w int) string {
@@ -703,7 +710,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No providers available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
@@ -736,11 +743,11 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		}
 		account := truncateToWidth(id, accountW)
 		provider := truncateToWidth(providerID, providerW)
-		line := fmt.Sprintf("%s%-3d %s %-*s %-*s", prefix, i+1, onStyle.Render(onText), accountW, account, providerW, dimStyle.Render(provider))
+		line := fmt.Sprintf("%s%-3d %s %-*s %-*s", prefix, i+1, onStyle.Render(onText), accountW, account, providerW, provider)
 		lines = append(lines, line)
 	}
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
@@ -777,7 +784,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(entries) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard sections available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
@@ -807,7 +814,7 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 		lines = append(lines, line)
 	}
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 func (m Model) renderSettingsWidgetSectionsPreview(w, h int) string {
@@ -1097,7 +1104,7 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(themes) == 0 {
 		lines = append(lines, dimStyle.Render("No themes available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.themeCursor, 0, len(themes)-1)
@@ -1114,19 +1121,19 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 
-		current := dimStyle.Render("·")
+		current := "."
 		if i == activeThemeIdx {
-			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("●")
+			current = "*"
 		}
-		selected := dimStyle.Render("·")
+		selected := "."
 		if i == cursor {
-			selected = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("◆")
+			selected = ">"
 		}
-		name := truncateToWidth(theme.Icon+" "+theme.Name, nameW)
+		name := truncateToWidth(theme.Name, nameW)
 		lines = append(lines, fmt.Sprintf("%s%-3d %-3s %-3s %-*s", prefix, i+1, selected, current, nameW, name))
 	}
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 func (m Model) renderSettingsViewBody(w, h int) string {
@@ -1140,7 +1147,7 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(dashboardViewOptions) == 0 {
 		lines = append(lines, dimStyle.Render("No dashboard views available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
@@ -1172,7 +1179,7 @@ func (m Model) renderSettingsViewBody(w, h int) string {
 		lines = append(lines, "    "+dimStyle.Render(option.Description))
 	}
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 // apiKeysTabIDs returns account IDs for the API Keys tab, including
@@ -1252,7 +1259,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No API-key providers available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
@@ -1278,8 +1285,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		}
 
 		if !isAPIKeyProvider(providerID) {
-			status := dimStyle.Render("N/A")
-			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, status, accountW, truncateToWidth(id, accountW), envW, dimStyle.Render("-"))
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, "-")
 			lines = append(lines, line)
 			continue
 		}
@@ -1287,16 +1293,12 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		envVar := envVarForProvider(providerID)
 
 		var statusText string
-		var statusStyle lipgloss.Style
 		if snap, ok := m.snapshots[id]; ok && snap.Status == core.StatusOK {
 			statusText = "OK"
-			statusStyle = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 		} else if envVar != "" && os.Getenv(envVar) != "" {
 			statusText = "ENV"
-			statusStyle = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 		} else {
 			statusText = "MISS"
-			statusStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 		}
 
 		account := truncateToWidth(id, accountW)
@@ -1310,7 +1312,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			masked := maskAPIKey(m.settings.apiKeyInput)
 			inputStyle := lipgloss.NewStyle().Foreground(colorSapphire)
 			cursorChar := PulseChar("█", "▌", m.animFrame)
-			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusStyle.Render(statusText), accountW, account, envW, dimStyle.Render(envLabel))
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusText, accountW, account, envW, envLabel)
 			lines = append(lines, line)
 			keyLine := fmt.Sprintf("     key: %s", inputStyle.Render(masked+cursorChar))
 			if m.settings.apiKeyStatus != "" {
@@ -1318,12 +1320,12 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			}
 			lines = append(lines, keyLine)
 		} else {
-			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusStyle.Render(statusText), accountW, account, envW, dimStyle.Render(envLabel))
+			line := fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusText, accountW, account, envW, envLabel)
 			lines = append(lines, line)
 		}
 	}
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
@@ -1378,7 +1380,7 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 	}
 
 	start, end := listWindow(len(lines), m.settings.bodyOffset, h)
-	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
+	return renderSettingsBodyLines(lines[start:end], w, h)
 }
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {
@@ -1400,7 +1402,7 @@ func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	lines = append(lines, settingsBodyRule(w))
 	if len(statuses) == 0 {
 		lines = append(lines, dimStyle.Render("No integration status available yet. Press r to refresh."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		return renderSettingsBodyLines(lines, w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(statuses)-1)
@@ -1446,7 +1448,7 @@ func (m Model) renderSettingsIntegrationsBody(w, h int) string {
 	}
 	lines = append(lines, "  Install/configure command writes plugin/hook files and updates tool configs automatically.")
 
-	return padToSize(strings.Join(lines, "\n"), w, h)
+	return renderSettingsBodyLines(lines, w, h)
 }
 
 func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
