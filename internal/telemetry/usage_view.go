@@ -634,7 +634,8 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	}()
 
 	// Create indexes on the temp table for the aggregation queries.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_type ON %s(event_type)", tempTable))
+	// Compound (event_type, status) covers the most common WHERE pattern.
+	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_status ON %s(event_type, status)", tempTable))
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_occurred ON %s(occurred_at)", tempTable))
 
 	// Count from the materialized table.
@@ -790,6 +791,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 		  AND status != 'error'
 		GROUP BY model_key
 		ORDER BY total_tokens DESC, requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -842,6 +844,7 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 		  AND status != 'error'
 		GROUP BY source_name
 		ORDER BY requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -884,6 +887,7 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 		  AND NULLIF(TRIM(workspace_id), '') IS NOT NULL
 		GROUP BY project_name
 		ORDER BY requests DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -920,6 +924,7 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 		  AND event_type = 'tool_usage'
 		GROUP BY tool_name
 		ORDER BY calls DESC
+		LIMIT 500
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
@@ -1141,6 +1146,7 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		  AND status != 'error'
 		GROUP BY provider_name
 		ORDER BY cost_usd DESC, requests DESC
+		LIMIT 200
 	`
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {

@@ -737,8 +737,9 @@ func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, err
 		WHERE raw_event_id IN (
 			SELECT r.raw_event_id
 			FROM usage_raw_events r
-			LEFT JOIN usage_events e ON e.raw_event_id = r.raw_event_id
-			WHERE e.raw_event_id IS NULL
+			WHERE NOT EXISTS (
+				SELECT 1 FROM usage_events e WHERE e.raw_event_id = r.raw_event_id
+			)
 			ORDER BY r.ingested_at ASC
 			LIMIT ?
 		)
@@ -768,7 +769,7 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 			SELECT raw_event_id
 			FROM usage_raw_events
 			WHERE ingested_at < datetime('now', ?)
-			  AND LENGTH(source_payload) > 2
+			  AND source_payload != '{}'
 			ORDER BY ingested_at ASC
 			LIMIT ?
 		)
