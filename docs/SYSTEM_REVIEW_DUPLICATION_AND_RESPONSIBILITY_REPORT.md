@@ -22,6 +22,8 @@ These were major concerns in earlier reviews and are now materially addressed:
 - OpenRouter provider-resolution, analytics, generation, projection, and account-path monolith sprawl.
 - TUI side-effect leakage into config persistence / integration install / provider validation.
 - Ollama hot-path `time.Now()` usage in behavioral window/reset logic.
+- Shared hook ingest parsing/local fallback drift between daemon and CLI.
+- Usage-view temp-table materialization living inline in the main orchestration path.
 
 ## Findings
 
@@ -73,19 +75,7 @@ What to address:
 - projection helpers
 - telemetry-specific collectors
 
-### 4. [P2] Hook ingestion behavior is still duplicated between daemon and CLI fallback
-
-The daemon and CLI fallback paths still own overlapping hook-ingest/spool behavior. The structure is workable, but the logic can drift.
-
-Refs:
-- [server_spool.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/daemon/server_spool.go)
-- [telemetry.go](/Users/janekbaraniewski/Workspace/priv/openusage/cmd/openusage/telemetry.go)
-
-What to address:
-- Extract a shared hook ingest service.
-- Keep transport/output concerns at the command/daemon edge.
-
-### 5. [P3] Ambiguous shared-path local sources still require explicit account disambiguation
+### 4. [P3] Ambiguous shared-path local sources still require explicit account disambiguation
 
 The daemon now binds local telemetry to configured accounts when the source/account mapping is unambiguous. If multiple accounts share the same source paths, it intentionally degrades to source-scoped attribution instead of silently guessing. That is the correct behavior today, but it means truly ambiguous local multi-account setups still need an explicit binding mechanism if they become a first-class use case.
 
@@ -98,7 +88,7 @@ What to address:
 - Add persisted source/account alias mapping only if ambiguous local multi-account setups become common.
 - Keep ambiguous attribution explicit; do not reintroduce silent account guessing.
 
-### 6. [P3] Account config contract cleanup is not finished
+### 5. [P3] Account config contract cleanup is not finished
 
 The hot-path abuse of `Binary`/`BaseURL` is fixed, but the type still allows path-like runtime hints and canonical provider config to coexist ambiguously.
 
@@ -110,7 +100,7 @@ What to address:
 - Introduce a dedicated typed runtime-hints structure.
 - Retire compatibility comments and residual semantic ambiguity in `AccountConfig`.
 
-### 7. [P3] Test suites are strong but still expensive to maintain
+### 6. [P3] Test suites are strong but still expensive to maintain
 
 Some package tests remain extremely large and inline too much fixture logic.
 
@@ -126,15 +116,14 @@ What to address:
 
 ## Recommended Order
 
-1. Telemetry account identity mapping.
-2. TUI extractor/decomposition follow-through.
-3. Remaining provider monolith splits.
-4. Shared hook ingest service.
-5. Account config contract hardening.
-6. Test fixture cleanup.
+1. TUI extractor/decomposition follow-through.
+2. Remaining provider monolith splits.
+3. Telemetry account identity mapping and daemon follow-through.
+4. Account config contract hardening.
+5. Test fixture cleanup.
 
 ## Notes
 
 - The repo is in materially better shape than it was at the start of this cleanup branch.
 - The main remaining risks are now architectural and maintainability-oriented rather than immediate correctness regressions.
-- The highest near-term drift risk is the duplicated hook-ingest control flow plus the remaining metric-prefix parsing still sitting in TUI render code.
+- The highest near-term drift risk is the remaining metric-prefix parsing still sitting in TUI render code plus the size of the remaining TUI/provider units.

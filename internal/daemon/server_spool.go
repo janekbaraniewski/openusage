@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -171,27 +170,14 @@ func (s *Service) processHookSpool(ctx context.Context, dir string) {
 			continue
 		}
 
-		source, ok := providers.TelemetrySourceBySystem(raw.Source)
-		if !ok {
+		parsed, parseErr := ParseHookRequests(raw.Source, strings.TrimSpace(raw.AccountID), raw.Payload)
+		if parseErr != nil || len(parsed.Requests) == 0 {
 			_ = os.Remove(path)
 			processed++
 			continue
 		}
 
-		options, effectiveAccountID, _ := ResolveTelemetrySourceOptions(source, strings.TrimSpace(raw.AccountID))
-		reqs, parseErr := telemetry.ParseSourceHookPayload(
-			source,
-			raw.Payload,
-			options,
-			effectiveAccountID,
-		)
-		if parseErr != nil || len(reqs) == 0 {
-			_ = os.Remove(path)
-			processed++
-			continue
-		}
-
-		tally, _ := s.ingestBatch(ctx, reqs)
+		tally, _ := s.ingestBatch(ctx, parsed.Requests)
 		_ = os.Remove(path)
 		processed++
 

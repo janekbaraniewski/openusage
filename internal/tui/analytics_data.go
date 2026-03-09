@@ -202,50 +202,15 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 }
 
 func extractProviderCost(snap core.UsageSnapshot) float64 {
-	modelTotal := 0.0
-	for _, model := range core.ExtractAnalyticsModelUsage(snap) {
-		modelTotal += model.CostUSD
-	}
-	if modelTotal > 0 {
-		return modelTotal
-	}
-
-	for _, key := range []string{
-		"total_cost_usd",
-		"plan_total_spend_usd",
-		"all_time_api_cost",
-		"jsonl_total_cost_usd",
-		"today_api_cost",
-		"daily_cost_usd",
-		"5h_block_cost",
-		"block_cost_usd",
-		"individual_spend",
-		"credits",
-	} {
-		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
-			return *m.Used
-		}
-	}
-
-	return 0
+	return core.ExtractAnalyticsCostSummary(snap).TotalCostUSD
 }
 
 func extractTodayCost(snap core.UsageSnapshot) float64 {
-	for _, key := range []string{"today_api_cost", "daily_cost_usd", "today_cost", "usage_daily"} {
-		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
-			return *m.Used
-		}
-	}
-	return 0
+	return core.ExtractAnalyticsCostSummary(snap).TodayCostUSD
 }
 
 func extract7DayCost(snap core.UsageSnapshot) float64 {
-	for _, key := range []string{"7d_api_cost", "usage_weekly"} {
-		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used > 0 {
-			return *m.Used
-		}
-	}
-	return 0
+	return core.ExtractAnalyticsCostSummary(snap).WeekCostUSD
 }
 
 func extractAllModels(snap core.UsageSnapshot, provColor lipgloss.Color) []modelCostEntry {

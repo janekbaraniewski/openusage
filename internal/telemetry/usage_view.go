@@ -290,35 +290,13 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 
 func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter) (*telemetryUsageAgg, error) {
 	filterStart := time.Now()
-	agg := &telemetryUsageAgg{
-		ModelDaily:   make(map[string][]core.TimePoint),
-		SourceDaily:  make(map[string][]core.TimePoint),
-		ProjectDaily: make(map[string][]core.TimePoint),
-		ClientDaily:  make(map[string][]core.TimePoint),
-		ClientTokens: make(map[string][]core.TimePoint),
+	agg := newTelemetryUsageAgg()
+
+	matFilter, cleanup, err := materializeUsageFilter(ctx, db, filter)
+	if err != nil {
+		return nil, err
 	}
-
-	// Materialize the deduped CTE into a temp table so subsequent queries
-	// read from a flat table instead of rebuilding the 3-level CTE each time.
-	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	tempTable := "_deduped_tmp"
-
-	matStart := time.Now()
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
-	materializeSQL := fmt.Sprintf("CREATE TEMP TABLE %s AS %s SELECT * FROM deduped_usage", tempTable, usageCTE)
-	if _, err := db.ExecContext(ctx, materializeSQL, whereArgs...); err != nil {
-		return nil, fmt.Errorf("materialize deduped usage: %w", err)
-	}
-	core.Tracef("[usage_view_perf] materialize temp table: %dms (providers=%v, windowHours=%d)",
-		time.Since(matStart).Milliseconds(), filter.ProviderIDs, filter.TimeWindowHours)
-	defer func() {
-		_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
-	}()
-
-	// Create indexes on the temp table for the aggregation queries.
-	// Compound (event_type, status) covers the most common WHERE pattern.
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_status ON %s(event_type, status)", tempTable))
-	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_occurred ON %s(occurred_at)", tempTable))
+	defer cleanup()
 
 	// Count from the materialized table.
 	countStart := time.Now()
@@ -326,7 +304,7 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 		SELECT COALESCE(MAX(occurred_at), ''), COUNT(*)
 		FROM %s
 		WHERE event_type IN ('message_usage', 'tool_usage')
-	`, tempTable)
+	`, matFilter.materializedTbl)
 	if err := db.QueryRowContext(ctx, countQuery).Scan(&agg.LastOccurred, &agg.EventCount); err != nil {
 		return nil, fmt.Errorf("canonical usage count query: %w", err)
 	}
@@ -335,10 +313,6 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if agg.EventCount == 0 {
 		return agg, nil
 	}
-
-	// All subsequent queries use the materialized temp table.
-	matFilter := filter
-	matFilter.materializedTbl = tempTable
 
 	trace := func(label string) func() {
 		start := time.Now()

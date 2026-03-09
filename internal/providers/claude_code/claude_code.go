@@ -816,7 +816,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	if altProjectsDir != "" {
 		jsonlFiles = append(jsonlFiles, collectJSONLFiles(altProjectsDir)...)
 	}
-	jsonlFiles = dedupeStringSlice(jsonlFiles)
+	jsonlFiles = lo.Uniq(lo.Compact(jsonlFiles))
 	sort.Strings(jsonlFiles)
 
 	if len(jsonlFiles) == 0 {
@@ -1875,10 +1875,6 @@ func inferLanguageFromPath(path string) string {
 		return "xml"
 	}
 	return ""
-}
-
-func dedupeStringSlice(items []string) []string {
-	return lo.Uniq(lo.Compact(items))
 }
 
 func summarizeCountMap(values map[string]int, limit int) string {

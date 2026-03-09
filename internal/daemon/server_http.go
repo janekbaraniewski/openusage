@@ -11,8 +11,6 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
-	"github.com/janekbaraniewski/openusage/internal/providers"
-	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
@@ -39,11 +37,6 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing hook source")
 		return
 	}
-	source, ok := providers.TelemetrySourceBySystem(sourceName)
-	if !ok {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("unknown hook source %q", sourceName))
-		return
-	}
 
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -56,25 +49,25 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := strings.TrimSpace(r.URL.Query().Get("account_id"))
-	options, effectiveAccountID, warnings := ResolveTelemetrySourceOptions(source, accountID)
-	reqs, err := telemetry.ParseSourceHookPayload(source, payload, options, effectiveAccountID)
+	parsed, err := ParseHookRequests(sourceName, accountID, payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse hook payload: %v", err))
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(reqs) == 0 {
-		writeJSON(w, http.StatusOK, HookResponse{Source: sourceName, Warnings: warnings})
+	if len(parsed.Requests) == 0 {
+		writeJSON(w, http.StatusOK, HookResponse{Source: sourceName, Warnings: parsed.Warnings})
 		return
 	}
 
-	tally, _ := s.ingestBatch(r.Context(), reqs)
+	tally, _ := s.ingestBatch(r.Context(), parsed.Requests)
+	warnings := append([]string(nil), parsed.Warnings...)
 	if tally.failed > 0 {
 		warnings = append(warnings, fmt.Sprintf("%d ingest failures", tally.failed))
 	}
 
 	writeJSON(w, http.StatusOK, HookResponse{
 		Source:    sourceName,
-		Enqueued:  len(reqs),
+		Enqueued:  len(parsed.Requests),
 		Processed: tally.processed,
 		Ingested:  tally.ingested,
 		Deduped:   tally.deduped,
@@ -91,15 +84,15 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	if tally.failed > 0 {
 		s.warnf(logLevel,
 			"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
-			sourceName, effectiveAccountID, durationMs,
-			len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
+			sourceName, parsed.EffectiveAccountID, durationMs,
+			len(parsed.Requests), tally.processed, tally.ingested, tally.deduped, tally.failed,
 		)
 		return
 	}
 	s.infof(logLevel,
 		"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
-		sourceName, effectiveAccountID, durationMs,
-		len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
+		sourceName, parsed.EffectiveAccountID, durationMs,
+		len(parsed.Requests), tally.processed, tally.ingested, tally.deduped, tally.failed,
 	)
 }
 

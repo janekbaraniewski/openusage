@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"context"
@@ -14,7 +14,7 @@ func TestIngestHookLocally_IngestsHookPayload(t *testing.T) {
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	payload := []byte(`{"hook":"chat.message","timestamp":"2026-02-26T20:00:00Z","input":{"sessionID":"sess-1","agent":"main","messageID":"turn-1","variant":"default","model":{"providerID":"openrouter","modelID":"openai/gpt-oss-20b"}},"output":{"message":{"id":"msg-1","sessionID":"sess-1","role":"assistant"},"route":{"provider_name":"DeepInfra"},"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16,"cost_usd":0.00012}}}`)
 
-	resp, err := ingestHookLocally(context.Background(), "opencode", "openrouter", payload, dbPath, spoolDir, false)
+	resp, err := IngestHookLocally(context.Background(), "opencode", "openrouter", payload, dbPath, spoolDir, false)
 	if err != nil {
 		t.Fatalf("ingest hook locally: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestIngestHookLocally_SpoolOnly(t *testing.T) {
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	payload := []byte(`{"hook":"tool.execute.after","timestamp":"2026-02-26T20:00:00Z","input":{"tool":"glob","sessionID":"sess-1","callID":"tool-1"},"output":{"title":"Glob"}}`)
 
-	resp, err := ingestHookLocally(context.Background(), "opencode", "openrouter", payload, dbPath, spoolDir, true)
+	resp, err := IngestHookLocally(context.Background(), "opencode", "openrouter", payload, dbPath, spoolDir, true)
 	if err != nil {
 		t.Fatalf("spool-only ingest hook locally: %v", err)
 	}
