@@ -40,6 +40,7 @@ var settingsResetRe = regexp.MustCompile(`(?is)(Session usage|Weekly usage).*?da
 
 type Provider struct {
 	providerbase.Base
+	clock core.Clock
 }
 
 func New() *Provider {
@@ -64,6 +65,7 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
+		clock: core.SystemClock{},
 	}
 }
 
@@ -82,6 +84,13 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 	}
 }
 
+func (p *Provider) now() time.Time {
+	if p != nil && p.clock != nil {
+		return p.clock.Now()
+	}
+	return time.Now()
+}
+
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
 	cloudOnly := strings.EqualFold(acct.Auth, string(core.ProviderAuthTypeAPIKey))
@@ -90,6 +99,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
+	snap.Timestamp = p.now()
 	snap.DailySeries = make(map[string][]core.TimePoint)
 	hasData := false
 
@@ -147,7 +157,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	finalizeUsageWindows(&snap)
+	finalizeUsageWindows(&snap, p.now())
 
 	switch {
 	case hasData:
@@ -292,7 +302,7 @@ func (p *Provider) fetchLocalMe(ctx context.Context, baseURL string, snap *core.
 
 	switch code {
 	case http.StatusOK:
-		return applyCloudUserPayload(resp, snap), nil
+		return applyCloudUserPayload(resp, snap, p.now()), nil
 	case http.StatusUnauthorized, http.StatusForbidden:
 		if signinURL := anyStringCaseInsensitive(resp, "signin_url", "sign_in_url"); signinURL != "" {
 			snap.SetAttribute("signin_url", signinURL)
@@ -662,7 +672,7 @@ func (p *Provider) fetchDesktopDB(ctx context.Context, acct core.AccountConfig, 
 		snap.SetDiagnostic("desktop_model_usage_error", err.Error())
 	}
 
-	if err := populateEstimatedTokenUsageFromDB(ctx, db, snap); err != nil {
+	if err := populateEstimatedTokenUsageFromDB(ctx, db, snap, p.now()); err != nil {
 		snap.SetDiagnostic("desktop_token_estimate_error", err.Error())
 	}
 
@@ -699,7 +709,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 		return false, nil
 	}
 
-	now := time.Now()
+	now := p.now()
 	start5h := now.Add(-5 * time.Hour)
 	start24h := now.Add(-24 * time.Hour)
 	start7d := now.Add(-7 * 24 * time.Hour)
@@ -857,7 +867,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	switch status {
 	case http.StatusOK:
 		snap.SetAttribute("auth_type", "api_key")
-		if applyCloudUserPayload(me, snap) {
+		if applyCloudUserPayload(me, snap, p.now()) {
 			hasData = true
 		}
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -901,7 +911,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	return hasData, authFailed, limited, nil
 }
 
-func applyCloudUserPayload(payload map[string]any, snap *core.UsageSnapshot) bool {
+func applyCloudUserPayload(payload map[string]any, snap *core.UsageSnapshot, now time.Time) bool {
 	if len(payload) == 0 {
 		return false
 	}
@@ -942,20 +952,20 @@ func applyCloudUserPayload(payload map[string]any, snap *core.UsageSnapshot) boo
 		snap.SetAttribute("billing_cycle_end", billingEnd.Format(time.RFC3339))
 	}
 
-	if extractCloudUsageWindows(payload, snap) {
+	if extractCloudUsageWindows(payload, snap, now) {
 		hasData = true
 	}
 
 	return hasData
 }
 
-func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot) bool {
+func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot, now time.Time) bool {
 	var found bool
 
 	sessionKeys := []string{
 		"session_usage", "sessionusage", "usage_5h", "usagefivehour", "five_hour_usage", "fivehourusage",
 	}
-	if metric, resetAt, ok := findUsageWindow(payload, sessionKeys, "5h"); ok {
+	if metric, resetAt, ok := findUsageWindow(payload, sessionKeys, "5h", now); ok {
 		snap.Metrics["usage_five_hour"] = metric
 		if !resetAt.IsZero() {
 			snap.Resets["usage_five_hour"] = resetAt
@@ -971,7 +981,7 @@ func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot) 
 	dayKeys := []string{
 		"weekly_usage", "weeklyusage", "usage_1d", "usageoneday", "one_day_usage", "daily_usage", "dailyusage",
 	}
-	if metric, resetAt, ok := findUsageWindow(payload, dayKeys, "1d"); ok {
+	if metric, resetAt, ok := findUsageWindow(payload, dayKeys, "1d", now); ok {
 		snap.Metrics["usage_weekly"] = core.Metric{
 			Limit:     metric.Limit,
 			Remaining: metric.Remaining,
@@ -991,7 +1001,7 @@ func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot) 
 	return found
 }
 
-func findUsageWindow(payload map[string]any, keys []string, fallbackWindow string) (core.Metric, time.Time, bool) {
+func findUsageWindow(payload map[string]any, keys []string, fallbackWindow string, now time.Time) (core.Metric, time.Time, bool) {
 	sources := []map[string]any{
 		payload,
 		anyMapCaseInsensitive(payload, "usage"),
@@ -1008,7 +1018,7 @@ func findUsageWindow(payload map[string]any, keys []string, fallbackWindow strin
 			if !ok {
 				continue
 			}
-			if metric, resetAt, ok := parseUsageWindowValue(v, fallbackWindow); ok {
+			if metric, resetAt, ok := parseUsageWindowValue(v, fallbackWindow, now); ok {
 				return metric, resetAt, true
 			}
 		}
@@ -1017,7 +1027,7 @@ func findUsageWindow(payload map[string]any, keys []string, fallbackWindow strin
 	return core.Metric{}, time.Time{}, false
 }
 
-func parseUsageWindowValue(v any, fallbackWindow string) (core.Metric, time.Time, bool) {
+func parseUsageWindowValue(v any, fallbackWindow string, now time.Time) (core.Metric, time.Time, bool) {
 	if pct, ok := anyFloat(v); ok {
 		return core.Metric{
 			Used:   core.Float64Ptr(pct),
@@ -1072,7 +1082,7 @@ func parseUsageWindowValue(v any, fallbackWindow string) (core.Metric, time.Time
 		}
 		if resetAt.IsZero() {
 			if seconds, ok := anyFloatCaseInsensitive(raw, "reset_in", "reset_in_seconds", "resets_in", "seconds_to_reset"); ok && seconds > 0 {
-				resetAt = time.Now().Add(time.Duration(seconds * float64(time.Second)))
+				resetAt = now.Add(time.Duration(seconds * float64(time.Second)))
 			}
 		}
 
@@ -1084,8 +1094,8 @@ func parseUsageWindowValue(v any, fallbackWindow string) (core.Metric, time.Time
 	return core.Metric{}, time.Time{}, false
 }
 
-func finalizeUsageWindows(snap *core.UsageSnapshot) {
-	now := time.Now().In(time.Local)
+func finalizeUsageWindows(snap *core.UsageSnapshot, now time.Time) {
+	now = now.In(time.Local)
 	blockStart, blockEnd := currentFiveHourBlock(now)
 
 	// Keep usage windows strictly real-data-driven.
@@ -1525,7 +1535,7 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 	return nil
 }
 
-func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
+func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot, now time.Time) error {
 	hasThinking, err := tableHasColumn(ctx, db, "messages", "thinking")
 	if err != nil {
 		return err
@@ -1572,7 +1582,7 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 	sourceDailyRequests := make(map[string]map[string]float64)
 	sessionsBySource := make(map[string]float64)
 
-	now := time.Now().In(time.Local)
+	now = now.In(time.Local)
 	start5h := now.Add(-5 * time.Hour)
 	start1d := now.Add(-24 * time.Hour)
 	start7d := now.Add(-7 * 24 * time.Hour)
