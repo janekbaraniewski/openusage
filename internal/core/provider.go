@@ -14,27 +14,36 @@ type AccountConfig struct {
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
 	// Binary stores a CLI binary path for providers that execute a local command.
-	// Provider-specific local data paths belong in Paths. Legacy Binary-based
+	// Provider-specific local data paths belong in ProviderPaths. Legacy Binary-based
 	// data-path compatibility is handled inside the affected provider packages.
 	Binary string `json:"binary,omitempty"`
 
 	// BaseURL stores an HTTP API base URL for providers with configurable
-	// endpoints. Provider-specific local data paths belong in Paths. Legacy
+	// endpoints. Provider-specific local data paths belong in ProviderPaths. Legacy
 	// BaseURL-based data-path compatibility is handled inside provider packages.
 	BaseURL string `json:"base_url,omitempty"`
 
-	// Paths holds named provider-specific paths/URLs that are not part of the
-	// shared account contract. Keys are provider-defined (for example
+	// ProviderPaths holds named provider-specific paths/URLs that are not part
+	// of the shared account contract. Keys are provider-defined (for example
 	// "tracking_db", "state_db", "stats_cache", "account_config").
+	ProviderPaths map[string]string `json:"provider_paths,omitempty"`
+
+	// Paths is a legacy persisted alias for provider-specific paths. New code
+	// should use ProviderPaths through Path/SetPath helpers.
 	Paths map[string]string `json:"paths,omitempty"`
 
 	Token     string            `json:"-"` // runtime-only: access token (never persisted)
 	ExtraData map[string]string `json:"-"` // runtime-only: extra detection data (never persisted)
 }
 
-// Path returns the named provider-specific path. It checks Paths first,
-// then ExtraData (for backward compat with detect), then the given fallback.
+// Path returns the named provider-specific path. It checks ProviderPaths first,
+// then legacy Paths, then ExtraData (for backward compat with detect), then the fallback.
 func (c AccountConfig) Path(key, fallback string) string {
+	if c.ProviderPaths != nil {
+		if v, ok := c.ProviderPaths[key]; ok && v != "" {
+			return v
+		}
+	}
 	if c.Paths != nil {
 		if v, ok := c.Paths[key]; ok && v != "" {
 			return v
@@ -56,10 +65,39 @@ func (c *AccountConfig) SetPath(key, value string) {
 	if c == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 		return
 	}
-	if c.Paths == nil {
-		c.Paths = make(map[string]string)
+	if c.ProviderPaths == nil {
+		c.ProviderPaths = make(map[string]string)
 	}
-	c.Paths[key] = strings.TrimSpace(value)
+	c.ProviderPaths[key] = strings.TrimSpace(value)
+}
+
+// PathMap returns a merged copy of provider-local paths, preferring
+// ProviderPaths over legacy Paths.
+func (c AccountConfig) PathMap() map[string]string {
+	if len(c.ProviderPaths) == 0 && len(c.Paths) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(c.ProviderPaths)+len(c.Paths))
+	for key, value := range c.Paths {
+		trimmedKey := strings.TrimSpace(key)
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedKey == "" || trimmedValue == "" {
+			continue
+		}
+		out[trimmedKey] = trimmedValue
+	}
+	for key, value := range c.ProviderPaths {
+		trimmedKey := strings.TrimSpace(key)
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedKey == "" || trimmedValue == "" {
+			continue
+		}
+		out[trimmedKey] = trimmedValue
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (c AccountConfig) ResolveAPIKey() string {

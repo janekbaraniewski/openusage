@@ -226,6 +226,18 @@ func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 	}
 	normalized := lo.Map(in, func(acct core.AccountConfig, _ int) core.AccountConfig {
 		acct.ID = normalizeAccountID(acct.ID)
+		if len(acct.ProviderPaths) == 0 && len(acct.Paths) > 0 {
+			acct.ProviderPaths = make(map[string]string, len(acct.Paths))
+			for key, value := range acct.Paths {
+				trimmedKey := strings.TrimSpace(key)
+				trimmedValue := strings.TrimSpace(value)
+				if trimmedKey == "" || trimmedValue == "" {
+					continue
+				}
+				acct.ProviderPaths[trimmedKey] = trimmedValue
+			}
+		}
+		acct.Paths = nil
 		return acct
 	})
 	filtered := lo.Filter(normalized, func(acct core.AccountConfig, _ int) bool { return acct.ID != "" })

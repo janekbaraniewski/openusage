@@ -4,6 +4,7 @@ type AnalyticsCostSummary struct {
 	TotalCostUSD float64
 	TodayCostUSD float64
 	WeekCostUSD  float64
+	BurnRateUSD  float64
 }
 
 func ExtractAnalyticsCostSummary(s UsageSnapshot) AnalyticsCostSummary {
@@ -32,6 +33,10 @@ func ExtractAnalyticsCostSummary(s UsageSnapshot) AnalyticsCostSummary {
 			0,
 			"7d_api_cost",
 			"usage_weekly",
+		),
+		BurnRateUSD: firstPositiveMetricUsed(s,
+			0,
+			"burn_rate",
 		),
 	}
 }

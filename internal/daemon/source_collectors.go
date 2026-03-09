@@ -215,7 +215,7 @@ func collectOptionsForAccount(source shared.TelemetrySource, acct core.AccountCo
 	for key, value := range opts.Paths {
 		opts.Paths[key] = strings.TrimSpace(acct.Path(key, value))
 	}
-	for key, value := range acct.Paths {
+	for key, value := range acct.PathMap() {
 		trimmedKey := strings.TrimSpace(key)
 		trimmedValue := strings.TrimSpace(value)
 		if trimmedKey == "" || trimmedValue == "" {

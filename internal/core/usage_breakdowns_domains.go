@@ -5,6 +5,29 @@ import (
 	"strings"
 )
 
+func HasLanguageUsage(s UsageSnapshot) bool {
+	langs, _ := ExtractLanguageUsage(s)
+	return len(langs) > 0
+}
+
+func HasMCPUsage(s UsageSnapshot) bool {
+	servers, _ := ExtractMCPUsage(s)
+	return len(servers) > 0
+}
+
+func HasModelCostUsage(s UsageSnapshot) bool {
+	for key := range s.Metrics {
+		if IsModelCostMetricKey(key) {
+			return true
+		}
+	}
+	return false
+}
+
+func IncludeDetailMetricKey(key string) bool {
+	return !strings.HasPrefix(strings.TrimSpace(key), "mcp_")
+}
+
 func ExtractProjectUsage(s UsageSnapshot) ([]ProjectUsageEntry, map[string]bool) {
 	byProject := make(map[string]*ProjectUsageEntry)
 	usedKeys := make(map[string]bool)

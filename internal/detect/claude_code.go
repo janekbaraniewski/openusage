@@ -34,15 +34,18 @@ func detectClaudeCode(result *Result) {
 	if hasStats || hasAccount {
 		log.Printf("[detect] Claude Code data found (stats=%v, account=%v)", hasStats, hasAccount)
 
-		addAccount(result, core.AccountConfig{
+		acct := core.AccountConfig{
 			ID:       "claude-code",
 			Provider: "claude_code",
 			Auth:     "local",
-			Paths: map[string]string{
-				"stats_cache":    statsFile,
-				"account_config": accountFile,
-			},
-		})
+		}
+		if hasStats {
+			acct.SetPath("stats_cache", statsFile)
+		}
+		if hasAccount {
+			acct.SetPath("account_config", accountFile)
+		}
+		addAccount(result, acct)
 	} else {
 		log.Printf("[detect] Claude Code found but no stats data at expected locations")
 	}

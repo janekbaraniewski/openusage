@@ -37,6 +37,7 @@ func normalizeProviderDisplayInfoType(info providerDisplayInfo) providerDisplayI
 
 func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget) providerDisplayInfo {
 	info := providerDisplayInfo{gaugePercent: -1}
+	costSummary := core.ExtractAnalyticsCostSummary(snap)
 
 	switch snap.Status {
 	case core.StatusError:
@@ -243,8 +244,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 				detailParts = append(detailParts, fmt.Sprintf("~$%.2f", *dc.Used))
 			}
 		}
-		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *br.Used))
+		if costSummary.BurnRateUSD > 0 {
+			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", costSummary.BurnRateUSD))
 		}
 		info.detail = strings.Join(detailParts, " · ")
 		core.Tracef("[display] %s: branch=usage_five_hour used=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, *fh.Used, info.gaugePercent)
@@ -265,8 +266,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 				parts = append(parts, fmt.Sprintf("~$%.2f", *dc.Used))
 			}
 		}
-		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
-			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
+		if costSummary.BurnRateUSD > 0 {
+			parts = append(parts, fmt.Sprintf("$%.2f/h", costSummary.BurnRateUSD))
 		}
 		info.summary = strings.Join(parts, " · ")
 
@@ -304,8 +305,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 			costLabel = fmt.Sprintf("~$%.2f %s", *m.Used, tag)
 		}
 		parts := []string{costLabel}
-		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
-			parts = append(parts, fmt.Sprintf("$%.2f/h", *br.Used))
+		if costSummary.BurnRateUSD > 0 {
+			parts = append(parts, fmt.Sprintf("$%.2f/h", costSummary.BurnRateUSD))
 		}
 		info.summary = strings.Join(parts, " · ")
 
@@ -335,8 +336,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.summary = fmt.Sprintf("~$%.2f / 5h block", *m.Used)
-		if br, ok2 := snap.Metrics["burn_rate"]; ok2 && br.Used != nil {
-			info.detail = fmt.Sprintf("$%.2f/h burn rate", *br.Used)
+		if costSummary.BurnRateUSD > 0 {
+			info.detail = fmt.Sprintf("$%.2f/h burn rate", costSummary.BurnRateUSD)
 		}
 		return info
 	}
@@ -442,6 +443,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 }
 
 func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDisplayInfo) providerDisplayInfo {
+	costSummary := core.ExtractAnalyticsCostSummary(snap)
+
 	if m, ok := snap.Metrics["credit_balance"]; ok && m.Limit != nil && m.Remaining != nil {
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
@@ -509,8 +512,8 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 		if byok, ok := snap.Metrics["byok_daily"]; ok && byok.Used != nil && *byok.Used > 0 {
 			detailParts = append(detailParts, fmt.Sprintf("BYOK $%.2f", *byok.Used))
 		}
-		if burn, ok := snap.Metrics["burn_rate"]; ok && burn.Used != nil {
-			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", *burn.Used))
+		if costSummary.BurnRateUSD > 0 {
+			detailParts = append(detailParts, fmt.Sprintf("$%.2f/h", costSummary.BurnRateUSD))
 		}
 		if models := snapshotMeta(snap, "activity_models"); models != "" {
 			detailParts = append(detailParts, fmt.Sprintf("%s models", models))

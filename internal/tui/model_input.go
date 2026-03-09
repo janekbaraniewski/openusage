@@ -16,7 +16,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.tileBodyCache = make(map[string][]string)
+		m.invalidateRenderCaches()
 		return m, nil
 
 	case DaemonStatusMsg:
@@ -60,7 +60,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snapshots = msg.Snapshots
 		m.refreshing = false
-		m.tileBodyCache = make(map[string][]string)
+		m.invalidateRenderCaches()
 		if msg.RequestID > m.lastSnapshotRequestID {
 			m.lastSnapshotRequestID = msg.RequestID
 		}
@@ -398,6 +398,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.cursor = idx
 	m.tileOffset = 0
+	m.invalidateDetailCache()
 	return m, nil
 }
 
@@ -424,14 +425,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeList
 			m.detailOffset = 0
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 			return m, nil
 		case "shift+tab":
 			m.screen = m.nextScreen(-1)
 			m.mode = modeList
 			m.detailOffset = 0
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 			return m, nil
 		case "t":
+			m.invalidateRenderCaches()
 			return m, m.persistThemeCmd(CycleTheme())
 		case "w":
 			return m.cycleTimeWindow()
@@ -477,12 +481,14 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "s":
 		m.analyticsSortBy = (m.analyticsSortBy + 1) % analyticsSortCount
+		m.invalidateAnalyticsCache()
 	case "/":
 		m.analyticsFilter.active = true
 		m.analyticsFilter.text = ""
 	case "esc":
 		if m.analyticsFilter.text != "" {
 			m.analyticsFilter.text = ""
+			m.invalidateAnalyticsCache()
 		}
 	case "r":
 		m = m.requestRefresh()
@@ -496,14 +502,19 @@ func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.analyticsFilter.active = false
 	case "esc":
 		m.analyticsFilter.active = false
-		m.analyticsFilter.text = ""
+		if m.analyticsFilter.text != "" {
+			m.analyticsFilter.text = ""
+			m.invalidateAnalyticsCache()
+		}
 	case "backspace":
 		if len(m.analyticsFilter.text) > 0 {
 			m.analyticsFilter.text = m.analyticsFilter.text[:len(m.analyticsFilter.text)-1]
+			m.invalidateAnalyticsCache()
 		}
 	default:
 		if len(msg.String()) == 1 {
 			m.analyticsFilter.text += msg.String()
+			m.invalidateAnalyticsCache()
 		}
 	}
 	return m, nil
@@ -549,6 +560,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 			m.detailTab = 0
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "down", "j":
 		if m.cursor < len(ids)-1 {
@@ -556,18 +568,22 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 			m.detailTab = 0
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "pgdown", "ctrl+d":
 		if len(ids) > 0 {
 			m.cursor = clamp(m.cursor+pageStep, 0, len(ids)-1)
+			m.invalidateDetailCache()
 		}
 	case "pgup", "ctrl+u":
 		if len(ids) > 0 {
 			m.cursor = clamp(m.cursor-pageStep, 0, len(ids)-1)
+			m.invalidateDetailCache()
 		}
 	case "enter", "right", "l":
 		m.mode = modeDetail
 		m.detailOffset = 0
+		m.invalidateDetailCache()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
@@ -583,6 +599,7 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "left", "h", "backspace":
 		m.mode = modeList
+		m.invalidateDetailCache()
 	case "up", "k":
 		if m.detailOffset > 0 {
 			m.detailOffset--
@@ -597,13 +614,16 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detailTab > 0 {
 			m.detailTab--
 			m.detailOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "]":
 		m.detailTab++
 		m.detailOffset = 0
+		m.invalidateDetailCache()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.detailTab = int(msg.String()[0] - '1')
 		m.detailOffset = 0
+		m.invalidateDetailCache()
 	}
 	return m, nil
 }
@@ -614,11 +634,13 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
+		m.invalidateDetailCache()
 	case "esc":
 		m.filter.text = ""
 		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
+		m.invalidateDetailCache()
 	case "backspace":
 		if len(m.filter.text) > 0 {
 			m.filter.text = m.filter.text[:len(m.filter.text)-1]
@@ -642,21 +664,25 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= cols {
 			m.cursor -= cols
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "down", "j":
 		if m.cursor+cols < len(ids) {
 			m.cursor += cols
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "left", "h":
 		if m.cursor > 0 {
 			m.cursor--
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "right", "l":
 		if m.cursor < len(ids)-1 {
 			m.cursor++
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "pgdown", "ctrl+d":
 		if scrollModeWidget {
@@ -684,6 +710,7 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.mode = modeDetail
 		m.detailOffset = 0
+		m.invalidateDetailCache()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
@@ -692,6 +719,7 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.text = ""
 			m.cursor = 0
 			m.tileOffset = 0
+			m.invalidateDetailCache()
 		}
 	case "r":
 		m = m.requestRefresh()

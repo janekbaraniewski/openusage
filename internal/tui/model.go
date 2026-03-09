@@ -144,6 +144,8 @@ type Model struct {
 	tileOffset            int // vertical scroll offset for selected dashboard tile row
 	expandedModelMixTiles map[string]bool
 	tileBodyCache         map[string][]string
+	analyticsCache        analyticsRenderCacheEntry
+	detailCache           detailRenderCacheEntry
 
 	warnThreshold float64
 	critThreshold float64
@@ -197,6 +199,8 @@ func NewModel(
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
 		tileBodyCache:         make(map[string][]string),
+		analyticsCache:        analyticsRenderCacheEntry{},
+		detailCache:           detailRenderCacheEntry{},
 		daemon:                daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
 	}
@@ -812,7 +816,7 @@ func (m Model) renderDetailPanel(w, h int) string {
 		activeTab = 0
 	}
 
-	content := RenderDetailContent(snap, w-2, m.warnThreshold, m.critThreshold, activeTab)
+	content := m.cachedDetailContent(ids[m.cursor], snap, w-2, activeTab)
 
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
@@ -951,6 +955,7 @@ func (m Model) settingsIDs() []string {
 func (m *Model) setWidgetSections(entries []config.DashboardWidgetSection) {
 	m.widgetSections = normalizeWidgetSectionEntries(entries)
 	m.applyWidgetSectionOverrides()
+	m.invalidateTileBodyCache()
 }
 
 func normalizeWidgetSectionEntries(entries []config.DashboardWidgetSection) []config.DashboardWidgetSection {
@@ -1044,6 +1049,7 @@ func (m *Model) setWidgetSectionEntries(entries []config.DashboardWidgetSection)
 	normalized := normalizeWidgetSectionEntries(entries)
 	m.widgetSections = normalized
 	m.applyWidgetSectionOverrides()
+	m.invalidateTileBodyCache()
 }
 
 func (m Model) dashboardWidgetSectionConfigEntries() []config.DashboardWidgetSection {

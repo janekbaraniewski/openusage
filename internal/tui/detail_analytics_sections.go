@@ -75,8 +75,7 @@ func hasChartableSeries(series map[string][]core.TimePoint) bool {
 }
 
 func hasLanguageMetrics(snap core.UsageSnapshot) bool {
-	langs, _ := core.ExtractLanguageUsage(snap)
-	return len(langs) > 0
+	return core.HasLanguageUsage(snap)
 }
 
 func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
@@ -151,8 +150,7 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 }
 
 func hasMCPMetrics(snap core.UsageSnapshot) bool {
-	servers, _ := core.ExtractMCPUsage(snap)
-	return len(servers) > 0
+	return core.HasMCPUsage(snap)
 }
 
 func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
@@ -247,12 +245,7 @@ func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
 }
 
 func hasModelCostMetrics(snap core.UsageSnapshot) bool {
-	for key := range snap.Metrics {
-		if core.IsModelCostMetricKey(key) {
-			return true
-		}
-	}
-	return false
+	return core.HasModelCostUsage(snap)
 }
 
 func renderTrendsSection(sb *strings.Builder, snap core.UsageSnapshot, widget core.DashboardWidget, w int) {

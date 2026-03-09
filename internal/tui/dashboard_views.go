@@ -140,6 +140,8 @@ func (m *Model) setDashboardView(mode dashboardViewMode) {
 	m.detailOffset = 0
 	m.detailTab = 0
 	m.tileOffset = 0
+	m.invalidateTileBodyCache()
+	m.invalidateDetailCache()
 }
 
 func (m Model) nextDashboardView(step int) dashboardViewMode {

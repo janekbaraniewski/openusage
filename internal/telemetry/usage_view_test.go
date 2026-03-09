@@ -2,8 +2,6 @@ package telemetry
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,15 +14,10 @@ import (
 func float64Ptr(v float64) *float64 { return &v }
 
 func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 22, 12, 0, 0, 0, time.UTC)
-	_, err = store.Ingest(context.Background(), IngestRequest{
+	mustIngestUsageEvent(t, store, IngestRequest{
 		SourceSystem:  SourceSystem("opencode"),
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt,
@@ -42,12 +35,9 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 			CostUSD:      float64Ptr(0.012),
 			Requests:     int64Ptr(1),
 		},
-	})
-	if err != nil {
-		t.Fatalf("ingest message event: %v", err)
-	}
+	}, "ingest message event")
 
-	_, err = store.Ingest(context.Background(), IngestRequest{
+	mustIngestUsageEvent(t, store, IngestRequest{
 		SourceSystem:  SourceSystem("opencode"),
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt.Add(1 * time.Second),
@@ -62,10 +52,7 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 		TokenUsage: core.TokenUsage{
 			Requests: int64Ptr(1),
 		},
-	})
-	if err != nil {
-		t.Fatalf("ingest tool event: %v", err)
-	}
+	}, "ingest tool event")
 
 	balance := 7.92
 	snaps := map[string]core.UsageSnapshot{
@@ -105,20 +92,10 @@ func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *t
 }
 
 func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	store := NewStore(db)
-	if err := store.Init(context.Background()); err != nil {
-		t.Fatalf("init store: %v", err)
-	}
+	dbPath, db, store := openUsageViewRawTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 22, 12, 0, 0, 0, time.UTC)
-	_, err = store.Ingest(context.Background(), IngestRequest{
+	_, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("opencode"),
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt,
@@ -225,15 +202,10 @@ func TestApplyCanonicalUsageView_DedupsLegacyCrossAccountDuplicates(t *testing.T
 }
 
 func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 22, 12, 0, 0, 0, time.UTC)
-	_, err = store.Ingest(context.Background(), IngestRequest{
+	if _, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("opencode"),
 		SourceChannel: SourceChannelHook,
 		OccurredAt:    occurredAt,
@@ -251,8 +223,7 @@ func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *tes
 			CostUSD:      float64Ptr(9.99),
 			Requests:     int64Ptr(1),
 		},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("ingest message event: %v", err)
 	}
 
@@ -298,12 +269,7 @@ func TestApplyCanonicalUsageView_TelemetryOverridesModelAndDailyAnalytics(t *tes
 }
 
 func TestApplyCanonicalUsageView_FallsBackToProviderScopeForAccountView(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 23, 7, 30, 0, 0, time.UTC)
 	input := int64(77)
@@ -356,12 +322,7 @@ func TestApplyCanonicalUsageView_FallsBackToProviderScopeForAccountView(t *testi
 }
 
 func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 23, 9, 0, 0, 0, time.UTC)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -424,12 +385,7 @@ func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t
 }
 
 func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 23, 10, 0, 0, 0, time.UTC)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -525,12 +481,7 @@ func TestApplyCanonicalUsageView_TelemetryOverwritesNativeBreakdown(t *testing.T
 }
 
 func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissing(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Date(2026, 2, 23, 10, 30, 0, 0, time.UTC)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -578,12 +529,7 @@ func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissi
 }
 
 func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Now().UTC().Add(-2 * time.Minute)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -677,12 +623,7 @@ func TestParseMCPToolName_CopilotLegacyWrapper(t *testing.T) {
 }
 
 func TestApplyCanonicalUsageView_SkipsProviderBurnMetricsForCodex(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	occurredAt := time.Now().UTC()
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -731,12 +672,7 @@ func TestApplyCanonicalUsageView_SkipsProviderBurnMetricsForCodex(t *testing.T) 
 }
 
 func TestApplyCanonicalUsageView_DedupsCodexMessageUsageByTurnID(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	now := time.Now().UTC()
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -811,12 +747,7 @@ func TestApplyCanonicalUsageView_DedupsCodexMessageUsageByTurnID(t *testing.T) {
 }
 
 func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	now := time.Now().UTC()
 	if _, err := store.Ingest(context.Background(), IngestRequest{
@@ -893,12 +824,7 @@ func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing
 }
 
 func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	dbPath, store := openUsageViewTestStore(t)
 
 	now := time.Now().UTC()
 	if _, err := store.Ingest(context.Background(), IngestRequest{

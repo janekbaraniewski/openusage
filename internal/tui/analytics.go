@@ -15,25 +15,16 @@ import (
 )
 
 func (m Model) renderAnalyticsContent(w, h int) string {
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text)
-	sortProviders(data.providers, m.analyticsSortBy)
-	sortModels(data.models, m.analyticsSortBy)
-	summary := computeAnalyticsSummary(data)
-
 	var statusBuf strings.Builder
 	renderStatusBar(&statusBuf, m.analyticsSortBy, m.analyticsFilter.text, w)
 	statusStr := statusBuf.String()
 
-	hasData := data.totalCost > 0 || len(data.models) > 0 || len(data.budgets) > 0 ||
-		len(data.usageGauges) > 0 || len(data.tokenActivity) > 0 || len(data.timeSeries) > 0
-
+	content, hasData := m.cachedAnalyticsPageContent(w)
 	if !hasData {
 		empty := "\n" + dimStyle.Render("  No cost or usage data available.")
 		empty += "\n" + dimStyle.Render("  Analytics requires providers that report spend, tokens, or budgets.")
 		return statusStr + empty
 	}
-
-	content := renderAnalyticsSinglePage(data, summary, w)
 
 	lines := strings.Split(statusStr+content, "\n")
 	for len(lines) < h {

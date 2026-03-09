@@ -152,6 +152,7 @@ func (m Model) requestRefresh() Model {
 
 func (m Model) beginTimeWindowRefresh(window core.TimeWindow) Model {
 	m.timeWindow = window
+	m.invalidateRenderCaches()
 	if m.onTimeWindowChange != nil {
 		m.onTimeWindowChange(window)
 	}
