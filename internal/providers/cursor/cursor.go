@@ -1685,11 +1685,20 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 		return fmt.Errorf("state DB not accessible: %w", err)
 	}
 
+	composerRecords, err := loadComposerSessionRecords(ctx, db)
+	if err != nil {
+		log.Printf("[cursor] composerData query error: %v", err)
+	}
+	bubbleRecords, err := loadBubbleRecords(ctx, db)
+	if err != nil {
+		log.Printf("[cursor] bubbleId query error: %v", err)
+	}
+
 	p.readDailyStatsToday(ctx, db, snap)
 	p.readDailyStatsSeries(ctx, db, snap)
-	p.readComposerSessions(ctx, db, snap)
+	p.readComposerSessions(composerRecords, snap)
 	p.readStateMetadata(ctx, db, snap)
-	p.readToolUsage(ctx, db, snap)
+	p.readToolUsage(bubbleRecords, snap)
 
 	return nil
 }
@@ -1732,32 +1741,7 @@ func (p *Provider) readDailyStatsToday(ctx context.Context, db *sql.DB, snap *co
 	}
 }
 
-func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT json_extract(value, '$.usageData'),
-		       json_extract(value, '$.unifiedMode'),
-		       json_extract(value, '$.createdAt'),
-		       json_extract(value, '$.totalLinesAdded'),
-		       json_extract(value, '$.totalLinesRemoved'),
-		       json_extract(value, '$.contextTokensUsed'),
-		       json_extract(value, '$.contextTokenLimit'),
-		       json_extract(value, '$.filesChangedCount'),
-		       json_extract(value, '$.subagentInfo.subagentTypeName'),
-		       json_extract(value, '$.isAgentic'),
-		       json_extract(value, '$.forceMode'),
-		       json_extract(value, '$.addedFiles'),
-		       json_extract(value, '$.removedFiles'),
-		       json_extract(value, '$.status')
-		FROM cursorDiskKV
-		WHERE key LIKE 'composerData:%'
-		  AND json_extract(value, '$.usageData') IS NOT NULL
-		  AND json_extract(value, '$.usageData') != '{}'`)
-	if err != nil {
-		log.Printf("[cursor] composerData query error: %v", err)
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readComposerSessions(records []cursorComposerSessionRecord, snap *core.UsageSnapshot) {
 	var (
 		totalCostCents     float64
 		totalRequests      int
@@ -1787,83 +1771,50 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	for rows.Next() {
-		var usageJSON sql.NullString
-		var mode sql.NullString
-		var createdAt sql.NullInt64
-		var linesAdded sql.NullInt64
-		var linesRemoved sql.NullInt64
-		var ctxUsed sql.NullFloat64
-		var ctxLimit sql.NullFloat64
-		var filesChanged sql.NullInt64
-		var subagentType sql.NullString
-		var isAgentic sql.NullBool
-		var forceMode sql.NullString
-		var addedFiles sql.NullInt64
-		var removedFiles sql.NullInt64
-		var status sql.NullString
-		if rows.Scan(&usageJSON, &mode, &createdAt, &linesAdded, &linesRemoved,
-			&ctxUsed, &ctxLimit, &filesChanged, &subagentType,
-			&isAgentic, &forceMode, &addedFiles, &removedFiles, &status) != nil {
-			continue
-		}
-		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
-			continue
-		}
-
-		var usage map[string]composerModelUsage
-		if json.Unmarshal([]byte(usageJSON.String), &usage) != nil {
-			continue
-		}
-
+	for _, record := range records {
 		totalSessions++
-		if mode.Valid && mode.String != "" {
-			modeSessions[mode.String]++
+		if record.Mode != "" {
+			modeSessions[record.Mode]++
 		}
-		if isAgentic.Valid {
-			if isAgentic.Bool {
+		if record.IsAgentic != nil {
+			if *record.IsAgentic {
 				agenticSessions++
 			} else {
 				nonAgenticSessions++
 			}
 		}
-		if forceMode.Valid && forceMode.String != "" {
-			forceModes[forceMode.String]++
+		if record.ForceMode != "" {
+			forceModes[record.ForceMode]++
 		}
-		if status.Valid && status.String != "" {
-			statusCounts[status.String]++
+		if record.Status != "" {
+			statusCounts[record.Status]++
 		}
-		if linesAdded.Valid {
-			totalLinesAdded += int(linesAdded.Int64)
+		totalLinesAdded += record.LinesAdded
+		totalLinesRemoved += record.LinesRemoved
+		if record.FilesChanged > 0 {
+			totalFilesChanged += record.FilesChanged
 		}
-		if linesRemoved.Valid {
-			totalLinesRemoved += int(linesRemoved.Int64)
+		if record.AddedFiles > 0 {
+			totalFilesCreated += record.AddedFiles
 		}
-		if filesChanged.Valid && filesChanged.Int64 > 0 {
-			totalFilesChanged += int(filesChanged.Int64)
+		if record.RemovedFiles > 0 {
+			totalFilesRemoved += record.RemovedFiles
 		}
-		if addedFiles.Valid && addedFiles.Int64 > 0 {
-			totalFilesCreated += int(addedFiles.Int64)
-		}
-		if removedFiles.Valid && removedFiles.Int64 > 0 {
-			totalFilesRemoved += int(removedFiles.Int64)
-		}
-		if ctxUsed.Valid && ctxUsed.Float64 > 0 && ctxLimit.Valid && ctxLimit.Float64 > 0 {
-			totalContextUsed += ctxUsed.Float64
-			totalContextLimit += ctxLimit.Float64
+		if record.ContextTokensUsed > 0 && record.ContextTokenLimit > 0 {
+			totalContextUsed += record.ContextTokensUsed
+			totalContextLimit += record.ContextTokenLimit
 			contextSampleCount++
 		}
-		if subagentType.Valid && subagentType.String != "" {
-			subagentTypes[subagentType.String]++
+		if record.SubagentType != "" {
+			subagentTypes[record.SubagentType]++
 		}
 
 		var sessionDay string
-		if createdAt.Valid && createdAt.Int64 > 0 {
-			t := time.UnixMilli(createdAt.Int64)
-			sessionDay = t.In(now.Location()).Format("2006-01-02")
+		if !record.OccurredAt.IsZero() {
+			sessionDay = record.OccurredAt.In(now.Location()).Format("2006-01-02")
 		}
 
-		for model, mu := range usage {
+		for model, mu := range record.Usage {
 			totalCostCents += mu.CostInCents
 			totalRequests += mu.Amount
 			modelCosts[model] += mu.CostInCents
@@ -1873,7 +1824,7 @@ func (p *Provider) readComposerSessions(ctx context.Context, db *sql.DB, snap *c
 				dailyCost[sessionDay] += mu.CostInCents
 				dailyRequests[sessionDay] += float64(mu.Amount)
 			}
-			if createdAt.Valid && time.UnixMilli(createdAt.Int64).After(todayStart) {
+			if !record.OccurredAt.IsZero() && record.OccurredAt.After(todayStart) {
 				todayCostCents += mu.CostInCents
 				todayRequests += mu.Amount
 			}
@@ -2116,44 +2067,22 @@ func (p *Provider) readStateMetadata(ctx context.Context, db *sql.DB, snap *core
 	}
 }
 
-// readToolUsage extracts tool call statistics from the bubbleId entries
-// in cursorDiskKV. Each AI-response bubble (type=2) may contain a
-// toolFormerData object with the tool name, status, and other metadata.
-func (p *Provider) readToolUsage(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT json_extract(value, '$.toolFormerData.name') as tool_name,
-		       json_extract(value, '$.toolFormerData.status') as tool_status
-		FROM cursorDiskKV
-		WHERE key LIKE 'bubbleId:%'
-		  AND json_extract(value, '$.type') = 2
-		  AND json_extract(value, '$.toolFormerData.name') IS NOT NULL
-		  AND json_extract(value, '$.toolFormerData.name') != ''`)
-	if err != nil {
-		log.Printf("[cursor] tool usage query error: %v", err)
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readToolUsage(records []cursorBubbleRecord, snap *core.UsageSnapshot) {
 	toolCounts := make(map[string]int)
 	statusCounts := make(map[string]int)
 	var totalCalls int
 
-	for rows.Next() {
-		var toolName sql.NullString
-		var toolStatus sql.NullString
-		if rows.Scan(&toolName, &toolStatus) != nil {
-			continue
-		}
-		if !toolName.Valid || toolName.String == "" {
+	for _, record := range records {
+		if strings.TrimSpace(record.ToolName) == "" {
 			continue
 		}
 
-		name := normalizeToolName(toolName.String)
+		name := normalizeToolName(record.ToolName)
 		toolCounts[name]++
 		totalCalls++
 
-		if toolStatus.Valid && toolStatus.String != "" {
-			statusCounts[toolStatus.String]++
+		if strings.TrimSpace(record.ToolStatus) != "" {
+			statusCounts[record.ToolStatus]++
 		}
 	}
 

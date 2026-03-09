@@ -243,22 +243,28 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	}
 
 	var out []shared.TelemetryEvent
+	composerRecords, err := loadComposerSessionRecords(ctx, db)
+	if err != nil {
+		composerRecords = nil
+	}
+	bubbleRecords, err := loadBubbleRecords(ctx, db)
+	if err != nil {
+		bubbleRecords = nil
+	}
+	sessionTimestamps := composerSessionTimestampMap(composerRecords)
 
-	// Collect composer session usage events.
-	composerEvents, err := collectComposerEvents(ctx, db, dbPath)
-	if err == nil {
+	composerEvents := composerEventsFromRecords(composerRecords, dbPath)
+	if len(composerEvents) > 0 {
 		out = append(out, composerEvents...)
 	}
 
-	// Collect tool usage events from bubble data.
-	toolEvents, err := collectToolEvents(ctx, db, dbPath)
-	if err == nil {
+	toolEvents := toolEventsFromBubbleRecords(bubbleRecords, sessionTimestamps, dbPath)
+	if len(toolEvents) > 0 {
 		out = append(out, toolEvents...)
 	}
 
-	// Collect token counts from bubble entries and attach to composer sessions.
-	tokenEvents, err := collectBubbleTokenEvents(ctx, db, dbPath)
-	if err == nil {
+	tokenEvents := bubbleTokenEventsFromRecords(bubbleRecords, sessionTimestamps, dbPath)
+	if len(tokenEvents) > 0 {
 		out = append(out, tokenEvents...)
 	}
 
@@ -272,93 +278,21 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 
 	return out, nil
 }
-
-// collectComposerEvents extracts usage data from composerData entries.
-// Each composer session has a usageData map with per-model cost and request counts,
-// plus session metadata like mode, model config, and file changes.
-func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT key,
-		       json_extract(value, '$.usageData'),
-		       json_extract(value, '$.createdAt'),
-		       json_extract(value, '$.unifiedMode'),
-		       json_extract(value, '$.forceMode'),
-		       json_extract(value, '$.isAgentic'),
-		       json_extract(value, '$.totalLinesAdded'),
-		       json_extract(value, '$.totalLinesRemoved'),
-		       json_extract(value, '$.modelConfig.modelName'),
-		       json_extract(value, '$.newlyCreatedFiles'),
-		       json_extract(value, '$.addedFiles'),
-		       json_extract(value, '$.removedFiles'),
-		       json_extract(value, '$.contextTokensUsed'),
-		       json_extract(value, '$.contextTokenLimit'),
-		       json_extract(value, '$.filesChangedCount')
-		FROM cursorDiskKV
-		WHERE key LIKE 'composerData:%'
-		  AND json_extract(value, '$.usageData') IS NOT NULL
-		  AND json_extract(value, '$.usageData') != '{}'`)
-	if err != nil {
-		return nil, fmt.Errorf("cursor: querying composerData: %w", err)
-	}
-	defer rows.Close()
-
+func composerEventsFromRecords(records []cursorComposerSessionRecord, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-
-		var (
-			key             string
-			usageJSON       sql.NullString
-			createdAt       sql.NullInt64
-			mode            sql.NullString
-			forceMode       sql.NullString
-			isAgentic       sql.NullBool
-			linesAdded      sql.NullInt64
-			linesRemoved    sql.NullInt64
-			modelConfigName sql.NullString
-			newlyCreated    sql.NullString
-			addedFiles      sql.NullString
-			removedFiles    sql.NullString
-			ctxTokensUsed   sql.NullInt64
-			ctxTokenLimit   sql.NullInt64
-			filesChangedCnt sql.NullInt64
-		)
-		if err := rows.Scan(&key, &usageJSON, &createdAt, &mode, &forceMode, &isAgentic,
-			&linesAdded, &linesRemoved, &modelConfigName, &newlyCreated, &addedFiles, &removedFiles,
-			&ctxTokensUsed, &ctxTokenLimit, &filesChangedCnt); err != nil {
-			continue
-		}
-		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
-			continue
-		}
-
-		sessionID := strings.TrimPrefix(key, "composerData:")
-
-		var usage map[string]composerModelUsage
-		if json.Unmarshal([]byte(usageJSON.String), &usage) != nil {
-			continue
-		}
-
-		occurredAt := time.Now().UTC()
-		if createdAt.Valid && createdAt.Int64 > 0 {
-			occurredAt = shared.UnixAuto(createdAt.Int64)
-		}
-
-		for model, mu := range usage {
-			if mu.Amount <= 0 && mu.CostInCents <= 0 {
+	for _, record := range records {
+		for model, usage := range record.Usage {
+			if usage.Amount <= 0 && usage.CostInCents <= 0 {
 				continue
 			}
 
-			costUSD := mu.CostInCents / 100.0
-			messageID := fmt.Sprintf("cursor-composer:%s:%s", sessionID, sanitizeCursorMetricName(model))
-
+			costUSD := usage.CostInCents / 100.0
+			messageID := fmt.Sprintf("cursor-composer:%s:%s", record.SessionID, sanitizeCursorMetricName(model))
 			payload := map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
 					"table":   "cursorDiskKV",
-					"key":     key,
+					"key":     record.Key,
 				},
 				"client":        "IDE",
 				"cursor_source": "composer",
@@ -366,52 +300,49 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 			if upstream := inferProviderFromModel(model); upstream != "cursor" {
 				payload["upstream_provider"] = upstream
 			}
-			if mode.Valid && mode.String != "" {
-				payload["mode"] = mode.String
+			if record.Mode != "" {
+				payload["mode"] = record.Mode
 			}
-			if forceMode.Valid && forceMode.String != "" {
-				payload["force_mode"] = forceMode.String
+			if record.ForceMode != "" {
+				payload["force_mode"] = record.ForceMode
 			}
-			if isAgentic.Valid {
-				payload["is_agentic"] = isAgentic.Bool
+			if record.IsAgentic != nil {
+				payload["is_agentic"] = *record.IsAgentic
 			}
-			if linesAdded.Valid && linesAdded.Int64 > 0 {
-				payload["lines_added"] = linesAdded.Int64
+			if record.LinesAdded > 0 {
+				payload["lines_added"] = record.LinesAdded
 			}
-			if linesRemoved.Valid && linesRemoved.Int64 > 0 {
-				payload["lines_removed"] = linesRemoved.Int64
+			if record.LinesRemoved > 0 {
+				payload["lines_removed"] = record.LinesRemoved
 			}
-			if modelConfigName.Valid && modelConfigName.String != "" {
-				payload["model_config"] = modelConfigName.String
+			if record.ModelConfigName != "" {
+				payload["model_config"] = record.ModelConfigName
 			}
-			newFileCount := countJSONArrayItems(newlyCreated)
-			addedCount := countNullableInt(addedFiles)
-			removedCount := countNullableInt(removedFiles)
-			if newFileCount > 0 {
-				payload["newly_created_files"] = newFileCount
+			if record.NewlyCreatedFiles > 0 {
+				payload["newly_created_files"] = record.NewlyCreatedFiles
 			}
-			if addedCount > 0 {
-				payload["added_files"] = addedCount
+			if record.AddedFiles > 0 {
+				payload["added_files"] = record.AddedFiles
 			}
-			if removedCount > 0 {
-				payload["removed_files"] = removedCount
+			if record.RemovedFiles > 0 {
+				payload["removed_files"] = record.RemovedFiles
 			}
-			if ctxTokensUsed.Valid && ctxTokensUsed.Int64 > 0 {
-				payload["context_tokens_used"] = ctxTokensUsed.Int64
+			if record.ContextTokensUsed > 0 {
+				payload["context_tokens_used"] = record.ContextTokensUsed
 			}
-			if ctxTokenLimit.Valid && ctxTokenLimit.Int64 > 0 {
-				payload["context_token_limit"] = ctxTokenLimit.Int64
+			if record.ContextTokenLimit > 0 {
+				payload["context_token_limit"] = record.ContextTokenLimit
 			}
-			if filesChangedCnt.Valid && filesChangedCnt.Int64 > 0 {
-				payload["files_changed"] = filesChangedCnt.Int64
+			if record.FilesChanged > 0 {
+				payload["files_changed"] = record.FilesChanged
 			}
 
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: telemetryCursorSQLiteSchema,
 				Channel:       shared.TelemetryChannelSQLite,
-				OccurredAt:    occurredAt,
+				OccurredAt:    record.OccurredAt,
 				AccountID:     "",
-				SessionID:     sessionID,
+				SessionID:     record.SessionID,
 				MessageID:     messageID,
 				ProviderID:    "cursor",
 				AgentName:     "cursor",
@@ -419,148 +350,52 @@ func collectComposerEvents(ctx context.Context, db *sql.DB, dbPath string) ([]sh
 				ModelRaw:      model,
 				TokenUsage: core.TokenUsage{
 					CostUSD:  core.Float64Ptr(costUSD),
-					Requests: core.Int64Ptr(int64(mu.Amount)),
+					Requests: core.Int64Ptr(int64(usage.Amount)),
 				},
 				Status:  shared.TelemetryStatusOK,
 				Payload: payload,
 			})
 		}
 	}
-
-	return out, rows.Err()
+	return out
 }
 
-// collectToolEvents extracts tool call data from bubbleId entries in the
-// state database. Each AI response bubble (type=2) may contain toolFormerData.
-func collectToolEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
-	// Pre-query composerData to build a map of conversationId → createdAt
-	// so tool events can be assigned meaningful timestamps.
-	sessionTimestamps := buildSessionTimestampMap(ctx, db)
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT key,
-		       json_extract(value, '$.toolFormerData.name'),
-		       json_extract(value, '$.toolFormerData.status'),
-		       json_extract(value, '$.conversationId')
-		FROM cursorDiskKV
-		WHERE key LIKE 'bubbleId:%'
-		  AND json_extract(value, '$.type') = 2
-		  AND json_extract(value, '$.toolFormerData.name') IS NOT NULL
-		  AND json_extract(value, '$.toolFormerData.name') != ''`)
-	if err != nil {
-		return nil, fmt.Errorf("cursor: querying bubbleId tool data: %w", err)
-	}
-	defer rows.Close()
-
+func toolEventsFromBubbleRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-
-		var (
-			key            string
-			toolNameRaw    sql.NullString
-			toolStatusRaw  sql.NullString
-			conversationID sql.NullString
-		)
-		if err := rows.Scan(&key, &toolNameRaw, &toolStatusRaw, &conversationID); err != nil {
+	for _, record := range records {
+		if strings.TrimSpace(record.ToolName) == "" {
 			continue
 		}
-		if !toolNameRaw.Valid || toolNameRaw.String == "" {
-			continue
-		}
-
-		toolName := normalizeToolName(toolNameRaw.String)
-		toolCallID := strings.TrimPrefix(key, "bubbleId:")
-
-		status := shared.TelemetryStatusOK
-		if toolStatusRaw.Valid {
-			status = mapCursorToolStatus(toolStatusRaw.String)
-		}
-
-		sessionID := ""
-		if conversationID.Valid && conversationID.String != "" {
-			sessionID = conversationID.String
-		}
-
-		// Derive timestamp from the parent composer session's createdAt.
-		// If no matching session is found, use zero time so the telemetry
-		// store can handle it appropriately.
-		var occurredAt time.Time
-		if sessionID != "" {
-			if ts, ok := sessionTimestamps[sessionID]; ok {
-				occurredAt = ts
-			}
-		}
-
+		status := mapCursorToolStatus(record.ToolStatus)
+		occurredAt := sessionTimestamps[record.SessionID]
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
 			OccurredAt:    occurredAt,
 			AccountID:     "",
-			SessionID:     sessionID,
-			ToolCallID:    toolCallID,
+			SessionID:     record.SessionID,
+			ToolCallID:    record.BubbleID,
 			ProviderID:    "cursor",
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeToolUsage,
 			TokenUsage: core.TokenUsage{
 				Requests: core.Int64Ptr(1),
 			},
-			ToolName: strings.ToLower(toolName),
+			ToolName: strings.ToLower(normalizeToolName(record.ToolName)),
 			Status:   status,
 			Payload: map[string]any{
 				"source": map[string]any{
 					"db_path": dbPath,
 					"table":   "cursorDiskKV",
-					"key":     key,
+					"key":     record.Key,
 				},
 				"client":          "IDE",
-				"raw_tool_name":   toolNameRaw.String,
-				"raw_tool_status": toolStatusRaw.String,
+				"raw_tool_name":   record.ToolName,
+				"raw_tool_status": record.ToolStatus,
 			},
 		})
 	}
-
-	return out, rows.Err()
-}
-
-// buildSessionTimestampMap queries composerData entries from cursorDiskKV and
-// returns a map of sessionID (composerData key suffix) → createdAt time.
-// This is used to assign meaningful timestamps to tool events (bubbleId entries)
-// that reference a conversationId matching a composer session.
-func buildSessionTimestampMap(ctx context.Context, db *sql.DB) map[string]time.Time {
-	m := make(map[string]time.Time)
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT key, json_extract(value, '$.createdAt')
-		FROM cursorDiskKV
-		WHERE key LIKE 'composerData:%'
-		  AND json_extract(value, '$.createdAt') IS NOT NULL`)
-	if err != nil {
-		return m
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return m
-		}
-		var (
-			key       string
-			createdAt sql.NullInt64
-		)
-		if err := rows.Scan(&key, &createdAt); err != nil {
-			continue
-		}
-		if !createdAt.Valid || createdAt.Int64 <= 0 {
-			continue
-		}
-		sessionID := strings.TrimPrefix(key, "composerData:")
-		m[sessionID] = shared.UnixAuto(createdAt.Int64)
-	}
-
-	return m
+	return out
 }
 
 // appendCursorDedupEvents appends events to the output slice, deduplicating
@@ -690,83 +525,29 @@ func normalizeFileExtension(ext string) string {
 // state DB. Each AI response bubble (type=2) may have a tokenCount with
 // inputTokens/outputTokens. These are emitted as message_usage events linked
 // to their parent composer session via conversationId.
-func collectBubbleTokenEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
-	sessionTimestamps := buildSessionTimestampMap(ctx, db)
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT key,
-		       json_extract(value, '$.tokenCount.inputTokens'),
-		       json_extract(value, '$.tokenCount.outputTokens'),
-		       json_extract(value, '$.conversationId'),
-		       json_extract(value, '$.model')
-		FROM cursorDiskKV
-		WHERE key LIKE 'bubbleId:%'
-		  AND json_extract(value, '$.type') = 2
-		  AND json_extract(value, '$.tokenCount') IS NOT NULL
-		  AND json_extract(value, '$.tokenCount.inputTokens') > 0`)
-	if err != nil {
-		return nil, fmt.Errorf("cursor: querying bubbleId tokens: %w", err)
-	}
-	defer rows.Close()
-
+func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-
-		var (
-			key            string
-			inputTokens    sql.NullInt64
-			outputTokens   sql.NullInt64
-			conversationID sql.NullString
-			model          sql.NullString
-		)
-		if err := rows.Scan(&key, &inputTokens, &outputTokens, &conversationID, &model); err != nil {
+	for _, record := range records {
+		if record.InputTokens <= 0 {
 			continue
 		}
-		if !inputTokens.Valid || inputTokens.Int64 <= 0 {
-			continue
-		}
-
-		bubbleID := strings.TrimPrefix(key, "bubbleId:")
-		messageID := fmt.Sprintf("cursor-bubble-tokens:%s", bubbleID)
-
-		sessionID := ""
-		if conversationID.Valid && conversationID.String != "" {
-			sessionID = conversationID.String
-		}
-
-		var occurredAt time.Time
-		if sessionID != "" {
-			if ts, ok := sessionTimestamps[sessionID]; ok {
-				occurredAt = ts
-			}
-		}
-
-		modelRaw := ""
-		if model.Valid {
-			modelRaw = model.String
-		}
-
+		messageID := fmt.Sprintf("cursor-bubble-tokens:%s", record.BubbleID)
+		occurredAt := sessionTimestamps[record.SessionID]
 		var inTok, outTok *int64
-		if inputTokens.Valid && inputTokens.Int64 > 0 {
-			inTok = core.Int64Ptr(inputTokens.Int64)
+		inTok = core.Int64Ptr(record.InputTokens)
+		if record.OutputTokens > 0 {
+			outTok = core.Int64Ptr(record.OutputTokens)
 		}
-		if outputTokens.Valid && outputTokens.Int64 > 0 {
-			outTok = core.Int64Ptr(outputTokens.Int64)
-		}
-
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
 			OccurredAt:    occurredAt,
-			SessionID:     sessionID,
+			SessionID:     record.SessionID,
 			MessageID:     messageID,
 			ProviderID:    "cursor",
 			AgentName:     "cursor",
 			EventType:     shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:      modelRaw,
+			ModelRaw:      record.Model,
 			TokenUsage: core.TokenUsage{
 				InputTokens:  inTok,
 				OutputTokens: outTok,
@@ -777,15 +558,14 @@ func collectBubbleTokenEvents(ctx context.Context, db *sql.DB, dbPath string) ([
 				"source": map[string]any{
 					"db_path": dbPath,
 					"table":   "cursorDiskKV",
-					"key":     key,
+					"key":     record.Key,
 				},
 				"client":        "IDE",
 				"cursor_source": "composer",
 			},
 		})
 	}
-
-	return out, rows.Err()
+	return out
 }
 
 // collectDailyStatsEvents extracts daily code tracking stats from ItemTable.
@@ -956,31 +736,6 @@ type cursorDailyStats struct {
 	TabAcceptedLines       int    `json:"tabAcceptedLines"`
 	ComposerSuggestedLines int    `json:"composerSuggestedLines"`
 	ComposerAcceptedLines  int    `json:"composerAcceptedLines"`
-}
-
-// countJSONArrayItems parses a nullable string as a JSON array and returns its length.
-func countJSONArrayItems(s sql.NullString) int {
-	if !s.Valid || s.String == "" || s.String == "[]" {
-		return 0
-	}
-	var arr []any
-	if json.Unmarshal([]byte(s.String), &arr) != nil {
-		return 0
-	}
-	return len(arr)
-}
-
-// countNullableInt parses a nullable string as an integer count.
-// Handles both integer values and JSON array strings.
-func countNullableInt(s sql.NullString) int {
-	if !s.Valid || s.String == "" {
-		return 0
-	}
-	var n int
-	if _, err := fmt.Sscanf(s.String, "%d", &n); err == nil {
-		return n
-	}
-	return countJSONArrayItems(s)
 }
 
 func truncateString(s string, maxLen int) string {
