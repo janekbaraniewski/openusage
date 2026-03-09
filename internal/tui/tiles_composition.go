@@ -2215,36 +2215,14 @@ func buildProviderLanguageCompositionLines(snap core.UsageSnapshot, innerW int, 
 }
 
 func collectProviderLanguageMix(snap core.UsageSnapshot) ([]toolMixEntry, map[string]bool) {
-	byLang := make(map[string]float64)
-	usedKeys := make(map[string]bool)
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil || !strings.HasPrefix(key, "lang_") {
-			continue
-		}
-		name := strings.TrimPrefix(key, "lang_")
-		if name == "" {
-			continue
-		}
-		byLang[name] = *met.Used
-		usedKeys[key] = true
+	languageUsage, usedKeys := core.ExtractLanguageUsage(snap)
+	if len(languageUsage) == 0 {
+		return nil, usedKeys
 	}
-
-	langs := make([]toolMixEntry, 0, len(byLang))
-	for name, count := range byLang {
-		if count <= 0 {
-			continue
-		}
-		langs = append(langs, toolMixEntry{name: name, count: count})
+	langs := make([]toolMixEntry, 0, len(languageUsage))
+	for _, language := range languageUsage {
+		langs = append(langs, toolMixEntry{name: language.Name, count: language.Requests})
 	}
-
-	sort.Slice(langs, func(i, j int) bool {
-		if langs[i].count == langs[j].count {
-			return langs[i].name < langs[j].name
-		}
-		return langs[i].count > langs[j].count
-	})
-
 	return langs, usedKeys
 }
 
@@ -2500,95 +2478,33 @@ func isMCPToolMetricName(name string) bool {
 }
 
 func buildMCPUsageLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
-	usedKeys := make(map[string]bool)
-
 	type funcEntry struct {
 		name  string
 		calls float64
 	}
 	type serverEntry struct {
-		rawName string
-		name    string
-		calls   float64
-		funcs   []funcEntry
+		name  string
+		calls float64
+		funcs []funcEntry
 	}
 
-	// First pass: collect server totals.
-	serverMap := make(map[string]*serverEntry)
-	for key, m := range snap.Metrics {
-		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
-			continue
-		}
-		usedKeys[key] = true
-
-		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
-			continue
-		}
-		if strings.HasSuffix(key, "_today") {
-			continue
-		}
-
-		rest := strings.TrimPrefix(key, "mcp_")
-		if !strings.HasSuffix(rest, "_total") {
-			continue
-		}
-		rawServerName := strings.TrimSuffix(rest, "_total")
-		if rawServerName == "" {
-			continue
-		}
-		serverMap[rawServerName] = &serverEntry{
-			rawName: rawServerName,
-			name:    prettifyMCPServerName(rawServerName),
-			calls:   *m.Used,
-		}
-	}
-
-	// Second pass: collect functions for each known server.
-	for key, m := range snap.Metrics {
-		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
-			continue
-		}
-		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
-			continue
-		}
-		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_total") {
-			continue
-		}
-		rest := strings.TrimPrefix(key, "mcp_")
-		for rawServerName, srv := range serverMap {
-			prefix := rawServerName + "_"
-			if strings.HasPrefix(rest, prefix) {
-				funcName := strings.TrimPrefix(rest, prefix)
-				if funcName != "" {
-					srv.funcs = append(srv.funcs, funcEntry{
-						name:  prettifyMCPFunctionName(funcName),
-						calls: *m.Used,
-					})
-				}
-				break
-			}
-		}
-	}
-
-	// Sort servers and their functions.
-	var servers []*serverEntry
+	rawServers, usedKeys := core.ExtractMCPUsage(snap)
+	servers := make([]serverEntry, 0, len(rawServers))
 	var totalCalls float64
-	for _, srv := range serverMap {
-		sort.Slice(srv.funcs, func(i, j int) bool {
-			if srv.funcs[i].calls != srv.funcs[j].calls {
-				return srv.funcs[i].calls > srv.funcs[j].calls
-			}
-			return srv.funcs[i].name < srv.funcs[j].name
-		})
-		servers = append(servers, srv)
-		totalCalls += srv.calls
-	}
-	sort.Slice(servers, func(i, j int) bool {
-		if servers[i].calls != servers[j].calls {
-			return servers[i].calls > servers[j].calls
+	for _, rawServer := range rawServers {
+		server := serverEntry{
+			name:  prettifyMCPServerName(rawServer.RawName),
+			calls: rawServer.Calls,
 		}
-		return servers[i].name < servers[j].name
-	})
+		for _, rawFunc := range rawServer.Functions {
+			server.funcs = append(server.funcs, funcEntry{
+				name:  prettifyMCPFunctionName(rawFunc.RawName),
+				calls: rawFunc.Calls,
+			})
+		}
+		servers = append(servers, server)
+		totalCalls += server.calls
+	}
 
 	if len(servers) == 0 || totalCalls <= 0 {
 		return nil, usedKeys

@@ -883,37 +883,19 @@ func hasChartableSeries(series map[string][]core.TimePoint) bool {
 
 // hasLanguageMetrics checks if the snapshot contains lang_ metric keys.
 func hasLanguageMetrics(snap core.UsageSnapshot) bool {
-	for key := range snap.Metrics {
-		if strings.HasPrefix(key, "lang_") {
-			return true
-		}
-	}
-	return false
+	langs, _ := core.ExtractLanguageUsage(snap)
+	return len(langs) > 0
 }
 
 func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
-	type langEntry struct {
-		name  string
-		count float64
-	}
-
-	var langs []langEntry
-	for key, m := range snap.Metrics {
-		if !strings.HasPrefix(key, "lang_") || m.Used == nil {
-			continue
-		}
-		name := strings.TrimPrefix(key, "lang_")
-		langs = append(langs, langEntry{name: name, count: *m.Used})
-	}
-	sort.Slice(langs, func(i, j int) bool { return langs[i].count > langs[j].count })
-
+	langs, _ := core.ExtractLanguageUsage(snap)
 	if len(langs) == 0 {
 		return
 	}
 
 	total := float64(0)
 	for _, l := range langs {
-		total += l.count
+		total += l.Requests
 	}
 	if total <= 0 {
 		return
@@ -927,9 +909,9 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 	var items []chartItem
 	for _, l := range langs {
 		items = append(items, chartItem{
-			Label: l.name,
-			Value: l.count,
-			Color: stableModelColor("lang:"+l.name, "languages"),
+			Label: l.Name,
+			Value: l.Requests,
+			Color: stableModelColor("lang:"+l.Name, "languages"),
 		})
 	}
 
@@ -968,8 +950,8 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 			bar, track, pctStr, countStr))
 	}
 
-	if len(snap.Metrics) > maxShow {
-		remaining := len(snap.Metrics) - maxShow
+	if len(langs) > maxShow {
+		remaining := len(langs) - maxShow
 		if remaining > 0 {
 			sb.WriteString("  " + dimStyle.Render(fmt.Sprintf("+ %d more languages", remaining)) + "\n")
 		}
@@ -978,102 +960,45 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 
 // hasMCPMetrics checks if the snapshot contains any MCP metric keys.
 func hasMCPMetrics(snap core.UsageSnapshot) bool {
-	for key := range snap.Metrics {
-		if strings.HasPrefix(key, "mcp_") {
-			return true
-		}
-	}
-	return false
+	servers, _ := core.ExtractMCPUsage(snap)
+	return len(servers) > 0
 }
 
 // renderMCPSection renders MCP server and function call metrics.
 // Uses prettifyMCPServerName/prettifyMCPFunctionName from tiles.go (same package).
 func renderMCPSection(sb *strings.Builder, snap core.UsageSnapshot, w int) {
-	type mcpFunc struct {
+	rawServers, _ := core.ExtractMCPUsage(snap)
+	servers := make([]struct {
 		name  string
 		calls float64
-	}
-	type mcpServer struct {
-		rawName string
-		name    string
-		calls   float64
-		funcs   []mcpFunc
-	}
-
-	// Collect server totals from metrics.
-	serverMap := make(map[string]*mcpServer)
-	for key, m := range snap.Metrics {
-		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
-			continue
+		funcs []struct {
+			name  string
+			calls float64
 		}
-		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
-			continue
-		}
-		if strings.HasSuffix(key, "_today") {
-			continue
-		}
-
-		rest := strings.TrimPrefix(key, "mcp_")
-
-		if strings.HasSuffix(rest, "_total") {
-			rawServerName := strings.TrimSuffix(rest, "_total")
-			if rawServerName == "" {
-				continue
+	}, 0, len(rawServers))
+	for _, rawServer := range rawServers {
+		server := struct {
+			name  string
+			calls float64
+			funcs []struct {
+				name  string
+				calls float64
 			}
-			serverMap[rawServerName] = &mcpServer{
-				rawName: rawServerName,
-				name:    prettifyMCPServerName(rawServerName),
-				calls:   *m.Used,
-			}
+		}{
+			name:  prettifyMCPServerName(rawServer.RawName),
+			calls: rawServer.Calls,
 		}
+		for _, rawFunc := range rawServer.Functions {
+			server.funcs = append(server.funcs, struct {
+				name  string
+				calls float64
+			}{
+				name:  prettifyMCPFunctionName(rawFunc.RawName),
+				calls: rawFunc.Calls,
+			})
+		}
+		servers = append(servers, server)
 	}
-
-	// Second pass: collect functions for each known server.
-	for key, m := range snap.Metrics {
-		if !strings.HasPrefix(key, "mcp_") || m.Used == nil {
-			continue
-		}
-		if key == "mcp_calls_total" || key == "mcp_calls_total_today" || key == "mcp_servers_active" {
-			continue
-		}
-		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_total") {
-			continue
-		}
-
-		rest := strings.TrimPrefix(key, "mcp_")
-		for rawServerName, srv := range serverMap {
-			prefix := rawServerName + "_"
-			if strings.HasPrefix(rest, prefix) {
-				funcName := strings.TrimPrefix(rest, prefix)
-				if funcName != "" {
-					srv.funcs = append(srv.funcs, mcpFunc{
-						name:  prettifyMCPFunctionName(funcName),
-						calls: *m.Used,
-					})
-				}
-				break
-			}
-		}
-	}
-
-	// Sort servers by calls desc.
-	servers := make([]*mcpServer, 0, len(serverMap))
-	for _, srv := range serverMap {
-		sort.Slice(srv.funcs, func(i, j int) bool {
-			if srv.funcs[i].calls != srv.funcs[j].calls {
-				return srv.funcs[i].calls > srv.funcs[j].calls
-			}
-			return srv.funcs[i].name < srv.funcs[j].name
-		})
-		servers = append(servers, srv)
-	}
-	sort.Slice(servers, func(i, j int) bool {
-		if servers[i].calls != servers[j].calls {
-			return servers[i].calls > servers[j].calls
-		}
-		return servers[i].name < servers[j].name
-	})
-
 	if len(servers) == 0 {
 		return
 	}
