@@ -5,7 +5,7 @@ Repository: `/Users/janekbaraniewski/Workspace/priv/openusage`
 
 ## Scope
 
-This is a refreshed architecture review after the dashboard race fix, daemon/read-model cleanup, provider parser consolidation, and the recent Cursor/OpenRouter/Ollama/Codex/Claude Code/TUI refactors on branch `feat/dashboard-race-parser-cleanups`.
+This is a refreshed architecture review after the dashboard race fix, daemon/read-model cleanup, provider parser consolidation, telemetry collector splits, and the recent Cursor/OpenRouter/Ollama/Z.AI/Codex/Claude Code/TUI refactors on branch `feat/dashboard-race-parser-cleanups`.
 
 The goal of this report is not to restate already-fixed issues. It documents the meaningful problems still left in the current tree.
 
@@ -23,10 +23,14 @@ These were major concerns in earlier reviews and are now materially addressed:
 - Claude Code local file readers, model-summary helpers, and conversation aggregation concentrated in one provider file.
 - Copilot GitHub API fetch/quota/org-metrics flow concentrated in the same file as local log/session parsing.
 - Copilot local config/log/session parsing concentrated in the same file as provider orchestration.
+- Copilot telemetry JSONL/session-store/log parsing concentrated in one collector file.
+- OpenCode telemetry event-file/SQLite/hook parsing concentrated in one collector file.
 - OpenRouter provider-resolution, analytics, generation, projection, and account-path monolith sprawl.
 - TUI side-effect leakage into config persistence / integration install / provider validation.
 - Settings modal layout/render wrapper living inline with settings state/input handling.
+- Tile composition provider/client/tool sections living in one large file.
 - Ollama hot-path `time.Now()` usage in behavioral window/reset logic.
+- Z.AI monitor helpers and usage extraction/payload parsing concentrated in one provider file.
 - Shared hook ingest parsing/local fallback drift between daemon and CLI.
 - Usage-view temp-table materialization and aggregate query fanout living inline in the main orchestration path.
 
@@ -34,13 +38,16 @@ These were major concerns in earlier reviews and are now materially addressed:
 
 ### 1. [P2] TUI rendering and state handling are still concentrated in a few very large files
 
-The TUI is much better than before, and provider tile display-summary logic no longer lives inline in `model.go`, while the settings modal layout wrapper now lives in its own file. Tile-body derivation is cached now as well. But [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go), and the remaining settings modal render sections are still large enough that unrelated concerns move together.
+The TUI is much better than before, and provider tile display-summary logic no longer lives inline in `model.go`, while the settings modal layout wrapper now lives in its own file. Tile-body derivation is cached now, and provider/client/tool composition sections are split out of the main composition file. But [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [analytics.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/analytics.go), and the remaining settings modal render sections are still large enough that unrelated concerns move together.
 
 Refs:
 - [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go)
 - [model_display_info.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model_display_info.go)
 - [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go)
 - [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go)
+- [tiles_composition_providers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition_providers.go)
+- [tiles_composition_clients.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition_clients.go)
+- [tiles_composition_tools.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition_tools.go)
 - [settings_modal.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/settings_modal.go)
 - [settings_modal_layout.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/settings_modal_layout.go)
 
@@ -80,20 +87,26 @@ What to address:
 
 ### 4. [P2] Several providers are still large mixed-responsibility units
 
-Cursor, OpenRouter, Codex, Copilot, and Claude Code are now in much better shape, but several providers still remain monoliths that mix transport, parsing, normalization, and projection in one place.
+Cursor, OpenRouter, Codex, Copilot, Claude Code, and Z.AI are now in much better shape, and the OpenCode/Copilot telemetry collectors are split as well. The remaining larger provider concentration is now mostly in Ollama and Gemini CLI.
 
 Refs:
 - [ollama.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/ollama/ollama.go)
-- [zai.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/zai/zai.go)
+- [local_paths.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/ollama/local_paths.go)
+- [server_log_parse.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/ollama/server_log_parse.go)
 - [gemini_cli.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/gemini_cli/gemini_cli.go)
-- [copilot.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/copilot.go)
-- [api_data.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/api_data.go)
-- [local_data.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/local_data.go)
-- [local_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/local_helpers.go)
-- [claude_code.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/claude_code.go)
-- [local_files.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_files.go)
-- [local_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_helpers.go)
-- [conversation_usage.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/conversation_usage.go)
+- [session_usage.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/gemini_cli/session_usage.go)
+- [zai.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/zai/zai.go)
+- [monitor_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/zai/monitor_helpers.go)
+- [usage_extract.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/zai/usage_extract.go)
+- [usage_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/zai/usage_helpers.go)
+- [telemetry.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/opencode/telemetry.go)
+- [telemetry_event_file.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/opencode/telemetry_event_file.go)
+- [telemetry_sqlite.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/opencode/telemetry_sqlite.go)
+- [telemetry_hooks.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/opencode/telemetry_hooks.go)
+- [telemetry.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/telemetry.go)
+- [telemetry_session_file.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/telemetry_session_file.go)
+- [telemetry_session_store.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/telemetry_session_store.go)
+- [telemetry_logs.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/telemetry_logs.go)
 
 What to address:
 - Split by concern, not by arbitrary line count:
@@ -154,4 +167,4 @@ What to address:
 
 - The repo is in materially better shape than it was at the start of this cleanup branch.
 - The main remaining risks are now architectural and maintainability-oriented rather than immediate correctness regressions.
-- The highest near-term drift risk is the remaining metric-prefix parsing still sitting in TUI render code plus the size of the remaining TUI/provider units.
+- The highest near-term drift risk is the remaining analytics/detail metric-prefix parsing still sitting in UI render code plus the size of the remaining TUI/provider units.
