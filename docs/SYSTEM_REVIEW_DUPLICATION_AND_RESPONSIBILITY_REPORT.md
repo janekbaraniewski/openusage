@@ -23,7 +23,7 @@ These were major concerns in earlier reviews and are now materially addressed:
 - TUI side-effect leakage into config persistence / integration install / provider validation.
 - Ollama hot-path `time.Now()` usage in behavioral window/reset logic.
 - Shared hook ingest parsing/local fallback drift between daemon and CLI.
-- Usage-view temp-table materialization living inline in the main orchestration path.
+- Usage-view temp-table materialization and aggregate query fanout living inline in the main orchestration path.
 
 ## Findings
 
@@ -56,7 +56,21 @@ What to address:
 - Promote remaining analytics/detail extractors into `internal/core`.
 - Keep renderers as display adapters over typed sections.
 
-### 3. [P2] Several providers are still large mixed-responsibility units
+### 3. [P2] Telemetry usage-view orchestration is smaller, but still centralized
+
+The usage-view path is much cleaner after helper, projection, query, materialization, and aggregate-fanout splits, but the top-level file still coordinates source selection, cache/application flow, and final snapshot application in one place.
+
+Refs:
+- [usage_view.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/telemetry/usage_view.go)
+- [usage_view_materialize.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/telemetry/usage_view_materialize.go)
+- [usage_view_aggregate.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/telemetry/usage_view_aggregate.go)
+- [usage_view_projection.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/telemetry/usage_view_projection.go)
+
+What to address:
+- Keep future telemetry work inside the split helper units.
+- Only split the remaining coordinator path further if new behavior starts coupling unrelated concerns again.
+
+### 4. [P2] Several providers are still large mixed-responsibility units
 
 Cursor and OpenRouter are now in much better shape, but several other providers remain monoliths that mix transport, parsing, normalization, and projection in one place.
 
@@ -75,7 +89,7 @@ What to address:
 - projection helpers
 - telemetry-specific collectors
 
-### 4. [P3] Ambiguous shared-path local sources still require explicit account disambiguation
+### 5. [P3] Ambiguous shared-path local sources still require explicit account disambiguation
 
 The daemon now binds local telemetry to configured accounts when the source/account mapping is unambiguous. If multiple accounts share the same source paths, it intentionally degrades to source-scoped attribution instead of silently guessing. That is the correct behavior today, but it means truly ambiguous local multi-account setups still need an explicit binding mechanism if they become a first-class use case.
 
@@ -88,7 +102,7 @@ What to address:
 - Add persisted source/account alias mapping only if ambiguous local multi-account setups become common.
 - Keep ambiguous attribution explicit; do not reintroduce silent account guessing.
 
-### 5. [P3] Account config contract cleanup is not finished
+### 6. [P3] Account config contract cleanup is not finished
 
 The hot-path abuse of `Binary`/`BaseURL` is fixed, but the type still allows path-like runtime hints and canonical provider config to coexist ambiguously.
 
@@ -100,7 +114,7 @@ What to address:
 - Introduce a dedicated typed runtime-hints structure.
 - Retire compatibility comments and residual semantic ambiguity in `AccountConfig`.
 
-### 6. [P3] Test suites are strong but still expensive to maintain
+### 7. [P3] Test suites are strong but still expensive to maintain
 
 Some package tests remain extremely large and inline too much fixture logic.
 
@@ -117,10 +131,11 @@ What to address:
 ## Recommended Order
 
 1. TUI extractor/decomposition follow-through.
-2. Remaining provider monolith splits.
-3. Telemetry account identity mapping and daemon follow-through.
-4. Account config contract hardening.
-5. Test fixture cleanup.
+2. Telemetry and TUI decomposition follow-through.
+3. Remaining provider monolith splits.
+4. Telemetry account identity mapping and daemon follow-through.
+5. Account config contract hardening.
+6. Test fixture cleanup.
 
 ## Notes
 
