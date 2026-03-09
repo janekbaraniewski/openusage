@@ -20,7 +20,7 @@ These were major concerns in earlier reviews and are now materially addressed:
 - Cursor parser/SQLite duplication across dashboard and telemetry paths.
 - Codex and Claude Code raw parser duplication.
 - Codex live/session flow concentrated in one provider file.
-- Claude Code local file readers and model-summary helpers concentrated in one provider file.
+- Claude Code local file readers, model-summary helpers, and conversation aggregation concentrated in one provider file.
 - Copilot GitHub API fetch/quota/org-metrics flow concentrated in the same file as local log/session parsing.
 - Copilot local config/log/session parsing concentrated in the same file as provider orchestration.
 - OpenRouter provider-resolution, analytics, generation, projection, and account-path monolith sprawl.
@@ -34,7 +34,7 @@ These were major concerns in earlier reviews and are now materially addressed:
 
 ### 1. [P2] TUI rendering and state handling are still concentrated in a few very large files
 
-The TUI is much better than before, and provider tile display-summary logic no longer lives inline in `model.go`, while the settings modal layout wrapper now lives in its own file. But [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go), and the remaining settings modal render sections are still large enough that unrelated concerns move together.
+The TUI is much better than before, and provider tile display-summary logic no longer lives inline in `model.go`, while the settings modal layout wrapper now lives in its own file. Tile-body derivation is cached now as well. But [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go), and the remaining settings modal render sections are still large enough that unrelated concerns move together.
 
 Refs:
 - [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go)
@@ -80,7 +80,7 @@ What to address:
 
 ### 4. [P2] Several providers are still large mixed-responsibility units
 
-Cursor, OpenRouter, Codex, and Copilot are now in much better shape, Claude Code has started the same split, but several providers still remain monoliths that mix transport, parsing, normalization, and projection in one place.
+Cursor, OpenRouter, Codex, Copilot, and Claude Code are now in much better shape, but several providers still remain monoliths that mix transport, parsing, normalization, and projection in one place.
 
 Refs:
 - [ollama.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/ollama/ollama.go)
@@ -93,6 +93,7 @@ Refs:
 - [claude_code.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/claude_code.go)
 - [local_files.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_files.go)
 - [local_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_helpers.go)
+- [conversation_usage.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/conversation_usage.go)
 
 What to address:
 - Split by concern, not by arbitrary line count:

@@ -143,6 +143,7 @@ type Model struct {
 	detailTab             int // active tab index in the detail panel (0=All)
 	tileOffset            int // vertical scroll offset for selected dashboard tile row
 	expandedModelMixTiles map[string]bool
+	tileBodyCache         map[string][]string
 
 	warnThreshold float64
 	critThreshold float64
@@ -195,6 +196,7 @@ func NewModel(
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
+		tileBodyCache:         make(map[string][]string),
 		daemon:                daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
 	}

@@ -16,6 +16,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.tileBodyCache = make(map[string][]string)
 		return m, nil
 
 	case DaemonStatusMsg:
@@ -59,6 +60,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snapshots = msg.Snapshots
 		m.refreshing = false
+		m.tileBodyCache = make(map[string][]string)
 		if msg.RequestID > m.lastSnapshotRequestID {
 			m.lastSnapshotRequestID = msg.RequestID
 		}
