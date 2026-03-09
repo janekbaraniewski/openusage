@@ -28,6 +28,7 @@ import (
 
 type Service struct {
 	cfg Config
+	ctx context.Context
 
 	store        *telemetry.Store
 	pipeline     *telemetry.Pipeline
@@ -100,6 +101,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 
 	svc := &Service{
 		cfg:          cfg,
+		ctx:          ctx,
 		store:        store,
 		pipeline:     telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
 		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
@@ -318,6 +320,13 @@ func (s *Service) refreshReadModelCacheAsync(
 	}()
 }
 
+func (s *Service) backgroundContext() context.Context {
+	if s != nil && s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
 func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	if s == nil {
 		return
@@ -387,7 +396,7 @@ func (s *Service) runSpoolMaintenanceLoop(ctx context.Context) {
 
 	s.infof("spool_loop_start", "flush_interval=%s cleanup_interval=%s", 5*time.Second, 60*time.Second)
 	s.flushSpoolBacklog(ctx, 10000)
-	s.cleanupSpool(ctx)
+	s.cleanupSpool()
 
 	for {
 		select {
@@ -397,7 +406,7 @@ func (s *Service) runSpoolMaintenanceLoop(ctx context.Context) {
 		case <-flushTicker.C:
 			s.flushSpoolBacklog(ctx, 10000)
 		case <-cleanupTicker.C:
-			s.cleanupSpool(ctx)
+			s.cleanupSpool()
 		}
 	}
 }
@@ -423,7 +432,7 @@ func (s *Service) flushSpoolBacklog(ctx context.Context, maxTotal int) {
 	}
 }
 
-func (s *Service) cleanupSpool(ctx context.Context) {
+func (s *Service) cleanupSpool() {
 	if s == nil || strings.TrimSpace(s.cfg.SpoolDir) == "" {
 		return
 	}
@@ -1105,7 +1114,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
-			s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
+			s.refreshReadModelCacheAsync(s.backgroundContext(), cacheKey, req, 60*time.Second)
 		}
 		return
 	}
@@ -1123,7 +1132,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
 	}
 
-	s.refreshReadModelCacheAsync(context.Background(), cacheKey, req, 60*time.Second)
+	s.refreshReadModelCacheAsync(s.backgroundContext(), cacheKey, req, 60*time.Second)
 	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()
