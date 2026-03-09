@@ -29,10 +29,11 @@ These were major concerns in earlier reviews and are now materially addressed:
 
 ### 1. [P2] TUI rendering and state handling are still concentrated in a few very large files
 
-The TUI is much better than before, but [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go), and [settings_modal.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/settings_modal.go) are still large enough that unrelated concerns move together.
+The TUI is much better than before, and provider tile display-summary logic no longer lives inline in `model.go`, but [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go), [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go), [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go), and [settings_modal.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/settings_modal.go) are still large enough that unrelated concerns move together.
 
 Refs:
 - [model.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model.go)
+- [model_display_info.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/model_display_info.go)
 - [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go)
 - [tiles_composition.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/tiles_composition.go)
 - [settings_modal.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/settings_modal.go)
@@ -44,13 +45,14 @@ What to address:
 
 ### 2. [P2] Some analytics/detail sections still decode raw metric-key conventions in UI code
 
-The major composition and token-table paths now use shared extractors, but analytics/detail still contain pockets of renderer-owned key interpretation. That is better than before, but it is still a drift vector.
+The major composition paths, provider tile fallback/rate-limit selection, and token-table paths now use shared extractors, but analytics/detail still contain pockets of renderer-owned key interpretation. That is better than before, but it is still a drift vector.
 
 Refs:
 - [analytics.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/analytics.go)
 - [detail.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/tui/detail.go)
 - [usage_breakdowns.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/core/usage_breakdowns.go)
 - [analytics_snapshot.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/core/analytics_snapshot.go)
+- [dashboard_display_metrics.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/core/dashboard_display_metrics.go)
 
 What to address:
 - Promote remaining analytics/detail extractors into `internal/core`.
