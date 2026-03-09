@@ -61,9 +61,6 @@ func TestLoadFrom_MissingFile(t *testing.T) {
 }
 
 func TestLoadFrom_ValidFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.json")
-
 	content := `{
   "ui": {
     "refresh_interval_seconds": 10,
@@ -87,14 +84,7 @@ func TestLoadFrom_ValidFile(t *testing.T) {
     }
   ]
 }`
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("writing test config: %v", err)
-	}
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		t.Fatalf("LoadFrom() error: %v", err)
-	}
+	cfg := loadConfigJSON(t, content)
 
 	if cfg.UI.RefreshIntervalSeconds != 10 {
 		t.Errorf("refresh = %d, want 10", cfg.UI.RefreshIntervalSeconds)
@@ -120,14 +110,7 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 }
 
 func TestLoadFrom_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.json")
-
-	if err := os.WriteFile(path, []byte(`{not json`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(path)
+	cfg, err := LoadFrom(writeSettingsJSON(t, `{not json`))
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -137,36 +120,14 @@ func TestLoadFrom_InvalidJSON(t *testing.T) {
 }
 
 func TestLoadFrom_EmptyThemeFallsBackToDefault(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.json")
-
-	data := []byte(`{"theme":"","experimental":{"analytics":true}}`)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	cfg := loadConfigJSON(t, `{"theme":"","experimental":{"analytics":true}}`)
 	if cfg.Theme != "Gruvbox" {
 		t.Errorf("expected default theme for empty string, got %q", cfg.Theme)
 	}
 }
 
 func TestLoadFrom_ZeroThresholdsGetDefaults(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.json")
-
-	data := []byte(`{"ui":{"refresh_interval_seconds":0,"warn_threshold":0,"crit_threshold":0}}`)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	cfg := loadConfigJSON(t, `{"ui":{"refresh_interval_seconds":0,"warn_threshold":0,"crit_threshold":0}}`)
 	if cfg.UI.RefreshIntervalSeconds != 30 {
 		t.Errorf("refresh = %d, want 30 (default for zero)", cfg.UI.RefreshIntervalSeconds)
 	}
@@ -729,30 +690,14 @@ func TestSaveDashboardHideSectionsWithNoDataTo(t *testing.T) {
 }
 
 func TestLoadFrom_DashboardViewTabs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"tabs"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfigJSON(t, `{"dashboard":{"view":"tabs"}}`)
 	if cfg.Dashboard.View != DashboardViewTabs {
 		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewTabs)
 	}
 }
 
 func TestLoadFrom_DashboardLegacyListMapsToSplit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"list"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfigJSON(t, `{"dashboard":{"view":"list"}}`)
 	if cfg.Dashboard.View != DashboardViewSplit {
 		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
 	}

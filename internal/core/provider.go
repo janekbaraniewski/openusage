@@ -13,19 +13,19 @@ type AccountConfig struct {
 	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
-	// Binary stores a CLI binary path (copilot, gemini_cli) or a primary data
-	// file path (cursor tracking DB, claude_code stats-cache.json).
-	// Prefer using Paths for new providers.
+	// Binary stores a CLI binary path for providers that execute a local command.
+	// Provider-specific local data paths belong in Paths. Legacy Binary-based
+	// data-path compatibility is handled inside the affected provider packages.
 	Binary string `json:"binary,omitempty"`
 
-	// BaseURL stores an API base URL (openrouter, codex, ollama) or a secondary
-	// data file path (cursor state.vscdb, claude_code .claude.json).
-	// Prefer using Paths for new providers.
+	// BaseURL stores an HTTP API base URL for providers with configurable
+	// endpoints. Provider-specific local data paths belong in Paths. Legacy
+	// BaseURL-based data-path compatibility is handled inside provider packages.
 	BaseURL string `json:"base_url,omitempty"`
 
-	// Paths holds named provider-specific paths/URLs, replacing the overloaded
-	// Binary and BaseURL fields. Keys are provider-defined (e.g. "tracking_db",
-	// "state_db", "stats_cache", "account_config").
+	// Paths holds named provider-specific paths/URLs that are not part of the
+	// shared account contract. Keys are provider-defined (for example
+	// "tracking_db", "state_db", "stats_cache", "account_config").
 	Paths map[string]string `json:"paths,omitempty"`
 
 	Token     string            `json:"-"` // runtime-only: access token (never persisted)
