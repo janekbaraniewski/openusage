@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 type modelMixEntry struct {
@@ -961,23 +960,6 @@ func mergeSeriesByDay(seriesByClient map[string]map[string]float64, client strin
 		}
 		seriesByClient[client][point.Date] += point.Value
 	}
-}
-
-func sortedSeriesFromByDay(pointsByDay map[string]float64) []core.TimePoint {
-	if len(pointsByDay) == 0 {
-		return nil
-	}
-	days := lo.Keys(pointsByDay)
-	sort.Strings(days)
-
-	points := make([]core.TimePoint, 0, len(days))
-	for _, day := range days {
-		points = append(points, core.TimePoint{
-			Date:  day,
-			Value: pointsByDay[day],
-		})
-	}
-	return points
 }
 
 func limitClientMix(clients []clientMixEntry, expanded bool, maxVisible int) ([]clientMixEntry, int) {

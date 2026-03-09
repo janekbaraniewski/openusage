@@ -62,31 +62,6 @@ func (c *AccountConfig) SetPath(key, value string) {
 	c.Paths[key] = strings.TrimSpace(value)
 }
 
-// NormalizeRuntimePaths migrates legacy provider-specific path overloads out of
-// Binary/BaseURL into Paths so runtime code can use a single access pattern.
-func (c *AccountConfig) NormalizeRuntimePaths() {
-	if c == nil {
-		return
-	}
-
-	switch strings.TrimSpace(c.Provider) {
-	case "cursor":
-		if strings.TrimSpace(c.Binary) != "" {
-			c.SetPath("tracking_db", c.Binary)
-		}
-		if strings.TrimSpace(c.BaseURL) != "" {
-			c.SetPath("state_db", c.BaseURL)
-		}
-	case "claude_code":
-		if strings.TrimSpace(c.Binary) != "" {
-			c.SetPath("stats_cache", c.Binary)
-		}
-		if strings.TrimSpace(c.BaseURL) != "" {
-			c.SetPath("account_config", c.BaseURL)
-		}
-	}
-}
-
 func (c AccountConfig) ResolveAPIKey() string {
 	if c.Token != "" {
 		return c.Token

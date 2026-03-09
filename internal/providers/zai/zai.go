@@ -1139,9 +1139,9 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	setUsedMetric(snap, "active_languages", float64(len(languageTotals)), "languages", "7d")
 	setUsedMetric(snap, "activity_providers", float64(len(providerTotals)), "providers", "7d")
 
-	snap.DailySeries["cost"] = mapToSeries(dailyCost)
-	snap.DailySeries["requests"] = mapToSeries(dailyReq)
-	snap.DailySeries["tokens"] = mapToSeries(dailyTokens)
+	snap.DailySeries["cost"] = core.SortedTimePoints(dailyCost)
+	snap.DailySeries["requests"] = core.SortedTimePoints(dailyReq)
+	snap.DailySeries["tokens"] = core.SortedTimePoints(dailyTokens)
 
 	type modelTotal struct {
 		name   string
@@ -1158,7 +1158,7 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	for _, entry := range ranked {
 		if dayMap, ok := modelDailyTokens[entry.name]; ok {
 			key := "tokens_" + sanitizeMetricSlug(entry.name)
-			snap.DailySeries[key] = mapToSeries(dayMap)
+			snap.DailySeries[key] = core.SortedTimePoints(dayMap)
 		}
 	}
 
@@ -1166,13 +1166,13 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		if len(dayMap) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_client_"+sanitizeMetricSlug(client)] = mapToSeries(dayMap)
+		snap.DailySeries["usage_client_"+sanitizeMetricSlug(client)] = core.SortedTimePoints(dayMap)
 	}
 	for source, dayMap := range sourceDailyReq {
 		if len(dayMap) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_source_"+sanitizeMetricSlug(source)] = mapToSeries(dayMap)
+		snap.DailySeries["usage_source_"+sanitizeMetricSlug(source)] = core.SortedTimePoints(dayMap)
 	}
 
 	modelShare := make(map[string]float64, len(modelTotals))
@@ -1288,7 +1288,7 @@ func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	}
 
 	if len(dailyCalls) > 0 {
-		snap.DailySeries["tool_calls"] = mapToSeries(dailyCalls)
+		snap.DailySeries["tool_calls"] = core.SortedTimePoints(dailyCalls)
 	}
 
 	toolSummary := make(map[string]float64, len(toolTotals))
@@ -2428,21 +2428,6 @@ func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, wi
 		Unit:   unit,
 		Window: window,
 	}
-}
-
-func mapToSeries(input map[string]float64) []core.TimePoint {
-	out := make([]core.TimePoint, 0, len(input))
-	for day, value := range input {
-		if strings.TrimSpace(day) == "" {
-			continue
-		}
-		out = append(out, core.TimePoint{
-			Date:  day,
-			Value: value,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
-	return out
 }
 
 func sanitizeMetricSlug(value string) string {

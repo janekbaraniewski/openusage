@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1040,15 +1042,8 @@ func mapKeysSorted(values map[string]bool) []string {
 	if len(values) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(values))
-	for key := range values {
-		if strings.TrimSpace(key) == "" {
-			continue
-		}
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
+	out := slices.Sorted(maps.Keys(values))
+	return slices.DeleteFunc(out, func(key string) bool { return strings.TrimSpace(key) == "" })
 }
 
 func formatGeminiNameList(values []string, max int) string {
@@ -1608,7 +1603,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 
 		if byDay, ok := daily[entry.Name]; ok {
 			seriesKey := "tokens_" + prefix + "_" + sanitizeMetricName(entry.Name)
-			snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDay)
+			snap.DailySeries[seriesKey] = core.SortedTimePoints(byDay)
 		}
 
 		if prefix == "model" {
@@ -1827,7 +1822,7 @@ func formatUsageSummary(entries []usageEntry, max int) string {
 	for i := 0; i < limit; i++ {
 		entry := entries[i]
 		pct := float64(entry.Data.TotalTokens) / float64(total) * 100
-		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entry.Name, formatTokenCount(entry.Data.TotalTokens), pct))
+		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entry.Name, shared.FormatTokenCount(entry.Data.TotalTokens), pct))
 	}
 	if len(entries) > limit {
 		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
@@ -2148,8 +2143,6 @@ func inferGeminiLanguageFromPath(path string) string {
 	return ""
 }
 
-func formatTokenCount(value int) string { return shared.FormatTokenCount(value) }
-
 func usageDelta(current, previous tokenUsage) tokenUsage {
 	return tokenUsage{
 		InputTokens:       current.InputTokens - previous.InputTokens,
@@ -2271,25 +2264,11 @@ func dayFromSession(startTime, lastUpdated string) string {
 	return dayFromTimestamp(startTime)
 }
 
-func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
-	if len(byDate) == 0 {
-		return nil
-	}
-	keys := lo.Keys(byDate)
-	sort.Strings(keys)
-
-	points := make([]core.TimePoint, 0, len(keys))
-	for _, date := range keys {
-		points = append(points, core.TimePoint{Date: date, Value: byDate[date]})
-	}
-	return points
-}
-
 func storeSeries(snap *core.UsageSnapshot, key string, values map[string]float64) {
 	if len(values) == 0 {
 		return
 	}
-	snap.DailySeries[key] = mapToSortedTimePoints(values)
+	snap.DailySeries[key] = core.SortedTimePoints(values)
 }
 
 func latestSeriesValue(values map[string]float64) (string, float64) {

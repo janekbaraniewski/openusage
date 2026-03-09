@@ -1367,12 +1367,12 @@ func emitProductivityMetrics(stats patchStats, promptCount, commits, totalReques
 
 func emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals map[string]float64, interfaceDaily map[string]map[string]float64, snap *core.UsageSnapshot) {
 	if len(dailyTokenTotals) > 0 {
-		points := mapToSortedTimePoints(dailyTokenTotals)
+		points := core.SortedTimePoints(dailyTokenTotals)
 		snap.DailySeries["analytics_tokens"] = points
 		snap.DailySeries["tokens_total"] = points
 	}
 	if len(dailyRequestTotals) > 0 {
-		points := mapToSortedTimePoints(dailyRequestTotals)
+		points := core.SortedTimePoints(dailyRequestTotals)
 		snap.DailySeries["analytics_requests"] = points
 		snap.DailySeries["requests"] = points
 	}
@@ -1381,8 +1381,8 @@ func emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals map[string]float6
 			continue
 		}
 		key := sanitizeMetricName(name)
-		snap.DailySeries["usage_client_"+key] = mapToSortedTimePoints(byDay)
-		snap.DailySeries["usage_source_"+key] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["usage_client_"+key] = core.SortedTimePoints(byDay)
+		snap.DailySeries["usage_source_"+key] = core.SortedTimePoints(byDay)
 	}
 }
 
@@ -1404,7 +1404,7 @@ func formatCountSummary(entries []countEntry, max int) string {
 	parts := make([]string, 0, limit+1)
 	for i := 0; i < limit; i++ {
 		pct := float64(entries[i].count) / float64(total) * 100
-		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entries[i].name, formatTokenCount(entries[i].count), pct))
+		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entries[i].name, shared.FormatTokenCount(entries[i].count), pct))
 	}
 	if len(entries) > limit {
 		parts = append(parts, fmt.Sprintf("+%d more", len(entries)-limit))
@@ -1435,7 +1435,7 @@ func emitBreakdownMetrics(prefix string, totals map[string]tokenUsage, daily map
 		}
 
 		if byDay, ok := daily[entry.Name]; ok {
-			series := mapToSortedTimePoints(byDay)
+			series := core.SortedTimePoints(byDay)
 			snap.DailySeries["tokens_"+prefix+"_"+sanitizeMetricName(entry.Name)] = series
 			snap.DailySeries["usage_"+prefix+"_"+sanitizeMetricName(entry.Name)] = series
 		}
@@ -1557,7 +1557,7 @@ func formatUsageSummary(entries []usageEntry, max int) string {
 	for i := 0; i < limit; i++ {
 		entry := entries[i]
 		pct := float64(entry.Data.TotalTokens) / float64(total) * 100
-		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entry.Name, formatTokenCount(entry.Data.TotalTokens), pct))
+		parts = append(parts, fmt.Sprintf("%s %s (%.0f%%)", entry.Name, shared.FormatTokenCount(entry.Data.TotalTokens), pct))
 	}
 
 	if len(entries) > limit {
@@ -1565,8 +1565,6 @@ func formatUsageSummary(entries []usageEntry, max int) string {
 	}
 	return strings.Join(parts, ", ")
 }
-
-func formatTokenCount(value int) string { return shared.FormatTokenCount(value) }
 
 func usageDelta(current, previous tokenUsage) tokenUsage {
 	return tokenUsage{
@@ -1691,21 +1689,6 @@ func dayFromSessionPath(path, sessionsDir string) string {
 		return ""
 	}
 	return candidate
-}
-
-func mapToSortedTimePoints(byDate map[string]float64) []core.TimePoint {
-	if len(byDate) == 0 {
-		return nil
-	}
-
-	keys := lo.Keys(byDate)
-	sort.Strings(keys)
-
-	points := make([]core.TimePoint, 0, len(keys))
-	for _, date := range keys {
-		points = append(points, core.TimePoint{Date: date, Value: byDate[date]})
-	}
-	return points
 }
 
 func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {

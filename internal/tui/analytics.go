@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -263,8 +265,8 @@ func renderTopModelsSummary(models []modelCostEntry, w int, limit int) string {
 	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (Daily volume & efficiency)") + "\n")
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
 
-	nameW := clampInt(w/3, 20, 34)
-	provW := clampInt(w/5, 14, 22)
+	nameW := clamp(w/3, 20, 34)
+	provW := clamp(w/5, 14, 22)
 	tokW := 12
 	costW := 10
 	effW := 10
@@ -317,8 +319,8 @@ func renderTopModelsCompact(models []modelCostEntry, w int, limit int) string {
 	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (compact)") + "\n")
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
 
-	nameW := clampInt(w/2, 16, 26)
-	provW := clampInt(w/4, 10, 16)
+	nameW := clamp(w/2, 16, 26)
+	provW := clamp(w/4, 10, 16)
 	tokW := 9
 	effW := 9
 
@@ -385,8 +387,8 @@ func renderCostTableCompact(data costData, w int, limit int) string {
 	sb.WriteString("  " + sectionStyle.Render("COST & SPEND (compact)") + "\n")
 	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
 
-	provW := clampInt(w/3, 14, 24)
-	colW := clampInt((w-provW-8)/3, 8, 12)
+	provW := clamp(w/3, 14, 24)
+	colW := clamp((w-provW-8)/3, 8, 12)
 	head := dimStyle.Copy().Bold(true)
 	sb.WriteString("  " + padRight(head.Render("Provider"), provW) + " " +
 		padLeft(head.Render("Today"), colW) + " " +
@@ -864,9 +866,9 @@ func computeAnalyticsSummary(data costData) analyticsSummary {
 		}
 	}
 
-	s.dailyCost = mapToSortedPoints(costByDate)
-	s.dailyTokens = mapToSortedPoints(tokensByDate)
-	s.dailyMessages = mapToSortedPoints(messagesByDate)
+	s.dailyCost = core.SortedTimePoints(costByDate)
+	s.dailyTokens = core.SortedTimePoints(tokensByDate)
+	s.dailyMessages = core.SortedTimePoints(messagesByDate)
 	s.activeDays = countNonZeroDays(s.dailyCost, s.dailyTokens, s.dailyMessages)
 
 	s.peakCostDate, s.peakCost = maxPoint(s.dailyCost)
@@ -888,17 +890,6 @@ func computeAnalyticsSummary(data costData) analyticsSummary {
 		s.dayOfWeekCount[wd]++
 	}
 	return s
-}
-
-func mapToSortedPoints(m map[string]float64) []core.TimePoint {
-	keys := lo.Keys(m)
-	sort.Strings(keys)
-
-	out := make([]core.TimePoint, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, core.TimePoint{Date: k, Value: m[k]})
-	}
-	return out
 }
 
 func maxPoint(points []core.TimePoint) (string, float64) {
@@ -1041,16 +1032,6 @@ func filterTokenModels(models []modelCostEntry) []modelCostEntry {
 	return out
 }
 
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
 func truncStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -1059,7 +1040,5 @@ func truncStr(s string, maxLen int) string {
 }
 
 func sortedMetricKeys(m map[string]core.Metric) []string {
-	keys := lo.Keys(m)
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

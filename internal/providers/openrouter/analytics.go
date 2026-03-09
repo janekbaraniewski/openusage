@@ -275,22 +275,22 @@ func (p *Provider) fetchAnalytics(ctx context.Context, baseURL, apiKey string, s
 	}
 
 	if len(costByDate) > 0 {
-		snap.DailySeries["analytics_cost"] = mapToSortedTimePoints(costByDate)
+		snap.DailySeries["analytics_cost"] = core.SortedTimePoints(costByDate)
 	}
 	if len(tokensByDate) > 0 {
-		snap.DailySeries["analytics_tokens"] = mapToSortedTimePoints(tokensByDate)
+		snap.DailySeries["analytics_tokens"] = core.SortedTimePoints(tokensByDate)
 	}
 	if len(requestsByDate) > 0 {
-		snap.DailySeries["analytics_requests"] = mapToSortedTimePoints(requestsByDate)
+		snap.DailySeries["analytics_requests"] = core.SortedTimePoints(requestsByDate)
 	}
 	if len(byokCostByDate) > 0 {
-		snap.DailySeries["analytics_byok_cost"] = mapToSortedTimePoints(byokCostByDate)
+		snap.DailySeries["analytics_byok_cost"] = core.SortedTimePoints(byokCostByDate)
 	}
 	if len(reasoningTokensByDate) > 0 {
-		snap.DailySeries["analytics_reasoning_tokens"] = mapToSortedTimePoints(reasoningTokensByDate)
+		snap.DailySeries["analytics_reasoning_tokens"] = core.SortedTimePoints(reasoningTokensByDate)
 	}
 	if len(cachedTokensByDate) > 0 {
-		snap.DailySeries["analytics_cached_tokens"] = mapToSortedTimePoints(cachedTokensByDate)
+		snap.DailySeries["analytics_cached_tokens"] = core.SortedTimePoints(cachedTokensByDate)
 	}
 
 	if totalCost > 0 {
@@ -707,17 +707,6 @@ func emitAnalyticsEndpointMetrics(snap *core.UsageSnapshot, endpointStatsMap map
 			snap.Raw[prefix+"_model"] = entry.stats.Model
 		}
 	}
-}
-
-func mapToSortedTimePoints(m map[string]float64) []core.TimePoint {
-	points := make([]core.TimePoint, 0, len(m))
-	for date, val := range m {
-		points = append(points, core.TimePoint{Date: date, Value: val})
-	}
-	sort.Slice(points, func(i, j int) bool {
-		return points[i].Date < points[j].Date
-	})
-	return points
 }
 
 func parseAPIErrorMessage(body []byte) string {

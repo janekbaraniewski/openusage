@@ -429,8 +429,8 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		snap.Metrics["daily_projected"] = core.Metric{Used: &dailyProjected, Unit: "USD", Window: "24h"}
 	}
 
-	snap.DailySeries["cost"] = mapToSortedTimePoints(dailyCost)
-	snap.DailySeries["requests"] = mapToSortedTimePoints(dailyRequests)
+	snap.DailySeries["cost"] = core.SortedTimePoints(dailyCost)
+	snap.DailySeries["requests"] = core.SortedTimePoints(dailyRequests)
 	emitClientDailySeries(snap, dailyProviderTokens, dailyProviderRequests)
 
 	type modelTokenTotal struct {
@@ -454,7 +454,7 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		topN = len(modelTotals)
 	}
 	for _, modelTotal := range modelTotals[:topN] {
-		snap.DailySeries["tokens_"+sanitizeName(modelTotal.model)] = mapToSortedTimePoints(modelTotal.byDate)
+		snap.DailySeries["tokens_"+sanitizeName(modelTotal.model)] = core.SortedTimePoints(modelTotal.byDate)
 	}
 
 	hasAnalyticsModelRows := strings.TrimSpace(snap.Raw["activity_rows"]) != "" && strings.TrimSpace(snap.Raw["activity_rows"]) != "0"

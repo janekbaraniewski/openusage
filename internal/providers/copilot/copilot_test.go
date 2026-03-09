@@ -71,7 +71,7 @@ func TestMapToSeries(t *testing.T) {
 		"2026-02-18": 3,
 		"2026-02-19": 7,
 	}
-	series := mapToSeries(m)
+	series := core.SortedTimePoints(m)
 	if len(series) != 3 {
 		t.Fatalf("expected 3 points, got %d", len(series))
 	}
@@ -87,7 +87,7 @@ func TestMapToSeries(t *testing.T) {
 }
 
 func TestMapToSeries_Empty(t *testing.T) {
-	series := mapToSeries(map[string]float64{})
+	series := core.SortedTimePoints(map[string]float64{})
 	if len(series) != 0 {
 		t.Errorf("expected 0 points, got %d", len(series))
 	}

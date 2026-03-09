@@ -33,7 +33,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	acct.NormalizeRuntimePaths()
+	normalizeLegacyPaths(&acct)
 	trackingDBPath := acct.Path("tracking_db", "")
 	stateDBPath := acct.Path("state_db", "")
 

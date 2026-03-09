@@ -168,13 +168,13 @@ func emitClientDailySeries(snap *core.UsageSnapshot, tokensByClient, requestsByC
 		if client == "" || len(byDate) == 0 {
 			continue
 		}
-		snap.DailySeries["tokens_client_"+client] = mapToSortedTimePoints(byDate)
+		snap.DailySeries["tokens_client_"+client] = core.SortedTimePoints(byDate)
 	}
 	for client, byDate := range requestsByClient {
 		if client == "" || len(byDate) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_client_"+client] = mapToSortedTimePoints(byDate)
+		snap.DailySeries["usage_client_"+client] = core.SortedTimePoints(byDate)
 	}
 }
 

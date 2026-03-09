@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -334,18 +333,4 @@ func usageAuthoritativeCost(snap core.UsageSnapshot) float64 {
 		return *metric.Used
 	}
 	return 0
-}
-
-func sortedSeriesFromByDay(byDay map[string]float64) []core.TimePoint {
-	days := lo.Keys(byDay)
-	sort.Strings(days)
-
-	out := make([]core.TimePoint, 0, len(days))
-	for _, day := range days {
-		out = append(out, core.TimePoint{
-			Date:  day,
-			Value: byDay[day],
-		})
-	}
-	return out
 }

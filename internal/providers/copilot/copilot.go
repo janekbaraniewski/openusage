@@ -1598,7 +1598,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 				snap.Metrics["context_window"] = core.Metric{
 					Limit:     &limit,
 					Used:      core.Float64Ptr(sessionTokens),
-					Remaining: core.Float64Ptr(maxFloat(limit-sessionTokens, 0)),
+					Remaining: core.Float64Ptr(max(limit-sessionTokens, 0)),
 					Unit:      "tokens",
 					Window:    "session",
 				}
@@ -1780,20 +1780,9 @@ func parseSimpleYAML(content string) map[string]string {
 	return result
 }
 
-func mapToSeries(m map[string]float64) []core.TimePoint {
-	pts := make([]core.TimePoint, 0, len(m))
-	for date, val := range m {
-		pts = append(pts, core.TimePoint{Date: date, Value: val})
-	}
-	sort.Slice(pts, func(i, j int) bool {
-		return pts[i].Date < pts[j].Date
-	})
-	return pts
-}
-
 func storeSeries(snap *core.UsageSnapshot, key string, m map[string]float64) {
 	if len(m) > 0 {
-		snap.DailySeries[key] = mapToSeries(m)
+		snap.DailySeries[key] = core.SortedTimePoints(m)
 	}
 }
 
@@ -2354,13 +2343,6 @@ func clampPercent(v float64) float64 {
 		return 100
 	}
 	return v
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func sanitizeMetricName(name string) string {

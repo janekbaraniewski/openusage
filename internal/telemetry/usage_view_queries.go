@@ -502,7 +502,7 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 
 	out := make(map[string][]core.TimePoint, len(byDim))
 	for key, dayMap := range byDim {
-		out[key] = sortedSeriesFromByDay(dayMap)
+		out[key] = core.SortedTimePoints(dayMap)
 	}
 	return out, nil
 }
@@ -554,7 +554,7 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 
 	out := make(map[string][]core.TimePoint, len(byClient))
 	for key, dayMap := range byClient {
-		out[key] = sortedSeriesFromByDay(dayMap)
+		out[key] = core.SortedTimePoints(dayMap)
 	}
 	return out, nil
 }

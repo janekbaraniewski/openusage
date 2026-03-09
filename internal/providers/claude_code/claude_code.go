@@ -322,7 +322,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		home = filepath.Dir(claudeDir) // derive "home" from the override
 	}
 
-	acct.NormalizeRuntimePaths()
+	normalizeLegacyPaths(&acct)
 	statsPath := acct.Path("stats_cache", "")
 	accountPath := acct.Path("account_config", "")
 

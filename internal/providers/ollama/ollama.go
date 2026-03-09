@@ -26,7 +26,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/parsers"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
-	"github.com/samber/lo"
 )
 
 const (
@@ -822,7 +821,7 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 		setValueMetric(snap, "avg_latency_ms_today", avgMs, "ms", "today")
 	}
 
-	snap.DailySeries["requests"] = mapToSortedTimePoints(metrics.dailyRequests)
+	snap.DailySeries["requests"] = core.SortedTimePoints(metrics.dailyRequests)
 	return true, nil
 }
 
@@ -1527,9 +1526,9 @@ func populateModelUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageS
 
 	for model, byDate := range perModelDaily {
 		seriesKey := "requests_model_" + sanitizeMetricPart(model)
-		snap.DailySeries[seriesKey] = mapToSortedTimePoints(byDate)
+		snap.DailySeries[seriesKey] = core.SortedTimePoints(byDate)
 		usageSeriesKey := "usage_model_" + sanitizeMetricPart(model)
-		snap.DailySeries[usageSeriesKey] = mapToSortedTimePoints(byDate)
+		snap.DailySeries[usageSeriesKey] = core.SortedTimePoints(byDate)
 	}
 
 	return nil
@@ -1737,7 +1736,7 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 		return topModels[i].tok > topModels[j].tok
 	})
 	if len(topModels) > 0 {
-		top := make([]string, 0, minInt(len(topModels), 6))
+		top := make([]string, 0, min(len(topModels), 6))
 		for i := 0; i < len(topModels) && i < 6; i++ {
 			top = append(top, fmt.Sprintf("%s=%.0f", topModels[i].name, topModels[i].tok))
 		}
@@ -1763,25 +1762,25 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 		if len(byDay) == 0 {
 			continue
 		}
-		snap.DailySeries["tokens_client_"+sourceKey] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["tokens_client_"+sourceKey] = core.SortedTimePoints(byDay)
 	}
 	for sourceKey, byDay := range sourceDailyRequests {
 		if len(byDay) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_client_"+sourceKey] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["usage_client_"+sourceKey] = core.SortedTimePoints(byDay)
 	}
 	for modelKey, byDay := range modelDailyTokens {
 		if len(byDay) == 0 {
 			continue
 		}
-		snap.DailySeries["tokens_model_"+modelKey] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["tokens_model_"+modelKey] = core.SortedTimePoints(byDay)
 	}
 	if len(dailyTokens) > 0 {
-		snap.DailySeries["analytics_tokens"] = mapToSortedTimePoints(dailyTokens)
+		snap.DailySeries["analytics_tokens"] = core.SortedTimePoints(dailyTokens)
 	}
 	if len(dailyRequests) > 0 {
-		snap.DailySeries["analytics_requests"] = mapToSortedTimePoints(dailyRequests)
+		snap.DailySeries["analytics_requests"] = core.SortedTimePoints(dailyRequests)
 	}
 
 	if tokensToday > 0 {
@@ -1806,13 +1805,6 @@ func estimateTokensFromChars(chars int) float64 {
 		return 0
 	}
 	return float64((chars + 3) / 4)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) error {
@@ -1916,7 +1908,7 @@ func populateSourceUsageFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 		if len(byDay) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_source_"+sourceKey] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["usage_source_"+sourceKey] = core.SortedTimePoints(byDay)
 	}
 
 	return nil
@@ -1998,7 +1990,7 @@ func populateToolUsageFromDB(ctx context.Context, db *sql.DB, snap *core.UsageSn
 		if len(byDay) == 0 {
 			continue
 		}
-		snap.DailySeries["usage_tool_"+toolKey] = mapToSortedTimePoints(byDay)
+		snap.DailySeries["usage_tool_"+toolKey] = core.SortedTimePoints(byDay)
 	}
 
 	return nil
@@ -2050,7 +2042,7 @@ func populateDailySeriesFromDB(ctx context.Context, db *sql.DB, snap *core.Usage
 		}
 		rows.Close()
 		if len(byDate) > 0 {
-			points := mapToSortedTimePoints(byDate)
+			points := core.SortedTimePoints(byDate)
 			snap.DailySeries[dq.key] = points
 			if dq.key == "requests_user" {
 				if _, exists := snap.DailySeries["requests"]; !exists {
@@ -2222,19 +2214,6 @@ func doJSONPostRequest(ctx context.Context, url string, body any, out any, clien
 		return resp.StatusCode, err
 	}
 	return resp.StatusCode, nil
-}
-
-func mapToSortedTimePoints(values map[string]float64) []core.TimePoint {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := lo.Keys(values)
-	sort.Strings(keys)
-	series := make([]core.TimePoint, 0, len(keys))
-	for _, key := range keys {
-		series = append(series, core.TimePoint{Date: key, Value: values[key]})
-	}
-	return series
 }
 
 func sanitizeMetricPart(input string) string {
