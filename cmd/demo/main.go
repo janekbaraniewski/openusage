@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,6 +40,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var snapshotRequestID atomic.Uint64
 
 	refreshAll := func() {
 		snaps := make(map[string]core.UsageSnapshot, len(accounts))
@@ -61,7 +63,11 @@ func main() {
 			}
 			snaps[acct.ID] = snap
 		}
-		p.Send(tui.SnapshotsMsg(snaps))
+		p.Send(tui.SnapshotsMsg{
+			Snapshots:  snaps,
+			TimeWindow: core.TimeWindow30d,
+			RequestID:  snapshotRequestID.Add(1),
+		})
 	}
 
 	go func() {

@@ -35,6 +35,26 @@ func DefaultDetailWidget() DetailWidget {
 	}
 }
 
+func CodingToolDetailWidget(includeMCP bool) DetailWidget {
+	sections := []DetailSection{
+		{Name: "Usage", Order: 1, Style: DetailSectionStyleUsage},
+		{Name: "Models", Order: 2, Style: DetailSectionStyleModels},
+		{Name: "Languages", Order: 3, Style: DetailSectionStyleLanguages},
+	}
+	nextOrder := 4
+	if includeMCP {
+		sections = append(sections, DetailSection{Name: "MCP Usage", Order: nextOrder, Style: DetailSectionStyleMCP})
+		nextOrder++
+	}
+	sections = append(sections,
+		DetailSection{Name: "Spending", Order: nextOrder, Style: DetailSectionStyleSpending},
+		DetailSection{Name: "Trends", Order: nextOrder + 1, Style: DetailSectionStyleTrends},
+		DetailSection{Name: "Tokens", Order: nextOrder + 2, Style: DetailSectionStyleTokens},
+		DetailSection{Name: "Activity", Order: nextOrder + 3, Style: DetailSectionStyleActivity},
+	)
+	return DetailWidget{Sections: sections}
+}
+
 func (w DetailWidget) section(name string) (DetailSection, bool) {
 	for _, s := range w.Sections {
 		if s.Name == name {

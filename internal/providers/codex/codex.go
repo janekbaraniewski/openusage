@@ -63,32 +63,6 @@ func New() *Provider {
 	}
 }
 
-type sessionEvent struct {
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-type eventPayload struct {
-	Type       string      `json:"type"`
-	Info       *tokenInfo  `json:"info,omitempty"`
-	RateLimits *rateLimits `json:"rate_limits,omitempty"`
-}
-
-type tokenInfo struct {
-	TotalTokenUsage    tokenUsage `json:"total_token_usage"`
-	LastTokenUsage     tokenUsage `json:"last_token_usage"`
-	ModelContextWindow int        `json:"model_context_window"`
-}
-
-type tokenUsage struct {
-	InputTokens           int `json:"input_tokens"`
-	CachedInputTokens     int `json:"cached_input_tokens"`
-	OutputTokens          int `json:"output_tokens"`
-	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
-	TotalTokens           int `json:"total_tokens"`
-}
-
 type rateLimits struct {
 	Primary   *rateLimitBucket `json:"primary,omitempty"`
 	Secondary *rateLimitBucket `json:"secondary,omitempty"`
@@ -174,16 +148,6 @@ type usageCredits struct {
 	Balance    any  `json:"balance"`
 }
 
-type sessionMetaPayload struct {
-	Source     string `json:"source,omitempty"`
-	Originator string `json:"originator,omitempty"`
-	Model      string `json:"model,omitempty"`
-}
-
-type turnContextPayload struct {
-	Model string `json:"model,omitempty"`
-}
-
 type usageEntry struct {
 	Name string
 	Data tokenUsage
@@ -227,18 +191,7 @@ type countEntry struct {
 }
 
 func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DetailWidget{
-		Sections: []core.DetailSection{
-			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
-			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
-			{Name: "MCP Usage", Order: 4, Style: core.DetailSectionStyleMCP},
-			{Name: "Spending", Order: 5, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 6, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 7, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 8, Style: core.DetailSectionStyleActivity},
-		},
-	}
+	return core.CodingToolDetailWidget(true)
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
@@ -877,56 +830,25 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 		var previous tokenUsage
 		var hasPrevious bool
 		var countedSession bool
-
-		file, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		buf := make([]byte, 0, 512*1024)
-		scanner.Buffer(buf, maxScannerBufferSize)
-
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if !bytes.Contains(line, []byte(`"type":"event_msg"`)) &&
-				!bytes.Contains(line, []byte(`"type":"turn_context"`)) &&
-				!bytes.Contains(line, []byte(`"type":"session_meta"`)) &&
-				!bytes.Contains(line, []byte(`"type":"response_item"`)) {
-				continue
-			}
-
-			var event sessionEvent
-			if err := json.Unmarshal(line, &event); err != nil {
-				continue
-			}
-
-			switch event.Type {
-			case "session_meta":
-				var meta sessionMetaPayload
-				if json.Unmarshal(event.Payload, &meta) == nil {
-					sessionClient = classifyClient(meta.Source, meta.Originator)
-					if meta.Model != "" {
-						currentModel = meta.Model
-					}
+		return walkSessionFile(path, func(record sessionLine) error {
+			switch {
+			case record.SessionMeta != nil:
+				sessionClient = classifyClient(record.SessionMeta.Source, record.SessionMeta.Originator)
+				if record.SessionMeta.Model != "" {
+					currentModel = record.SessionMeta.Model
 				}
-			case "turn_context":
-				var tc turnContextPayload
-				if json.Unmarshal(event.Payload, &tc) == nil && strings.TrimSpace(tc.Model) != "" {
-					currentModel = tc.Model
+			case record.TurnContext != nil:
+				if strings.TrimSpace(record.TurnContext.Model) != "" {
+					currentModel = record.TurnContext.Model
 				}
-			case "event_msg":
-				var payload eventPayload
-				if json.Unmarshal(event.Payload, &payload) != nil {
-					continue
-				}
+			case record.EventPayload != nil:
+				payload := record.EventPayload
 				if payload.Type == "user_message" {
 					promptCount++
-					continue
+					return nil
 				}
 				if payload.Type != "token_count" || payload.Info == nil {
-					continue
+					return nil
 				}
 
 				total := payload.Info.TotalTokenUsage
@@ -941,12 +863,12 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				hasPrevious = true
 
 				if delta.TotalTokens <= 0 {
-					continue
+					return nil
 				}
 
 				modelName := normalizeModelName(currentModel)
 				clientName := normalizeClientName(sessionClient)
-				day := dayFromTimestamp(event.Timestamp)
+				day := dayFromTimestamp(record.Timestamp)
 				if day == "" {
 					day = defaultDay
 				}
@@ -968,11 +890,8 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 					clientSessions[clientName]++
 					countedSession = true
 				}
-			case "response_item":
-				var item responseItemPayload
-				if json.Unmarshal(event.Payload, &item) != nil {
-					continue
-				}
+			case record.ResponseItem != nil:
+				item := record.ResponseItem
 				switch item.Type {
 				case "function_call":
 					tool := normalizeToolName(item.Name)
@@ -1000,9 +919,9 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 					setToolCallOutcome(item.CallID, item.Output, callOutcome)
 				}
 			}
-		}
 
-		return nil
+			return nil
+		})
 	})
 	if walkErr != nil {
 		return fmt.Errorf("walking session files: %w", walkErr)
@@ -1931,43 +1850,18 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 }
 
 func findLastTokenCount(path string) (*eventPayload, error) {
-	f, err := os.Open(path)
-	if err != nil {
+	var lastPayload *eventPayload
+	if err := walkSessionFile(path, func(record sessionLine) error {
+		if record.EventPayload == nil || record.EventPayload.Type != "token_count" {
+			return nil
+		}
+		payload := *record.EventPayload
+		lastPayload = &payload
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	var lastPayload *eventPayload
-
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 256*1024)
-	scanner.Buffer(buf, maxScannerBufferSize)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if !bytes.Contains(line, []byte(`"type":"event_msg"`)) {
-			continue
-		}
-
-		var event sessionEvent
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
-		}
-		if event.Type != "event_msg" {
-			continue
-		}
-
-		var payload eventPayload
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			continue
-		}
-
-		if payload.Type == "token_count" {
-			lastPayload = &payload
-		}
-	}
-
-	return lastPayload, scanner.Err()
+	return lastPayload, nil
 }
 
 func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) {

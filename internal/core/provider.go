@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"os"
+	"strings"
 )
 
 type AccountConfig struct {
@@ -52,10 +53,38 @@ func (c AccountConfig) Path(key, fallback string) string {
 
 // SetPath stores a named provider-specific path.
 func (c *AccountConfig) SetPath(key, value string) {
+	if c == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return
+	}
 	if c.Paths == nil {
 		c.Paths = make(map[string]string)
 	}
-	c.Paths[key] = value
+	c.Paths[key] = strings.TrimSpace(value)
+}
+
+// NormalizeRuntimePaths migrates legacy provider-specific path overloads out of
+// Binary/BaseURL into Paths so runtime code can use a single access pattern.
+func (c *AccountConfig) NormalizeRuntimePaths() {
+	if c == nil {
+		return
+	}
+
+	switch strings.TrimSpace(c.Provider) {
+	case "cursor":
+		if strings.TrimSpace(c.Binary) != "" {
+			c.SetPath("tracking_db", c.Binary)
+		}
+		if strings.TrimSpace(c.BaseURL) != "" {
+			c.SetPath("state_db", c.BaseURL)
+		}
+	case "claude_code":
+		if strings.TrimSpace(c.Binary) != "" {
+			c.SetPath("stats_cache", c.Binary)
+		}
+		if strings.TrimSpace(c.BaseURL) != "" {
+			c.SetPath("account_config", c.BaseURL)
+		}
+	}
 }
 
 func (c AccountConfig) ResolveAPIKey() string {

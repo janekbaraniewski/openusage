@@ -1,7 +1,6 @@
 package claude_code
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,8 +12,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
-
-const telemetryScannerBufferSize = 8 * 1024 * 1024
 
 func (p *Provider) System() string { return p.ID() }
 
@@ -68,31 +65,16 @@ func DefaultTelemetryProjectsDirs() (string, string) {
 // ParseTelemetryConversationFile parses a Claude Code conversation JSONL file
 // and emits message/tool telemetry events.
 func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
 	seenUsage := make(map[string]bool)
 	seenTools := make(map[string]bool)
 	var out []shared.TelemetryEvent
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 512*1024), telemetryScannerBufferSize)
-	lineNumber := 0
-
-	for scanner.Scan() {
-		lineNumber++
-		var entry jsonlEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
-		if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+	records := parseConversationRecords(path)
+	for _, record := range records {
+		if record.usage == nil {
 			continue
 		}
 
-		usageKey := claudeTelemetryUsageDedupKey(entry)
+		usageKey := conversationUsageDedupKey(record)
 		if usageKey != "" && seenUsage[usageKey] {
 			continue
 		}
@@ -100,31 +82,21 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 			seenUsage[usageKey] = true
 		}
 
-		ts := time.Now().UTC()
-		if parsed, err := shared.ParseTimestampString(entry.Timestamp); err == nil {
-			ts = parsed
-		}
-
-		model := strings.TrimSpace(entry.Message.Model)
+		ts := record.timestamp
+		model := strings.TrimSpace(record.model)
 		if model == "" {
 			model = "unknown"
 		}
 
-		usage := entry.Message.Usage
-		totalTokens := int64(
-			usage.InputTokens +
-				usage.OutputTokens +
-				usage.CacheReadInputTokens +
-				usage.CacheCreationInputTokens +
-				usage.ReasoningTokens,
-		)
+		usage := record.usage
+		totalTokens := conversationTotalTokens(usage)
 		cost := estimateCost(model, usage)
 
-		turnID := core.FirstNonEmpty(entry.RequestID, entry.Message.ID)
+		turnID := core.FirstNonEmpty(record.requestID, record.messageID)
 		if turnID == "" {
-			turnID = fmt.Sprintf("%s:%d", strings.TrimSpace(entry.SessionID), lineNumber)
+			turnID = fmt.Sprintf("%s:%d", strings.TrimSpace(record.sessionID), record.lineNumber)
 		}
-		messageID := strings.TrimSpace(entry.Message.ID)
+		messageID := strings.TrimSpace(record.messageID)
 		if messageID == "" {
 			messageID = turnID
 		}
@@ -134,8 +106,8 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 			Channel:       shared.TelemetryChannelJSONL,
 			OccurredAt:    ts,
 			AccountID:     "claude-code",
-			WorkspaceID:   shared.SanitizeWorkspace(entry.CWD),
-			SessionID:     strings.TrimSpace(entry.SessionID),
+			WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
+			SessionID:     strings.TrimSpace(record.sessionID),
 			TurnID:        turnID,
 			MessageID:     messageID,
 			ProviderID:    "anthropic",
@@ -154,15 +126,15 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 			Status: shared.TelemetryStatusOK,
 			Payload: map[string]any{
 				"file": path,
-				"line": lineNumber,
+				"line": record.lineNumber,
 			},
 		})
 
-		for idx, part := range entry.Message.Content {
+		for idx, part := range record.content {
 			if part.Type != "tool_use" {
 				continue
 			}
-			toolKey := claudeTelemetryToolDedupKey(entry, idx, part)
+			toolKey := conversationToolDedupKey(record, idx, part)
 			if toolKey != "" && seenTools[toolKey] {
 				continue
 			}
@@ -186,8 +158,8 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				Channel:       shared.TelemetryChannelJSONL,
 				OccurredAt:    ts,
 				AccountID:     "claude-code",
-				WorkspaceID:   shared.SanitizeWorkspace(entry.CWD),
-				SessionID:     strings.TrimSpace(entry.SessionID),
+				WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
+				SessionID:     strings.TrimSpace(record.sessionID),
 				TurnID:        turnID,
 				MessageID:     messageID,
 				ToolCallID:    strings.TrimSpace(part.ID),
@@ -202,60 +174,13 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				Status:   shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"source_file": path,
-					"line":        lineNumber,
+					"line":        record.lineNumber,
 					"file":        toolFilePath,
 				},
 			})
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return out, err
-	}
 	return out, nil
-}
-
-func claudeTelemetryUsageDedupKey(entry jsonlEntry) string {
-	if id := strings.TrimSpace(entry.RequestID); id != "" {
-		return "req:" + id
-	}
-	if entry.Message != nil {
-		if id := strings.TrimSpace(entry.Message.ID); id != "" {
-			return "msg:" + id
-		}
-		if entry.Message.Usage != nil {
-			u := entry.Message.Usage
-			return fmt.Sprintf("fp:%s|%s|%s|%d|%d|%d|%d|%d",
-				strings.TrimSpace(entry.SessionID),
-				strings.TrimSpace(entry.Timestamp),
-				strings.TrimSpace(entry.Message.Model),
-				u.InputTokens,
-				u.OutputTokens,
-				u.CacheReadInputTokens,
-				u.CacheCreationInputTokens,
-				u.ReasoningTokens,
-			)
-		}
-	}
-	return ""
-}
-
-func claudeTelemetryToolDedupKey(entry jsonlEntry, idx int, part jsonlContent) string {
-	base := strings.TrimSpace(entry.RequestID)
-	if base == "" && entry.Message != nil {
-		base = strings.TrimSpace(entry.Message.ID)
-	}
-	if base == "" {
-		base = strings.TrimSpace(entry.SessionID) + "|" + strings.TrimSpace(entry.Timestamp)
-	}
-	if id := strings.TrimSpace(part.ID); id != "" {
-		return base + "|tool:" + id
-	}
-	name := strings.ToLower(strings.TrimSpace(part.Name))
-	if name == "" {
-		name = "unknown"
-	}
-	return fmt.Sprintf("%s|tool:%s|%d", base, name, idx)
 }
 
 // ParseTelemetryHookPayload parses Claude Code hook stdin payloads.

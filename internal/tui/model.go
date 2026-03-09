@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -13,7 +12,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
-	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/samber/lo"
 )
 
@@ -49,7 +47,11 @@ const (
 	maxLeftWidth = 38
 )
 
-type SnapshotsMsg map[string]core.UsageSnapshot
+type SnapshotsMsg struct {
+	Snapshots  map[string]core.UsageSnapshot
+	TimeWindow core.TimeWindow
+	RequestID  uint64
+}
 
 type DaemonStatus string
 
@@ -115,6 +117,19 @@ type settingsState struct {
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 }
 
+type Services interface {
+	SaveTheme(themeName string) error
+	SaveDashboardProviders(providers []config.DashboardProviderConfig) error
+	SaveDashboardView(view string) error
+	SaveDashboardWidgetSections(sections []config.DashboardWidgetSection) error
+	SaveDashboardHideSectionsWithNoData(hide bool) error
+	SaveTimeWindow(window string) error
+	ValidateAPIKey(accountID, providerID, apiKey string) (bool, string)
+	SaveCredential(accountID, apiKey string) error
+	DeleteCredential(accountID string) error
+	InstallIntegration(id integrations.ID) ([]integrations.Status, error)
+}
+
 type Model struct {
 	snapshots map[string]core.UsageSnapshot
 	sortedIDs []string
@@ -140,9 +155,9 @@ type Model struct {
 	analyticsFilter filterState
 	analyticsSortBy int // 0=cost↓, 1=name↑, 2=tokens↓
 
-	animFrame  int  // monotonically increasing frame counter
-	refreshing bool // true when a manual refresh is in progress
-	hasData    bool // true after the first SnapshotsMsg arrives
+	animFrame  int // monotonically increasing frame counter
+	refreshing bool
+	hasData    bool
 
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
@@ -156,12 +171,14 @@ type Model struct {
 	widgetSections         []config.DashboardWidgetSection
 	hideSectionsWithNoData bool
 
-	timeWindow core.TimeWindow
+	timeWindow            core.TimeWindow
+	lastSnapshotRequestID uint64
 
+	services           Services
 	onAddAccount       func(core.AccountConfig)
-	onRefresh          func()
+	onRefresh          func(core.TimeWindow)
 	onInstallDaemon    func() error
-	onTimeWindowChange func(string)
+	onTimeWindowChange func(core.TimeWindow)
 }
 
 func NewModel(
@@ -191,18 +208,20 @@ func (m *Model) SetOnInstallDaemon(fn func() error) {
 	m.onInstallDaemon = fn
 }
 
+func (m *Model) SetServices(services Services) {
+	m.services = services
+}
+
 // SetOnAddAccount sets a callback invoked when a new provider account is added via the API Keys tab.
 func (m *Model) SetOnAddAccount(fn func(core.AccountConfig)) {
 	m.onAddAccount = fn
 }
 
-// SetOnRefresh sets a callback invoked when the user requests a manual refresh.
-func (m *Model) SetOnRefresh(fn func()) {
+func (m *Model) SetOnRefresh(fn func(core.TimeWindow)) {
 	m.onRefresh = fn
 }
 
-// SetOnTimeWindowChange sets a callback invoked when the user changes the time window.
-func (m *Model) SetOnTimeWindowChange(fn func(string)) {
+func (m *Model) SetOnTimeWindowChange(fn func(core.TimeWindow)) {
 	m.onTimeWindowChange = fn
 }
 
@@ -249,7 +268,10 @@ type integrationInstallResultMsg struct {
 
 func (m Model) persistThemeCmd(themeName string) tea.Cmd {
 	return func() tea.Msg {
-		err := config.SaveTheme(themeName)
+		if m.services == nil {
+			return themePersistedMsg{err: fmt.Errorf("theme service unavailable")}
+		}
+		err := m.services.SaveTheme(themeName)
 		if err != nil {
 			log.Printf("theme persist: %v", err)
 		}
@@ -260,7 +282,10 @@ func (m Model) persistThemeCmd(themeName string) tea.Cmd {
 func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 	providers := m.dashboardConfigProviders()
 	return func() tea.Msg {
-		err := config.SaveDashboardProviders(providers)
+		if m.services == nil {
+			return dashboardPrefsPersistedMsg{err: fmt.Errorf("dashboard settings service unavailable")}
+		}
+		err := m.services.SaveDashboardProviders(providers)
 		if err != nil {
 			log.Printf("dashboard settings persist: %v", err)
 		}
@@ -271,7 +296,10 @@ func (m Model) persistDashboardPrefsCmd() tea.Cmd {
 func (m Model) persistDashboardViewCmd() tea.Cmd {
 	view := string(m.configuredDashboardView())
 	return func() tea.Msg {
-		err := config.SaveDashboardView(view)
+		if m.services == nil {
+			return dashboardViewPersistedMsg{err: fmt.Errorf("dashboard view service unavailable")}
+		}
+		err := m.services.SaveDashboardView(view)
 		if err != nil {
 			log.Printf("dashboard view persist: %v", err)
 		}
@@ -282,7 +310,10 @@ func (m Model) persistDashboardViewCmd() tea.Cmd {
 func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
 	sections := m.dashboardWidgetSectionConfigEntries()
 	return func() tea.Msg {
-		err := config.SaveDashboardWidgetSections(sections)
+		if m.services == nil {
+			return dashboardWidgetSectionsPersistedMsg{err: fmt.Errorf("dashboard sections service unavailable")}
+		}
+		err := m.services.SaveDashboardWidgetSections(sections)
 		if err != nil {
 			log.Printf("dashboard widget sections persist: %v", err)
 		}
@@ -293,7 +324,10 @@ func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
 func (m Model) persistDashboardHideSectionsWithNoDataCmd() tea.Cmd {
 	hide := m.hideSectionsWithNoData
 	return func() tea.Msg {
-		err := config.SaveDashboardHideSectionsWithNoData(hide)
+		if m.services == nil {
+			return dashboardHideSectionsWithNoDataPersistedMsg{err: fmt.Errorf("dashboard empty-state service unavailable")}
+		}
+		err := m.services.SaveDashboardHideSectionsWithNoData(hide)
 		if err != nil {
 			log.Printf("dashboard hide sections with no data persist: %v", err)
 		}
@@ -303,7 +337,10 @@ func (m Model) persistDashboardHideSectionsWithNoDataCmd() tea.Cmd {
 
 func (m Model) persistTimeWindowCmd(window string) tea.Cmd {
 	return func() tea.Msg {
-		err := config.SaveTimeWindow(window)
+		if m.services == nil {
+			return timeWindowPersistedMsg{err: fmt.Errorf("time window service unavailable")}
+		}
+		err := m.services.SaveTimeWindow(window)
 		if err != nil {
 			log.Printf("time window persist: %v", err)
 		}
@@ -313,61 +350,43 @@ func (m Model) persistTimeWindowCmd(window string) tea.Cmd {
 
 func (m Model) validateKeyCmd(accountID, providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		var provider core.UsageProvider
-		for _, p := range providers.AllProviders() {
-			if p.ID() == providerID {
-				provider = p
-				break
-			}
+		if m.services == nil {
+			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: "validation service unavailable"}
 		}
-		if provider == nil {
-			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: "unknown provider"}
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		acct := core.AccountConfig{
-			ID:       accountID,
-			Provider: providerID,
-			Token:    apiKey,
-		}
-		snap, err := provider.Fetch(ctx, acct)
-		if err != nil {
-			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: err.Error()}
-		}
-		if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
-			msg := snap.Message
-			if msg == "" {
-				msg = string(snap.Status)
-			}
-			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: msg}
-		}
-		return validateKeyResultMsg{AccountID: accountID, Valid: true}
+		valid, errMsg := m.services.ValidateAPIKey(accountID, providerID, apiKey)
+		return validateKeyResultMsg{AccountID: accountID, Valid: valid, Error: errMsg}
 	}
 }
 
 func (m Model) saveCredentialCmd(accountID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		err := config.SaveCredential(accountID, apiKey)
+		if m.services == nil {
+			return credentialSavedMsg{AccountID: accountID, Err: fmt.Errorf("credential service unavailable")}
+		}
+		err := m.services.SaveCredential(accountID, apiKey)
 		return credentialSavedMsg{AccountID: accountID, Err: err}
 	}
 }
 
 func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
 	return func() tea.Msg {
-		err := config.DeleteCredential(accountID)
+		if m.services == nil {
+			return credentialDeletedMsg{AccountID: accountID, Err: fmt.Errorf("credential service unavailable")}
+		}
+		err := m.services.DeleteCredential(accountID)
 		return credentialDeletedMsg{AccountID: accountID, Err: err}
 	}
 }
 
 func (m Model) installIntegrationCmd(id integrations.ID) tea.Cmd {
 	return func() tea.Msg {
-		manager := integrations.NewDefaultManager()
-		err := manager.Install(id)
+		if m.services == nil {
+			return integrationInstallResultMsg{IntegrationID: id, Err: fmt.Errorf("integration service unavailable")}
+		}
+		statuses, err := m.services.InstallIntegration(id)
 		return integrationInstallResultMsg{
 			IntegrationID: id,
-			Statuses:      manager.ListStatuses(),
+			Statuses:      statuses,
 			Err:           err,
 		}
 	}
@@ -412,19 +431,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SnapshotsMsg:
-		if m.refreshing && m.hasData && !snapshotsReady(msg) {
-			// During a time-window change the daemon may return empty
-			// template snapshots while it recomputes. Keep the old data
-			// visible so tiles don't flash to the loading screen.
+		msgWindow := msg.TimeWindow
+		if msgWindow == "" {
+			msgWindow = core.TimeWindow30d
+		}
+		if msgWindow != m.timeWindow {
 			return m, nil
 		}
-		m.snapshots = msg
+		if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID {
+			return m, nil
+		}
+		if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {
+			return m, nil
+		}
+		m.snapshots = msg.Snapshots
 		m.refreshing = false
-		if len(msg) > 0 || snapshotsReady(msg) {
+		if msg.RequestID > m.lastSnapshotRequestID {
+			m.lastSnapshotRequestID = msg.RequestID
+		}
+		if len(msg.Snapshots) > 0 || snapshotsReady(msg.Snapshots) {
 			m.hasData = true
 			m.daemon.status = DaemonRunning
 		}
-		// Stamp display decision into snapshot diagnostics for the Info tab.
 		for id, snap := range m.snapshots {
 			info := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
 			if info.reason != "" {
@@ -1110,21 +1138,26 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) cycleTimeWindow() (tea.Model, tea.Cmd) {
 	next := core.NextTimeWindow(m.timeWindow)
-	m.timeWindow = next
-	if m.onTimeWindowChange != nil {
-		m.onTimeWindowChange(string(next))
-	}
-	m.refreshing = true
-	if m.onRefresh != nil {
-		m.onRefresh()
-	}
+	m = m.beginTimeWindowRefresh(next)
 	return m, m.persistTimeWindowCmd(string(next))
 }
 
 func (m Model) requestRefresh() Model {
 	m.refreshing = true
 	if m.onRefresh != nil {
-		m.onRefresh()
+		m.onRefresh(m.timeWindow)
+	}
+	return m
+}
+
+func (m Model) beginTimeWindowRefresh(window core.TimeWindow) Model {
+	m.timeWindow = window
+	if m.onTimeWindowChange != nil {
+		m.onTimeWindowChange(window)
+	}
+	m.refreshing = true
+	if m.onRefresh != nil {
+		m.onRefresh(window)
 	}
 	return m
 }

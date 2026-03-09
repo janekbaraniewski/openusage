@@ -29,7 +29,7 @@ type ReadModelAccount struct {
 type ReadModelRequest struct {
 	Accounts      []ReadModelAccount `json:"accounts"`
 	ProviderLinks map[string]string  `json:"provider_links"`
-	TimeWindow    string             `json:"time_window,omitempty"`
+	TimeWindow    core.TimeWindow    `json:"time_window,omitempty"`
 }
 
 type ReadModelResponse struct {
@@ -55,13 +55,10 @@ type HealthResponse struct {
 }
 
 type cachedReadModelEntry struct {
-	snapshots  map[string]core.UsageSnapshot
-	updatedAt  time.Time
-	timeWindow string
+	snapshots map[string]core.UsageSnapshot
+	updatedAt time.Time
 }
 
-// readModelCache encapsulates the read-model caching layer with
-// thread-safe access and in-flight deduplication.
 type readModelCache struct {
 	mu       sync.RWMutex
 	entries  map[string]cachedReadModelEntry
@@ -75,13 +72,13 @@ func newReadModelCache() *readModelCache {
 	}
 }
 
-func (c *readModelCache) get(cacheKey, timeWindow string) (map[string]core.UsageSnapshot, time.Time, bool) {
+func (c *readModelCache) get(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
 	if cacheKey == "" {
 		return nil, time.Time{}, false
 	}
 	c.mu.RLock()
 	entry, ok := c.entries[cacheKey]
-	if !ok || len(entry.snapshots) == 0 || entry.timeWindow != timeWindow {
+	if !ok || len(entry.snapshots) == 0 {
 		c.mu.RUnlock()
 		return nil, time.Time{}, false
 	}
@@ -90,16 +87,15 @@ func (c *readModelCache) get(cacheKey, timeWindow string) (map[string]core.Usage
 	return cloned, entry.updatedAt, true
 }
 
-func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSnapshot, timeWindow string) {
+func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSnapshot) {
 	if cacheKey == "" || len(snapshots) == 0 {
 		return
 	}
 	now := time.Now().UTC()
 	c.mu.Lock()
 	c.entries[cacheKey] = cachedReadModelEntry{
-		snapshots:  core.DeepCloneSnapshots(snapshots),
-		updatedAt:  now,
-		timeWindow: timeWindow,
+		snapshots: core.DeepCloneSnapshots(snapshots),
+		updatedAt: now,
 	}
 	// Evict stale entries to prevent unbounded growth.
 	const maxEntries = 50
@@ -130,7 +126,6 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 	c.mu.Unlock()
 }
 
-// beginRefresh marks a cache key as in-flight. Returns false if already refreshing.
 func (c *readModelCache) beginRefresh(cacheKey string) bool {
 	if cacheKey == "" {
 		return false
@@ -157,7 +152,12 @@ type ingestTally struct {
 	failed    int
 }
 
-type SnapshotHandler func(map[string]core.UsageSnapshot)
+type SnapshotFrame struct {
+	Snapshots  map[string]core.UsageSnapshot
+	TimeWindow core.TimeWindow
+}
+
+type SnapshotHandler func(SnapshotFrame)
 
 type DaemonStatus int
 

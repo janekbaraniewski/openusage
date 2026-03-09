@@ -41,8 +41,8 @@ type storedLimitEnvelope struct {
 
 type ReadModelOptions struct {
 	ProviderLinks   map[string]string
-	TimeWindowHours int    // 0 = no filter (all data)
-	TimeWindow      string // raw value like "7d", "1h" for metric labels
+	TimeWindowHours int
+	TimeWindow      core.TimeWindow
 }
 
 // ApplyCanonicalTelemetryView hydrates snapshots from canonical telemetry streams.

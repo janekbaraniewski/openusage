@@ -165,20 +165,13 @@ type composerModelUsage struct {
 }
 
 func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DetailWidget{
-		Sections: []core.DetailSection{
-			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
-			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
-			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
-		},
-	}
+	return core.CodingToolDetailWidget(false)
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	if strings.TrimSpace(acct.Provider) == "" {
+		acct.Provider = p.ID()
+	}
 	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
@@ -198,8 +191,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	trackingDBPath := acct.Path("tracking_db", acct.Binary)
-	stateDBPath := acct.Path("state_db", acct.BaseURL)
+	acct.NormalizeRuntimePaths()
+	trackingDBPath := acct.Path("tracking_db", "")
+	stateDBPath := acct.Path("state_db", "")
 
 	// If the token was not persisted (json:"-"), try to extract it fresh
 	// from the Cursor state DB so daemon polls can access the API.

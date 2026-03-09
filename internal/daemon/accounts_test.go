@@ -273,4 +273,26 @@ func TestSnapshotsHaveUsableData(t *testing.T) {
 	}
 }
 
+func TestReadModelRequestKeyIncludesNormalizedTimeWindow(t *testing.T) {
+	base := ReadModelRequest{
+		Accounts: []ReadModelAccount{
+			{AccountID: "openrouter", ProviderID: "openrouter"},
+		},
+	}
+
+	key1d := ReadModelRequestKey(base)
+
+	base.TimeWindow = core.TimeWindow30d
+	keyExplicit30d := ReadModelRequestKey(base)
+	if key1d != keyExplicit30d {
+		t.Fatalf("empty and explicit 30d normalization mismatch: %q vs %q", key1d, keyExplicit30d)
+	}
+
+	base.TimeWindow = core.TimeWindow7d
+	key7d := ReadModelRequestKey(base)
+	if key7d == keyExplicit30d {
+		t.Fatalf("expected different cache keys for different windows, both were %q", key7d)
+	}
+}
+
 func float64Ptr(v float64) *float64 { return &v }

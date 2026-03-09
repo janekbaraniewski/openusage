@@ -301,14 +301,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case " ", "enter":
 			if m.settings.cursor >= 0 && m.settings.cursor < twCount {
 				tw := core.ValidTimeWindows[m.settings.cursor]
-				m.timeWindow = tw
-				if m.onTimeWindowChange != nil {
-					m.onTimeWindowChange(string(tw))
-				}
-				m.refreshing = true
-				if m.onRefresh != nil {
-					m.onRefresh()
-				}
+				m = m.beginTimeWindowRefresh(tw)
 				m.settings.status = "saving time window..."
 				return m, m.persistTimeWindowCmd(string(tw))
 			}

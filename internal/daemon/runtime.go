@@ -25,7 +25,7 @@ type ViewRuntime struct {
 
 	stateMu    sync.RWMutex
 	state      DaemonState
-	timeWindow string
+	timeWindow core.TimeWindow
 }
 
 func NewViewRuntime(
@@ -113,21 +113,24 @@ func (r *ViewRuntime) State() DaemonState {
 	return r.state
 }
 
-func (r *ViewRuntime) SetTimeWindow(tw string) {
+func (r *ViewRuntime) SetTimeWindow(tw core.TimeWindow) {
 	if r == nil {
 		return
 	}
 	r.stateMu.Lock()
-	r.timeWindow = tw
+	r.timeWindow = normalizeReadModelTimeWindow(tw)
 	r.stateMu.Unlock()
 }
 
-func (r *ViewRuntime) TimeWindow() string {
+func (r *ViewRuntime) TimeWindow() core.TimeWindow {
 	if r == nil {
-		return ""
+		return core.TimeWindow30d
 	}
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
+	if r.timeWindow == "" {
+		return core.TimeWindow30d
+	}
 	return r.timeWindow
 }
 
@@ -141,9 +144,14 @@ func (r *ViewRuntime) ResetEnsureThrottle() {
 	r.SetClient(nil)
 }
 
-func (r *ViewRuntime) ReadWithFallback(ctx context.Context) map[string]core.UsageSnapshot {
+func (r *ViewRuntime) ReadWithFallback(ctx context.Context) SnapshotFrame {
+	return r.ReadWithFallbackForWindow(ctx, r.TimeWindow())
+}
+
+func (r *ViewRuntime) ReadWithFallbackForWindow(ctx context.Context, timeWindow core.TimeWindow) SnapshotFrame {
+	frame := SnapshotFrame{TimeWindow: normalizeReadModelTimeWindow(timeWindow)}
 	if r == nil {
-		return nil
+		return frame
 	}
 
 	client := r.CurrentClient()
@@ -151,12 +159,13 @@ func (r *ViewRuntime) ReadWithFallback(ctx context.Context) map[string]core.Usag
 		client = r.EnsureClient(ctx)
 	}
 
-	snaps, err := r.fetchReadModel(ctx, client, ReadModelRequest{TimeWindow: r.TimeWindow()})
+	snaps, err := r.fetchReadModel(ctx, client, ReadModelRequest{TimeWindow: frame.TimeWindow})
 	if err != nil {
 		r.throttledLogError(err)
-		return nil
+		return frame
 	}
-	return snaps
+	frame.Snapshots = snaps
+	return frame
 }
 
 func (r *ViewRuntime) fetchReadModel(
@@ -233,10 +242,10 @@ func StartBroadcaster(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				snaps := rt.ReadWithFallback(ctx)
+				frame := rt.ReadWithFallback(ctx)
 				emitState()
-				if len(snaps) > 0 {
-					handler(snaps)
+				if len(frame.Snapshots) > 0 {
+					handler(frame)
 				}
 			}
 		}
@@ -244,11 +253,11 @@ func StartBroadcaster(
 }
 
 func warmUp(ctx context.Context, rt *ViewRuntime, handler SnapshotHandler, emitState func()) (cancelled bool) {
-	snaps := rt.ReadWithFallback(ctx)
+	frame := rt.ReadWithFallback(ctx)
 	emitState()
-	if len(snaps) > 0 {
-		handler(snaps)
-		if SnapshotsHaveUsableData(snaps) {
+	if len(frame.Snapshots) > 0 {
+		handler(frame)
+		if SnapshotsHaveUsableData(frame.Snapshots) {
 			return false
 		}
 	}
@@ -260,13 +269,13 @@ func warmUp(ctx context.Context, rt *ViewRuntime, handler SnapshotHandler, emitS
 		case <-ctx.Done():
 			return true
 		case <-ticker.C:
-			snaps := rt.ReadWithFallback(ctx)
+			frame := rt.ReadWithFallback(ctx)
 			emitState()
-			if len(snaps) == 0 {
+			if len(frame.Snapshots) == 0 {
 				continue
 			}
-			handler(snaps)
-			if SnapshotsHaveUsableData(snaps) {
+			handler(frame)
+			if SnapshotsHaveUsableData(frame.Snapshots) {
 				return false
 			}
 		}

@@ -283,14 +283,14 @@ func (s *Service) computeReadModel(
 	if len(templates) == 0 {
 		return map[string]core.UsageSnapshot{}, nil
 	}
-	tw := core.ParseTimeWindow(req.TimeWindow)
+	tw := normalizeReadModelTimeWindow(req.TimeWindow)
 	result, err := telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
 		ProviderLinks:   req.ProviderLinks,
 		TimeWindowHours: tw.Hours(),
-		TimeWindow:      req.TimeWindow,
+		TimeWindow:      tw,
 	})
 	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
-		time.Since(start).Milliseconds(), req.TimeWindow, len(req.Accounts), len(result))
+		time.Since(start).Milliseconds(), tw, len(req.Accounts), len(result))
 	return result, err
 }
 
@@ -314,7 +314,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			}
 			return
 		}
-		s.rmCache.set(cacheKey, snapshots, req.TimeWindow)
+		s.rmCache.set(cacheKey, snapshots)
 	}()
 }
 
@@ -1098,7 +1098,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheKey := ReadModelRequestKey(req)
-	if cached, cachedAt, ok := s.rmCache.get(cacheKey, req.TimeWindow); ok {
+	if cached, cachedAt, ok := s.rmCache.get(cacheKey); ok {
 		core.Tracef("[read_model] cache hit key=%s age=%s providers=%d", cacheKey, time.Since(cachedAt).Round(time.Millisecond), len(cached))
 		for id, snap := range cached {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
@@ -1114,7 +1114,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
-		s.rmCache.set(cacheKey, snapshots, req.TimeWindow)
+		s.rmCache.set(cacheKey, snapshots)
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 		return
 	}

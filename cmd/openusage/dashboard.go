@@ -14,6 +14,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/daemon"
+	"github.com/janekbaraniewski/openusage/internal/dashboardapp"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
@@ -39,6 +40,7 @@ func runDashboard(cfg config.Config) {
 		cachedAccounts,
 		timeWindow,
 	)
+	model.SetServices(dashboardapp.NewService())
 
 	socketPath := daemon.ResolveSocketPath()
 
@@ -47,12 +49,13 @@ func runDashboard(cfg config.Config) {
 		socketPath,
 		verbose,
 	)
-	viewRuntime.SetTimeWindow(string(timeWindow))
+	viewRuntime.SetTimeWindow(timeWindow)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var program *tea.Program
+	dispatcher := &snapshotDispatcher{}
 
 	model.SetOnAddAccount(func(acct core.AccountConfig) {
 		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {
@@ -96,16 +99,11 @@ func runDashboard(cfg config.Config) {
 		}
 	})
 
-	model.SetOnRefresh(func() {
-		go func() {
-			snaps := viewRuntime.ReadWithFallback(ctx)
-			if len(snaps) > 0 && program != nil {
-				program.Send(tui.SnapshotsMsg(snaps))
-			}
-		}()
+	model.SetOnRefresh(func(window core.TimeWindow) {
+		dispatcher.refresh(ctx, viewRuntime, window)
 	})
 
-	model.SetOnTimeWindowChange(func(tw string) {
+	model.SetOnTimeWindowChange(func(tw core.TimeWindow) {
 		viewRuntime.SetTimeWindow(tw)
 	})
 
@@ -118,6 +116,7 @@ func runDashboard(cfg config.Config) {
 	})
 
 	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	dispatcher.bind(program)
 
 	go func() {
 		runStartupUpdateCheck(
@@ -139,8 +138,8 @@ func runDashboard(cfg config.Config) {
 		ctx,
 		viewRuntime,
 		interval,
-		func(snaps map[string]core.UsageSnapshot) {
-			program.Send(tui.SnapshotsMsg(snaps))
+		func(frame daemon.SnapshotFrame) {
+			dispatcher.dispatch(frame)
 		},
 		func(state daemon.DaemonState) {
 			program.Send(mapDaemonState(state))

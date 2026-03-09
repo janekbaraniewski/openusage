@@ -38,8 +38,6 @@ func detectClaudeCode(result *Result) {
 			ID:       "claude-code",
 			Provider: "claude_code",
 			Auth:     "local",
-			Binary:   statsFile,   // compat fallback
-			BaseURL:  accountFile, // compat fallback
 			Paths: map[string]string{
 				"stats_cache":    statsFile,
 				"account_config": accountFile,

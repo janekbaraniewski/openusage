@@ -1,0 +1,63 @@
+# Codebase Audit Action Table
+
+Date: 2026-03-09
+Repository: `/Users/janekbaraniewski/Workspace/priv/openusage`
+
+## Scope
+
+This pass combined:
+
+- full test run: `go test ./...`
+- targeted race run: `go test -race ./internal/daemon ./internal/telemetry ./internal/tui ./cmd/openusage`
+- repo-wide static scans for large files, goroutines, mutex usage, legacy markers, and duplicated metric-prefix parsing
+- targeted reads of the highest-risk files and subsystems
+
+This table captures every issue found in this pass. It is broad and high-signal, but it is still a static audit, not a proof that no additional edge-case bugs exist.
+
+## Resolved In This Pass
+
+| ID | Priority | Area | Evidence | Change made | Follow-up |
+| --- | --- | --- | --- | --- | --- |
+| R1 | Fixed | Dashboard timeframe race | `cmd/openusage/dashboard.go`, `internal/tui/model.go`, `internal/daemon/runtime.go` | Snapshot messages now carry `TimeWindow` and `RequestID`, and stale responses are rejected. | None. Keep regression tests. |
+| R2 | Fixed | Daemon cache refresh bug | `internal/daemon/accounts.go`, `internal/daemon/server.go`, `internal/daemon/types.go` | Read-model cache refresh dedupe now keys by normalized time window instead of collapsing all windows together. | None. |
+| R3 | Fixed | Weakly typed time-window flow | `internal/daemon/types.go`, `internal/daemon/runtime.go`, `internal/telemetry/read_model.go`, `internal/telemetry/usage_view.go` | Internal daemon and telemetry paths now use `core.TimeWindow` instead of raw strings. | Continue shrinking stringly typed config boundaries over time. |
+| R4 | Fixed | Dashboard refresh orchestration sprawl | `cmd/openusage/snapshot_dispatcher.go`, `cmd/openusage/dashboard.go` | Snapshot sequencing/version dispatch moved out of dashboard wiring into a dedicated helper. | Reuse the same pattern if other async UI data channels are added. |
+| R5 | Fixed | Legacy runtime path overload cleanup | `internal/core/provider.go`, `internal/config/config.go`, `internal/detect/cursor.go`, `internal/detect/claude_code.go`, `internal/providers/cursor/cursor.go`, `internal/providers/claude_code/claude_code.go` | Legacy provider-specific path overloads are normalized into `Paths`, and runtime provider code now uses named paths instead of normal-path dependence on `Binary` / `BaseURL`. | The type still contains `Binary` and `BaseURL` for legitimate CLI/base-URL providers. |
+| R6 | Fixed | Repeated coding-tool detail widgets | `internal/core/detail_widget.go`, `internal/providers/cursor/cursor.go`, `internal/providers/codex/codex.go`, `internal/providers/claude_code/claude_code.go`, `internal/providers/copilot/copilot.go`, `internal/providers/gemini_cli/gemini_cli.go` | Repeated detail section arrays were replaced with a shared `CodingToolDetailWidget(...)` constructor. | Extend the same pattern if more coding-tool providers are added. |
+| R7 | Fixed | TUI side-effect boundary | `internal/tui/model.go`, `internal/dashboardapp/service.go`, `cmd/openusage/dashboard.go` | `tui.Model` no longer directly persists settings, saves credentials, installs integrations, or validates API keys. Those side effects now go through an injected dashboard application service. | More UI decomposition is still useful, but the highest-leak side effects are no longer hardcoded in the model. |
+| R8 | Fixed | Codex parser duplication | `internal/providers/codex/session_decoder.go`, `internal/providers/codex/codex.go`, `internal/providers/codex/telemetry_usage.go` | Codex session JSONL parsing now runs through one shared decoder used by both the dashboard breakdown reader and telemetry ingestion path. | Apply the same consolidation to Claude Code and Cursor. |
+| R9 | Fixed | Claude Code parser duplication | `internal/providers/claude_code/conversation_records.go`, `internal/providers/claude_code/claude_code.go`, `internal/providers/claude_code/telemetry_usage.go` | Claude Code JSONL parsing, token total calculation, and usage/tool dedupe keys now run through one shared normalized conversation-record helper used by both the dashboard aggregator and telemetry collector. | Apply the same consolidation pattern to Cursor. |
+
+## Action Table
+
+| ID | Priority | Area | Evidence | Issue | Recommended action | Expected payoff |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 | P2 | Account config contract hardening | `internal/core/provider.go:31-43`, `internal/config/config.go:199-206` | Path overload dependence is removed from the hot runtime flow, but `Binary` / `BaseURL` still coexist in the same type and the distinction between CLI path vs provider-local path is still not encoded by type. | Introduce a dedicated typed runtime-hints/path struct and eventually retire path-related legacy comments/compatibility in `AccountConfig`. | Finishes the contract cleanup and makes misuse harder. |
+| A2 | P2 | TUI/application decomposition follow-through | `internal/tui/model.go:393-584`, `internal/dashboardapp/service.go` | The side effects are now injected, but `Model` still owns a very large amount of event-handling and state-transition logic. | Continue splitting update/action logic into smaller TUI units and move more orchestration decisions into the dashboard application layer over time. | Lower UI complexity and smaller blast radius per change. |
+| A3 | P1 | UI metric-prefix parsing | `internal/tui/tiles_composition.go:302-322`, `internal/tui/tiles_composition.go:913-1527`, `internal/tui/detail.go:371-432`, `internal/tui/analytics.go:663-729` | Rendering code is still parsing raw metric key conventions (`model_`, `usage_client_`, `usage_source_`, `mcp_`, `lang_`) directly. This duplicates interpretation logic across views. | Introduce typed composition DTOs in `internal/core` or `internal/telemetry`; renderers should consume structured sections rather than re-parse maps. | Removes a large class of UI drift bugs and reduces per-render work. |
+| A4 | P1 | OpenRouter provider size | `internal/providers/openrouter/openrouter.go:307-2188` | `openrouter.go` mixes auth probing, credits, keys, analytics parsing, generation pagination, provider resolution, metadata enrichment, and output projection in one 2800+ LOC file. | Split into subpackages/files: `api_client`, `analytics`, `generations`, `provider_resolution`, `projection`, `types`. | Easier maintenance, smaller diff surface, faster targeted testing. |
+| A5 | P1 | Cursor provider responsibility overload | `internal/providers/cursor/cursor.go:181-335`, `internal/providers/cursor/cursor.go:903-1006`, `internal/providers/cursor/cursor.go:1087-2086` | Cursor provider combines API orchestration, local SQLite readers, token extraction, and two independent caches in one class. | Split into `api`, `trackingdb`, `statedb`, `cache`, and `snapshot_projection` modules. Move token extraction out of provider hot path. | Cleaner boundaries and less risk of local/API logic regressions. |
+| A6 | P1 | Telemetry usage-view monolith | `internal/telemetry/usage_view.go:160-1757` | `usage_view.go` is simultaneously query planner, SQL execution layer, aggregation engine, naming normalizer, and snapshot projection layer. | Split into `query_*`, `aggregate_*`, `projection_*`, and `mcp_*` units. Add a typed intermediate aggregation model. | Easier optimization and safer incremental changes. |
+| A7 | P1 | Daemon service monolith | `internal/daemon/server.go:1-1211` | `server.go` owns service startup, socket server, polling, collection, retention, cache refresh, hook handling, and HTTP endpoints. | Split into `service_runtime`, `http_handlers`, `polling`, `collection`, `cache`, and `hook_ingest` files/types. | Lower mental load and easier concurrency review. |
+| A8 | P1 | Shared parser duplication | `internal/providers/cursor/cursor.go:1087-2086`, `internal/providers/cursor/telemetry.go:97-231` | Codex and Claude Code are now consolidated, but Cursor still parses overlapping local source formats in multiple flows. Snapshot and telemetry ingestion paths can still drift there. | Build one canonical decoder/projection layer for Cursor local sources and use it from both dashboard and telemetry paths. | Eliminates duplicated bugfix work and reduces format drift risk. |
+| A9 | P2 | Detached background work ownership | `internal/daemon/server.go:1108`, `internal/daemon/server.go:1126`, `internal/daemon/server.go:306-318` | Read-model cache refreshes are launched from request handlers with `context.Background()`. They are bounded by timeout but detached from service lifecycle ownership. | Give `Service` a root context and use it for detached async refreshes. Optionally expose a bounded worker pool instead of unconstrained goroutine creation. | Safer shutdown semantics and fewer background task ownership ambiguities. |
+| A11 | P2 | Time-dependent logic without injectable clock | `internal/providers/cursor/cursor.go:478`, `internal/providers/cursor/cursor.go:1704-1711`, `internal/providers/openrouter/openrouter.go:728`, `internal/providers/ollama/ollama.go:1088`, `internal/core/analytics_normalize.go:61-103` | Providers and analytics logic read `time.Now()` directly in many places, often mixing local time and UTC. This is hard to test and easy to get subtly wrong. | Introduce a small clock abstraction in time-sensitive subsystems and standardize UTC/local semantics per provider. | Better determinism and fewer timezone edge cases. |
+| A12 | P2 | Test file sprawl and fixture duplication | `internal/providers/openrouter/openrouter_test.go`, `internal/providers/copilot/copilot_test.go`, `internal/telemetry/usage_view_test.go`, `internal/config/config_test.go` | Some tests are 1000-2600 LOC and re-encode similar setup logic inline. They are valuable but expensive to navigate and update. | Extract fixture builders and scenario helpers per package. Keep top-level tests declarative. | Faster iteration and simpler maintenance of large test suites. |
+| A13 | P3 | Logging/throttling utilities are ad hoc | `internal/daemon/server.go:194-237`, `internal/daemon/runtime.go:198-207`, `internal/core/trace.go:14-27` | Log throttling and trace behavior are implemented in several small local patterns instead of one reusable utility. | Consolidate throttled logging and trace controls into a shared helper package. | Small cleanup, but it reduces low-grade duplication. |
+| A14 | P3 | File-size based decomposition needed in TUI | `internal/tui/model.go`, `internal/tui/detail.go`, `internal/tui/settings_modal.go`, `internal/tui/tiles_composition.go` | TUI logic is split across files, but the files are still individually very large and mix event handling, rendering, and data interpretation. | Continue decomposition by concern: `model_update`, `model_actions`, `model_display`, `settings_actions`, `detail_sections`, `composition_extractors`. | Better readability and easier targeted refactors. |
+| A15 | P3 | Performance optimization opportunity in render path | `internal/tui/model.go:441-450`, `internal/tui/tiles_composition.go:302-322`, `internal/tui/detail.go:752-1046`, `internal/tui/analytics.go:663-729` | The UI recomputes display/composition structures from raw metric maps repeatedly during rendering. It is correct, but the work is duplicated across views and frames. | Cache derived display/composition sections per snapshot update instead of rebuilding them in each view path. | Lower render cost and less duplicated parsing logic. |
+
+## Suggested Execution Order
+
+1. A1, A8
+2. A2, A3
+3. A6, A7
+4. A4, A5
+5. A9, A11, A15
+6. A10, A12, A13, A14
+
+## Notes
+
+- The highest-risk remaining issues are architectural rather than immediately broken behavior.
+- The biggest drift risks are still the duplicated raw-source parsers and the metric-prefix parsing in the TUI.
+- The race pass completed cleanly for the core dashboard/daemon/telemetry packages after the timeframe fix.

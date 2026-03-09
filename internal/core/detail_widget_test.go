@@ -62,3 +62,34 @@ func TestDetailWidgetWithModelsAndTrends(t *testing.T) {
 		t.Fatalf("Trends order = %d, want 3", got)
 	}
 }
+
+func TestCodingToolDetailWidget(t *testing.T) {
+	tests := []struct {
+		name       string
+		includeMCP bool
+		wantMCP    bool
+		wantCount  int
+	}{
+		{name: "with mcp", includeMCP: true, wantMCP: true, wantCount: 8},
+		{name: "without mcp", includeMCP: false, wantMCP: false, wantCount: 7},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := CodingToolDetailWidget(tt.includeMCP)
+			if len(w.Sections) != tt.wantCount {
+				t.Fatalf("sections len = %d, want %d", len(w.Sections), tt.wantCount)
+			}
+			_, hasMCP := w.section("MCP Usage")
+			if hasMCP != tt.wantMCP {
+				t.Fatalf("has MCP Usage = %v, want %v", hasMCP, tt.wantMCP)
+			}
+			if got := w.SectionStyle("Usage"); got != DetailSectionStyleUsage {
+				t.Fatalf("Usage style = %q, want %q", got, DetailSectionStyleUsage)
+			}
+			if got := w.SectionStyle("Activity"); got != DetailSectionStyleActivity {
+				t.Fatalf("Activity style = %q, want %q", got, DetailSectionStyleActivity)
+			}
+		})
+	}
+}

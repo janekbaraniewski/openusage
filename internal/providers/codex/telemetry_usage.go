@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,38 +13,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
-
-type telemetrySessionEvent struct {
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-type telemetrySessionMeta struct {
-	ID            string `json:"id"`
-	SessionID     string `json:"session_id"`
-	Model         string `json:"model"`
-	CWD           string `json:"cwd"`
-	Source        string `json:"source"`
-	Originator    string `json:"originator"`
-	ModelProvider string `json:"model_provider"`
-}
-
-type telemetryTurnContext struct {
-	Model  string `json:"model"`
-	TurnID string `json:"turn_id"`
-}
-
-type telemetryTokenInfo struct {
-	TotalTokenUsage tokenUsage `json:"total_token_usage"`
-}
-
-type telemetryEventPayload struct {
-	Type      string              `json:"type"`
-	Info      *telemetryTokenInfo `json:"info"`
-	RequestID string              `json:"request_id,omitempty"`
-	MessageID string              `json:"message_id,omitempty"`
-}
 
 const (
 	codexTelemetryProviderID    = "codex"
@@ -104,12 +71,6 @@ func DefaultTelemetrySessionsDir() string {
 
 // ParseTelemetrySessionFile parses a Codex session JSONL file into normalized telemetry events.
 func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
 	sessionID := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	model := ""
 	upstreamProviderID := codexTelemetryUpstreamModel
@@ -124,52 +85,36 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 	toolByCallID := make(map[string]int)
 
 	var out []shared.TelemetryEvent
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 512*1024), maxScannerBufferSize)
-	lineNumber := 0
-
-	for scanner.Scan() {
-		lineNumber++
-		var ev telemetrySessionEvent
-		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
-			continue
-		}
-
-		switch ev.Type {
-		case "session_meta":
-			var meta telemetrySessionMeta
-			if json.Unmarshal(ev.Payload, &meta) == nil {
-				sid := core.FirstNonEmpty(meta.SessionID, meta.ID)
-				if sid != "" {
-					sessionID = sid
-				}
-				if strings.TrimSpace(meta.Model) != "" {
-					model = strings.TrimSpace(meta.Model)
-				}
-				if strings.TrimSpace(meta.ModelProvider) != "" {
-					upstreamProviderID = strings.TrimSpace(meta.ModelProvider)
-				}
-				if ws := shared.SanitizeWorkspace(meta.CWD); ws != "" {
-					workspaceID = ws
-				}
-				clientSource = strings.TrimSpace(meta.Source)
-				clientOriginator = strings.TrimSpace(meta.Originator)
-				clientName = classifyClient(clientSource, clientOriginator)
+	if err := walkSessionFile(path, func(record sessionLine) error {
+		switch {
+		case record.SessionMeta != nil:
+			sid := core.FirstNonEmpty(record.SessionMeta.SessionID, record.SessionMeta.ID)
+			if sid != "" {
+				sessionID = sid
 			}
-		case "turn_context":
-			var tc telemetryTurnContext
-			if json.Unmarshal(ev.Payload, &tc) == nil {
-				if strings.TrimSpace(tc.Model) != "" {
-					model = strings.TrimSpace(tc.Model)
-				}
-				if strings.TrimSpace(tc.TurnID) != "" {
-					currentTurnID = strings.TrimSpace(tc.TurnID)
-				}
+			if strings.TrimSpace(record.SessionMeta.Model) != "" {
+				model = strings.TrimSpace(record.SessionMeta.Model)
 			}
-		case "event_msg":
-			var payload telemetryEventPayload
-			if json.Unmarshal(ev.Payload, &payload) != nil || payload.Type != "token_count" || payload.Info == nil {
-				continue
+			if strings.TrimSpace(record.SessionMeta.ModelProvider) != "" {
+				upstreamProviderID = strings.TrimSpace(record.SessionMeta.ModelProvider)
+			}
+			if ws := shared.SanitizeWorkspace(record.SessionMeta.CWD); ws != "" {
+				workspaceID = ws
+			}
+			clientSource = strings.TrimSpace(record.SessionMeta.Source)
+			clientOriginator = strings.TrimSpace(record.SessionMeta.Originator)
+			clientName = classifyClient(clientSource, clientOriginator)
+		case record.TurnContext != nil:
+			if strings.TrimSpace(record.TurnContext.Model) != "" {
+				model = strings.TrimSpace(record.TurnContext.Model)
+			}
+			if strings.TrimSpace(record.TurnContext.TurnID) != "" {
+				currentTurnID = strings.TrimSpace(record.TurnContext.TurnID)
+			}
+		case record.EventPayload != nil:
+			payload := record.EventPayload
+			if payload.Type != "token_count" || payload.Info == nil {
+				return nil
 			}
 
 			total := payload.Info.TotalTokenUsage
@@ -184,12 +129,12 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			hasPrevious = true
 
 			if delta.TotalTokens <= 0 {
-				continue
+				return nil
 			}
 			turnIndex++
 
 			occurredAt := time.Now().UTC()
-			if ts, err := shared.ParseTimestampString(ev.Timestamp); err == nil {
+			if ts, err := shared.ParseTimestampString(record.Timestamp); err == nil {
 				occurredAt = ts
 			}
 
@@ -228,21 +173,17 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				Status: shared.TelemetryStatusOK,
 				Payload: map[string]any{
 					"source_file":       path,
-					"line":              lineNumber,
+					"line":              record.LineNumber,
 					"upstream_provider": upstreamProviderID,
 					"client":            clientName,
 					"client_source":     clientSource,
 					"client_originator": clientOriginator,
 				},
 			})
-		case "response_item":
-			var item responseItemPayload
-			if json.Unmarshal(ev.Payload, &item) != nil {
-				continue
-			}
-
+		case record.ResponseItem != nil:
+			item := record.ResponseItem
 			occurredAt := time.Now().UTC()
-			if ts, err := shared.ParseTimestampString(ev.Timestamp); err == nil {
+			if ts, err := shared.ParseTimestampString(record.Timestamp); err == nil {
 				occurredAt = ts
 			}
 
@@ -256,13 +197,13 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 					toolName = "unknown"
 				}
 
-				turnID := fmt.Sprintf("%s:tool:%d", sessionID, lineNumber)
+				turnID := fmt.Sprintf("%s:tool:%d", sessionID, record.LineNumber)
 				if strings.TrimSpace(currentTurnID) != "" {
 					turnID = strings.TrimSpace(currentTurnID)
 				}
 				callID := strings.TrimSpace(item.CallID)
-				messageID := core.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", sessionID, lineNumber))
-				eventPayload := codexBuildToolPayload(path, lineNumber, item)
+				messageID := core.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", sessionID, record.LineNumber))
+				eventPayload := codexBuildToolPayload(path, record.LineNumber, *item)
 				if strings.TrimSpace(upstreamProviderID) != "" {
 					eventPayload["upstream_provider"] = strings.TrimSpace(upstreamProviderID)
 				}
@@ -302,7 +243,7 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				callID := strings.TrimSpace(item.CallID)
 				idx, ok := toolByCallID[callID]
 				if !ok || idx < 0 || idx >= len(out) {
-					continue
+					return nil
 				}
 				switch inferToolCallOutcome(item.Output) {
 				case 2:
@@ -314,9 +255,8 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				}
 			}
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return out, err
 	}
 	return out, nil

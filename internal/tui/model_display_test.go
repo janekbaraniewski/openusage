@@ -227,13 +227,17 @@ func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
 	}
 
 	snaps := SnapshotsMsg{
-		"openrouter": {
-			ProviderID: "openrouter",
-			AccountID:  "openrouter",
-			Status:     core.StatusUnknown,
-			Message:    "daemon warming up",
-			Metrics:    map[string]core.Metric{},
+		Snapshots: map[string]core.UsageSnapshot{
+			"openrouter": {
+				ProviderID: "openrouter",
+				AccountID:  "openrouter",
+				Status:     core.StatusUnknown,
+				Message:    "daemon warming up",
+				Metrics:    map[string]core.Metric{},
+			},
 		},
+		TimeWindow: core.TimeWindow30d,
+		RequestID:  1,
 	}
 
 	updated, _ := m.Update(snaps)
@@ -243,6 +247,87 @@ func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
 	}
 	if !got.hasData {
 		t.Fatal("expected hasData=true after first snapshots frame")
+	}
+}
+
+func TestUpdate_SnapshotsMsgIgnoresStaleTimeWindowResponse(t *testing.T) {
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow1d)
+	currentUsed := 1.0
+	m.snapshots = map[string]core.UsageSnapshot{
+		"openrouter": {
+			ProviderID: "openrouter",
+			AccountID:  "openrouter",
+			Status:     core.StatusOK,
+			Metrics: map[string]core.Metric{
+				"requests_today": {Used: &currentUsed, Unit: "requests", Window: "1d"},
+			},
+		},
+	}
+	m.hasData = true
+	m.lastSnapshotRequestID = 2
+
+	staleUsed := 30.0
+	updated, _ := m.Update(SnapshotsMsg{
+		Snapshots: map[string]core.UsageSnapshot{
+			"openrouter": {
+				ProviderID: "openrouter",
+				AccountID:  "openrouter",
+				Status:     core.StatusOK,
+				Metrics: map[string]core.Metric{
+					"requests_window": {Used: &staleUsed, Unit: "requests", Window: "30d"},
+				},
+			},
+		},
+		TimeWindow: core.TimeWindow30d,
+		RequestID:  3,
+	})
+	got := updated.(Model)
+	if metric := got.snapshots["openrouter"].Metrics["requests_today"]; metric.Used == nil || *metric.Used != 1 {
+		t.Fatalf("current window snapshot was replaced by stale window: %+v", got.snapshots["openrouter"].Metrics)
+	}
+}
+
+func TestUpdate_SnapshotsMsgIgnoresOlderCurrentWindowResponse(t *testing.T) {
+	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow7d)
+	m.hasData = true
+
+	newUsed := 7.0
+	updated, _ := m.Update(SnapshotsMsg{
+		Snapshots: map[string]core.UsageSnapshot{
+			"openrouter": {
+				ProviderID: "openrouter",
+				AccountID:  "openrouter",
+				Status:     core.StatusOK,
+				Metrics: map[string]core.Metric{
+					"window_requests": {Used: &newUsed, Unit: "requests", Window: "7d"},
+				},
+			},
+		},
+		TimeWindow: core.TimeWindow7d,
+		RequestID:  5,
+	})
+	got := updated.(Model)
+
+	oldUsed := 3.0
+	updated, _ = got.Update(SnapshotsMsg{
+		Snapshots: map[string]core.UsageSnapshot{
+			"openrouter": {
+				ProviderID: "openrouter",
+				AccountID:  "openrouter",
+				Status:     core.StatusOK,
+				Metrics: map[string]core.Metric{
+					"window_requests": {Used: &oldUsed, Unit: "requests", Window: "7d"},
+				},
+			},
+		},
+		TimeWindow: core.TimeWindow7d,
+		RequestID:  4,
+	})
+	got = updated.(Model)
+
+	metric := got.snapshots["openrouter"].Metrics["window_requests"]
+	if metric.Used == nil || *metric.Used != 7 {
+		t.Fatalf("older request overwrote newer snapshot: %+v", metric)
 	}
 }
 

@@ -297,21 +297,13 @@ func buildStatsCandidates(explicitPath, claudeDir, home string) []string {
 }
 
 func (p *Provider) DetailWidget() core.DetailWidget {
-	return core.DetailWidget{
-		Sections: []core.DetailSection{
-			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
-			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Languages", Order: 3, Style: core.DetailSectionStyleLanguages},
-			{Name: "MCP Usage", Order: 4, Style: core.DetailSectionStyleMCP},
-			{Name: "Spending", Order: 5, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 6, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 7, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 8, Style: core.DetailSectionStyleActivity},
-		},
-	}
+	return core.CodingToolDetailWidget(true)
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	if strings.TrimSpace(acct.Provider) == "" {
+		acct.Provider = p.ID()
+	}
 	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
@@ -330,8 +322,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		home = filepath.Dir(claudeDir) // derive "home" from the override
 	}
 
-	statsPath := acct.Path("stats_cache", acct.Binary)
-	accountPath := acct.Path("account_config", acct.BaseURL)
+	acct.NormalizeRuntimePaths()
+	statsPath := acct.Path("stats_cache", "")
+	accountPath := acct.Path("account_config", "")
 
 	if accountPath == "" {
 		accountPath = filepath.Join(home, ".claude.json")
@@ -868,19 +861,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 
 	blockStartCandidates := []time.Time{}
 
-	type parsedUsage struct {
-		timestamp  time.Time
-		model      string
-		usage      *jsonlUsage
-		requestID  string
-		messageID  string
-		sessionID  string
-		cwd        string
-		sourcePath string
-		content    []jsonlContent
-	}
-
-	var allUsages []parsedUsage
+	var allUsages []conversationRecord
 	modelTotals := make(map[string]*modelUsageTotals)
 	clientTotals := make(map[string]*modelUsageTotals)
 	projectTotals := make(map[string]*modelUsageTotals)
@@ -965,70 +946,8 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		}
 		return sanitizeModelName(dir)
 	}
-	usageDedupKey := func(u parsedUsage) string {
-		if u.requestID != "" {
-			return "req:" + u.requestID
-		}
-		if u.messageID != "" {
-			return "msg:" + u.messageID
-		}
-		if u.usage == nil {
-			return ""
-		}
-		return fmt.Sprintf("%s|%s|%d|%d|%d|%d|%d",
-			u.sessionID,
-			u.timestamp.UTC().Format(time.RFC3339Nano),
-			u.usage.InputTokens,
-			u.usage.OutputTokens,
-			u.usage.CacheReadInputTokens,
-			u.usage.CacheCreationInputTokens,
-			u.usage.ReasoningTokens,
-		)
-	}
-	toolDedupKey := func(u parsedUsage, idx int, item jsonlContent) string {
-		base := u.requestID
-		if base == "" {
-			base = u.messageID
-		}
-		if base == "" {
-			base = u.sessionID + "|" + u.timestamp.UTC().Format(time.RFC3339Nano)
-		}
-		if item.ID != "" {
-			return base + "|tool|" + item.ID
-		}
-		name := strings.ToLower(strings.TrimSpace(item.Name))
-		if name == "" {
-			name = "unknown"
-		}
-		return fmt.Sprintf("%s|tool|%s|%d", base, name, idx)
-	}
-
 	for _, fpath := range jsonlFiles {
-		entries := parseJSONLFile(fpath)
-		for _, entry := range entries {
-			if entry.Type != "assistant" || entry.Message == nil {
-				continue
-			}
-			ts, ok := parseJSONLTimestamp(entry.Timestamp)
-			if !ok {
-				continue
-			}
-			model := entry.Message.Model
-			if model == "" {
-				model = "unknown"
-			}
-			allUsages = append(allUsages, parsedUsage{
-				timestamp:  ts,
-				model:      model,
-				usage:      entry.Message.Usage,
-				requestID:  entry.RequestID,
-				messageID:  entry.Message.ID,
-				sessionID:  entry.SessionID,
-				cwd:        entry.CWD,
-				sourcePath: fpath,
-				content:    entry.Message.Content,
-			})
-		}
+		allUsages = append(allUsages, parseConversationRecords(fpath)...)
 	}
 
 	sort.Slice(allUsages, func(i, j int) bool {
@@ -1040,7 +959,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		if u.usage == nil {
 			continue
 		}
-		key := usageDedupKey(u)
+		key := conversationUsageDedupKey(u)
 		if key != "" {
 			if seenForBlock[key] {
 				continue
@@ -1064,7 +983,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			if item.Type != "tool_use" {
 				continue
 			}
-			toolKey := toolDedupKey(u, idx, item)
+			toolKey := conversationToolDedupKey(u, idx, item)
 			if seenToolKeys[toolKey] {
 				continue
 			}
@@ -1108,7 +1027,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		if u.usage == nil {
 			continue
 		}
-		usageKey := usageDedupKey(u)
+		usageKey := conversationUsageDedupKey(u)
 		if usageKey != "" && seenUsageKeys[usageKey] {
 			continue
 		}

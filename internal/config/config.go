@@ -226,6 +226,7 @@ func normalizeAccounts(in []core.AccountConfig) []core.AccountConfig {
 	}
 	normalized := lo.Map(in, func(acct core.AccountConfig, _ int) core.AccountConfig {
 		acct.ID = normalizeAccountID(acct.ID)
+		acct.NormalizeRuntimePaths()
 		return acct
 	})
 	filtered := lo.Filter(normalized, func(acct core.AccountConfig, _ int) bool { return acct.ID != "" })

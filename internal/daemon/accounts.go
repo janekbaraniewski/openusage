@@ -147,7 +147,7 @@ func LoadAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfig,
 func BuildReadModelRequest(
 	accounts []core.AccountConfig,
 	providerLinks map[string]string,
-	timeWindow string,
+	timeWindow core.TimeWindow,
 ) ReadModelRequest {
 	seen := make(map[string]bool, len(accounts))
 	outAccounts := make([]ReadModelAccount, 0, len(accounts))
@@ -171,7 +171,11 @@ func BuildReadModelRequest(
 			links[source] = target
 		}
 	}
-	return ReadModelRequest{Accounts: outAccounts, ProviderLinks: links, TimeWindow: timeWindow}
+	return ReadModelRequest{
+		Accounts:      outAccounts,
+		ProviderLinks: links,
+		TimeWindow:    normalizeReadModelTimeWindow(timeWindow),
+	}
 }
 
 func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
@@ -180,7 +184,7 @@ func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
 		return ReadModelRequest{}, err
 	}
 	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
-	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks, cfg.Data.TimeWindow), nil
+	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks, core.ParseTimeWindow(cfg.Data.TimeWindow)), nil
 }
 
 func ReadModelRequestKey(req ReadModelRequest) string {
@@ -234,7 +238,13 @@ func ReadModelRequestKey(req ReadModelRequest) string {
 		b.WriteString(key)
 		b.WriteByte(';')
 	}
+	b.WriteString("|window:")
+	b.WriteString(string(normalizeReadModelTimeWindow(req.TimeWindow)))
 	return b.String()
+}
+
+func normalizeReadModelTimeWindow(timeWindow core.TimeWindow) core.TimeWindow {
+	return core.ParseTimeWindow(strings.TrimSpace(string(timeWindow)))
 }
 
 func ReadModelTemplatesFromRequest(
