@@ -28,19 +28,15 @@ func DetailTabs(snap core.UsageSnapshot) []string {
 			tabs = append(tabs, g.title)
 		}
 	}
-	// Add Models tab if model data is available.
-	if len(snap.ModelUsage) > 0 || hasModelCostMetrics(snap) {
+	if hasAnalyticsModelData(snap) {
 		tabs = append(tabs, "Models")
 	}
-	// Add Languages tab if language data is available.
 	if hasLanguageMetrics(snap) {
 		tabs = append(tabs, "Languages")
 	}
-	// Add MCP Usage tab if MCP metrics are available.
 	if hasMCPMetrics(snap) {
 		tabs = append(tabs, "MCP Usage")
 	}
-	// Add Trends tab if daily series has enough data for a chart.
 	if hasChartableSeries(snap.DailySeries) {
 		tabs = append(tabs, "Trends")
 	}
@@ -97,9 +93,8 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 		}
 	}
 
-	// Models section — dispatched directly (needs full snapshot, not just metric entries).
 	showModels := tabName == "Models" || showAll
-	if showModels && (len(snap.ModelUsage) > 0 || hasModelCostMetrics(snap)) {
+	if showModels && hasAnalyticsModelData(snap) {
 		sb.WriteString("\n")
 		renderDetailSectionHeader(&sb, "Models", w)
 		renderModelsSection(&sb, snap, widget, w)
@@ -765,110 +760,61 @@ func renderSectionSparklines(sb *strings.Builder, widget core.DashboardWidget, w
 	}
 }
 
-// renderModelsSection renders ModelUsageRecord data as a horizontal bar chart of costs
-// and a token breakdown for the top model. Falls back to existing model cost table
-// if ModelUsage is empty but metric-based model costs exist.
 func renderModelsSection(sb *strings.Builder, snap core.UsageSnapshot, widget core.DashboardWidget, w int) {
-	if len(snap.ModelUsage) > 0 {
-		// Sort by cost descending, take top 8.
-		records := make([]core.ModelUsageRecord, len(snap.ModelUsage))
-		copy(records, snap.ModelUsage)
-		sort.Slice(records, func(i, j int) bool {
-			ci, cj := float64(0), float64(0)
-			if records[i].CostUSD != nil {
-				ci = *records[i].CostUSD
-			}
-			if records[j].CostUSD != nil {
-				cj = *records[j].CostUSD
-			}
-			return ci > cj
-		})
-		if len(records) > 8 {
-			records = records[:8]
-		}
-
-		// Build chart items.
-		var items []chartItem
-		for i, rec := range records {
-			cost := float64(0)
-			if rec.CostUSD != nil {
-				cost = *rec.CostUSD
-			}
-			if cost <= 0 {
-				continue
-			}
-			name := rec.Canonical
-			if name == "" {
-				name = rec.RawModelID
-			}
-			items = append(items, chartItem{
-				Label: prettifyModelName(name),
-				Value: cost,
-				Color: stableModelColor(name, snap.ProviderID),
-				SubLabel: func() string {
-					if i == 0 && rec.InputTokens != nil {
-						return formatTokens(*rec.InputTokens) + " in"
-					}
-					return ""
-				}(),
-			})
-		}
-
-		if len(items) > 0 {
-			labelW := 22
-			if w < 55 {
-				labelW = 16
-			}
-			barW := w - labelW - 20
-			if barW < 8 {
-				barW = 8
-			}
-			if barW > 30 {
-				barW = 30
-			}
-			sb.WriteString(RenderHBarChart(items, barW, labelW) + "\n")
-		}
-
-		// Token breakdown for the top model with token data.
-		for _, rec := range records {
-			inTok := float64(0)
-			outTok := float64(0)
-			if rec.InputTokens != nil {
-				inTok = *rec.InputTokens
-			}
-			if rec.OutputTokens != nil {
-				outTok = *rec.OutputTokens
-			}
-			if inTok > 0 || outTok > 0 {
-				sb.WriteString("\n")
-				name := rec.Canonical
-				if name == "" {
-					name = rec.RawModelID
-				}
-				sb.WriteString("  " + dimStyle.Render("Token breakdown: "+prettifyModelName(name)) + "\n")
-				sb.WriteString(RenderTokenBreakdown(inTok, outTok, w-4) + "\n")
-				break
-			}
-		}
+	models := core.ExtractAnalyticsModelUsage(snap)
+	if len(models) == 0 {
 		return
 	}
 
-	// Fallback: check for model cost metrics.
-	if hasModelCostMetrics(snap) {
-		groups := groupMetrics(snap.Metrics, widget, detailWidget(snap.ProviderID))
-		for _, g := range groups {
-			var modelCosts []metricEntry
-			for _, e := range g.entries {
-				if isModelCostKey(e.key) {
-					modelCosts = append(modelCosts, e)
-				}
-			}
-			if len(modelCosts) > 0 {
-				renderModelCostsTable(sb, modelCosts, w)
-				return
-			}
-		}
+	if len(models) > 8 {
+		models = models[:8]
 	}
+
+	items := make([]chartItem, 0, len(models))
+	for i, model := range models {
+		if model.CostUSD <= 0 {
+			continue
+		}
+		subLabel := ""
+		if i == 0 && model.InputTokens > 0 {
+			subLabel = formatTokens(model.InputTokens) + " in"
+		}
+		items = append(items, chartItem{
+			Label:    prettifyModelName(model.Name),
+			Value:    model.CostUSD,
+			Color:    stableModelColor(model.Name, snap.ProviderID),
+			SubLabel: subLabel,
+		})
+	}
+
+	if len(items) > 0 {
+		labelW := 22
+		if w < 55 {
+			labelW = 16
+		}
+		barW := w - labelW - 20
+		if barW < 8 {
+			barW = 8
+		}
+		if barW > 30 {
+			barW = 30
+		}
+		sb.WriteString(RenderHBarChart(items, barW, labelW) + "\n")
+	}
+
+	for _, model := range models {
+		if model.InputTokens <= 0 && model.OutputTokens <= 0 {
+			continue
+		}
+		sb.WriteString("\n")
+		sb.WriteString("  " + dimStyle.Render("Token breakdown: "+prettifyModelName(model.Name)) + "\n")
+		sb.WriteString(RenderTokenBreakdown(model.InputTokens, model.OutputTokens, w-4) + "\n")
+		break
+	}
+}
+
+func hasAnalyticsModelData(snap core.UsageSnapshot) bool {
+	return len(core.ExtractAnalyticsModelUsage(snap)) > 0
 }
 
 // hasChartableSeries returns true if at least one daily series has >= 2 data points.

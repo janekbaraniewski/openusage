@@ -56,11 +56,7 @@ func aliasInto(s *UsageSnapshot, canonical string, aliases ...string) {
 }
 
 func synthesizeCoreSeriesFromMetrics(s *UsageSnapshot) {
-	today := s.Timestamp
-	if today.IsZero() {
-		today = time.Now()
-	}
-	todayDate := today.Format("2006-01-02")
+	todayDate := analyticsReferenceTime(s).Format("2006-01-02")
 
 	metricUsed := func(keys ...string) float64 {
 		for _, k := range keys {
@@ -98,11 +94,7 @@ func synthesizeModelSeriesFromRecords(s *UsageSnapshot) {
 	if len(s.ModelUsage) == 0 {
 		return
 	}
-	today := s.Timestamp
-	if today.IsZero() {
-		today = time.Now()
-	}
-	date := today.Format("2006-01-02")
+	date := analyticsReferenceTime(s).Format("2006-01-02")
 
 	perModel := make(map[string]float64)
 	for _, rec := range s.ModelUsage {
@@ -182,4 +174,11 @@ func normalizeSeriesModelKey(model string) string {
 		return "unknown"
 	}
 	return model
+}
+
+func analyticsReferenceTime(s *UsageSnapshot) time.Time {
+	if s != nil && !s.Timestamp.IsZero() {
+		return s.Timestamp.UTC()
+	}
+	return time.Now().UTC()
 }

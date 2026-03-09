@@ -1,0 +1,217 @@
+package tui
+
+import (
+	"fmt"
+	"log"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/integrations"
+)
+
+func (m Model) persistThemeCmd(themeName string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return themePersistedMsg{err: fmt.Errorf("theme service unavailable")}
+		}
+		err := m.services.SaveTheme(themeName)
+		if err != nil {
+			log.Printf("theme persist: %v", err)
+		}
+		return themePersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardPrefsCmd() tea.Cmd {
+	providers := m.dashboardConfigProviders()
+	return func() tea.Msg {
+		if m.services == nil {
+			return dashboardPrefsPersistedMsg{err: fmt.Errorf("dashboard settings service unavailable")}
+		}
+		err := m.services.SaveDashboardProviders(providers)
+		if err != nil {
+			log.Printf("dashboard settings persist: %v", err)
+		}
+		return dashboardPrefsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardViewCmd() tea.Cmd {
+	view := string(m.configuredDashboardView())
+	return func() tea.Msg {
+		if m.services == nil {
+			return dashboardViewPersistedMsg{err: fmt.Errorf("dashboard view service unavailable")}
+		}
+		err := m.services.SaveDashboardView(view)
+		if err != nil {
+			log.Printf("dashboard view persist: %v", err)
+		}
+		return dashboardViewPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
+	sections := m.dashboardWidgetSectionConfigEntries()
+	return func() tea.Msg {
+		if m.services == nil {
+			return dashboardWidgetSectionsPersistedMsg{err: fmt.Errorf("dashboard sections service unavailable")}
+		}
+		err := m.services.SaveDashboardWidgetSections(sections)
+		if err != nil {
+			log.Printf("dashboard widget sections persist: %v", err)
+		}
+		return dashboardWidgetSectionsPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistDashboardHideSectionsWithNoDataCmd() tea.Cmd {
+	hide := m.hideSectionsWithNoData
+	return func() tea.Msg {
+		if m.services == nil {
+			return dashboardHideSectionsWithNoDataPersistedMsg{err: fmt.Errorf("dashboard empty-state service unavailable")}
+		}
+		err := m.services.SaveDashboardHideSectionsWithNoData(hide)
+		if err != nil {
+			log.Printf("dashboard hide sections with no data persist: %v", err)
+		}
+		return dashboardHideSectionsWithNoDataPersistedMsg{err: err}
+	}
+}
+
+func (m Model) persistTimeWindowCmd(window string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return timeWindowPersistedMsg{err: fmt.Errorf("time window service unavailable")}
+		}
+		err := m.services.SaveTimeWindow(window)
+		if err != nil {
+			log.Printf("time window persist: %v", err)
+		}
+		return timeWindowPersistedMsg{err: err}
+	}
+}
+
+func (m Model) validateKeyCmd(accountID, providerID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return validateKeyResultMsg{AccountID: accountID, Valid: false, Error: "validation service unavailable"}
+		}
+		valid, errMsg := m.services.ValidateAPIKey(accountID, providerID, apiKey)
+		return validateKeyResultMsg{AccountID: accountID, Valid: valid, Error: errMsg}
+	}
+}
+
+func (m Model) saveCredentialCmd(accountID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return credentialSavedMsg{AccountID: accountID, Err: fmt.Errorf("credential service unavailable")}
+		}
+		err := m.services.SaveCredential(accountID, apiKey)
+		return credentialSavedMsg{AccountID: accountID, Err: err}
+	}
+}
+
+func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return credentialDeletedMsg{AccountID: accountID, Err: fmt.Errorf("credential service unavailable")}
+		}
+		err := m.services.DeleteCredential(accountID)
+		return credentialDeletedMsg{AccountID: accountID, Err: err}
+	}
+}
+
+func (m Model) installIntegrationCmd(id integrations.ID) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return integrationInstallResultMsg{IntegrationID: id, Err: fmt.Errorf("integration service unavailable")}
+		}
+		statuses, err := m.services.InstallIntegration(id)
+		return integrationInstallResultMsg{
+			IntegrationID: id,
+			Statuses:      statuses,
+			Err:           err,
+		}
+	}
+}
+
+func (m Model) cycleTimeWindow() (tea.Model, tea.Cmd) {
+	next := core.NextTimeWindow(m.timeWindow)
+	m = m.beginTimeWindowRefresh(next)
+	return m, m.persistTimeWindowCmd(string(next))
+}
+
+func (m Model) requestRefresh() Model {
+	m.refreshing = true
+	if m.onRefresh != nil {
+		m.onRefresh(m.timeWindow)
+	}
+	return m
+}
+
+func (m Model) beginTimeWindowRefresh(window core.TimeWindow) Model {
+	m.timeWindow = window
+	if m.onTimeWindowChange != nil {
+		m.onTimeWindowChange(window)
+	}
+	m.refreshing = true
+	if m.onRefresh != nil {
+		m.onRefresh(window)
+	}
+	return m
+}
+
+func (m Model) installDaemonCmd() tea.Cmd {
+	fn := m.onInstallDaemon
+	return func() tea.Msg {
+		if fn == nil {
+			return daemonInstallResultMsg{err: fmt.Errorf("install callback not configured")}
+		}
+		return daemonInstallResultMsg{err: fn()}
+	}
+}
+
+func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
+	if len(snaps) == 0 {
+		return false
+	}
+	for _, snap := range snaps {
+		if snap.Status != core.StatusUnknown {
+			return true
+		}
+		if len(snap.Metrics) > 0 ||
+			len(snap.Resets) > 0 ||
+			len(snap.DailySeries) > 0 ||
+			len(snap.ModelUsage) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) renderDashboard() string {
+	w, h := m.width, m.height
+
+	header := m.renderHeader(w)
+	headerH := strings.Count(header, "\n") + 1
+
+	footer := m.renderFooter(w)
+	footerH := strings.Count(footer, "\n") + 1
+
+	contentH := h - headerH - footerH
+	if contentH < 3 {
+		contentH = 3
+	}
+
+	var content string
+
+	switch m.screen {
+	case screenAnalytics:
+		content = m.renderAnalyticsContent(w, contentH)
+	default:
+		content = m.renderDashboardContent(w, contentH)
+	}
+
+	return header + "\n" + content + "\n" + footer
+}

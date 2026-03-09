@@ -655,30 +655,12 @@ func buildProviderModelTokenDistributionSeries(data costData, limit int) []Brail
 	var cands []candidate
 
 	for _, g := range data.timeSeries {
-		keys := lo.Keys(g.series)
-		sort.Strings(keys)
-		tokenKeys := make([]string, 0, len(keys))
-		usageKeys := make([]string, 0, len(keys))
-		for _, key := range keys {
-			if strings.HasPrefix(key, "tokens_") {
-				tokenKeys = append(tokenKeys, key)
-			} else if strings.HasPrefix(key, "usage_model_") {
-				usageKeys = append(usageKeys, key)
-			}
-		}
-		modelKeys := tokenKeys
-		if len(modelKeys) == 0 {
-			modelKeys = usageKeys
-		}
-		for _, key := range modelKeys {
-			pts := clipSeriesPointsByRecentDates(g.series[key], 30)
+		for _, named := range core.ExtractAnalyticsModelSeries(g.series) {
+			pts := clipSeriesPointsByRecentDates(named.Points, 30)
 			if !hasNonZeroData(pts) {
 				continue
 			}
-
-			model := key
-			model = strings.TrimPrefix(model, "tokens_")
-			model = strings.TrimPrefix(model, "usage_model_")
+			model := named.Name
 			label := truncStr(prettifyModelName(model)+" · "+g.providerName, 34)
 
 			cands = append(cands, candidate{
@@ -710,28 +692,8 @@ func buildProviderModelTokenDistributionSeries(data costData, limit int) []Brail
 }
 
 func selectBestProviderCostWeightSeries(series map[string][]core.TimePoint) []core.TimePoint {
-	for _, key := range []string{
-		"tokens_total",
-		"messages",
-		"sessions",
-		"tool_calls",
-		"requests",
-		"tab_accepted",
-		"composer_accepted",
-	} {
-		if pts, ok := series[key]; ok && hasNonZeroData(pts) {
-			return pts
-		}
-	}
-	keys := lo.Keys(series)
-	sort.Strings(keys)
-	for _, key := range keys {
-		if strings.HasPrefix(key, "tokens_") || strings.HasPrefix(key, "usage_model_") || strings.HasPrefix(key, "usage_client_") {
-			pts := series[key]
-			if hasNonZeroData(pts) {
-				return pts
-			}
-		}
+	if pts := core.SelectAnalyticsWeightSeries(series); hasNonZeroData(pts) {
+		return pts
 	}
 	return nil
 }
@@ -747,13 +709,8 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	dateSet := make(map[string]bool)
 
 	for _, g := range data.timeSeries {
-		keys := lo.Keys(g.series)
-		sort.Strings(keys)
-		for _, key := range keys {
-			pts := g.series[key]
-			if !strings.HasPrefix(key, "tokens_") {
-				continue
-			}
+		for _, named := range core.ExtractAnalyticsModelSeries(g.series) {
+			pts := named.Points
 			total := seriesTotal(pts)
 			if total <= 0 {
 				continue
@@ -765,10 +722,10 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 					dateSet[p.Date] = true
 				}
 			}
-			model := prettifyModelName(strings.TrimPrefix(key, "tokens_"))
+			model := prettifyModelName(named.Name)
 			rows = append(rows, row{
 				label: truncStr(g.providerName+" · "+model, 42),
-				color: stableModelColor(key, g.providerID),
+				color: stableModelColor(named.Name, g.providerID),
 				vals:  vals,
 				total: total,
 			})
@@ -892,10 +849,8 @@ func computeAnalyticsSummary(data costData) analyticsSummary {
 			}
 		}
 		if !hasTotalTokens {
-			for key, pts := range g.series {
-				if !strings.HasPrefix(key, "tokens_") {
-					continue
-				}
+			for _, named := range core.ExtractAnalyticsModelSeries(g.series) {
+				pts := named.Points
 				for _, p := range pts {
 					tokensByDate[p.Date] += p.Value
 				}
