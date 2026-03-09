@@ -255,115 +255,19 @@ func selectBurnMode(totalTokens, totalCost, totalRequests float64) (mode string,
 }
 
 func collectProviderModelMix(snap core.UsageSnapshot) ([]modelMixEntry, map[string]bool) {
-	type agg struct {
-		cost       float64
-		input      float64
-		output     float64
-		requests   float64
-		requests1d float64
-		series     []core.TimePoint
-	}
-	byModel := make(map[string]*agg)
-	usedKeys := make(map[string]bool)
-
-	ensure := func(name string) *agg {
-		if _, ok := byModel[name]; !ok {
-			byModel[name] = &agg{}
-		}
-		return byModel[name]
-	}
-
-	recordCost := func(name string, v float64, key string) {
-		ensure(name).cost += v
-		usedKeys[key] = true
-	}
-	recordInput := func(name string, v float64, key string) {
-		ensure(name).input += v
-		usedKeys[key] = true
-	}
-	recordOutput := func(name string, v float64, key string) {
-		ensure(name).output += v
-		usedKeys[key] = true
-	}
-	recordRequests := func(name string, v float64, key string) {
-		ensure(name).requests += v
-		usedKeys[key] = true
-	}
-	recordRequests1d := func(name string, v float64, key string) {
-		ensure(name).requests1d += v
-		usedKeys[key] = true
-	}
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost_usd"):
-			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost_usd"), *met.Used, key)
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost"):
-			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cost"), *met.Used, key)
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_input_tokens"):
-			recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_input_tokens"), *met.Used, key)
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_output_tokens"):
-			recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_output_tokens"), *met.Used, key)
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_requests_today"):
-			recordRequests1d(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_requests_today"), *met.Used, key)
-		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_requests"):
-			recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_requests"), *met.Used, key)
-		case strings.HasPrefix(key, "input_tokens_"):
-			recordInput(strings.TrimPrefix(key, "input_tokens_"), *met.Used, key)
-		case strings.HasPrefix(key, "output_tokens_"):
-			recordOutput(strings.TrimPrefix(key, "output_tokens_"), *met.Used, key)
-		}
-	}
-
-	for key, points := range snap.DailySeries {
-		const prefix = "usage_model_"
-		if !strings.HasPrefix(key, prefix) || len(points) == 0 {
-			continue
-		}
-		name := strings.TrimPrefix(key, prefix)
-		if name == "" {
-			continue
-		}
-		m := ensure(name)
-		m.series = points
-		if m.requests <= 0 {
-			m.requests = sumSeriesValues(points)
-		}
-	}
-
-	models := make([]modelMixEntry, 0, len(byModel))
-	for name, v := range byModel {
-		if v.cost <= 0 && v.input <= 0 && v.output <= 0 && v.requests <= 0 && len(v.series) == 0 {
-			continue
-		}
+	entries, usedKeys := core.ExtractModelBreakdown(snap)
+	models := make([]modelMixEntry, 0, len(entries))
+	for _, entry := range entries {
 		models = append(models, modelMixEntry{
-			name:       name,
-			cost:       v.cost,
-			input:      v.input,
-			output:     v.output,
-			requests:   v.requests,
-			requests1d: v.requests1d,
-			series:     v.series,
+			name:       entry.Name,
+			cost:       entry.Cost,
+			input:      entry.Input,
+			output:     entry.Output,
+			requests:   entry.Requests,
+			requests1d: entry.Requests1d,
+			series:     entry.Series,
 		})
 	}
-
-	sort.Slice(models, func(i, j int) bool {
-		ti := models[i].input + models[i].output
-		tj := models[j].input + models[j].output
-		if ti != tj {
-			return ti > tj
-		}
-		if models[i].cost != models[j].cost {
-			return models[i].cost > models[j].cost
-		}
-		if models[i].requests != models[j].requests {
-			return models[i].requests > models[j].requests
-		}
-		return models[i].name < models[j].name
-	})
 	return models, usedKeys
 }
 
@@ -474,168 +378,17 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 }
 
 func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[string]bool) {
-	type agg struct {
-		cost     float64
-		input    float64
-		output   float64
-		requests float64
-	}
-	type providerFieldState struct {
-		cost     bool
-		input    bool
-		output   bool
-		requests bool
-	}
-	byProvider := make(map[string]*agg)
-	usedKeys := make(map[string]bool)
-	fieldState := make(map[string]*providerFieldState)
-
-	ensure := func(name string) *agg {
-		if _, ok := byProvider[name]; !ok {
-			byProvider[name] = &agg{}
-		}
-		return byProvider[name]
-	}
-	ensureFieldState := func(name string) *providerFieldState {
-		if _, ok := fieldState[name]; !ok {
-			fieldState[name] = &providerFieldState{}
-		}
-		return fieldState[name]
-	}
-
-	recordCost := func(name string, v float64, key string) {
-		ensure(name).cost += v
-		ensureFieldState(name).cost = true
-		usedKeys[key] = true
-	}
-	recordInput := func(name string, v float64, key string) {
-		ensure(name).input += v
-		ensureFieldState(name).input = true
-		usedKeys[key] = true
-	}
-	recordOutput := func(name string, v float64, key string) {
-		ensure(name).output += v
-		ensureFieldState(name).output = true
-		usedKeys[key] = true
-	}
-	recordRequests := func(name string, v float64, key string) {
-		ensure(name).requests += v
-		ensureFieldState(name).requests = true
-		usedKeys[key] = true
-	}
-
-	// Pass 1: primary metrics (including non-BYOK cost) so BYOK fallback logic is order-independent.
-	for key, met := range snap.Metrics {
-		if met.Used == nil || !strings.HasPrefix(key, "provider_") {
-			continue
-		}
-		switch {
-		case strings.HasSuffix(key, "_cost_usd"):
-			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost_usd"), *met.Used, key)
-		case strings.HasSuffix(key, "_cost") && !strings.HasSuffix(key, "_byok_cost"):
-			recordCost(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost"), *met.Used, key)
-		case strings.HasSuffix(key, "_input_tokens"):
-			recordInput(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens"), *met.Used, key)
-		case strings.HasSuffix(key, "_output_tokens"):
-			recordOutput(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_output_tokens"), *met.Used, key)
-		case strings.HasSuffix(key, "_requests"):
-			recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests"), *met.Used, key)
-		}
-	}
-	// Pass 2: BYOK cost only when primary provider cost is absent.
-	for key, met := range snap.Metrics {
-		if met.Used == nil || !strings.HasPrefix(key, "provider_") || !strings.HasSuffix(key, "_byok_cost") {
-			continue
-		}
-		base := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
-		if base == "" || ensureFieldState(base).cost {
-			continue
-		}
-		recordCost(base, *met.Used, key)
-	}
-
-	meta := snapshotMetaEntries(snap)
-	// Pass 3: raw fallback for primary cost fields (excluding BYOK), tokens, requests.
-	for key, raw := range meta {
-		if usedKeys[key] || !strings.HasPrefix(key, "provider_") {
-			continue
-		}
-		switch {
-		case strings.HasSuffix(key, "_cost") && !strings.HasSuffix(key, "_byok_cost"):
-			if v, ok := parseTileNumeric(raw); ok {
-				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_cost")
-				if baseKey == "" || ensureFieldState(baseKey).cost {
-					continue
-				}
-				recordCost(baseKey, v, key)
-			}
-		case strings.HasSuffix(key, "_input_tokens"), strings.HasSuffix(key, "_prompt_tokens"):
-			if v, ok := parseTileNumeric(raw); ok {
-				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_input_tokens")
-				baseKey = strings.TrimSuffix(baseKey, "_prompt_tokens")
-				if baseKey == "" || ensureFieldState(baseKey).input {
-					continue
-				}
-				recordInput(baseKey, v, key)
-			}
-		case strings.HasSuffix(key, "_output_tokens"), strings.HasSuffix(key, "_completion_tokens"):
-			if v, ok := parseTileNumeric(raw); ok {
-				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_output_tokens")
-				baseKey = strings.TrimSuffix(baseKey, "_completion_tokens")
-				if baseKey == "" || ensureFieldState(baseKey).output {
-					continue
-				}
-				recordOutput(baseKey, v, key)
-			}
-		case strings.HasSuffix(key, "_requests"):
-			if v, ok := parseTileNumeric(raw); ok {
-				baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_requests")
-				if baseKey == "" || ensureFieldState(baseKey).requests {
-					continue
-				}
-				recordRequests(baseKey, v, key)
-			}
-		}
-	}
-	// Pass 4: raw fallback for BYOK cost only when no primary cost exists.
-	for key, raw := range meta {
-		if usedKeys[key] || !strings.HasPrefix(key, "provider_") || !strings.HasSuffix(key, "_byok_cost") {
-			continue
-		}
-		if v, ok := parseTileNumeric(raw); ok {
-			baseKey := strings.TrimSuffix(strings.TrimPrefix(key, "provider_"), "_byok_cost")
-			if baseKey == "" || ensureFieldState(baseKey).cost {
-				continue
-			}
-			recordCost(baseKey, v, key)
-		}
-	}
-
-	providers := make([]providerMixEntry, 0, len(byProvider))
-	for name, v := range byProvider {
-		if v.cost <= 0 && v.input <= 0 && v.output <= 0 && v.requests <= 0 {
-			continue
-		}
+	entries, usedKeys := core.ExtractProviderBreakdown(snap)
+	providers := make([]providerMixEntry, 0, len(entries))
+	for _, entry := range entries {
 		providers = append(providers, providerMixEntry{
-			name:     name,
-			cost:     v.cost,
-			input:    v.input,
-			output:   v.output,
-			requests: v.requests,
+			name:     entry.Name,
+			cost:     entry.Cost,
+			input:    entry.Input,
+			output:   entry.Output,
+			requests: entry.Requests,
 		})
 	}
-
-	sort.Slice(providers, func(i, j int) bool {
-		ti := providers[i].input + providers[i].output
-		tj := providers[j].input + providers[j].output
-		if ti != tj {
-			return ti > tj
-		}
-		if providers[i].cost != providers[j].cost {
-			return providers[i].cost > providers[j].cost
-		}
-		return providers[i].requests > providers[j].requests
-	})
 	return providers, usedKeys
 }
 
@@ -746,69 +499,17 @@ func buildUpstreamProviderCompositionLines(snap core.UsageSnapshot, innerW int, 
 }
 
 func collectUpstreamProviderMix(snap core.UsageSnapshot) ([]providerMixEntry, map[string]bool) {
-	type agg struct {
-		cost     float64
-		input    float64
-		output   float64
-		requests float64
-	}
-	byProvider := make(map[string]*agg)
-	usedKeys := make(map[string]bool)
-
-	ensure := func(name string) *agg {
-		if _, ok := byProvider[name]; !ok {
-			byProvider[name] = &agg{}
-		}
-		return byProvider[name]
-	}
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil || !strings.HasPrefix(key, "upstream_") {
-			continue
-		}
-		switch {
-		case strings.HasSuffix(key, "_cost_usd"):
-			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_cost_usd")
-			ensure(name).cost += *met.Used
-			usedKeys[key] = true
-		case strings.HasSuffix(key, "_input_tokens"):
-			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_input_tokens")
-			ensure(name).input += *met.Used
-			usedKeys[key] = true
-		case strings.HasSuffix(key, "_output_tokens"):
-			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_output_tokens")
-			ensure(name).output += *met.Used
-			usedKeys[key] = true
-		case strings.HasSuffix(key, "_requests"):
-			name := strings.TrimSuffix(strings.TrimPrefix(key, "upstream_"), "_requests")
-			ensure(name).requests += *met.Used
-			usedKeys[key] = true
-		}
-	}
-
-	if len(byProvider) == 0 {
-		return nil, nil
-	}
-
-	result := make([]providerMixEntry, 0, len(byProvider))
-	for name, a := range byProvider {
+	entries, usedKeys := core.ExtractUpstreamProviderBreakdown(snap)
+	result := make([]providerMixEntry, 0, len(entries))
+	for _, entry := range entries {
 		result = append(result, providerMixEntry{
-			name:     name,
-			cost:     a.cost,
-			input:    a.input,
-			output:   a.output,
-			requests: a.requests,
+			name:     entry.Name,
+			cost:     entry.Cost,
+			input:    entry.Input,
+			output:   entry.Output,
+			requests: entry.Requests,
 		})
 	}
-	sort.Slice(result, func(i, j int) bool {
-		ti := result[i].input + result[i].output
-		tj := result[j].input + result[j].output
-		if ti != tj {
-			return ti > tj
-		}
-		return result[i].requests > result[j].requests
-	})
-
 	return result, usedKeys
 }
 
@@ -909,140 +610,20 @@ func tailSeriesValues(points []core.TimePoint, max int) []float64 {
 	return values
 }
 
-func parseSourceMetricKey(key string) (name, field string, ok bool) {
-	const prefix = "source_"
-	if !strings.HasPrefix(key, prefix) {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(key, prefix)
-	for _, suffix := range []string{
-		"_requests_today",
-		"_requests",
-	} {
-		if strings.HasSuffix(rest, suffix) {
-			return strings.TrimSuffix(rest, suffix), strings.TrimPrefix(suffix, "_"), true
-		}
-	}
-	return "", "", false
-}
-
-func sourceAsClientBucket(source string) string {
-	s := strings.ToLower(strings.TrimSpace(source))
-	s = strings.ReplaceAll(s, "-", "_")
-	s = strings.ReplaceAll(s, " ", "_")
-	if s == "" || s == "unknown" {
-		return "other"
-	}
-
-	switch s {
-	case "composer", "tab", "human", "vscode", "ide", "editor", "cursor":
-		return "ide"
-	case "cloud", "cloud_agent", "cloud_agents", "web", "web_agent", "background_agent":
-		return "cloud_agents"
-	case "cli", "terminal", "agent", "agents", "cli_agents":
-		return "cli_agents"
-	case "desktop", "desktop_app":
-		return "desktop_app"
-	}
-
-	if strings.Contains(s, "cloud") || strings.Contains(s, "web") {
-		return "cloud_agents"
-	}
-	if strings.Contains(s, "cli") || strings.Contains(s, "terminal") || strings.Contains(s, "agent") {
-		return "cli_agents"
-	}
-	if strings.Contains(s, "compose") || strings.Contains(s, "tab") || strings.Contains(s, "ide") || strings.Contains(s, "editor") {
-		return "ide"
-	}
-	return s
-}
-
-func canonicalClientBucket(name string) string {
-	bucket := sourceAsClientBucket(name)
-	switch bucket {
-	case "codex", "openusage":
-		return "cli_agents"
-	}
-	return bucket
-}
-
 // collectInterfaceAsClients builds clientMixEntry items from interface_ metrics
 // so the interface breakdown (composer, cli, human, tab) can be shown directly
 // in the client composition section instead of a separate panel.
 func collectInterfaceAsClients(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {
-	byName := make(map[string]*clientMixEntry)
-	ensure := func(name string) *clientMixEntry {
-		if _, ok := byName[name]; !ok {
-			byName[name] = &clientMixEntry{name: name}
-		}
-		return byName[name]
+	entries, usedKeys := core.ExtractInterfaceClientBreakdown(snap)
+	clients := make([]clientMixEntry, 0, len(entries))
+	for _, entry := range entries {
+		clients = append(clients, clientMixEntry{
+			name:       entry.Name,
+			requests:   entry.Requests,
+			seriesKind: entry.SeriesKind,
+			series:     entry.Series,
+		})
 	}
-	usedKeys := make(map[string]bool)
-	usageSeriesByName := make(map[string]map[string]float64)
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil {
-			continue
-		}
-		if !strings.HasPrefix(key, "interface_") {
-			continue
-		}
-		name := canonicalClientBucket(strings.TrimPrefix(key, "interface_"))
-		if name == "" {
-			continue
-		}
-		entry := ensure(name)
-		entry.requests += *met.Used
-		usedKeys[key] = true
-	}
-
-	for key, points := range snap.DailySeries {
-		if len(points) == 0 {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(key, "usage_client_"):
-			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_client_"))
-			if name == "" {
-				continue
-			}
-			mergeSeriesByDay(usageSeriesByName, name, points)
-		case strings.HasPrefix(key, "usage_source_"):
-			source := strings.TrimPrefix(key, "usage_source_")
-			if source == "" {
-				continue
-			}
-			name := canonicalClientBucket(source)
-			mergeSeriesByDay(usageSeriesByName, name, points)
-		}
-	}
-
-	for name, pointsByDay := range usageSeriesByName {
-		entry := ensure(name)
-		entry.series = sortedSeriesFromByDay(pointsByDay)
-		entry.seriesKind = "requests"
-		if entry.requests <= 0 {
-			entry.requests = sumSeriesValues(entry.series)
-		}
-	}
-
-	if len(byName) == 0 {
-		return nil, nil
-	}
-
-	clients := make([]clientMixEntry, 0, len(byName))
-	for _, entry := range byName {
-		if entry.requests <= 0 && len(entry.series) == 0 {
-			continue
-		}
-		clients = append(clients, *entry)
-	}
-	sort.Slice(clients, func(i, j int) bool {
-		if clients[i].requests != clients[j].requests {
-			return clients[i].requests > clients[j].requests
-		}
-		return clients[i].name < clients[j].name
-	})
 	return clients, usedKeys
 }
 
@@ -1285,192 +866,23 @@ func colorForProject(colors map[string]lipgloss.Color, name string) lipgloss.Col
 }
 
 func collectProviderClientMix(snap core.UsageSnapshot) ([]clientMixEntry, map[string]bool) {
-	byClient := make(map[string]*clientMixEntry)
-	usedKeys := make(map[string]bool)
-
-	ensure := func(name string) *clientMixEntry {
-		if _, ok := byClient[name]; !ok {
-			byClient[name] = &clientMixEntry{name: name}
-		}
-		return byClient[name]
+	entries, usedKeys := core.ExtractClientBreakdown(snap)
+	clients := make([]clientMixEntry, 0, len(entries))
+	for _, entry := range entries {
+		clients = append(clients, clientMixEntry{
+			name:       entry.Name,
+			total:      entry.Total,
+			input:      entry.Input,
+			output:     entry.Output,
+			cached:     entry.Cached,
+			reasoning:  entry.Reasoning,
+			requests:   entry.Requests,
+			sessions:   entry.Sessions,
+			seriesKind: entry.SeriesKind,
+			series:     entry.Series,
+		})
 	}
-	tokenSeriesByClient := make(map[string]map[string]float64)
-	usageClientSeriesByClient := make(map[string]map[string]float64)
-	usageSourceSeriesByClient := make(map[string]map[string]float64)
-	hasAllTimeRequests := make(map[string]bool)
-	requestsTodayFallback := make(map[string]float64)
-	hasAnyClientMetrics := false
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil {
-			continue
-		}
-		if strings.HasPrefix(key, "client_") {
-			name, field, ok := parseClientMetricKey(key)
-			if !ok {
-				continue
-			}
-			name = canonicalClientBucket(name)
-			hasAnyClientMetrics = true
-			client := ensure(name)
-			switch field {
-			case "total_tokens":
-				client.total = *met.Used
-			case "input_tokens":
-				client.input = *met.Used
-			case "output_tokens":
-				client.output = *met.Used
-			case "cached_tokens":
-				client.cached = *met.Used
-			case "reasoning_tokens":
-				client.reasoning = *met.Used
-			case "requests":
-				client.requests = *met.Used
-				hasAllTimeRequests[name] = true
-			case "sessions":
-				client.sessions = *met.Used
-			}
-			usedKeys[key] = true
-			continue
-		}
-		if strings.HasPrefix(key, "source_") {
-			sourceName, field, ok := parseSourceMetricKey(key)
-			if !ok {
-				continue
-			}
-			clientName := canonicalClientBucket(sourceName)
-			client := ensure(clientName)
-			switch field {
-			case "requests":
-				client.requests += *met.Used
-				hasAllTimeRequests[clientName] = true
-			case "requests_today":
-				requestsTodayFallback[clientName] += *met.Used
-			}
-			usedKeys[key] = true
-		}
-	}
-	for clientName, value := range requestsTodayFallback {
-		if hasAllTimeRequests[clientName] {
-			continue
-		}
-		client := ensure(clientName)
-		if client.requests <= 0 {
-			client.requests = value
-		}
-	}
-	hasAnyClientSeries := false
-	for key := range snap.DailySeries {
-		if strings.HasPrefix(key, "tokens_client_") || strings.HasPrefix(key, "usage_client_") {
-			hasAnyClientSeries = true
-			break
-		}
-	}
-
-	for key, points := range snap.DailySeries {
-		if len(points) == 0 {
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(key, "tokens_client_"):
-			name := canonicalClientBucket(strings.TrimPrefix(key, "tokens_client_"))
-			if name == "" {
-				continue
-			}
-			mergeSeriesByDay(tokenSeriesByClient, name, points)
-		case strings.HasPrefix(key, "usage_client_"):
-			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_client_"))
-			if name == "" {
-				continue
-			}
-			mergeSeriesByDay(usageClientSeriesByClient, name, points)
-		case strings.HasPrefix(key, "usage_source_"):
-			if hasAnyClientMetrics || hasAnyClientSeries {
-				continue
-			}
-			name := canonicalClientBucket(strings.TrimPrefix(key, "usage_source_"))
-			if name == "" {
-				continue
-			}
-			mergeSeriesByDay(usageSourceSeriesByClient, name, points)
-		default:
-			continue
-		}
-	}
-
-	for name, pointsByDay := range tokenSeriesByClient {
-		client := ensure(name)
-		client.series = sortedSeriesFromByDay(pointsByDay)
-		client.seriesKind = "tokens"
-		if client.total <= 0 {
-			client.total = sumSeriesValues(client.series)
-		}
-	}
-	for name, pointsByDay := range usageClientSeriesByClient {
-		client := ensure(name)
-		if client.seriesKind == "tokens" {
-			continue
-		}
-		client.series = sortedSeriesFromByDay(pointsByDay)
-		client.seriesKind = "requests"
-		if client.requests <= 0 {
-			client.requests = sumSeriesValues(client.series)
-		}
-	}
-	for name, pointsByDay := range usageSourceSeriesByClient {
-		client := ensure(name)
-		if client.seriesKind != "" {
-			continue
-		}
-		client.series = sortedSeriesFromByDay(pointsByDay)
-		client.seriesKind = "requests"
-		if client.requests <= 0 {
-			client.requests = sumSeriesValues(client.series)
-		}
-	}
-
-	clients := make([]clientMixEntry, 0, len(byClient))
-	for _, client := range byClient {
-		if clientMixValue(*client) <= 0 && client.sessions <= 0 && client.requests <= 0 && len(client.series) == 0 {
-			continue
-		}
-		clients = append(clients, *client)
-	}
-
-	sort.Slice(clients, func(i, j int) bool {
-		vi := clientTokenValue(clients[i])
-		vj := clientTokenValue(clients[j])
-		if vi == vj {
-			if clients[i].requests == clients[j].requests {
-				if clients[i].sessions == clients[j].sessions {
-					return clients[i].name < clients[j].name
-				}
-				return clients[i].sessions > clients[j].sessions
-			}
-			return clients[i].requests > clients[j].requests
-		}
-		return vi > vj
-	})
-
 	return clients, usedKeys
-}
-
-func parseClientMetricKey(key string) (name, field string, ok bool) {
-	const prefix = "client_"
-	if !strings.HasPrefix(key, prefix) {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(key, prefix)
-	for _, suffix := range []string{
-		"_total_tokens", "_input_tokens", "_output_tokens",
-		"_cached_tokens", "_reasoning_tokens", "_requests", "_sessions",
-	} {
-		if strings.HasSuffix(rest, suffix) {
-			return strings.TrimSuffix(rest, suffix), strings.TrimPrefix(suffix, "_"), true
-		}
-	}
-	return "", "", false
 }
 
 func clientTokenValue(client clientMixEntry) float64 {
