@@ -209,3 +209,33 @@ func TestExtractInterfaceClientBreakdown(t *testing.T) {
 		t.Fatalf("used keys missing expected interface metrics: %#v", used)
 	}
 }
+
+func TestExtractActualToolUsage(t *testing.T) {
+	snap := UsageSnapshot{
+		Metrics: map[string]Metric{
+			"tool_bash":                         {Used: Float64Ptr(3)},
+			"tool_read":                         {Used: Float64Ptr(5)},
+			"tool_bash_today":                   {Used: Float64Ptr(1)},
+			"tool_calls_total":                  {Used: Float64Ptr(9)},
+			"tool_mcp_github_list_issues":       {Used: Float64Ptr(2)},
+			"tool_github_mcp_server_get_commit": {Used: Float64Ptr(1)},
+		},
+	}
+
+	got, used := ExtractActualToolUsage(snap)
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].RawName != "read" || got[0].Calls != 5 {
+		t.Fatalf("got[0] = %#v, want read/5", got[0])
+	}
+	if got[1].RawName != "bash" || got[1].Calls != 3 {
+		t.Fatalf("got[1] = %#v, want bash/3", got[1])
+	}
+	if !used["tool_calls_total"] || !used["tool_bash_today"] {
+		t.Fatalf("used keys missing expected tool metrics: %#v", used)
+	}
+	if !used["tool_mcp_github_list_issues"] || !used["tool_github_mcp_server_get_commit"] {
+		t.Fatalf("mcp tool metrics should still be marked used: %#v", used)
+	}
+}

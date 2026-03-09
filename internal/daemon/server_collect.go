@@ -36,8 +36,14 @@ func (s *Service) collectAndFlush(ctx context.Context) {
 	var allReqs []telemetry.IngestRequest
 	totalCollected := 0
 	var warnings []string
+	accounts, accountsErr := loadTelemetrySourceAccounts()
+	if accountsErr != nil {
+		warnings = append(warnings, fmt.Sprintf("collector account config: %v", accountsErr))
+	}
+	collectors, collectorWarnings := buildCollectors(accounts)
+	warnings = append(warnings, collectorWarnings...)
 
-	for _, collector := range s.collectors {
+	for _, collector := range collectors {
 		reqs, err := collector.Collect(ctx)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", collector.Name(), err))

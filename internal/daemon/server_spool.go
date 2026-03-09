@@ -178,11 +178,12 @@ func (s *Service) processHookSpool(ctx context.Context, dir string) {
 			continue
 		}
 
+		options, effectiveAccountID, _ := ResolveTelemetrySourceOptions(source, strings.TrimSpace(raw.AccountID))
 		reqs, parseErr := telemetry.ParseSourceHookPayload(
 			source,
 			raw.Payload,
-			source.DefaultCollectOptions(),
-			strings.TrimSpace(raw.AccountID),
+			options,
+			effectiveAccountID,
 		)
 		if parseErr != nil || len(reqs) == 0 {
 			_ = os.Remove(path)

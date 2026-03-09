@@ -18,7 +18,6 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers"
-	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -29,7 +28,6 @@ type Service struct {
 	store        *telemetry.Store
 	pipeline     *telemetry.Pipeline
 	quotaIngest  *telemetry.QuotaSnapshotIngestor
-	collectors   []telemetry.Collector
 	providerByID map[string]core.UsageProvider
 
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
@@ -100,7 +98,6 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		store:        store,
 		pipeline:     telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
 		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
-		collectors:   buildCollectors(),
 		providerByID: providersByID(),
 		logThrottle:  core.NewLogThrottle(200, 10*time.Minute),
 		rmCache:      newReadModelCache(),
@@ -114,7 +111,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.SpoolDir,
 		svc.cfg.CollectInterval,
 		svc.cfg.PollInterval,
-		len(svc.collectors),
+		telemetrySourceCount(),
 		len(svc.providerByID),
 	)
 
@@ -291,18 +288,6 @@ func EnsureSocketPathAvailable(socketPath string) error {
 }
 
 // --- Helpers ---
-
-func buildCollectors() []telemetry.Collector {
-	collectors := make([]telemetry.Collector, 0)
-	for _, provider := range providers.AllProviders() {
-		source, ok := provider.(shared.TelemetrySource)
-		if !ok {
-			continue
-		}
-		collectors = append(collectors, telemetry.NewSourceCollector(source, source.DefaultCollectOptions(), ""))
-	}
-	return collectors
-}
 
 func providersByID() map[string]core.UsageProvider {
 	out := make(map[string]core.UsageProvider)

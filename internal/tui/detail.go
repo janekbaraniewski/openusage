@@ -393,110 +393,11 @@ func groupMetrics(metrics map[string]core.Metric, widget core.DashboardWidget, d
 }
 
 func classifyMetric(key string, m core.Metric, widget core.DashboardWidget, details core.DetailWidget) (group, label string, order int) {
-	if override, ok := widget.MetricGroupOverrides[key]; ok && override.Group != "" {
-		label = override.Label
-		if label == "" {
-			label = metricLabel(widget, key)
-		}
-		label = normalizeWidgetLabel(label)
-		order = override.Order
-		if order <= 0 {
-			order = groupOrder(details, override.Group, 4)
-		}
-		return override.Group, label, order
-	}
-
-	group = string(core.InferMetricGroup(key, m))
-	label = metricLabel(widget, key)
-	switch group {
-	case string(core.MetricGroupUsage):
-		if strings.HasPrefix(key, "rate_limit_") {
-			label = metricLabel(widget, strings.TrimPrefix(key, "rate_limit_"))
-		} else if m.Remaining != nil && m.Limit != nil && m.Unit != "%" && m.Unit != "USD" {
-			label = prettifyUsageKey(key, widget)
-		}
-		order = groupOrder(details, group, 1)
-	case string(core.MetricGroupSpending):
-		if strings.HasPrefix(key, "model_") &&
-			!strings.HasSuffix(key, "_input_tokens") &&
-			!strings.HasSuffix(key, "_output_tokens") {
-			label = strings.TrimPrefix(key, "model_")
-		}
-		order = groupOrder(details, group, 2)
-	case string(core.MetricGroupTokens):
-		if strings.HasPrefix(key, "session_") {
-			label = metricLabel(widget, strings.TrimPrefix(key, "session_"))
-		}
-		order = groupOrder(details, group, 3)
-	default:
-		order = groupOrder(details, string(core.MetricGroupActivity), 4)
-		group = string(core.MetricGroupActivity)
-	}
-	return group, label, order
-}
-
-func groupOrder(details core.DetailWidget, group string, fallback int) int {
-	if order := details.SectionOrder(group); order > 0 {
-		return order
-	}
-	return fallback
+	return core.ClassifyDetailMetric(key, m, widget, details)
 }
 
 func metricLabel(widget core.DashboardWidget, key string) string {
-	if widget.MetricLabelOverrides != nil {
-		if label, ok := widget.MetricLabelOverrides[key]; ok && label != "" {
-			return normalizeWidgetLabel(label)
-		}
-	}
-	return normalizeWidgetLabel(prettifyKey(key))
-}
-
-func normalizeWidgetLabel(label string) string {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return label
-	}
-
-	replacements := []struct {
-		old string
-		new string
-	}{
-		{"5h Block", "Usage 5h"},
-		{"5-Hour Usage", "Usage 5h"},
-		{"5h Usage", "Usage 5h"},
-		{"7-Day Usage", "Usage 7d"},
-		{"7d Usage", "Usage 7d"},
-	}
-	for _, repl := range replacements {
-		label = strings.ReplaceAll(label, repl.old, repl.new)
-	}
-	return label
-}
-
-func prettifyUsageKey(key string, widget core.DashboardWidget) string {
-	lastUnderscore := strings.LastIndex(key, "_")
-	if lastUnderscore > 0 && lastUnderscore < len(key)-1 {
-		suffix := key[lastUnderscore+1:]
-		prefix := key[:lastUnderscore]
-		if suffix == strings.ToUpper(suffix) && len(suffix) > 1 {
-			return prettifyModelHyphens(prefix) + " " + titleCase(suffix)
-		}
-	}
-	return metricLabel(widget, key)
-}
-
-func prettifyModelHyphens(name string) string {
-	parts := strings.Split(name, "-")
-	for i, p := range parts {
-		if len(p) == 0 {
-			continue
-		}
-		if p[0] >= '0' && p[0] <= '9' {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
+	return core.MetricLabel(widget, key)
 }
 
 func titleCase(s string) string {
@@ -1634,32 +1535,8 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-var prettifyKeyOverrides = map[string]string{
-	"plan_percent_used":    "Plan Used",
-	"plan_total_spend_usd": "Total Plan Spend",
-	"spend_limit":          "Spend Limit",
-	"individual_spend":     "Individual Spend",
-	"context_window":       "Context Window",
-}
-
 func prettifyKey(key string) string {
-	if label, ok := prettifyKeyOverrides[key]; ok {
-		return label
-	}
-	parts := strings.Split(key, "_")
-	for i, p := range parts {
-		if len(p) > 0 {
-			parts[i] = strings.ToUpper(p[:1]) + p[1:]
-		}
-	}
-	result := strings.Join(parts, " ")
-	for _, pair := range [][2]string{
-		{"Usd", "USD"}, {"Rpm", "RPM"}, {"Tpm", "TPM"},
-		{"Rpd", "RPD"}, {"Tpd", "TPD"}, {"Api", "API"},
-	} {
-		result = strings.ReplaceAll(result, pair[0], pair[1])
-	}
-	return result
+	return core.PrettifyMetricKey(key)
 }
 
 func prettifyModelName(name string) string {

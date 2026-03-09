@@ -13,7 +13,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/detect"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
-	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/spf13/cobra"
 )
@@ -161,13 +160,15 @@ func ingestHookLocally(
 	if !ok {
 		return daemon.HookResponse{}, fmt.Errorf("unknown hook source %q", sourceName)
 	}
-	reqs, err := telemetry.ParseSourceHookPayload(source, payload, shared.TelemetryCollectOptions{}, accountID)
+	options, effectiveAccountID, warnings := daemon.ResolveTelemetrySourceOptions(source, accountID)
+	reqs, err := telemetry.ParseSourceHookPayload(source, payload, options, effectiveAccountID)
 	if err != nil {
 		return daemon.HookResponse{}, fmt.Errorf("parse hook payload: %w", err)
 	}
 	resp := daemon.HookResponse{
 		Source:   sourceName,
 		Enqueued: len(reqs),
+		Warnings: warnings,
 	}
 	if len(reqs) == 0 {
 		return resp, nil

@@ -56,18 +56,18 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := strings.TrimSpace(r.URL.Query().Get("account_id"))
-	reqs, err := telemetry.ParseSourceHookPayload(source, payload, source.DefaultCollectOptions(), accountID)
+	options, effectiveAccountID, warnings := ResolveTelemetrySourceOptions(source, accountID)
+	reqs, err := telemetry.ParseSourceHookPayload(source, payload, options, effectiveAccountID)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("parse hook payload: %v", err))
 		return
 	}
 	if len(reqs) == 0 {
-		writeJSON(w, http.StatusOK, HookResponse{Source: sourceName})
+		writeJSON(w, http.StatusOK, HookResponse{Source: sourceName, Warnings: warnings})
 		return
 	}
 
 	tally, _ := s.ingestBatch(r.Context(), reqs)
-	var warnings []string
 	if tally.failed > 0 {
 		warnings = append(warnings, fmt.Sprintf("%d ingest failures", tally.failed))
 	}
@@ -91,14 +91,14 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	if tally.failed > 0 {
 		s.warnf(logLevel,
 			"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
-			sourceName, accountID, durationMs,
+			sourceName, effectiveAccountID, durationMs,
 			len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
 		)
 		return
 	}
 	s.infof(logLevel,
 		"source=%s account_id=%q duration_ms=%d enqueued=%d processed=%d ingested=%d deduped=%d failed=%d",
-		sourceName, accountID, durationMs,
+		sourceName, effectiveAccountID, durationMs,
 		len(reqs), tally.processed, tally.ingested, tally.deduped, tally.failed,
 	)
 }

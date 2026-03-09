@@ -1435,34 +1435,14 @@ func buildProviderToolCompositionLines(snap core.UsageSnapshot, innerW int, expa
 }
 
 func collectProviderToolMix(snap core.UsageSnapshot) ([]toolMixEntry, map[string]bool) {
-	byTool := make(map[string]float64)
-	usedKeys := make(map[string]bool)
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil || strings.HasSuffix(key, "_today") {
-			continue
-		}
-		if !strings.HasPrefix(key, "interface_") {
-			continue
-		}
-		name := strings.TrimPrefix(key, "interface_")
-		if name == "" {
-			continue
-		}
-		byTool[name] += *met.Used
-		usedKeys[key] = true
+	entries, usedKeys := core.ExtractInterfaceClientBreakdown(snap)
+	tools := make([]toolMixEntry, 0, len(entries))
+	for _, entry := range entries {
+		tools = append(tools, toolMixEntry{
+			name:  entry.Name,
+			count: entry.Requests,
+		})
 	}
-
-	tools := make([]toolMixEntry, 0, len(byTool))
-	for name, count := range byTool {
-		if count <= 0 {
-			continue
-		}
-		tools = append(tools, toolMixEntry{name: name, count: count})
-	}
-
-	sortToolMixEntries(tools)
-
 	return tools, usedKeys
 }
 
@@ -1688,61 +1668,17 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 	return lines, usedKeys
 }
 
-// actualToolUsage status/aggregate keys that should not appear as individual tool entries.
-var actualToolAggregateKeys = map[string]bool{
-	"tool_calls_total":  true,
-	"tool_completed":    true,
-	"tool_errored":      true,
-	"tool_cancelled":    true,
-	"tool_success_rate": true,
-}
-
 func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
-	byTool := make(map[string]float64)
-	usedKeys := make(map[string]bool)
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil {
-			continue
-		}
-		if !strings.HasPrefix(key, "tool_") {
-			continue
-		}
-		if actualToolAggregateKeys[key] {
-			usedKeys[key] = true
-			continue
-		}
-		// Skip time-bucketed variants (e.g. tool_bash_today) — these are
-		// supplementary metrics that would appear as duplicate entries.
-		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_1d") || strings.HasSuffix(key, "_7d") || strings.HasSuffix(key, "_30d") {
-			usedKeys[key] = true
-			continue
-		}
-		name := strings.TrimPrefix(key, "tool_")
-		if name == "" {
-			continue
-		}
-		// Skip MCP tools — they have their own dedicated section.
-		if isMCPToolMetricName(name) {
-			usedKeys[key] = true
-			continue
-		}
-		byTool[name] += *met.Used
-		usedKeys[key] = true
-	}
-
-	if len(byTool) == 0 {
+	rawTools, usedKeys := core.ExtractActualToolUsage(snap)
+	if len(rawTools) == 0 {
 		return nil, usedKeys
 	}
 
-	allTools := make([]toolMixEntry, 0, len(byTool))
+	allTools := make([]toolMixEntry, 0, len(rawTools))
 	var totalCalls float64
-	for name, count := range byTool {
-		if count <= 0 {
-			continue
-		}
-		allTools = append(allTools, toolMixEntry{name: name, count: count})
-		totalCalls += count
+	for _, rawTool := range rawTools {
+		allTools = append(allTools, toolMixEntry{name: rawTool.RawName, count: rawTool.Calls})
+		totalCalls += rawTool.Calls
 	}
 	if totalCalls <= 0 {
 		return nil, nil
@@ -1807,20 +1743,6 @@ func buildActualToolUsageLines(snap core.UsageSnapshot, innerW int, expanded boo
 	}
 
 	return lines, usedKeys
-}
-
-func isMCPToolMetricName(name string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		return false
-	}
-	if strings.HasPrefix(normalized, "mcp_") {
-		return true
-	}
-	if strings.Contains(normalized, "_mcp_server_") || strings.Contains(normalized, "-mcp-server-") {
-		return true
-	}
-	return strings.HasSuffix(normalized, "_mcp")
 }
 
 func buildMCPUsageLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {

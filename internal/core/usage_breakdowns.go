@@ -60,6 +60,11 @@ type ClientBreakdownEntry struct {
 	Series     []TimePoint
 }
 
+type ActualToolUsageEntry struct {
+	RawName string
+	Calls   float64
+}
+
 func ExtractLanguageUsage(s UsageSnapshot) ([]LanguageUsageEntry, map[string]bool) {
 	byLang := make(map[string]float64)
 	usedKeys := make(map[string]bool)
@@ -837,6 +842,82 @@ func ExtractInterfaceClientBreakdown(s UsageSnapshot) ([]ClientBreakdownEntry, m
 		return nil, nil
 	}
 	return out, usedKeys
+}
+
+var actualToolAggregateKeys = map[string]bool{
+	"tool_calls_total":  true,
+	"tool_completed":    true,
+	"tool_errored":      true,
+	"tool_cancelled":    true,
+	"tool_success_rate": true,
+}
+
+func ExtractActualToolUsage(s UsageSnapshot) ([]ActualToolUsageEntry, map[string]bool) {
+	byTool := make(map[string]float64)
+	usedKeys := make(map[string]bool)
+
+	for key, metric := range s.Metrics {
+		if metric.Used == nil {
+			continue
+		}
+		if !strings.HasPrefix(key, "tool_") {
+			continue
+		}
+		if actualToolAggregateKeys[key] {
+			usedKeys[key] = true
+			continue
+		}
+		if strings.HasSuffix(key, "_today") || strings.HasSuffix(key, "_1d") || strings.HasSuffix(key, "_7d") || strings.HasSuffix(key, "_30d") {
+			usedKeys[key] = true
+			continue
+		}
+		name := strings.TrimPrefix(key, "tool_")
+		if name == "" {
+			continue
+		}
+		if IsMCPToolMetricName(name) {
+			usedKeys[key] = true
+			continue
+		}
+		byTool[name] += *metric.Used
+		usedKeys[key] = true
+	}
+
+	if len(byTool) == 0 {
+		return nil, usedKeys
+	}
+
+	out := make([]ActualToolUsageEntry, 0, len(byTool))
+	for name, calls := range byTool {
+		if calls <= 0 {
+			continue
+		}
+		out = append(out, ActualToolUsageEntry{
+			RawName: name,
+			Calls:   calls,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Calls != out[j].Calls {
+			return out[i].Calls > out[j].Calls
+		}
+		return out[i].RawName < out[j].RawName
+	})
+	return out, usedKeys
+}
+
+func IsMCPToolMetricName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "mcp_") {
+		return true
+	}
+	if strings.Contains(normalized, "_mcp_server_") || strings.Contains(normalized, "-mcp-server-") {
+		return true
+	}
+	return strings.HasSuffix(normalized, "_mcp")
 }
 
 func parseProjectMetricKey(key string) (name, field string, ok bool) {
