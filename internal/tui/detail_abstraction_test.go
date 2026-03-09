@@ -71,7 +71,7 @@ func TestRenderMetricGroup_UnknownSectionFallsBackToList(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	renderMetricGroup(&sb, group, widget, details, 80, 0.3, 0.1, nil, 0)
+	renderMetricGroup(&sb, core.UsageSnapshot{}, group, widget, details, 80, 0.3, 0.1, nil, 0)
 	out := sb.String()
 	if !strings.Contains(out, "Models") {
 		t.Fatalf("output missing metric label: %q", out)

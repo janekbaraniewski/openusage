@@ -88,7 +88,7 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 		groups := groupMetrics(snap.Metrics, widget, details)
 		for _, group := range groups {
 			if showAll || group.title == tabName {
-				renderMetricGroup(&sb, group, widget, details, w, warnThresh, critThresh, snap.DailySeries, burnRate)
+				renderMetricGroup(&sb, snap, group, widget, details, w, warnThresh, critThresh, snap.DailySeries, burnRate)
 			}
 		}
 	}
@@ -506,7 +506,7 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.DashboardWidget, details core.DetailWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint, burnRate float64) {
+func renderMetricGroup(sb *strings.Builder, snap core.UsageSnapshot, group metricGroup, widget core.DashboardWidget, details core.DetailWidget, w int, warnThresh, critThresh float64, series map[string][]core.TimePoint, burnRate float64) {
 	sb.WriteString("\n")
 	renderDetailSectionHeader(sb, group.title, w)
 
@@ -522,7 +522,7 @@ func renderMetricGroup(sb *strings.Builder, group metricGroup, widget core.Dashb
 	case core.DetailSectionStyleSpending:
 		renderSpendingSection(sb, entries, w, burnRate)
 	case core.DetailSectionStyleTokens:
-		renderTokensSection(sb, entries, widget, w, series)
+		renderTokensSection(sb, snap, entries, widget, w, series)
 	case core.DetailSectionStyleActivity:
 		renderActivitySection(sb, entries, widget, w, series)
 	case core.DetailSectionStyleLanguages:
@@ -610,38 +610,6 @@ func renderSpendingSection(sb *strings.Builder, entries []metricEntry, w int, bu
 		}
 		renderModelCostsTable(sb, modelCosts, w)
 	}
-}
-
-func renderTokensSection(sb *strings.Builder, entries []metricEntry, widget core.DashboardWidget, w int, series map[string][]core.TimePoint) {
-	labelW := sectionLabelWidth(w)
-
-	var perModelTokens []metricEntry
-	var otherTokens []metricEntry
-
-	for _, e := range entries {
-		if isPerModelTokenKey(e.key) {
-			perModelTokens = append(perModelTokens, e)
-		} else {
-			otherTokens = append(otherTokens, e)
-		}
-	}
-
-	for _, e := range otherTokens {
-		val := formatMetricValue(e.metric)
-		sb.WriteString(fmt.Sprintf("  %s %s\n",
-			labelStyle.Width(labelW).Render(e.label), valueStyle.Render(val)))
-	}
-
-	if len(perModelTokens) > 0 {
-		if len(otherTokens) > 0 {
-			sb.WriteString("\n")
-		}
-		renderTokenUsageTable(sb, perModelTokens, w)
-	}
-
-	renderSectionSparklines(sb, widget, w, series, []string{
-		"tokens_total", "tokens_input", "tokens_output",
-	})
 }
 
 func renderActivitySection(sb *strings.Builder, entries []metricEntry, widget core.DashboardWidget, w int, series map[string][]core.TimePoint) {
@@ -1252,10 +1220,6 @@ func isModelCostKey(key string) bool {
 	return core.IsModelCostMetricKey(key)
 }
 
-func isPerModelTokenKey(key string) bool {
-	return core.IsPerModelTokenMetricKey(key)
-}
-
 func formatMetricValue(m core.Metric) string {
 	var value string
 	switch {
@@ -1357,86 +1321,6 @@ func renderModelCostsTable(sb *strings.Builder, entries []metricEntry, w int) {
 		sb.WriteString(fmt.Sprintf("  %s %s\n",
 			labelStyle.Width(22).Render(prettifyModelName(e.label)),
 			valueStyle.Render(val),
-		))
-	}
-}
-
-func renderTokenUsageTable(sb *strings.Builder, entries []metricEntry, w int) {
-	type tokenData struct {
-		name         string
-		inputTokens  float64
-		outputTokens float64
-	}
-
-	models := make(map[string]*tokenData)
-	var modelOrder []string
-
-	for _, e := range entries {
-		key := e.key // use the raw metric key for pattern matching
-		var modelName string
-		var isInput bool
-
-		switch {
-		case strings.HasPrefix(key, "input_tokens_"):
-			modelName = strings.TrimPrefix(key, "input_tokens_")
-			isInput = true
-		case strings.HasPrefix(key, "output_tokens_"):
-			modelName = strings.TrimPrefix(key, "output_tokens_")
-			isInput = false
-		case strings.HasSuffix(key, "_input_tokens"):
-			modelName = strings.TrimPrefix(
-				strings.TrimSuffix(key, "_input_tokens"), "model_")
-			isInput = true
-		case strings.HasSuffix(key, "_output_tokens"):
-			modelName = strings.TrimPrefix(
-				strings.TrimSuffix(key, "_output_tokens"), "model_")
-			isInput = false
-		default:
-			continue
-		}
-
-		md, ok := models[modelName]
-		if !ok {
-			md = &tokenData{name: modelName}
-			models[modelName] = md
-			modelOrder = append(modelOrder, modelName)
-		}
-		if e.metric.Used != nil {
-			if isInput {
-				md.inputTokens = *e.metric.Used
-			} else {
-				md.outputTokens = *e.metric.Used
-			}
-		}
-	}
-
-	if len(modelOrder) == 0 {
-		return
-	}
-
-	nameW := 26
-	colW := 10
-	if w < 55 {
-		nameW = 18
-		colW = 8
-	}
-
-	sb.WriteString(fmt.Sprintf("  %-*s %*s %*s\n",
-		nameW, dimStyle.Bold(true).Render("Model"),
-		colW, dimStyle.Bold(true).Render("Input"),
-		colW, dimStyle.Bold(true).Render("Output"),
-	))
-
-	for _, name := range modelOrder {
-		md := models[name]
-		displayName := prettifyModelName(md.name)
-		if len(displayName) > nameW {
-			displayName = displayName[:nameW-1] + "…"
-		}
-		sb.WriteString(fmt.Sprintf("  %-*s %*s %*s\n",
-			nameW, valueStyle.Render(displayName),
-			colW, lipgloss.NewStyle().Foreground(colorSubtext).Render(formatTokens(md.inputTokens)),
-			colW, lipgloss.NewStyle().Foreground(colorSubtext).Render(formatTokens(md.outputTokens)),
 		))
 	}
 }
