@@ -20,8 +20,7 @@ type ViewRuntime struct {
 	ensureMu          sync.Mutex
 	lastEnsureAttempt time.Time
 
-	readModelMu         sync.Mutex
-	lastReadModelErrLog time.Time
+	logThrottle *core.LogThrottle
 
 	stateMu    sync.RWMutex
 	state      DaemonState
@@ -34,10 +33,11 @@ func NewViewRuntime(
 	verbose bool,
 ) *ViewRuntime {
 	return &ViewRuntime{
-		client:     client,
-		socketPath: strings.TrimSpace(socketPath),
-		verbose:    verbose,
-		state:      DaemonState{Status: DaemonStatusConnecting},
+		client:      client,
+		socketPath:  strings.TrimSpace(socketPath),
+		verbose:     verbose,
+		logThrottle: core.NewLogThrottle(8, time.Minute),
+		state:       DaemonState{Status: DaemonStatusConnecting},
 	}
 }
 
@@ -199,13 +199,7 @@ func (r *ViewRuntime) fetchReadModel(
 }
 
 func (r *ViewRuntime) throttledLogError(err error) {
-	r.readModelMu.Lock()
-	shouldLog := time.Since(r.lastReadModelErrLog) > 2*time.Second
-	if shouldLog {
-		r.lastReadModelErrLog = time.Now()
-	}
-	r.readModelMu.Unlock()
-	if shouldLog {
+	if r != nil && r.logThrottle.Allow("read_model_error", 2*time.Second, time.Now()) {
 		log.Printf("daemon read-model error: %v", err)
 	}
 }

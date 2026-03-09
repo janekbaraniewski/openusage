@@ -3,7 +3,6 @@ package cursor
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,98 +118,57 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 	// Collect scored commits from the same DB connection.
 	var commitEvents []shared.TelemetryEvent
 	if cursorTableExists(ctx, db, "scored_commits") {
-		commitEvents, _ = queryScoredCommits(ctx, db, dbPath)
+		commitEvents, _ = queryScoredCommits(ctx, db, dbPath, core.SystemClock{})
 	}
 
 	if !cursorTableExists(ctx, db, "ai_code_hashes") {
 		return nil, commitEvents, nil
 	}
 
-	timeExpr := chooseTrackingTimeExpr(ctx, db)
-
-	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(source, ''),
-		       COALESCE(model, ''),
-		       COALESCE(fileExtension, ''),
-		       COALESCE(fileName, ''),
-		       COALESCE(requestId, ''),
-		       COALESCE(conversationId, ''),
-		       COALESCE(%s, 0),
-		       rowid
-		FROM ai_code_hashes
-		ORDER BY %s ASC`, timeExpr, timeExpr))
+	records, err := loadTrackingRecords(ctx, db, core.SystemClock{})
 	if err != nil {
-		return nil, commitEvents, fmt.Errorf("cursor: querying ai_code_hashes: %w", err)
+		return nil, commitEvents, err
 	}
-	defer rows.Close()
 
 	var out []shared.TelemetryEvent
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return out, commitEvents, ctx.Err()
-		}
-
-		var (
-			source         string
-			model          string
-			fileExt        string
-			fileName       string
-			requestID      string
-			conversationID string
-			timestamp      int64
-			rowID          int64
-		)
-		if err := rows.Scan(&source, &model, &fileExt, &fileName, &requestID, &conversationID, &timestamp, &rowID); err != nil {
-			continue
-		}
-
-		occurredAt := time.Now().UTC()
-		if timestamp > 0 {
-			occurredAt = shared.UnixAuto(timestamp)
-		}
-
-		messageID := fmt.Sprintf("cursor-tracking:%d", rowID)
-
-		clientBucket := cursorSourceToClientBucket(source)
-
-		// Use conversationId as session ID to link tracking events to composer sessions.
-		sessionID := strings.TrimSpace(conversationID)
-
+	for _, record := range records {
+		messageID := fmt.Sprintf("cursor-tracking:%d", record.RowID)
+		clientBucket := cursorSourceToClientBucket(record.Source)
 		payload := map[string]any{
 			"source": map[string]any{
 				"db_path": dbPath,
 				"table":   "ai_code_hashes",
-				"row_id":  rowID,
+				"row_id":  record.RowID,
 			},
 			"client":        clientBucket,
-			"cursor_source": source,
+			"cursor_source": record.Source,
 		}
-		if fileExt != "" {
-			payload["file_extension"] = fileExt
+		if record.FileExt != "" {
+			payload["file_extension"] = record.FileExt
 		}
-		if fileName != "" {
-			payload["file"] = fileName
-		} else if fileExt != "" {
-			payload["file"] = "example" + normalizeFileExtension(fileExt)
+		if record.FileName != "" {
+			payload["file"] = record.FileName
+		} else if record.FileExt != "" {
+			payload["file"] = "example" + normalizeFileExtension(record.FileExt)
 		}
-		if upstream := inferProviderFromModel(model); upstream != "cursor" {
+		if upstream := inferProviderFromModel(record.Model); upstream != "cursor" {
 			payload["upstream_provider"] = upstream
 		}
-		if requestID != "" {
-			payload["request_id"] = requestID
+		if record.RequestID != "" {
+			payload["request_id"] = record.RequestID
 		}
 
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
-			OccurredAt:    occurredAt,
+			OccurredAt:    record.OccurredAt,
 			AccountID:     "",
-			SessionID:     sessionID,
+			SessionID:     strings.TrimSpace(record.SessionID),
 			MessageID:     messageID,
 			ProviderID:    "cursor",
-			AgentName:     cursorAgentName(source),
+			AgentName:     cursorAgentName(record.Source),
 			EventType:     shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:      model,
+			ModelRaw:      record.Model,
 			TokenUsage: core.TokenUsage{
 				Requests: core.Int64Ptr(1),
 			},
@@ -219,7 +177,7 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 		})
 	}
 
-	return out, commitEvents, rows.Err()
+	return out, commitEvents, nil
 }
 
 // collectStateDBEvents reads composerData and bubbleId entries from the
@@ -572,39 +530,19 @@ func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamp
 // Keys like "aiCodeTracking.dailyStats.v1.5.2025-11-23" contain tab/composer
 // suggested/accepted line counts per day.
 func collectDailyStatsEvents(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT key, value FROM ItemTable
-		WHERE key LIKE 'aiCodeTracking.dailyStats.%'`)
+	records, err := loadDailyStatsRecords(ctx, db)
 	if err != nil {
-		return nil, fmt.Errorf("cursor: querying dailyStats: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 
 	var out []shared.TelemetryEvent
-	for rows.Next() {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-
-		var key, rawJSON string
-		if err := rows.Scan(&key, &rawJSON); err != nil {
-			continue
-		}
-
-		var stats cursorDailyStats
-		if json.Unmarshal([]byte(rawJSON), &stats) != nil {
-			continue
-		}
-		if stats.Date == "" {
-			continue
-		}
-
-		dayTime, err := time.Parse("2006-01-02", stats.Date)
+	for _, record := range records {
+		dayTime, err := time.Parse("2006-01-02", record.Date)
 		if err != nil {
 			continue
 		}
 
-		messageID := fmt.Sprintf("cursor-daily-stats:%s", stats.Date)
+		messageID := fmt.Sprintf("cursor-daily-stats:%s", record.Date)
 
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
@@ -622,25 +560,28 @@ func collectDailyStatsEvents(ctx context.Context, db *sql.DB, dbPath string) ([]
 				"source": map[string]any{
 					"db_path": dbPath,
 					"table":   "ItemTable",
-					"key":     key,
+					"key":     record.Key,
 				},
 				"daily_stats": map[string]any{
-					"date":                     stats.Date,
-					"tab_suggested_lines":      stats.TabSuggestedLines,
-					"tab_accepted_lines":       stats.TabAcceptedLines,
-					"composer_suggested_lines": stats.ComposerSuggestedLines,
-					"composer_accepted_lines":  stats.ComposerAcceptedLines,
+					"date":                     record.Date,
+					"tab_suggested_lines":      record.Stats.TabSuggestedLines,
+					"tab_accepted_lines":       record.Stats.TabAcceptedLines,
+					"composer_suggested_lines": record.Stats.ComposerSuggestedLines,
+					"composer_accepted_lines":  record.Stats.ComposerAcceptedLines,
 				},
 			},
 		})
 	}
 
-	return out, rows.Err()
+	return out, nil
 }
 
 // queryScoredCommits reads scored_commits from an already-open tracking DB
 // and produces telemetry events with AI contribution percentages per commit.
-func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string) ([]shared.TelemetryEvent, error) {
+func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string, clock core.Clock) ([]shared.TelemetryEvent, error) {
+	if clock == nil {
+		clock = core.SystemClock{}
+	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT commitHash, branchName, scoredAt,
 		       COALESCE(linesAdded, 0), COALESCE(linesDeleted, 0),
@@ -684,7 +625,7 @@ func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string) ([]share
 			continue
 		}
 
-		occurredAt := time.Now().UTC()
+		occurredAt := clock.Now().UTC()
 		if scoredAt > 0 {
 			occurredAt = shared.UnixAuto(scoredAt)
 		}
@@ -728,14 +669,6 @@ func queryScoredCommits(ctx context.Context, db *sql.DB, dbPath string) ([]share
 	}
 
 	return out, rows.Err()
-}
-
-type cursorDailyStats struct {
-	Date                   string `json:"date"`
-	TabSuggestedLines      int    `json:"tabSuggestedLines"`
-	TabAcceptedLines       int    `json:"tabAcceptedLines"`
-	ComposerSuggestedLines int    `json:"composerSuggestedLines"`
-	ComposerAcceptedLines  int    `json:"composerAcceptedLines"`
 }
 
 func truncateString(s string, maxLen int) string {

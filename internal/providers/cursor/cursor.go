@@ -29,6 +29,7 @@ var cursorAPIBase = "https://api2.cursor.sh"
 type Provider struct {
 	providerbase.Base
 	mu                    sync.RWMutex
+	clock                 core.Clock
 	modelAggregationCache map[string]cachedModelAggregation
 }
 
@@ -60,6 +61,7 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
+		clock:                 core.SystemClock{},
 		modelAggregationCache: make(map[string]cachedModelAggregation),
 	}
 }
@@ -168,6 +170,13 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 	return core.CodingToolDetailWidget(false)
 }
 
+func (p *Provider) now() time.Time {
+	if p != nil && p.clock != nil {
+		return p.clock.Now()
+	}
+	return time.Now()
+}
+
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	if strings.TrimSpace(acct.Provider) == "" {
 		acct.Provider = p.ID()
@@ -175,7 +184,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),
 		AccountID:   acct.ID,
-		Timestamp:   time.Now(),
+		Timestamp:   p.now(),
 		Status:      core.StatusOK,
 		Metrics:     make(map[string]core.Metric),
 		Resets:      make(map[string]time.Time),
@@ -238,18 +247,20 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	var hasLocalData bool
 	if trackingDBPath != "" {
+		before := cursorSnapshotDataSignature(&snap)
 		if err := p.readTrackingDB(ctx, trackingDBPath, &snap); err != nil {
 			log.Printf("[cursor] tracking DB error: %v", err)
 			snap.Raw["tracking_db_error"] = err.Error()
-		} else {
+		} else if cursorSnapshotDataSignature(&snap) != before {
 			hasLocalData = true
 		}
 	}
 	if stateDBPath != "" {
+		before := cursorSnapshotDataSignature(&snap)
 		if err := p.readStateDB(ctx, stateDBPath, &snap); err != nil {
 			log.Printf("[cursor] state DB error: %v", err)
 			snap.Raw["state_db_error"] = err.Error()
-		} else {
+		} else if cursorSnapshotDataSignature(&snap) != before {
 			hasLocalData = true
 		}
 	}
@@ -303,6 +314,27 @@ func mergeAPIIntoSnapshot(dst, src *core.UsageSnapshot) {
 	}
 	if src.Message != "" {
 		dst.Message = src.Message
+	}
+}
+
+type cursorSnapshotSignature struct {
+	metrics     int
+	resets      int
+	raw         int
+	dailySeries int
+	modelUsage  int
+}
+
+func cursorSnapshotDataSignature(snap *core.UsageSnapshot) cursorSnapshotSignature {
+	if snap == nil {
+		return cursorSnapshotSignature{}
+	}
+	return cursorSnapshotSignature{
+		metrics:     len(snap.Metrics),
+		resets:      len(snap.Resets),
+		raw:         len(snap.Raw),
+		dailySeries: len(snap.DailySeries),
+		modelUsage:  len(snap.ModelUsage),
 	}
 }
 
@@ -469,7 +501,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 				Unit:      "%",
 				Window:    "billing-cycle",
 			}
-			daysRemaining := cycleEnd.Sub(time.Now()).Hours() / 24
+			daysRemaining := cycleEnd.Sub(p.now()).Hours() / 24
 			if daysRemaining < 0 {
 				daysRemaining = 0
 			}
@@ -1085,12 +1117,15 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 	}
 	defer db.Close()
 
-	var totalRequests int
-	err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ai_code_hashes`).Scan(&totalRequests)
-	if err != nil {
-		return fmt.Errorf("querying total requests: %w", err)
+	if !cursorTableExists(ctx, db, "ai_code_hashes") {
+		return nil
 	}
 
+	trackingRecords, err := loadTrackingRecords(ctx, db, p.clock)
+	if err != nil {
+		return err
+	}
+	totalRequests := len(trackingRecords)
 	if totalRequests > 0 {
 		total := float64(totalRequests)
 		snap.Metrics["total_ai_requests"] = core.Metric{
@@ -1100,13 +1135,14 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 		}
 	}
 
-	timeExpr := chooseTrackingTimeExpr(ctx, db)
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UnixMilli()
-	var todayCount int
-	err = db.QueryRowContext(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM ai_code_hashes WHERE %s >= ?`, timeExpr), todayStart).Scan(&todayCount)
-	if err == nil && todayCount > 0 {
+	today := p.now().Format("2006-01-02")
+	todayCount := 0
+	for _, record := range trackingRecords {
+		if record.OccurredDay == today {
+			todayCount++
+		}
+	}
+	if todayCount > 0 {
 		tc := float64(todayCount)
 		snap.Metrics["requests_today"] = core.Metric{
 			Used:   &tc,
@@ -1115,10 +1151,10 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 		}
 	}
 
-	p.readTrackingSourceBreakdown(ctx, db, snap, todayStart, timeExpr)
-	p.readTrackingDailyRequests(ctx, db, snap, timeExpr)
-	p.readTrackingModelBreakdown(ctx, db, snap, todayStart, timeExpr)
-	p.readTrackingLanguageBreakdown(ctx, db, snap)
+	p.readTrackingSourceBreakdown(trackingRecords, snap, today)
+	p.readTrackingDailyRequests(trackingRecords, snap)
+	p.readTrackingModelBreakdown(trackingRecords, snap, today)
+	p.readTrackingLanguageBreakdown(trackingRecords, snap)
 	p.readScoredCommits(ctx, db, snap)
 	p.readDeletedFiles(ctx, db, snap)
 	p.readTrackedFileContent(ctx, db, snap)
@@ -1264,31 +1300,9 @@ func (p *Provider) readTrackedFileContent(ctx context.Context, db *sql.DB, snap 
 }
 
 func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) string {
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(ai_code_hashes)`)
-	if err != nil {
-		return "createdAt"
-	}
-	defer rows.Close()
-
-	hasCreatedAt := false
-	hasTimestamp := false
-	for rows.Next() {
-		var cid int
-		var name string
-		var dataType string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk) != nil {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(name)) {
-		case "createdat":
-			hasCreatedAt = true
-		case "timestamp":
-			hasTimestamp = true
-		}
-	}
+	columns := cursorTableColumns(ctx, db, "ai_code_hashes")
+	hasCreatedAt := columns["createdat"]
+	hasTimestamp := columns["timestamp"]
 
 	switch {
 	case hasCreatedAt && hasTimestamp:
@@ -1298,35 +1312,26 @@ func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) string {
 	case hasTimestamp:
 		return "timestamp"
 	default:
-		return "createdAt"
+		return "0"
 	}
 }
 
-func (p *Provider) readTrackingSourceBreakdown(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot, todayStart int64, timeExpr string) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(source, ''), COUNT(*)
-		FROM ai_code_hashes
-		GROUP BY COALESCE(source, '')
-		ORDER BY COUNT(*) DESC`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readTrackingSourceBreakdown(records []cursorTrackingRecord, snap *core.UsageSnapshot, today string) {
 	clientTotals := map[string]float64{
 		"ide":        0,
 		"cli_agents": 0,
 		"other":      0,
 	}
+	sourceTotals := make(map[string]int)
+	todaySourceTotals := make(map[string]int)
 	var sourceSummary []string
-
-	for rows.Next() {
-		var source string
-		var count int
-		if rows.Scan(&source, &count) != nil || count <= 0 {
-			continue
+	for _, record := range records {
+		sourceTotals[record.Source]++
+		if record.OccurredDay == today {
+			todaySourceTotals[record.Source]++
 		}
-
+	}
+	for source, count := range sourceTotals {
 		value := float64(count)
 		sourceKey := sanitizeCursorMetricName(source)
 		snap.Metrics["source_"+sourceKey+"_requests"] = core.Metric{
@@ -1364,22 +1369,9 @@ func (p *Provider) readTrackingSourceBreakdown(ctx context.Context, db *sql.DB, 
 		}
 	}
 
-	todayRows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(source, ''), COUNT(*)
-		FROM ai_code_hashes
-		WHERE %s >= ?
-		GROUP BY COALESCE(source, '')
-		ORDER BY COUNT(*) DESC`, timeExpr), todayStart)
-	if err != nil {
-		return
-	}
-	defer todayRows.Close()
-
 	var todaySummary []string
-	for todayRows.Next() {
-		var source string
-		var count int
-		if todayRows.Scan(&source, &count) != nil || count <= 0 {
+	for source, count := range todaySourceTotals {
+		if count <= 0 {
 			continue
 		}
 		value := float64(count)
@@ -1396,17 +1388,7 @@ func (p *Provider) readTrackingSourceBreakdown(ctx context.Context, db *sql.DB, 
 	}
 }
 
-func (p *Provider) readTrackingDailyRequests(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot, timeExpr string) {
-	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(source, ''), strftime('%%Y-%%m-%%d', (%s)/1000, 'unixepoch', 'localtime') as day, COUNT(*)
-		FROM ai_code_hashes
-		GROUP BY COALESCE(source, ''), day
-		ORDER BY day ASC`, timeExpr))
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readTrackingDailyRequests(records []cursorTrackingRecord, snap *core.UsageSnapshot) {
 	totalByDay := make(map[string]float64)
 	byClientDay := map[string]map[string]float64{
 		"ide":        make(map[string]float64),
@@ -1415,19 +1397,16 @@ func (p *Provider) readTrackingDailyRequests(ctx context.Context, db *sql.DB, sn
 	}
 	bySourceDay := make(map[string]map[string]float64)
 
-	for rows.Next() {
-		var source string
-		var day string
-		var count int
-		if rows.Scan(&source, &day, &count) != nil || count <= 0 || day == "" {
+	for _, record := range records {
+		day := record.OccurredDay
+		if day == "" {
 			continue
 		}
-
-		v := float64(count)
+		v := 1.0
 		totalByDay[day] += v
-		clientKey := cursorClientBucket(source)
+		clientKey := cursorClientBucket(record.Source)
 		byClientDay[clientKey][day] += v
-		sourceKey := sanitizeCursorMetricName(source)
+		sourceKey := sanitizeCursorMetricName(record.Source)
 		if bySourceDay[sourceKey] == nil {
 			bySourceDay[sourceKey] = make(map[string]float64)
 		}
@@ -1451,22 +1430,26 @@ func (p *Provider) readTrackingDailyRequests(ctx context.Context, db *sql.DB, sn
 	}
 }
 
-func (p *Provider) readTrackingModelBreakdown(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot, todayStart int64, timeExpr string) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(model, ''), COUNT(*)
-		FROM ai_code_hashes
-		GROUP BY COALESCE(model, '')
-		ORDER BY COUNT(*) DESC`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readTrackingModelBreakdown(records []cursorTrackingRecord, snap *core.UsageSnapshot, today string) {
+	modelTotals := make(map[string]int)
+	todayModelTotals := make(map[string]int)
+	byModelDay := make(map[string]map[string]float64)
 	var modelSummary []string
-	for rows.Next() {
-		var model string
-		var count int
-		if rows.Scan(&model, &count) != nil || count <= 0 {
+	for _, record := range records {
+		modelTotals[record.Model]++
+		if record.OccurredDay == today {
+			todayModelTotals[record.Model]++
+		}
+		modelKey := sanitizeCursorMetricName(record.Model)
+		if byModelDay[modelKey] == nil {
+			byModelDay[modelKey] = make(map[string]float64)
+		}
+		if record.OccurredDay != "" {
+			byModelDay[modelKey][record.OccurredDay]++
+		}
+	}
+	for model, count := range modelTotals {
+		if count <= 0 {
 			continue
 		}
 
@@ -1483,53 +1466,17 @@ func (p *Provider) readTrackingModelBreakdown(ctx context.Context, db *sql.DB, s
 		snap.Raw["model_usage"] = strings.Join(modelSummary, " · ")
 	}
 
-	todayRows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(model, ''), COUNT(*)
-		FROM ai_code_hashes
-		WHERE %s >= ?
-		GROUP BY COALESCE(model, '')
-		ORDER BY COUNT(*) DESC`, timeExpr), todayStart)
-	if err == nil {
-		defer todayRows.Close()
-		for todayRows.Next() {
-			var model string
-			var count int
-			if todayRows.Scan(&model, &count) != nil || count <= 0 {
-				continue
-			}
-			value := float64(count)
-			modelKey := sanitizeCursorMetricName(model)
-			snap.Metrics["model_"+modelKey+"_requests_today"] = core.Metric{
-				Used:   &value,
-				Unit:   "requests",
-				Window: "1d",
-			}
-		}
-	}
-
-	dailyRows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(model, ''), strftime('%%Y-%%m-%%d', (%s)/1000, 'unixepoch', 'localtime') as day, COUNT(*)
-		FROM ai_code_hashes
-		GROUP BY COALESCE(model, ''), day
-		ORDER BY day ASC`, timeExpr))
-	if err != nil {
-		return
-	}
-	defer dailyRows.Close()
-
-	byModelDay := make(map[string]map[string]float64)
-	for dailyRows.Next() {
-		var model string
-		var day string
-		var count int
-		if dailyRows.Scan(&model, &day, &count) != nil || count <= 0 || day == "" {
+	for model, count := range todayModelTotals {
+		if count <= 0 {
 			continue
 		}
 		modelKey := sanitizeCursorMetricName(model)
-		if byModelDay[modelKey] == nil {
-			byModelDay[modelKey] = make(map[string]float64)
+		value := float64(count)
+		snap.Metrics["model_"+modelKey+"_requests_today"] = core.Metric{
+			Used:   &value,
+			Unit:   "requests",
+			Window: "1d",
 		}
-		byModelDay[modelKey][day] += float64(count)
 	}
 	for modelKey, pointsByDay := range byModelDay {
 		if len(pointsByDay) < 2 {
@@ -1539,26 +1486,16 @@ func (p *Provider) readTrackingModelBreakdown(ctx context.Context, db *sql.DB, s
 	}
 }
 
-func (p *Provider) readTrackingLanguageBreakdown(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(fileExtension, ''), COUNT(*)
-		FROM ai_code_hashes
-		WHERE fileExtension IS NOT NULL AND fileExtension != ''
-		GROUP BY COALESCE(fileExtension, '')
-		ORDER BY COUNT(*) DESC`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
+func (p *Provider) readTrackingLanguageBreakdown(records []cursorTrackingRecord, snap *core.UsageSnapshot) {
+	langTotals := make(map[string]int)
 	var langSummary []string
-	for rows.Next() {
-		var ext string
-		var count int
-		if rows.Scan(&ext, &count) != nil || count <= 0 {
+	for _, record := range records {
+		if strings.TrimSpace(record.FileExt) == "" {
 			continue
 		}
-
+		langTotals[record.FileExt]++
+	}
+	for ext, count := range langTotals {
 		value := float64(count)
 		langName := extensionToLanguage(ext)
 		langKey := sanitizeCursorMetricName(langName)
@@ -1685,6 +1622,10 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 		return fmt.Errorf("state DB not accessible: %w", err)
 	}
 
+	dailyStatsRecords, err := loadDailyStatsRecords(ctx, db)
+	if err != nil {
+		dailyStatsRecords = nil
+	}
 	composerRecords, err := loadComposerSessionRecords(ctx, db)
 	if err != nil {
 		log.Printf("[cursor] composerData query error: %v", err)
@@ -1694,8 +1635,8 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 		log.Printf("[cursor] bubbleId query error: %v", err)
 	}
 
-	p.readDailyStatsToday(ctx, db, snap)
-	p.readDailyStatsSeries(ctx, db, snap)
+	p.readDailyStatsToday(dailyStatsRecords, snap)
+	p.readDailyStatsSeries(dailyStatsRecords, snap)
 	p.readComposerSessions(composerRecords, snap)
 	p.readStateMetadata(ctx, db, snap)
 	p.readToolUsage(bubbleRecords, snap)
@@ -1703,27 +1644,21 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 	return nil
 }
 
-func (p *Provider) readDailyStatsToday(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	today := time.Now().Format("2006-01-02")
-	key := fmt.Sprintf("aiCodeTracking.dailyStats.v1.5.%s", today)
-
-	var value string
-	err := db.QueryRowContext(ctx, `SELECT value FROM ItemTable WHERE key = ?`, key).Scan(&value)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-			key = fmt.Sprintf("aiCodeTracking.dailyStats.v1.5.%s", yesterday)
-			err = db.QueryRowContext(ctx, `SELECT value FROM ItemTable WHERE key = ?`, key).Scan(&value)
-			if err != nil {
-				return
+func (p *Provider) readDailyStatsToday(records []cursorDailyStatsRecord, snap *core.UsageSnapshot) {
+	today := p.now().Format("2006-01-02")
+	yesterday := p.now().AddDate(0, 0, -1).Format("2006-01-02")
+	var stats *dailyStats
+	for i := range records {
+		switch records[i].Date {
+		case today:
+			stats = &records[i].Stats
+		case yesterday:
+			if stats == nil {
+				stats = &records[i].Stats
 			}
-		} else {
-			return
 		}
 	}
-
-	var stats dailyStats
-	if json.Unmarshal([]byte(value), &stats) != nil {
+	if stats == nil {
 		return
 	}
 
@@ -1768,7 +1703,7 @@ func (p *Provider) readComposerSessions(records []cursorComposerSessionRecord, s
 		todayRequests      int
 	)
 
-	now := time.Now()
+	now := p.now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	for _, record := range records {
@@ -2218,30 +2153,10 @@ func normalizeCursorMCPName(name string) string {
 	return name
 }
 
-func (p *Provider) readDailyStatsSeries(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT key, value FROM ItemTable WHERE key LIKE 'aiCodeTracking.dailyStats.v1.5.%' ORDER BY key ASC`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
-	prefix := "aiCodeTracking.dailyStats.v1.5."
-	for rows.Next() {
-		var k, v string
-		if rows.Scan(&k, &v) != nil {
-			continue
-		}
-		dateStr := strings.TrimPrefix(k, prefix)
-		if len(dateStr) != 10 { // "2025-01-15"
-			continue
-		}
-
-		var ds dailyStats
-		if json.Unmarshal([]byte(v), &ds) != nil {
-			continue
-		}
-
+func (p *Provider) readDailyStatsSeries(records []cursorDailyStatsRecord, snap *core.UsageSnapshot) {
+	for _, record := range records {
+		ds := record.Stats
+		dateStr := record.Date
 		if ds.TabSuggestedLines > 0 || ds.TabAcceptedLines > 0 {
 			snap.DailySeries["tab_suggested"] = append(snap.DailySeries["tab_suggested"],
 				core.TimePoint{Date: dateStr, Value: float64(ds.TabSuggestedLines)})

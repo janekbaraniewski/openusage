@@ -36,9 +36,8 @@ type Service struct {
 	collectors   []telemetry.Collector
 	providerByID map[string]core.UsageProvider
 
-	spoolMu   sync.Mutex // guards spool filesystem operations (read/write/cleanup)
-	logMu     sync.Mutex
-	lastLogAt map[string]time.Time
+	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
+	logThrottle *core.LogThrottle
 
 	rmCache *readModelCache
 }
@@ -107,7 +106,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
 		collectors:   buildCollectors(),
 		providerByID: providersByID(),
-		lastLogAt:    map[string]time.Time{},
+		logThrottle:  core.NewLogThrottle(200, 10*time.Minute),
 		rmCache:      newReadModelCache(),
 	}
 
@@ -236,42 +235,7 @@ func (s *Service) shouldLog(key string, interval time.Duration) bool {
 	if s == nil {
 		return false
 	}
-	s.logMu.Lock()
-	defer s.logMu.Unlock()
-	now := time.Now()
-	if interval > 0 {
-		if last, ok := s.lastLogAt[key]; ok && now.Sub(last) < interval {
-			return false
-		}
-	}
-	s.lastLogAt[key] = now
-	// Prevent unbounded growth in long-running daemon.
-	const maxLogKeys = 200
-	const maxLogAge = 10 * time.Minute
-	if len(s.lastLogAt) > maxLogKeys {
-		// First pass: remove stale entries.
-		for k, t := range s.lastLogAt {
-			if now.Sub(t) > maxLogAge {
-				delete(s.lastLogAt, k)
-			}
-		}
-		// If still over limit, remove oldest entries until at cap.
-		for len(s.lastLogAt) > maxLogKeys {
-			oldestKey := ""
-			oldestTime := now
-			for k, t := range s.lastLogAt {
-				if t.Before(oldestTime) {
-					oldestKey = k
-					oldestTime = t
-				}
-			}
-			if oldestKey == "" {
-				break
-			}
-			delete(s.lastLogAt, oldestKey)
-		}
-	}
-	return true
+	return s.logThrottle.Allow(key, interval, time.Now())
 }
 
 // --- Read-model cache ---
