@@ -22,6 +22,7 @@ These were major concerns in earlier reviews and are now materially addressed:
 - Codex live/session flow concentrated in one provider file.
 - Claude Code local file readers and model-summary helpers concentrated in one provider file.
 - Copilot GitHub API fetch/quota/org-metrics flow concentrated in the same file as local log/session parsing.
+- Copilot local config/log/session parsing concentrated in the same file as provider orchestration.
 - OpenRouter provider-resolution, analytics, generation, projection, and account-path monolith sprawl.
 - TUI side-effect leakage into config persistence / integration install / provider validation.
 - Settings modal layout/render wrapper living inline with settings state/input handling.
@@ -79,7 +80,7 @@ What to address:
 
 ### 4. [P2] Several providers are still large mixed-responsibility units
 
-Cursor, OpenRouter, and Codex are now in much better shape, Claude Code has started the same split, and Copilot's GitHub API path is now separated, but several providers still remain monoliths that mix transport, parsing, normalization, and projection in one place.
+Cursor, OpenRouter, Codex, and Copilot are now in much better shape, Claude Code has started the same split, but several providers still remain monoliths that mix transport, parsing, normalization, and projection in one place.
 
 Refs:
 - [ollama.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/ollama/ollama.go)
@@ -87,6 +88,8 @@ Refs:
 - [gemini_cli.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/gemini_cli/gemini_cli.go)
 - [copilot.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/copilot.go)
 - [api_data.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/api_data.go)
+- [local_data.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/local_data.go)
+- [local_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/copilot/local_helpers.go)
 - [claude_code.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/claude_code.go)
 - [local_files.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_files.go)
 - [local_helpers.go](/Users/janekbaraniewski/Workspace/priv/openusage/internal/providers/claude_code/local_helpers.go)
