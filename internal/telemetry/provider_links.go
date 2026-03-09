@@ -1,10 +1,9 @@
 package telemetry
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
-
-	"github.com/samber/lo"
 )
 
 func normalizeProviderLinks(in map[string]string) map[string]string {
@@ -39,7 +38,5 @@ func telemetrySourceProvidersForTarget(targetProvider string, links map[string]s
 		}
 	}
 
-	out := lo.Keys(set)
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(set))
 }

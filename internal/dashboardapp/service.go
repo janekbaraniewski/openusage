@@ -11,10 +11,15 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers"
 )
 
-type Service struct{}
+type Service struct {
+	ctx context.Context
+}
 
-func NewService() *Service {
-	return &Service{}
+func NewService(ctx context.Context) *Service {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &Service{ctx: ctx}
 }
 
 func (s *Service) SaveTheme(themeName string) error {
@@ -53,7 +58,11 @@ func (s *Service) ValidateAPIKey(accountID, providerID, apiKey string) (bool, st
 		return false, "unknown provider"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	parent := context.Background()
+	if s != nil && s.ctx != nil {
+		parent = s.ctx
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	snap, err := provider.Fetch(ctx, core.AccountConfig{

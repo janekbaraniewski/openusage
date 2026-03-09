@@ -52,9 +52,12 @@ func (s *Service) refreshReadModelCacheAsync(
 	}()
 }
 
-func (s *Service) backgroundContext() context.Context {
+func (s *Service) serviceContext(fallback context.Context) context.Context {
 	if s != nil && s.ctx != nil {
 		return s.ctx
+	}
+	if fallback != nil {
+		return fallback
 	}
 	return context.Background()
 }

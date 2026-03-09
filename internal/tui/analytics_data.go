@@ -1,12 +1,13 @@
 package tui
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 const (
@@ -144,8 +145,7 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 	data.snapshots = snapshots
 	lowerFilter := strings.ToLower(filter)
 
-	keys := lo.Keys(snapshots)
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(snapshots))
 
 	for _, k := range keys {
 		snap := snapshots[k]

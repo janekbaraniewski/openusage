@@ -1,11 +1,10 @@
 package core
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
-
-	"github.com/samber/lo"
 )
 
 func normalizeAnalyticsDailySeries(s *UsageSnapshot) {
@@ -150,8 +149,7 @@ func normalizeSeriesPoints(points []TimePoint) []TimePoint {
 		}
 		agg[date] += p.Value
 	}
-	keys := lo.Keys(agg)
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(agg))
 	out := make([]TimePoint, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, TimePoint{Date: k, Value: agg[k]})

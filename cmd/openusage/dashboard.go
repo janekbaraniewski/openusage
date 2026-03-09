@@ -32,6 +32,9 @@ func runDashboard(cfg config.Config) {
 
 	timeWindow := core.ParseTimeWindow(cfg.Data.TimeWindow)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
 		cfg.UI.CritThreshold,
@@ -40,7 +43,7 @@ func runDashboard(cfg config.Config) {
 		cachedAccounts,
 		timeWindow,
 	)
-	model.SetServices(dashboardapp.NewService())
+	model.SetServices(dashboardapp.NewService(ctx))
 
 	socketPath := daemon.ResolveSocketPath()
 
@@ -50,9 +53,6 @@ func runDashboard(cfg config.Config) {
 		verbose,
 	)
 	viewRuntime.SetTimeWindow(timeWindow)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var program *tea.Program
 	dispatcher := &snapshotDispatcher{}

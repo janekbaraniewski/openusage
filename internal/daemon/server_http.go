@@ -126,7 +126,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
 		if time.Since(cachedAt) > 2*time.Second {
-			s.refreshReadModelCacheAsync(s.backgroundContext(), cacheKey, req, 60*time.Second)
+			s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 		}
 		return
 	}
@@ -144,7 +144,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
 	}
 
-	s.refreshReadModelCacheAsync(s.backgroundContext(), cacheKey, req, 60*time.Second)
+	s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 	durationMs := time.Since(started).Milliseconds()

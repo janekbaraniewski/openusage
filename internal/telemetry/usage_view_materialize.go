@@ -37,7 +37,9 @@ func materializeUsageFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 
 	filter.materializedTbl = tempTable
 	cleanup := func() {
-		_, _ = db.ExecContext(context.Background(), fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_, _ = db.ExecContext(cleanupCtx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
 	}
 	return filter, cleanup, nil
 }
