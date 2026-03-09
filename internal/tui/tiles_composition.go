@@ -1241,86 +1241,20 @@ func buildProviderProjectBreakdownLines(snap core.UsageSnapshot, innerW int, exp
 }
 
 func collectProviderProjectMix(snap core.UsageSnapshot) ([]projectMixEntry, map[string]bool) {
-	byProject := make(map[string]*projectMixEntry)
-	usedKeys := make(map[string]bool)
-
-	ensure := func(name string) *projectMixEntry {
-		if _, ok := byProject[name]; !ok {
-			byProject[name] = &projectMixEntry{name: name}
-		}
-		return byProject[name]
+	projectUsage, usedKeys := core.ExtractProjectUsage(snap)
+	if len(projectUsage) == 0 {
+		return nil, usedKeys
 	}
-
-	seriesByProject := make(map[string]map[string]float64)
-
-	for key, met := range snap.Metrics {
-		if met.Used == nil {
-			continue
-		}
-		name, field, ok := parseProjectMetricKey(key)
-		if !ok {
-			continue
-		}
-		project := ensure(name)
-		switch field {
-		case "requests":
-			project.requests = *met.Used
-		case "requests_today":
-			project.requests1d = *met.Used
-		}
-		usedKeys[key] = true
+	projects := make([]projectMixEntry, 0, len(projectUsage))
+	for _, project := range projectUsage {
+		projects = append(projects, projectMixEntry{
+			name:       project.Name,
+			requests:   project.Requests,
+			requests1d: project.Requests1d,
+			series:     project.Series,
+		})
 	}
-
-	for key, points := range snap.DailySeries {
-		if !strings.HasPrefix(key, "usage_project_") {
-			continue
-		}
-		name := strings.TrimPrefix(key, "usage_project_")
-		if strings.TrimSpace(name) == "" || len(points) == 0 {
-			continue
-		}
-		mergeSeriesByDay(seriesByProject, name, points)
-	}
-
-	for name, pointsByDay := range seriesByProject {
-		project := ensure(name)
-		project.series = sortedSeriesFromByDay(pointsByDay)
-		if project.requests <= 0 {
-			project.requests = sumSeriesValues(project.series)
-		}
-	}
-
-	projects := make([]projectMixEntry, 0, len(byProject))
-	for _, project := range byProject {
-		if project.requests <= 0 && len(project.series) == 0 {
-			continue
-		}
-		projects = append(projects, *project)
-	}
-
-	sort.Slice(projects, func(i, j int) bool {
-		if projects[i].requests == projects[j].requests {
-			return projects[i].name < projects[j].name
-		}
-		return projects[i].requests > projects[j].requests
-	})
-
 	return projects, usedKeys
-}
-
-func parseProjectMetricKey(key string) (name, field string, ok bool) {
-	const prefix = "project_"
-	if !strings.HasPrefix(key, prefix) {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(key, prefix)
-	if strings.HasSuffix(rest, "_requests_today") {
-		return strings.TrimSuffix(rest, "_requests_today"), "requests_today", true
-	}
-	if strings.HasSuffix(rest, "_requests") {
-		return strings.TrimSuffix(rest, "_requests"), "requests", true
-	}
-	return "", "", false
 }
 
 func limitProjectMix(projects []projectMixEntry, expanded bool, maxVisible int) ([]projectMixEntry, int) {

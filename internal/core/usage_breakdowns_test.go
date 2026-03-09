@@ -66,3 +66,36 @@ func TestExtractMCPUsage(t *testing.T) {
 		t.Fatalf("aggregate MCP key should still be marked used")
 	}
 }
+
+func TestExtractProjectUsage(t *testing.T) {
+	snap := UsageSnapshot{
+		Metrics: map[string]Metric{
+			"project_alpha_requests":       {Used: Float64Ptr(5)},
+			"project_alpha_requests_today": {Used: Float64Ptr(2)},
+			"project_beta_requests":        {Used: Float64Ptr(3)},
+		},
+		DailySeries: map[string][]TimePoint{
+			"usage_project_alpha": {
+				{Date: "2026-03-08", Value: 2},
+				{Date: "2026-03-09", Value: 3},
+			},
+		},
+	}
+
+	got, used := ExtractProjectUsage(snap)
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].Name != "alpha" || got[0].Requests != 5 || got[0].Requests1d != 2 {
+		t.Fatalf("got[0] = %#v, want alpha/5/2", got[0])
+	}
+	if len(got[0].Series) != 2 {
+		t.Fatalf("len(got[0].Series) = %d, want 2", len(got[0].Series))
+	}
+	if got[1].Name != "beta" || got[1].Requests != 3 {
+		t.Fatalf("got[1] = %#v, want beta/3", got[1])
+	}
+	if !used["project_alpha_requests"] || !used["project_beta_requests"] {
+		t.Fatalf("used keys missing project metrics: %#v", used)
+	}
+}
