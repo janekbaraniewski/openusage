@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 func captureEndpointPayload(snap *core.UsageSnapshot, endpoint string, body []byte) {
@@ -121,11 +122,7 @@ func walkPayloadStats(path string, v any, numericByPath map[string]*payloadNumer
 		if objectCount != nil {
 			*objectCount = *objectCount + 1
 		}
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+		keys := core.SortedStringKeys(value)
 		for _, key := range keys {
 			next := appendPayloadPath(path, key)
 			walkPayloadStats(next, value[key], numericByPath, leafCount, objectCount, arrayCount)
@@ -479,12 +476,7 @@ func accumulateUsageRollup(target map[string]*usageRollup, key string, sample us
 }
 
 func sortedUsageRollupKeys(values map[string]*usageRollup) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return core.SortedStringKeys(values)
 }
 
 func summarizeShareUsage(values map[string]float64, maxItems int) string {
@@ -722,7 +714,7 @@ func sanitizeMetricSlug(value string) string {
 }
 
 func clamp(value, minVal, maxVal float64) float64 {
-	return math.Min(math.Max(value, minVal), maxVal)
+	return lo.Clamp(value, minVal, maxVal)
 }
 
 func apiErrorMessage(err *apiError) string {

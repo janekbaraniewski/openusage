@@ -9,6 +9,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
+	"github.com/samber/lo"
 )
 
 type sourceCollectorSpec struct {
@@ -106,11 +107,7 @@ func resolveTelemetrySourceOptionsFromAccounts(
 
 func buildSourceCollectorSpecs(accounts []core.AccountConfig) ([]sourceCollectorSpec, []string) {
 	providersBySource := telemetrySourcesBySystem()
-	sourceNames := make([]string, 0, len(providersBySource))
-	for sourceName := range providersBySource {
-		sourceNames = append(sourceNames, sourceName)
-	}
-	sort.Strings(sourceNames)
+	sourceNames := core.SortedStringKeys(providersBySource)
 
 	specs := make([]sourceCollectorSpec, 0, len(sourceNames))
 	var warnings []string
@@ -127,17 +124,15 @@ func buildSourceCollectorSpecs(accounts []core.AccountConfig) ([]sourceCollector
 
 		groups := make(map[string][]core.AccountConfig)
 		groupOptions := make(map[string]shared.TelemetryCollectOptions)
-		groupKeys := make([]string, 0, len(candidates))
 		for _, acct := range candidates {
 			opts := collectOptionsForAccount(source, acct)
 			key := collectOptionsSignature(opts)
 			if _, ok := groups[key]; !ok {
-				groupKeys = append(groupKeys, key)
 				groupOptions[key] = opts
 			}
 			groups[key] = append(groups[key], acct)
 		}
-		sort.Strings(groupKeys)
+		groupKeys := core.SortedStringKeys(groups)
 
 		for _, key := range groupKeys {
 			group := groups[key]
@@ -151,11 +146,9 @@ func buildSourceCollectorSpecs(accounts []core.AccountConfig) ([]sourceCollector
 				continue
 			}
 
-			accountIDs := make([]string, 0, len(group))
-			for _, acct := range group {
-				accountIDs = append(accountIDs, strings.TrimSpace(acct.ID))
-			}
-			sort.Strings(accountIDs)
+			accountIDs := core.SortedCompactStrings(lo.Map(group, func(acct core.AccountConfig, _ int) string {
+				return acct.ID
+			}))
 			delete(opts.Paths, "account_id")
 			specs = append(specs, sourceCollectorSpec{
 				source:  source,
@@ -254,27 +247,12 @@ func cloneCollectOptions(in shared.TelemetryCollectOptions) shared.TelemetryColl
 }
 
 func collectOptionsSignature(opts shared.TelemetryCollectOptions) string {
-	pathKeys := make([]string, 0, len(opts.Paths))
-	for key, value := range opts.Paths {
-		trimmedKey := strings.TrimSpace(key)
-		if trimmedKey == "" || trimmedKey == "account_id" {
-			continue
-		}
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		pathKeys = append(pathKeys, trimmedKey)
-	}
-	sort.Strings(pathKeys)
-
-	listKeys := make([]string, 0, len(opts.PathLists))
-	for key, values := range opts.PathLists {
-		if strings.TrimSpace(key) == "" || len(values) == 0 {
-			continue
-		}
-		listKeys = append(listKeys, strings.TrimSpace(key))
-	}
-	sort.Strings(listKeys)
+	pathKeys := lo.Filter(core.SortedStringKeys(opts.Paths), func(key string, _ int) bool {
+		return key != "account_id" && strings.TrimSpace(opts.Paths[key]) != ""
+	})
+	listKeys := lo.Filter(core.SortedStringKeys(opts.PathLists), func(key string, _ int) bool {
+		return len(opts.PathLists[key]) > 0
+	})
 
 	var b strings.Builder
 	for _, key := range pathKeys {
@@ -285,11 +263,7 @@ func collectOptionsSignature(opts shared.TelemetryCollectOptions) string {
 		b.WriteByte(';')
 	}
 	for _, key := range listKeys {
-		values := append([]string{}, opts.PathLists[key]...)
-		for i := range values {
-			values[i] = strings.TrimSpace(values[i])
-		}
-		sort.Strings(values)
+		values := core.SortedCompactStrings(opts.PathLists[key])
 		b.WriteString("l:")
 		b.WriteString(key)
 		b.WriteByte('=')

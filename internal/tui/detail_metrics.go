@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 type metricGroup struct {
@@ -187,8 +186,7 @@ func renderTimersSection(sb *strings.Builder, resets map[string]time.Time, widge
 	labelW := sectionLabelWidth(w)
 	renderDetailSectionHeader(sb, "Timers", w)
 
-	timerKeys := lo.Keys(resets)
-	sort.Strings(timerKeys)
+	timerKeys := core.SortedStringKeys(resets)
 
 	for _, k := range timerKeys {
 		t := resets[k]

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -616,11 +615,7 @@ func appendSessionShutdownEvents(out *[]shared.TelemetryEvent, state *copilotTel
 		return
 	}
 
-	models := make([]string, 0, len(shutdown.ModelMetrics))
-	for model := range shutdown.ModelMetrics {
-		models = append(models, model)
-	}
-	sort.Strings(models)
+	models := core.SortedStringKeys(shutdown.ModelMetrics)
 
 	for idx, model := range models {
 		appendShutdownModelMetricEvent(out, state, lineNum, occurredAt, shutdown, model, idx)

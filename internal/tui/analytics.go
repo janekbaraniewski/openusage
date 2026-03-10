@@ -2,16 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"maps"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 func (m Model) renderAnalyticsContent(w, h int) string {
@@ -617,8 +614,7 @@ func aggregateSeriesByDate(series []BrailleSeries) []core.TimePoint {
 	if len(byDate) == 0 {
 		return nil
 	}
-	dates := lo.Keys(byDate)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(byDate)
 	out := make([]core.TimePoint, 0, len(dates))
 	for _, d := range dates {
 		out = append(out, core.TimePoint{Date: d, Value: byDate[d]})
@@ -735,8 +731,7 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 		rows = rows[:maxRows]
 	}
 
-	dates := lo.Keys(dateSet)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(dateSet)
 	dates = clipDatesToRecent(dates, lastDays)
 
 	labels := make([]string, len(rows))
@@ -1033,5 +1028,5 @@ func truncStr(s string, maxLen int) string {
 }
 
 func sortedMetricKeys(m map[string]core.Metric) []string {
-	return slices.Sorted(maps.Keys(m))
+	return core.SortedStringKeys(m)
 }

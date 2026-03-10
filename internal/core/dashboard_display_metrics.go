@@ -46,11 +46,7 @@ func ExtractRateLimitDisplayMetrics(metrics map[string]Metric) []RateLimitDispla
 }
 
 func FallbackDisplayMetricKeys(metrics map[string]Metric) []string {
-	keys := make([]string, 0, len(metrics))
-	for key := range metrics {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
+	keys := SortedStringKeys(metrics)
 	if len(keys) == 0 {
 		return nil
 	}

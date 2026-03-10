@@ -3,10 +3,11 @@ package daemon
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"sort"
 	"strings"
 
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/samber/lo"
 )
 
 // ProviderRegistryHash returns a stable fingerprint for the set of registered providers.
@@ -16,21 +17,16 @@ func ProviderRegistryHash() string {
 		return ""
 	}
 
-	ids := make([]string, 0, len(all))
-	for _, p := range all {
-		id := strings.TrimSpace(p.ID())
+	ids := core.SortedCompactStrings(lo.Map(all, func(provider core.UsageProvider, _ int) string {
+		id := strings.TrimSpace(provider.ID())
 		if id == "" {
-			id = strings.TrimSpace(p.Spec().ID)
+			id = strings.TrimSpace(provider.Spec().ID)
 		}
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
+		return id
+	}))
 	if len(ids) == 0 {
 		return ""
 	}
-
-	sort.Strings(ids)
 	sum := sha256.Sum256([]byte(strings.Join(ids, ",")))
 	return hex.EncodeToString(sum[:])
 }

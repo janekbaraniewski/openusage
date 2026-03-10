@@ -3,9 +3,10 @@ package zai
 import (
 	"encoding/json"
 	"maps"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
@@ -281,11 +282,7 @@ func extractUsageRows(v any) []map[string]any {
 			return combined
 		}
 
-		mapKeys := make([]string, 0, len(value))
-		for key := range value {
-			mapKeys = append(mapKeys, key)
-		}
-		sort.Strings(mapKeys)
+		mapKeys := core.SortedStringKeys(value)
 
 		var all []map[string]any
 		for _, key := range mapKeys {
@@ -375,11 +372,7 @@ func extractCreditGrantRows(v any) []map[string]any {
 			return rows
 		}
 
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+		keys := core.SortedStringKeys(value)
 		for _, key := range keys {
 			rows = append(rows, extractCreditGrantRows(value[key])...)
 		}

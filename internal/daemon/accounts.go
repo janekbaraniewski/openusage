@@ -222,7 +222,7 @@ func ReadModelRequestKey(req ReadModelRequest) string {
 		}
 		linkKeys = append(linkKeys, source+"="+target)
 	}
-	sort.Strings(linkKeys)
+	linkKeys = core.SortedCompactStrings(linkKeys)
 
 	var b strings.Builder
 	b.Grow(128 + len(accounts)*32 + len(linkKeys)*24)

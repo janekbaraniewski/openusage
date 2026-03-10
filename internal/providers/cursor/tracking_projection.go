@@ -5,12 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core.UsageSnapshot) error {
@@ -398,8 +396,7 @@ func mapToSortedDailyPoints(byDay map[string]float64) []core.TimePoint {
 	if len(byDay) == 0 {
 		return nil
 	}
-	days := lo.Keys(byDay)
-	sort.Strings(days)
+	days := core.SortedStringKeys(byDay)
 	points := make([]core.TimePoint, 0, len(days))
 	for _, day := range days {
 		points = append(points, core.TimePoint{Date: day, Value: byDay[day]})

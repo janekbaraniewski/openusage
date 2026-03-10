@@ -3,12 +3,10 @@ package tui
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 type compactMetricRowSpec struct {
@@ -116,8 +114,7 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 	}
 
 	if spec.match != nil && len(segments) < maxSegments {
-		keys := lo.Keys(metrics)
-		sort.Strings(keys)
+		keys := core.SortedStringKeys(metrics)
 		for _, key := range keys {
 			if len(segments) >= maxSegments {
 				break
@@ -310,8 +307,7 @@ func (m Model) buildTileMetricLines(snap core.UsageSnapshot, widget core.Dashboa
 		return nil
 	}
 
-	keys := lo.Keys(snap.Metrics)
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(snap.Metrics)
 
 	maxLabel := innerW/2 - 1
 	if maxLabel < 8 {

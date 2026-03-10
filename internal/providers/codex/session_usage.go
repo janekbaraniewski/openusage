@@ -11,7 +11,6 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
-	"github.com/samber/lo"
 )
 
 func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapshot) error {
@@ -1048,8 +1047,7 @@ func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSn
 		return
 	}
 
-	dates := lo.Keys(dayCounts)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(dayCounts)
 
 	for _, d := range dates {
 		snap.DailySeries["sessions"] = append(snap.DailySeries["sessions"], core.TimePoint{

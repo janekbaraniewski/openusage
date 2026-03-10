@@ -1,8 +1,6 @@
 package core
 
 import (
-	"maps"
-	"slices"
 	"strings"
 	"time"
 )
@@ -149,7 +147,7 @@ func normalizeSeriesPoints(points []TimePoint) []TimePoint {
 		}
 		agg[date] += p.Value
 	}
-	keys := slices.Sorted(maps.Keys(agg))
+	keys := SortedStringKeys(agg)
 	out := make([]TimePoint, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, TimePoint{Date: k, Value: agg[k]})

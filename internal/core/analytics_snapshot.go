@@ -3,6 +3,8 @@ package core
 import (
 	"sort"
 	"strings"
+
+	"github.com/samber/lo"
 )
 
 type AnalyticsModelUsageEntry struct {
@@ -104,18 +106,17 @@ func ExtractAnalyticsModelUsage(s UsageSnapshot) []AnalyticsModelUsageEntry {
 }
 
 func ExtractAnalyticsModelSeries(series map[string][]TimePoint) []NamedSeries {
-	keys := make([]string, 0, len(series))
-	for key := range series {
+	hasTokenSeries := hasAnalyticsTokenSeries(series)
+	keys := lo.Filter(SortedStringKeys(series), func(key string, _ int) bool {
 		switch {
 		case strings.HasPrefix(key, "tokens_"):
-			keys = append(keys, key)
+			return true
 		case strings.HasPrefix(key, "usage_model_"):
-			if !hasAnalyticsTokenSeries(series) {
-				keys = append(keys, key)
-			}
+			return !hasTokenSeries
+		default:
+			return false
 		}
-	}
-	sort.Strings(keys)
+	})
 
 	out := make([]NamedSeries, 0, len(keys))
 	for _, key := range keys {
@@ -148,13 +149,9 @@ func SelectAnalyticsWeightSeries(series map[string][]TimePoint) []TimePoint {
 			return named.Points
 		}
 	}
-	keys := make([]string, 0, len(series))
-	for key := range series {
-		if strings.HasPrefix(key, "usage_client_") {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
+	keys := lo.Filter(SortedStringKeys(series), func(key string, _ int) bool {
+		return strings.HasPrefix(key, "usage_client_")
+	})
 	for _, key := range keys {
 		if len(series[key]) > 0 {
 			return series[key]

@@ -9,7 +9,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 type chartItem struct {
@@ -480,8 +479,7 @@ func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt fun
 		}
 	}
 
-	allDates := lo.Keys(dateSet)
-	sort.Strings(allDates)
+	allDates := core.SortedStringKeys(dateSet)
 
 	startIdx, endIdx := 0, len(allDates)-1
 	for startIdx < endIdx && !dateHasNonZero[allDates[startIdx]] {
@@ -1062,8 +1060,7 @@ func alignSeriesByDate(series []BrailleSeries, continuous bool) ([]string, [][]f
 			dateSet[p.Date] = true
 		}
 	}
-	dates := lo.Keys(dateSet)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(dateSet)
 	if len(dates) == 0 {
 		return nil, nil
 	}

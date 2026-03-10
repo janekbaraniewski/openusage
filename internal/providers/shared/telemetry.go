@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -213,10 +212,7 @@ func CollectFilesByExt(roots []string, exts map[string]bool) []string {
 }
 
 func uniqueStrings(in []string) []string {
-	trimmed := lo.Map(in, func(s string, _ int) string { return strings.TrimSpace(s) })
-	result := lo.Uniq(lo.Compact(trimmed))
-	sort.Strings(result)
-	return result
+	return core.SortedCompactStrings(in)
 }
 
 // ExtractFilePathsFromPayload walks a JSON-like structure and extracts file path
@@ -254,12 +250,7 @@ func ExtractFilePathsFromPayload(input any) []string {
 	}
 	walk(input, false)
 
-	out := make([]string, 0, len(candidates))
-	for candidate := range candidates {
-		out = append(out, candidate)
-	}
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(candidates)
 }
 
 func extractPathTokens(raw string) []string {

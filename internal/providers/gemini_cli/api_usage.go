@@ -9,14 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
-	"github.com/samber/lo"
 )
 
 func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapshot, creds oauthCreds, acct core.AccountConfig) error {
@@ -358,8 +356,7 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 		return result
 	}
 
-	keys := lo.Keys(aggregates)
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(aggregates)
 
 	modelWorst := make(map[string]float64)
 	var summary []string

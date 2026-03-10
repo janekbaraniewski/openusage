@@ -163,12 +163,7 @@ func extractToolPathCandidates(input any) []string {
 	}
 	walk(input, false)
 
-	out := make([]string, 0, len(candidates))
-	for candidate := range candidates {
-		out = append(out, candidate)
-	}
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(candidates)
 }
 
 func extractPathTokens(raw string) []string {

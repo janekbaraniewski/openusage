@@ -407,8 +407,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	if snap.DailySeries == nil {
 		snap.DailySeries = make(map[string][]core.TimePoint)
 	}
-	dates := lo.Keys(dailyTokenTotals)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(dailyTokenTotals)
 
 	if len(snap.DailySeries["messages"]) == 0 && len(dates) > 0 {
 		for _, d := range dates {
@@ -656,8 +655,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Raw["jsonl_today_web_search_requests"] = fmt.Sprintf("%d", todayWebSearch)
 		snap.Raw["jsonl_today_web_fetch_requests"] = fmt.Sprintf("%d", todayWebFetch)
 
-		models := lo.Keys(todayModels)
-		sort.Strings(models)
+		models := core.SortedStringKeys(todayModels)
 		snap.Raw["jsonl_today_models"] = strings.Join(models, ", ")
 	}
 
@@ -708,8 +706,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		snap.Raw["block_start"] = currentBlockStart.Format(time.RFC3339)
 		snap.Raw["block_end"] = currentBlockEnd.Format(time.RFC3339)
 
-		blockModelList := lo.Keys(blockModels)
-		sort.Strings(blockModelList)
+		blockModelList := core.SortedStringKeys(blockModels)
 		snap.Raw["block_models"] = strings.Join(blockModelList, ", ")
 
 		elapsed := now.Sub(currentBlockStart)

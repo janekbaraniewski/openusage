@@ -1,13 +1,11 @@
 package tui
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
@@ -26,8 +24,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
 	}
 
-	keys := lo.Keys(snap.Metrics)
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(snap.Metrics)
 	keys = prioritizeMetricKeys(keys, widget.GaugePriority)
 
 	// When GaugePriority is set, treat it as an allowlist — only those

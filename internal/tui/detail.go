@@ -3,14 +3,12 @@ package tui
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 type DetailTab int
@@ -386,11 +384,7 @@ func renderInfoSection(sb *strings.Builder, snap core.UsageSnapshot, widget core
 
 // renderKeyValuePairs renders a sorted key-value map with consistent formatting.
 func renderKeyValuePairs(sb *strings.Builder, data map[string]string, labelW, maxValW int, vs lipgloss.Style) {
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(data)
 
 	for _, k := range keys {
 		v := smartFormatValue(data[k])
@@ -446,8 +440,7 @@ func renderRawData(sb *strings.Builder, raw map[string]string, widget core.Dashb
 		}
 	}
 
-	keys := lo.Keys(raw)
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(raw)
 
 	for _, k := range keys {
 		if rendered[k] || strings.HasSuffix(k, "_error") {

@@ -127,8 +127,7 @@ func latestSeriesValue(m map[string]float64) (string, float64) {
 	if len(m) == 0 {
 		return "", 0
 	}
-	dates := lo.Keys(m)
-	sort.Strings(dates)
+	dates := core.SortedStringKeys(m)
 	last := dates[len(dates)-1]
 	return last, m[last]
 }
@@ -441,12 +440,7 @@ func extractCopilotToolPaths(raw json.RawMessage) []string {
 	}
 	walk(payload, false)
 
-	out := make([]string, 0, len(candidates))
-	for c := range candidates {
-		out = append(out, c)
-	}
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(candidates)
 }
 
 func extractCopilotPathTokens(raw string) []string {

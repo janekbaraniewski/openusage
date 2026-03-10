@@ -872,11 +872,7 @@ func applyModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	snap.Raw["activity_models"] = strconv.Itoa(len(modelTotals))
 	snap.SetAttribute("activity_models", strconv.Itoa(len(modelTotals)))
 
-	modelKeys := make([]string, 0, len(modelTotals))
-	for k := range modelTotals {
-		modelKeys = append(modelKeys, k)
-	}
-	sort.Strings(modelKeys)
+	modelKeys := core.SortedStringKeys(modelTotals)
 
 	for _, model := range modelKeys {
 		stats := modelTotals[model]
@@ -1111,11 +1107,7 @@ func applyToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	setUsedMetric(snap, "today_tool_calls", todayCalls, "calls", "today")
 	setUsedMetric(snap, "7d_tool_calls", totalCalls, "calls", "7d")
 
-	keys := make([]string, 0, len(toolTotals))
-	for tool := range toolTotals {
-		keys = append(keys, tool)
-	}
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(toolTotals)
 	for _, tool := range keys {
 		stats := toolTotals[tool]
 		slug := sanitizeMetricSlug(tool)

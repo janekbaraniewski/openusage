@@ -670,7 +670,5 @@ func normalizeProviderIDs(in []string) []string {
 	normalized := lo.Map(in, func(s string, _ int) string {
 		return strings.ToLower(strings.TrimSpace(s))
 	})
-	result := lo.Uniq(lo.Compact(normalized))
-	sort.Strings(result)
-	return result
+	return core.SortedCompactStrings(normalized)
 }

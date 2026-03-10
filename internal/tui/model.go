@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -917,8 +916,7 @@ func (m *Model) ensureSnapshotProvidersKnown() {
 	if len(m.snapshots) == 0 {
 		return
 	}
-	keys := lo.Keys(m.snapshots)
-	sort.Strings(keys)
+	keys := core.SortedStringKeys(m.snapshots)
 
 	for _, id := range keys {
 		if m.providerOrderIndex(id) >= 0 {
@@ -1077,9 +1075,7 @@ func (m Model) telemetryUnmappedProviders() []string {
 		}
 	}
 
-	out := lo.Keys(seen)
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(seen)
 }
 
 func (m Model) telemetryProviderLinkHints() []string {
@@ -1092,9 +1088,7 @@ func (m Model) telemetryProviderLinkHints() []string {
 		seen[hint] = true
 	}
 
-	out := lo.Keys(seen)
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(seen)
 }
 
 func (m Model) configuredProviderIDs() []string {
@@ -1115,9 +1109,7 @@ func (m Model) configuredProviderIDs() []string {
 		seen[providerID] = true
 	}
 
-	out := lo.Keys(seen)
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(seen)
 }
 
 func (m *Model) refreshIntegrationStatuses() {
@@ -1170,10 +1162,9 @@ func (m *Model) rebuildSortedIDs() {
 		seen[id] = true
 	}
 
-	extra := lo.Filter(lo.Keys(m.snapshots), func(id string, _ int) bool {
+	extra := lo.Filter(core.SortedStringKeys(m.snapshots), func(id string, _ int) bool {
 		return !seen[id] && m.isProviderEnabled(id)
 	})
-	sort.Strings(extra)
 
 	m.sortedIDs = append(ordered, extra...)
 	if m.cursor >= len(m.sortedIDs) {

@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,8 +19,8 @@ func mapKeysSorted(values map[string]bool) []string {
 	if len(values) == 0 {
 		return nil
 	}
-	out := slices.Sorted(maps.Keys(values))
-	return slices.DeleteFunc(out, func(key string) bool { return strings.TrimSpace(key) == "" })
+	out := core.SortedStringKeys(values)
+	return lo.Filter(out, func(key string, _ int) bool { return strings.TrimSpace(key) != "" })
 }
 
 func formatGeminiNameList(values []string, max int) string {
@@ -920,12 +918,7 @@ func extractGeminiToolPaths(raw json.RawMessage) []string {
 	}
 	walk(payload, false)
 
-	out := make([]string, 0, len(candidates))
-	for c := range candidates {
-		out = append(out, c)
-	}
-	sort.Strings(out)
-	return out
+	return core.SortedStringKeys(candidates)
 }
 
 func extractGeminiPathTokens(raw string) []string {
@@ -1243,7 +1236,7 @@ func latestSeriesValue(values map[string]float64) (string, float64) {
 	if len(values) == 0 {
 		return "", 0
 	}
-	dates := slices.Sorted(maps.Keys(values))
+	dates := core.SortedStringKeys(values)
 	last := dates[len(dates)-1]
 	return last, values[last]
 }
