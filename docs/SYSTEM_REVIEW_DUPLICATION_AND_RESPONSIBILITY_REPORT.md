@@ -6,7 +6,7 @@ Branch: `feat/dashboard-race-parser-cleanups`
 
 ## Scope
 
-This report reflects the tree after the dashboard timeframe-race fix, parser consolidation work, daemon/read-model cleanup, provider decomposition, TUI decomposition, render-cache follow-through, and the final `A1`/`A2`/`A3`/`A4`/`A12`/`A14`/`A15` cleanup pass.
+This report reflects the tree after the dashboard timeframe-race fix, parser consolidation work, daemon/read-model cleanup, provider decomposition, TUI decomposition, render-cache follow-through, runtime-hint cleanup, large-suite splitting, and the final `A1`/`A2`/`A3`/`A4`/`A12`/`A14`/`A15` cleanup pass.
 
 It replaces the earlier “remaining gaps” snapshot. The goal now is to document the actual post-cleanup state, not to preserve stale open items.
 
@@ -24,7 +24,9 @@ The following earlier review themes are materially closed in this branch:
 - Remaining detail/analytics metric-prefix parsing pockets that were still living in renderer code.
 - Tile/detail/analytics render-path recomputation on every frame.
 - Account-config runtime-path overload in the hot path.
-- Repeated telemetry/config test setup boilerplate in the most actively changed suites.
+- Repeated telemetry/config/provider test setup boilerplate in the most actively changed suites.
+- Remaining runtime-only provider overrides reaching directly into ad hoc `ExtraData` fields.
+- The last oversized high-churn Copilot/OpenRouter test suites.
 
 ## Current Findings
 
@@ -49,15 +51,8 @@ The most change-prone areas are no longer concentrated the way they were at the 
 
 This reduces review blast radius and makes future concurrency/data-flow work easier to reason about.
 
-### 3. Residual items are explicit, low-risk follow-up opportunities
-
-There are still a few non-blocking areas worth keeping in mind:
-
-- `usage_view.go` still owns top-level orchestration, but it is no longer a monolith and does not currently hide a correctness issue.
-- The daemon could be pushed into more formal worker abstractions later, but present lifecycle/context handling is consistent in the active paths.
-- Ambiguous shared-path local account attribution still requires explicit user disambiguation by design; the code now avoids silent guessing.
-
-These are not “unfinished fixes”. They are optional future design work.
+### 3. No active audit-priority items remain
+The earlier follow-up list is now closed for the purposes of this review. What remains in the repo are ordinary future refactor options, not unresolved `P1`/`P2`/`P3` findings from this audit.
 
 ## References
 

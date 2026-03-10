@@ -123,11 +123,9 @@ func cloudEndpointURL(base, path string) string {
 }
 
 func resolveCloudSessionCookie(acct core.AccountConfig) string {
-	if acct.ExtraData != nil {
-		for _, key := range []string{"cloud_session_cookie", "session_cookie", "cookie"} {
-			if v := strings.TrimSpace(acct.ExtraData[key]); v != "" {
-				return v
-			}
+	for _, key := range []string{"cloud_session_cookie", "session_cookie", "cookie"} {
+		if v := strings.TrimSpace(acct.Hint(key, "")); v != "" {
+			return v
 		}
 	}
 	return strings.TrimSpace(os.Getenv("OLLAMA_SESSION_COOKIE"))

@@ -62,11 +62,7 @@ func TestFetch_ReadsLocalData(t *testing.T) {
 	os.WriteFile(filepath.Join(convDir, "session3.pb"), []byte("data"), 0644)
 
 	p := New()
-	acct := core.AccountConfig{
-		ID:        "test-gemini-cli",
-		Provider:  "gemini_cli",
-		ExtraData: map[string]string{"config_dir": tmpDir},
-	}
+	acct := testGeminiCLIAccount("test-gemini-cli", tmpDir)
 
 	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -128,10 +124,7 @@ func TestFetch_ExpiredOAuth(t *testing.T) {
 	writeJSON(t, filepath.Join(tmpDir, "oauth_creds.json"), creds)
 
 	p := New()
-	acct := core.AccountConfig{
-		ID:        "test-expired",
-		ExtraData: map[string]string{"config_dir": tmpDir},
-	}
+	acct := testGeminiCLIAccount("test-expired", tmpDir)
 
 	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -151,10 +144,7 @@ func TestFetch_NoData(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	p := New()
-	acct := core.AccountConfig{
-		ID:        "test-empty",
-		ExtraData: map[string]string{"config_dir": tmpDir},
-	}
+	acct := testGeminiCLIAccount("test-empty", tmpDir)
 
 	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -351,11 +341,7 @@ func TestFetch_SessionUsageBreakdowns(t *testing.T) {
 	writeJSON(t, filepath.Join(chatDir, "session-2026-02-01T10-00-aaaa1111.json"), chat)
 
 	p := New()
-	acct := core.AccountConfig{
-		ID:        "test-gemini-cli",
-		Provider:  "gemini_cli",
-		ExtraData: map[string]string{"config_dir": tmpDir},
-	}
+	acct := testGeminiCLIAccount("test-gemini-cli", tmpDir)
 
 	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -637,11 +623,7 @@ func TestFetch_QuotaLimitMessageFallback(t *testing.T) {
 	})
 
 	p := New()
-	snap, err := p.Fetch(context.Background(), core.AccountConfig{
-		ID:        "test-gemini-cli",
-		Provider:  "gemini_cli",
-		ExtraData: map[string]string{"config_dir": tmpDir},
-	})
+	snap, err := p.Fetch(context.Background(), testGeminiCLIAccount("test-gemini-cli", tmpDir))
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}

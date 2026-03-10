@@ -313,8 +313,8 @@ func resolveChatGPTBaseURL(acct core.AccountConfig, configDir string) string {
 	switch {
 	case strings.TrimSpace(acct.BaseURL) != "":
 		return normalizeChatGPTBaseURL(acct.BaseURL)
-	case acct.ExtraData != nil && strings.TrimSpace(acct.ExtraData["chatgpt_base_url"]) != "":
-		return normalizeChatGPTBaseURL(acct.ExtraData["chatgpt_base_url"])
+	case strings.TrimSpace(acct.Hint("chatgpt_base_url", "")) != "":
+		return normalizeChatGPTBaseURL(acct.Hint("chatgpt_base_url", ""))
 	default:
 		if fromConfig := readChatGPTBaseURLFromConfig(configDir); fromConfig != "" {
 			return normalizeChatGPTBaseURL(fromConfig)

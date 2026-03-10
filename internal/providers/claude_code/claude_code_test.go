@@ -78,11 +78,7 @@ func TestProvider_Fetch_WithStatsFile(t *testing.T) {
 	os.WriteFile(accountPath, []byte(acctData), 0644)
 
 	p := New()
-	snap, err := p.Fetch(context.Background(), core.AccountConfig{
-		ID:      "test-claude",
-		Binary:  statsPath,
-		BaseURL: accountPath,
-	})
+	snap, err := p.Fetch(context.Background(), testClaudeAccount("test-claude", statsPath, accountPath))
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
 	}
@@ -111,14 +107,15 @@ func TestProvider_Fetch_WithStatsFile(t *testing.T) {
 func TestProvider_Fetch_NoData(t *testing.T) {
 	tmpDir := t.TempDir()
 	p := New()
-	snap, err := p.Fetch(context.Background(), core.AccountConfig{
-		ID:      "test-claude",
-		Binary:  filepath.Join(tmpDir, "nonexistent-stats.json"),
-		BaseURL: filepath.Join(tmpDir, "nonexistent-account.json"),
-		ExtraData: map[string]string{
-			"claude_dir": filepath.Join(tmpDir, ".claude"),
-		},
-	})
+	snap, err := p.Fetch(
+		context.Background(),
+		testClaudeAccountWithDir(
+			"test-claude",
+			filepath.Join(tmpDir, "nonexistent-stats.json"),
+			filepath.Join(tmpDir, "nonexistent-account.json"),
+			filepath.Join(tmpDir, ".claude"),
+		),
+	)
 	if err != nil {
 		t.Fatalf("Fetch should not error, got: %v", err)
 	}
@@ -570,12 +567,7 @@ func TestProviderFetch_UsesBackupStatsPath(t *testing.T) {
 	}
 
 	p := New()
-	snap, err := p.Fetch(context.Background(), core.AccountConfig{
-		ID: "claude-backup-path",
-		ExtraData: map[string]string{
-			"claude_dir": claudeDir,
-		},
-	})
+	snap, err := p.Fetch(context.Background(), testClaudeAccountWithDir("claude-backup-path", "", "", claudeDir))
 	if err != nil {
 		t.Fatalf("fetch failed: %v", err)
 	}

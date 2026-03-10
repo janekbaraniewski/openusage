@@ -53,10 +53,12 @@ func detectCursor(result *Result) {
 
 	if hasTracking {
 		acct.SetPath("tracking_db", trackingDB)
+		acct.SetHint("tracking_db", trackingDB)
 		acct.ExtraData["tracking_db"] = trackingDB
 	}
 	if hasState {
 		acct.SetPath("state_db", stateDB)
+		acct.SetHint("state_db", stateDB)
 		acct.ExtraData["state_db"] = stateDB
 	}
 

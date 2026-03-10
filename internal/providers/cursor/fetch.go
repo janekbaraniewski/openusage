@@ -68,9 +68,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	if acct.ExtraData["tracking_db"] == "" && trackingDBPath != "" {
 		acct.ExtraData["tracking_db"] = trackingDBPath
+		acct.SetHint("tracking_db", trackingDBPath)
 	}
 	if acct.ExtraData["state_db"] == "" && stateDBPath != "" {
 		acct.ExtraData["state_db"] = stateDBPath
+		acct.SetHint("state_db", stateDBPath)
 	}
 
 	var hasLocalData bool

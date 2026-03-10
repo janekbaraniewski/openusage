@@ -245,7 +245,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if configuredBinary == "" {
 		configuredBinary = "gh"
 	}
-	ghBinary, copilotBinary := resolveCopilotBinaries(configuredBinary, acct.ExtraData)
+	ghBinary, copilotBinary := resolveCopilotBinaries(configuredBinary, acct)
 	if ghBinary == "" && copilotBinary == "" {
 		return core.UsageSnapshot{
 			ProviderID: p.ID(),
@@ -308,7 +308,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
-func resolveCopilotBinaries(configuredBinary string, extraData map[string]string) (string, string) {
+func resolveCopilotBinaries(configuredBinary string, acct core.AccountConfig) (string, string) {
 	ghBinary := ""
 	copilotBinary := ""
 
@@ -322,8 +322,8 @@ func resolveCopilotBinaries(configuredBinary string, extraData map[string]string
 		ghBinary = resolveBinaryPath("gh")
 	}
 
-	if copilotBinary == "" && extraData != nil {
-		copilotBinary = resolveBinaryPath(extraData["copilot_binary"])
+	if copilotBinary == "" {
+		copilotBinary = resolveBinaryPath(acct.Hint("copilot_binary", ""))
 	}
 	if copilotBinary == "" {
 		copilotBinary = resolveBinaryPath("copilot")
@@ -366,13 +366,11 @@ func detectCopilotVersion(ctx context.Context, ghBinary, copilotBinary string) (
 }
 
 func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.UsageSnapshot) {
-	if acct.ExtraData != nil {
-		if dir := strings.TrimSpace(acct.ExtraData["config_dir"]); dir != "" {
-			p.readConfig(dir, snap)
-			logData := p.readLogs(dir, snap)
-			p.readSessions(dir, snap, logData)
-			return
-		}
+	if dir := strings.TrimSpace(acct.Hint("config_dir", "")); dir != "" {
+		p.readConfig(dir, snap)
+		logData := p.readLogs(dir, snap)
+		p.readSessions(dir, snap, logData)
+		return
 	}
 
 	home, err := os.UserHomeDir()

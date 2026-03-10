@@ -280,7 +280,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	home, _ := os.UserHomeDir()
 	claudeDir := filepath.Join(home, ".claude")
-	if override, ok := acct.ExtraData["claude_dir"]; ok && override != "" {
+	if override := acct.Hint("claude_dir", ""); override != "" {
 		claudeDir = override
 		home = filepath.Dir(claudeDir) // derive "home" from the override
 	}
