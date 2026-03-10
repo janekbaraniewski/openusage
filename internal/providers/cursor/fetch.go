@@ -118,6 +118,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.ensureCreditGauges(acct.ID, &snap)
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
 
 	return snap, nil
 }

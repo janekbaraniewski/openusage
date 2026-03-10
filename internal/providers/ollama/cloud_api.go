@@ -55,6 +55,7 @@ func (p *Provider) fetchCloudAPI(ctx context.Context, acct core.AccountConfig, a
 	switch tagsStatus {
 	case http.StatusOK:
 		setValueMetric(snap, "cloud_catalog_models", float64(len(tags.Models)), "models", "current")
+		snap.SetMetricSource("cloud_catalog_models", core.MetricSourceProviderNative)
 		hasData = true
 	case http.StatusUnauthorized, http.StatusForbidden:
 		authFailed = true
@@ -130,6 +131,7 @@ func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot, 
 		"session_usage", "sessionusage", "usage_5h", "usagefivehour", "five_hour_usage", "fivehourusage",
 	}
 	if metric, resetAt, ok := findUsageWindow(payload, sessionKeys, "5h", now); ok {
+		metric.Source = core.MetricSourceProviderNative
 		snap.Metrics["usage_five_hour"] = metric
 		if !resetAt.IsZero() {
 			snap.Resets["usage_five_hour"] = resetAt
@@ -152,7 +154,9 @@ func extractCloudUsageWindows(payload map[string]any, snap *core.UsageSnapshot, 
 			Used:      metric.Used,
 			Unit:      metric.Unit,
 			Window:    "1w",
+			Source:    core.MetricSourceProviderNative,
 		}
+		metric.Source = core.MetricSourceProviderNative
 		snap.Metrics["usage_one_day"] = metric
 		if !resetAt.IsZero() {
 			snap.Resets["usage_weekly"] = resetAt

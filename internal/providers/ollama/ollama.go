@@ -146,6 +146,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	finalizeUsageWindows(&snap, p.now())
+	annotateOllamaMetricSources(&snap)
 
 	switch {
 	case hasData:
@@ -160,6 +161,23 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	return snap, nil
+}
+
+func annotateOllamaMetricSources(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	for _, key := range []string{
+		"cloud_catalog_models",
+		"usage_five_hour",
+		"usage_weekly",
+		"usage_one_day",
+	} {
+		if metric, ok := snap.Metrics[key]; ok && metric.Source == "" {
+			snap.SetMetricSource(key, core.MetricSourceProviderNative)
+		}
+	}
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
 }
 
 func buildStatusMessage(snap core.UsageSnapshot) string {
