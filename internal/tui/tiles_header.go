@@ -21,16 +21,16 @@ func buildTileHeaderMetaLines(snap core.UsageSnapshot, widget core.DashboardWidg
 
 func buildTileCyclePills(snap core.UsageSnapshot) []string {
 	var pills []string
-	if pill := buildTileCyclePill("Billing", snapshotMeta(snap, "billing_cycle_start"), snapshotMeta(snap, "billing_cycle_end")); pill != "" {
+	if pill := buildTileCyclePill("Billing", snapshotMeta(snap, "billing_cycle_start"), snapshotMeta(snap, "billing_cycle_end"), snap.Timestamp); pill != "" {
 		pills = append(pills, pill)
 	}
-	if pill := buildTileCyclePill("Usage 5h", snapshotMeta(snap, "block_start"), snapshotMeta(snap, "block_end")); pill != "" {
+	if pill := buildTileCyclePill("Usage 5h", snapshotMeta(snap, "block_start"), snapshotMeta(snap, "block_end"), snap.Timestamp); pill != "" {
 		pills = append(pills, pill)
 	}
 	return pills
 }
 
-func buildTileCyclePill(label, startRaw, endRaw string) string {
+func buildTileCyclePill(label, startRaw, endRaw string, referenceTime time.Time) string {
 	start, hasStart := parseTileTimestamp(startRaw)
 	end, hasEnd := parseTileTimestamp(endRaw)
 	if !hasStart && !hasEnd {
@@ -40,11 +40,11 @@ func buildTileCyclePill(label, startRaw, endRaw string) string {
 	var span string
 	switch {
 	case hasStart && hasEnd:
-		span = fmt.Sprintf("%s→%s", formatTileTimestamp(start), formatTileTimestamp(end))
+		span = fmt.Sprintf("%s→%s", formatTileTimestamp(start, referenceTime), formatTileTimestamp(end, referenceTime))
 	case hasEnd:
-		span = "ends " + formatTileTimestamp(end)
+		span = "ends " + formatTileTimestamp(end, referenceTime)
 	default:
-		span = "since " + formatTileTimestamp(start)
+		span = "since " + formatTileTimestamp(start, referenceTime)
 	}
 
 	return lipgloss.NewStyle().Foreground(colorLavender).Bold(true).Render("◷ "+label) +
@@ -81,8 +81,11 @@ func parseTileTimestamp(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func formatTileTimestamp(t time.Time) string {
-	now := time.Now()
+func formatTileTimestamp(t, referenceTime time.Time) string {
+	now := referenceTime
+	if now.IsZero() {
+		now = time.Now()
+	}
 	isDateOnly := t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
 	if isDateOnly {
 		if t.Year() == now.Year() {

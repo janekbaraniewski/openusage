@@ -515,7 +515,7 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 		if gg, ok := groupByProvider[p.name]; ok {
 			g = &gg
 		}
-		pts, observed, estimated := deriveProviderDailyCostPoints(p, g)
+		pts, observed, estimated := deriveProviderDailyCostPoints(p, g, data.referenceTime)
 		if !hasNonZeroData(pts) {
 			continue
 		}
@@ -556,7 +556,7 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 	return out, observedCount, estimatedCount
 }
 
-func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup) ([]core.TimePoint, bool, bool) {
+func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup, referenceTime time.Time) ([]core.TimePoint, bool, bool) {
 	if group != nil {
 		for _, key := range []string{"cost", "analytics_cost", "daily_cost"} {
 			if pts, ok := group.series[key]; ok && hasNonZeroData(pts) {
@@ -564,8 +564,10 @@ func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup) 
 			}
 		}
 	}
-	now := time.Now()
-	nowDate := now.Format("2006-01-02")
+	if referenceTime.IsZero() {
+		referenceTime = time.Now()
+	}
+	nowDate := referenceTime.Format("2006-01-02")
 
 	if p.todayCost > 0 {
 		return []core.TimePoint{{Date: nowDate, Value: p.todayCost}}, true, false

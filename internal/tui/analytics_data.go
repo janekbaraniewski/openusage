@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -25,6 +26,7 @@ type costData struct {
 	totalOutput   float64
 	providerCount int
 	activeCount   int
+	referenceTime time.Time
 	providers     []providerCostEntry
 	models        []modelCostEntry
 	budgets       []budgetEntry
@@ -160,6 +162,9 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 		if snap.Status == core.StatusOK || snap.Status == core.StatusNearLimit {
 			data.activeCount++
 		}
+		if snap.Timestamp.After(data.referenceTime) {
+			data.referenceTime = snap.Timestamp
+		}
 
 		provColor := ProviderColor(snap.ProviderID)
 		cost := extractProviderCost(snap)
@@ -197,6 +202,9 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 	}
 
 	data.models = aggregateCanonicalModels(data.providers)
+	if data.referenceTime.IsZero() {
+		data.referenceTime = time.Now()
+	}
 
 	return data
 }
