@@ -12,6 +12,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -170,12 +171,10 @@ type commandArgs struct {
 }
 
 type patchStats struct {
-	Added      int
-	Removed    int
-	Files      map[string]struct{}
-	Deleted    map[string]struct{}
-	PatchCalls int
+	shared.PatchStats
 }
+
+type lineDelta = shared.FileLineDelta
 
 type countEntry struct {
 	name  string
@@ -226,7 +225,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.readDailySessionCounts(sessionsDir, &snap)
-	if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
+	if err := p.readSessionUsageBreakdowns(ctx, sessionsDir, &snap); err != nil {
 		snap.Raw["split_error"] = err.Error()
 	}
 

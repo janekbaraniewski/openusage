@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -106,7 +107,7 @@ func TestReadSessions_AccumulatesShutdownEvents(t *testing.T) {
 	}
 
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	// Verify that the session data is still correctly parsed (existing behavior).
 	if m := snap.Metrics["cli_messages"]; m.Used == nil || *m.Used != 2 {
@@ -314,7 +315,7 @@ func TestReadSessions_AccumulatesUsageEvents(t *testing.T) {
 	}
 
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	// Verify that existing session behavior still works.
 	if m := snap.Metrics["cli_messages"]; m.Used == nil || *m.Used != 1 {
@@ -404,7 +405,7 @@ func TestReadSessions_UsageEventsMultipleSessions(t *testing.T) {
 	}
 
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	// Verify existing behavior is preserved.
 	if m := snap.Metrics["cli_messages"]; m.Used == nil || *m.Used != 2 {
@@ -485,7 +486,7 @@ func TestReadSessions_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
 	}
 
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	if m := snap.Metrics["lang_go"]; m.Used == nil || *m.Used <= 0 {
 		t.Fatalf("lang_go missing/zero: %+v", m)
@@ -507,6 +508,108 @@ func TestReadSessions_ExtractsLanguageAndCodeStatsMetrics(t *testing.T) {
 	}
 	if m := snap.Metrics["tool_calls_total"]; m.Used == nil || *m.Used != 3 {
 		t.Fatalf("tool_calls_total = %+v, want 3", m)
+	}
+	if _, ok := snap.Metrics["ai_code_percentage"]; ok {
+		t.Fatal("ai_code_percentage should be absent for heuristic-only Copilot stats")
+	}
+	if snap.Raw["code_stats_source"] != "tracked_edits" {
+		t.Fatalf("code_stats_source = %q, want tracked_edits", snap.Raw["code_stats_source"])
+	}
+}
+
+func TestReadSessions_UsesGitCommitDiffsForCodeStats(t *testing.T) {
+	p := New()
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitCopilotTest(t, repoDir, nil, "init")
+	runGitCopilotTest(t, repoDir, nil, "config", "user.email", "copilot@example.com")
+	runGitCopilotTest(t, repoDir, nil, "config", "user.name", "Copilot Test")
+
+	filePath := filepath.Join(repoDir, "main.go")
+	if err := os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCopilotTest(t, repoDir, nil, "add", "main.go")
+	runGitCopilotTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=2026-02-25T13:55:00Z",
+		"GIT_COMMITTER_DATE=2026-02-25T13:55:00Z",
+	}, "commit", "-m", "seed")
+
+	if err := os.WriteFile(filePath, []byte("one\nthree\nalpha\nbeta\ngamma\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCopilotTest(t, repoDir, nil, "add", "main.go")
+	commitTime := time.Date(2026, 2, 25, 14, 0, 5, 0, time.UTC)
+	runGitCopilotTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
+	}, "commit", "-m", "copilot metrics")
+
+	copilotDir := filepath.Join(tmp, ".copilot")
+	logDir := filepath.Join(copilotDir, "logs")
+	sessionDir := filepath.Join(copilotDir, "session-state")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	s1Dir := filepath.Join(sessionDir, "s1")
+	if err := os.MkdirAll(s1Dir, 0o755); err != nil {
+		t.Fatalf("mkdir s1: %v", err)
+	}
+	ws := strings.Join([]string{
+		"id: s1",
+		"cwd: " + repoDir,
+		"git_root: " + repoDir,
+		"repository: owner/repo",
+		"branch: main",
+		"created_at: 2026-02-25T14:00:00Z",
+		"updated_at: 2026-02-25T14:10:00Z",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(s1Dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+		t.Fatalf("write workspace: %v", err)
+	}
+	events := strings.Join([]string{
+		`{"type":"session.model_change","timestamp":"2026-02-25T14:00:00Z","data":{"newModel":"claude-sonnet-4.6"}}`,
+		`{"type":"user.message","timestamp":"2026-02-25T14:00:01Z","data":{"content":"patch code"}}`,
+		`{"type":"assistant.turn_start","timestamp":"2026-02-25T14:00:02Z","data":{"turnId":"0"}}`,
+		`{"type":"assistant.message","timestamp":"2026-02-25T14:00:03Z","data":{"content":"done","reasoningText":"","toolRequests":[{"name":"edit_file","args":{"filePath":"main.go","old_string":"two","new_string":"alpha\nbeta"}},{"name":"run_terminal","args":{"command":"git commit -m \"copilot metrics\""}}]}}`,
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(s1Dir, "events.jsonl"), []byte(events), 0o644); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+
+	snap := &core.UsageSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Resets:      make(map[string]time.Time),
+		Raw:         make(map[string]string),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	logs := p.readLogs(copilotDir, snap)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
+
+	if m := snap.Metrics["composer_lines_added"]; m.Used == nil || *m.Used != 4 {
+		t.Fatalf("composer_lines_added = %+v, want 4", m)
+	}
+	if m := snap.Metrics["composer_lines_removed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_lines_removed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["composer_files_changed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_files_changed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["scored_commits"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("scored_commits = %+v, want 1", m)
+	}
+	if m := snap.Metrics["ai_code_percentage"]; m.Used == nil || *m.Used != 60 {
+		t.Fatalf("ai_code_percentage = %+v, want 60", m)
+	}
+	if snap.Raw["code_stats_source"] != "git_commits" {
+		t.Fatalf("code_stats_source = %q, want git_commits", snap.Raw["code_stats_source"])
 	}
 }
 
@@ -662,6 +765,17 @@ func writeTestExe(t *testing.T, dir, name, body string) string {
 		t.Fatalf("write executable %s: %v", name, err)
 	}
 	return path
+}
+
+func runGitCopilotTest(t *testing.T, repoDir string, env []string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func unmarshalJSON(s string, v interface{}) error {

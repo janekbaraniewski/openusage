@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func TestReadSessions_EmitsModelTokenMetrics(t *testing.T) {
 	}
 
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	if m := snap.Metrics["model_gpt_5_mini_input_tokens"]; m.Used == nil || *m.Used <= 0 {
 		t.Fatalf("model_gpt_5_mini_input_tokens missing/zero: %+v", m)
@@ -207,7 +208,7 @@ func TestReadSessions_UsesLatestEventTimestampForRecency(t *testing.T) {
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 	logs := p.readLogs(copilotDir, snap)
-	p.readSessions(copilotDir, snap, logs)
+	p.readSessions(context.Background(), copilotDir, snap, logs)
 
 	if got := snap.Raw["last_session_model"]; got != "model-s2" {
 		t.Fatalf("last_session_model = %q, want model-s2", got)

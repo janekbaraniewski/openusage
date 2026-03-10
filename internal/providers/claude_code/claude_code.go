@@ -326,7 +326,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	projectsDir := filepath.Join(claudeDir, "projects")
 	newProjectsDir := filepath.Join(home, ".config", "claude", "projects")
 
-	if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {
+	if err := p.readConversationJSONL(ctx, projectsDir, newProjectsDir, &snap); err != nil {
 		snap.Raw["jsonl_error"] = err.Error()
 	} else {
 		hasData = true

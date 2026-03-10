@@ -88,6 +88,47 @@ func extractGeminiToolCommand(raw json.RawMessage) string {
 	return command
 }
 
+func extractGeminiToolWorkingDir(raw json.RawMessage) string {
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	var workingDir string
+	var walk func(v any)
+	walk = func(v any) {
+		if workingDir != "" || v == nil {
+			return
+		}
+		switch value := v.(type) {
+		case map[string]any:
+			for key, child := range value {
+				k := strings.ToLower(strings.TrimSpace(key))
+				if k == "cwd" || k == "dir" || k == "directory" || k == "workdir" || k == "workspace" || k == "root" {
+					if s, ok := child.(string); ok {
+						workingDir = strings.TrimSpace(s)
+						return
+					}
+				}
+			}
+			for _, child := range value {
+				walk(child)
+				if workingDir != "" {
+					return
+				}
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+				if workingDir != "" {
+					return
+				}
+			}
+		}
+	}
+	walk(payload)
+	return workingDir
+}
+
 func extractGeminiToolPaths(raw json.RawMessage) []string {
 	var payload any
 	if json.Unmarshal(raw, &payload) != nil {

@@ -1,11 +1,13 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,7 +114,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 	return nil
 }
 
-func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.UsageSnapshot) error {
+func (p *Provider) readSessionUsageBreakdowns(ctx context.Context, sessionsDir string, snap *core.UsageSnapshot) error {
 	modelTotals := make(map[string]tokenUsage)
 	clientTotals := make(map[string]tokenUsage)
 	modelDaily := make(map[string]map[string]float64)
@@ -126,10 +128,8 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	langRequests := make(map[string]int)
 	callTool := make(map[string]string)
 	callOutcome := make(map[string]int)
-	stats := patchStats{
-		Files:   make(map[string]struct{}),
-		Deleted: make(map[string]struct{}),
-	}
+	stats := patchStats{PatchStats: shared.NewPatchStats()}
+	var commitCandidates []shared.GitCommitCandidate
 	today := time.Now().UTC().Format("2006-01-02")
 	totalRequests := 0
 	requestsToday := 0
@@ -145,6 +145,8 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 		defaultDay := dayFromSessionPath(path, sessionsDir)
 		sessionClient := "Other"
 		currentModel := "unknown"
+		sessionCWD := ""
+		pendingCommitStats := patchStats{PatchStats: shared.NewPatchStats()}
 		var previous tokenUsage
 		var hasPrevious bool
 		var countedSession bool
@@ -154,6 +156,9 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 				sessionClient = classifyClient(record.SessionMeta.Source, record.SessionMeta.Originator)
 				if record.SessionMeta.Model != "" {
 					currentModel = record.SessionMeta.Model
+				}
+				if cwd := strings.TrimSpace(record.SessionMeta.CWD); cwd != "" {
+					sessionCWD = cwd
 				}
 			case record.TurnContext != nil:
 				if strings.TrimSpace(record.TurnContext.Model) != "" {
@@ -220,6 +225,15 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 							recordCommandLanguage(args.Cmd, langRequests)
 							if commandContainsGitCommit(args.Cmd) {
 								commits++
+								if ts, err := shared.ParseTimestampString(record.Timestamp); err == nil && sessionCWD != "" {
+									commitCandidates = append(commitCandidates, shared.GitCommitCandidate{
+										CWD:        sessionCWD,
+										OccurredAt: ts.UTC(),
+										Message:    shared.ExtractGitCommitMessage(args.Cmd),
+										Patch:      shared.ClonePatchStats(pendingCommitStats.PatchStats),
+									})
+								}
+								pendingCommitStats = patchStats{PatchStats: shared.NewPatchStats()}
 							}
 						}
 					}
@@ -229,6 +243,8 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 					if strings.EqualFold(tool, "apply_patch") {
 						stats.PatchCalls++
 						accumulatePatchStats(item.Input, &stats, langRequests)
+						pendingCommitStats.PatchCalls++
+						accumulatePatchStats(item.Input, &pendingCommitStats, nil)
 					}
 				case "web_search_call":
 					recordToolCall(toolCalls, callTool, "", "web_search")
@@ -251,7 +267,7 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	emitClientRequestMetrics(clientRequests, snap)
 	emitToolMetrics(toolCalls, callTool, callOutcome, completedWithoutCallID, snap)
 	emitLanguageMetrics(langRequests, snap)
-	emitProductivityMetrics(stats, promptCount, commits, totalRequests, requestsToday, clientSessions, snap)
+	emitProductivityMetrics(stats, shared.CollectGitCommitAttribution(ctx, commitCandidates), promptCount, commits, totalRequests, requestsToday, clientSessions, snap)
 	emitDailyUsageSeries(dailyTokenTotals, dailyRequestTotals, interfaceDaily, snap)
 
 	return nil
@@ -376,48 +392,88 @@ func accumulatePatchStats(input string, stats *patchStats, langs map[string]int)
 	if stats == nil {
 		return
 	}
+	if stats.Files == nil {
+		stats.Files = make(map[string]struct{})
+	}
+	if stats.Deleted == nil {
+		stats.Deleted = make(map[string]struct{})
+	}
+	if stats.FileDelta == nil {
+		stats.FileDelta = make(map[string]lineDelta)
+	}
 	lines := strings.Split(input, "\n")
+	currentFile := ""
 	for _, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "*** Update File: "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
 			if path != "" {
+				currentFile = shared.NormalizeRepoRelativePath(path)
 				stats.Files[path] = struct{}{}
-				if language := languageFromPath(path); language != "" {
-					langs[language]++
+				if langs != nil {
+					if language := languageFromPath(path); language != "" {
+						langs[language]++
+					}
 				}
+			} else {
+				currentFile = ""
 			}
 		case strings.HasPrefix(line, "*** Add File: "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
 			if path != "" {
+				currentFile = shared.NormalizeRepoRelativePath(path)
 				stats.Files[path] = struct{}{}
-				if language := languageFromPath(path); language != "" {
-					langs[language]++
+				if langs != nil {
+					if language := languageFromPath(path); language != "" {
+						langs[language]++
+					}
 				}
+			} else {
+				currentFile = ""
 			}
 		case strings.HasPrefix(line, "*** Delete File: "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
 			if path != "" {
+				currentFile = shared.NormalizeRepoRelativePath(path)
 				stats.Files[path] = struct{}{}
 				stats.Deleted[path] = struct{}{}
-				if language := languageFromPath(path); language != "" {
-					langs[language]++
+				if langs != nil {
+					if language := languageFromPath(path); language != "" {
+						langs[language]++
+					}
 				}
+			} else {
+				currentFile = ""
 			}
 		case strings.HasPrefix(line, "*** Move to: "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "*** Move to: "))
 			if path != "" {
+				currentFile = shared.NormalizeRepoRelativePath(path)
 				stats.Files[path] = struct{}{}
-				if language := languageFromPath(path); language != "" {
-					langs[language]++
+				if langs != nil {
+					if language := languageFromPath(path); language != "" {
+						langs[language]++
+					}
 				}
+			} else {
+				currentFile = ""
 			}
 		case strings.HasPrefix(line, "+++ "), strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "***"):
 			continue
 		case strings.HasPrefix(line, "+"):
 			stats.Added++
+			if currentFile != "" {
+				delta := stats.FileDelta[currentFile]
+				delta.Added++
+				stats.FileDelta[currentFile] = delta
+			}
 		case strings.HasPrefix(line, "-"):
 			stats.Removed++
+			if currentFile != "" {
+				delta := stats.FileDelta[currentFile]
+				delta.Removed++
+				stats.FileDelta[currentFile] = delta
+			}
 		}
 	}
 }
@@ -589,7 +645,7 @@ func emitLanguageMetrics(langRequests map[string]int, snap *core.UsageSnapshot) 
 	snap.Raw["language_usage"] = formatCountSummary(all, maxBreakdownRaw)
 }
 
-func emitProductivityMetrics(stats patchStats, promptCount, commits, totalRequests, requestsToday int, clientSessions map[string]int, snap *core.UsageSnapshot) {
+func emitProductivityMetrics(stats patchStats, commitStats shared.GitCommitAttribution, promptCount, commits, totalRequests, requestsToday int, clientSessions map[string]int, snap *core.UsageSnapshot) {
 	if totalRequests > 0 {
 		v := float64(totalRequests)
 		snap.Metrics["total_ai_requests"] = core.Metric{Used: &v, Unit: "requests", Window: defaultUsageWindowLabel}
@@ -621,40 +677,70 @@ func emitProductivityMetrics(stats patchStats, promptCount, commits, totalReques
 		snap.Metrics["composer_context_pct"] = core.Metric{Used: &pct, Unit: "%", Window: metric.Window}
 	}
 
-	if stats.Added > 0 {
-		v := float64(stats.Added)
+	linesAdded := stats.Added
+	linesRemoved := stats.Removed
+	filesChanged := len(stats.Files)
+	deletedFiles := len(stats.Deleted)
+	commitCount := commits
+	var aiPct *float64
+	codeStatsSource := "tracked_edits"
+
+	if commitStats.MatchedCommits > 0 {
+		linesAdded = commitStats.LinesAdded
+		linesRemoved = commitStats.LinesRemoved
+		filesChanged = len(commitStats.Files)
+		commitCount = commitStats.MatchedCommits
+		codeStatsSource = "git_commits"
+		totalCommitLines := commitStats.LinesAdded + commitStats.LinesRemoved
+		if totalCommitLines > 0 {
+			value := float64(commitStats.AIAdded+commitStats.AIRemoved) / float64(totalCommitLines) * 100
+			aiPct = &value
+		} else {
+			value := 0.0
+			aiPct = &value
+		}
+		snap.Raw["git_scored_commits_matched"] = strconv.Itoa(commitStats.MatchedCommits)
+		if commitStats.UnmatchedCommits > 0 {
+			snap.Raw["git_scored_commits_unmatched"] = strconv.Itoa(commitStats.UnmatchedCommits)
+		}
+		snap.Raw["git_commit_ai_lines_added"] = strconv.Itoa(commitStats.AIAdded)
+		snap.Raw["git_commit_ai_lines_removed"] = strconv.Itoa(commitStats.AIRemoved)
+	}
+
+	snap.Raw["code_stats_source"] = codeStatsSource
+
+	if linesAdded > 0 {
+		v := float64(linesAdded)
 		snap.Metrics["composer_lines_added"] = core.Metric{Used: &v, Unit: "lines", Window: defaultUsageWindowLabel}
 	}
-	if stats.Removed > 0 {
-		v := float64(stats.Removed)
+	if linesRemoved > 0 {
+		v := float64(linesRemoved)
 		snap.Metrics["composer_lines_removed"] = core.Metric{Used: &v, Unit: "lines", Window: defaultUsageWindowLabel}
 	}
-	if filesChanged := len(stats.Files); filesChanged > 0 {
+	if filesChanged > 0 {
 		v := float64(filesChanged)
 		snap.Metrics["composer_files_changed"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
 		snap.Metrics["ai_tracked_files"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
 	}
-	if deleted := len(stats.Deleted); deleted > 0 {
-		v := float64(deleted)
+	if deletedFiles > 0 {
+		v := float64(deletedFiles)
 		snap.Metrics["ai_deleted_files"] = core.Metric{Used: &v, Unit: "files", Window: defaultUsageWindowLabel}
 	}
-	if commits > 0 {
-		v := float64(commits)
+	if commitCount > 0 {
+		v := float64(commitCount)
 		snap.Metrics["scored_commits"] = core.Metric{Used: &v, Unit: "commits", Window: defaultUsageWindowLabel}
 	}
 	if promptCount > 0 {
 		v := float64(promptCount)
 		snap.Metrics["total_prompts"] = core.Metric{Used: &v, Unit: "prompts", Window: defaultUsageWindowLabel}
 	}
-	if stats.PatchCalls > 0 {
-		base := totalRequests
-		if base < stats.PatchCalls {
-			base = stats.PatchCalls
+	if aiPct != nil {
+		remaining := 100 - *aiPct
+		if remaining < 0 {
+			remaining = 0
 		}
-		if base > 0 {
-			pct := float64(stats.PatchCalls) / float64(base) * 100
-			snap.Metrics["ai_code_percentage"] = core.Metric{Used: &pct, Unit: "%", Window: defaultUsageWindowLabel}
-		}
+		limit := 100.0
+		snap.Metrics["ai_code_percentage"] = core.Metric{Used: aiPct, Remaining: &remaining, Limit: &limit, Unit: "%", Window: defaultUsageWindowLabel}
 	}
 }
 

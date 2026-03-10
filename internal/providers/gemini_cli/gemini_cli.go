@@ -340,7 +340,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	sessionCount, err := p.readSessionUsageBreakdowns(filepath.Join(configDir, "tmp"), &snap)
+	sessionCount, err := p.readSessionUsageBreakdowns(ctx, filepath.Join(configDir, "tmp"), &snap)
 	if err != nil {
 		snap.Raw["session_usage_error"] = err.Error()
 	}

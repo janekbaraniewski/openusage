@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -278,7 +279,7 @@ func TestProvider_Fetch_WithJSONL(t *testing.T) {
 		Resets:     make(map[string]time.Time),
 	}
 
-	err := p.readConversationJSONL(filepath.Join(tmpDir, "projects"), "/nonexistent", &snap)
+	err := p.readConversationJSONL(context.Background(), filepath.Join(tmpDir, "projects"), "/nonexistent", &snap)
 	if err != nil {
 		t.Fatalf("readConversationJSONL failed: %v", err)
 	}
@@ -622,7 +623,7 @@ func TestReadConversationJSONL_DedupesRequestUsageAndToolCalls(t *testing.T) {
 		Resets:      make(map[string]time.Time),
 		DailySeries: make(map[string][]core.TimePoint),
 	}
-	if err := p.readConversationJSONL(filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
+	if err := p.readConversationJSONL(context.Background(), filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
 		t.Fatalf("readConversationJSONL failed: %v", err)
 	}
 
@@ -687,7 +688,7 @@ func TestReadConversationJSONL_ExtractsLanguageAndCodeStatsMetrics(t *testing.T)
 		Resets:      make(map[string]time.Time),
 		DailySeries: make(map[string][]core.TimePoint),
 	}
-	if err := p.readConversationJSONL(filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
+	if err := p.readConversationJSONL(context.Background(), filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
 		t.Fatalf("readConversationJSONL failed: %v", err)
 	}
 
@@ -715,4 +716,98 @@ func TestReadConversationJSONL_ExtractsLanguageAndCodeStatsMetrics(t *testing.T)
 	if m := snap.Metrics["tool_calls_total"]; m.Used == nil || *m.Used != 3 {
 		t.Fatalf("expected tool_calls_total=3, got %+v", m)
 	}
+	if _, ok := snap.Metrics["ai_code_percentage"]; ok {
+		t.Fatal("ai_code_percentage should be absent for heuristic-only Claude Code stats")
+	}
+	if snap.Raw["code_stats_source"] != "tracked_edits" {
+		t.Fatalf("code_stats_source = %q, want tracked_edits", snap.Raw["code_stats_source"])
+	}
+}
+
+func TestReadConversationJSONL_UsesGitCommitDiffsForCodeStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo dir: %v", err)
+	}
+	runGitClaudeTest(t, repoDir, nil, "init")
+	runGitClaudeTest(t, repoDir, nil, "config", "user.email", "claude@example.com")
+	runGitClaudeTest(t, repoDir, nil, "config", "user.name", "Claude Test")
+
+	filePath := filepath.Join(repoDir, "main.go")
+	if err := os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitClaudeTest(t, repoDir, nil, "add", "main.go")
+	runGitClaudeTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=2026-02-21T13:55:00Z",
+		"GIT_COMMITTER_DATE=2026-02-21T13:55:00Z",
+	}, "commit", "-m", "seed")
+
+	if err := os.WriteFile(filePath, []byte("one\nthree\nalpha\nbeta\ngamma\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitClaudeTest(t, repoDir, nil, "add", "main.go")
+	commitTime := time.Date(2026, 2, 21, 14, 0, 5, 0, time.UTC)
+	runGitClaudeTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
+	}, "commit", "-m", "track metrics")
+
+	projectDir := filepath.Join(tmpDir, "projects", "repo-a")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	line := fmt.Sprintf(`{"type":"assistant","sessionId":"sess-git","requestId":"req-git-1","timestamp":"%s","cwd":"%s","message":{"id":"msg-git-1","model":"claude-sonnet-4-5","role":"assistant","content":[{"type":"tool_use","id":"tool-edit","name":"Edit","input":{"file_path":"main.go","old_string":"two","new_string":"alpha\nbeta"}},{"type":"tool_use","id":"tool-bash","name":"Bash","input":{"command":"git commit -m \"track metrics\""}}],"usage":{"input_tokens":200,"output_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+		commitTime.Add(-5*time.Second).Format(time.RFC3339),
+		repoDir,
+	)
+	if err := os.WriteFile(filepath.Join(projectDir, "session.jsonl"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	p := New()
+	snap := core.UsageSnapshot{
+		ProviderID:  p.ID(),
+		AccountID:   "claude-git-stats-test",
+		Timestamp:   time.Now(),
+		Status:      core.StatusOK,
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	if err := p.readConversationJSONL(context.Background(), filepath.Join(tmpDir, "projects"), "", &snap); err != nil {
+		t.Fatalf("readConversationJSONL failed: %v", err)
+	}
+
+	if m := snap.Metrics["composer_lines_added"]; m.Used == nil || *m.Used != 4 {
+		t.Fatalf("composer_lines_added = %+v, want 4", m)
+	}
+	if m := snap.Metrics["composer_lines_removed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_lines_removed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["composer_files_changed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_files_changed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["scored_commits"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("scored_commits = %+v, want 1", m)
+	}
+	if m := snap.Metrics["ai_code_percentage"]; m.Used == nil || *m.Used != 60 {
+		t.Fatalf("ai_code_percentage = %+v, want 60", m)
+	}
+	if snap.Raw["code_stats_source"] != "git_commits" {
+		t.Fatalf("code_stats_source = %q, want git_commits", snap.Raw["code_stats_source"])
+	}
+}
+
+func runGitClaudeTest(t *testing.T, repoDir string, env []string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out))
 }

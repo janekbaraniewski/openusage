@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -541,7 +542,7 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 		Resets:      make(map[string]time.Time),
 		DailySeries: make(map[string][]core.TimePoint),
 	}
-	count, err := p.readSessionUsageBreakdowns(tmpDir, &snap)
+	count, err := p.readSessionUsageBreakdowns(context.Background(), tmpDir, &snap)
 	if err != nil {
 		t.Fatalf("readSessionUsageBreakdowns() error: %v", err)
 	}
@@ -591,8 +592,11 @@ func TestReadSessionUsageBreakdowns_ExtractsLanguageAndCodeStatsMetrics(t *testi
 	if m, ok := snap.Metrics["total_prompts"]; !ok || m.Used == nil || *m.Used != 1 {
 		t.Fatalf("total_prompts = %v, want 1", m.Used)
 	}
-	if m, ok := snap.Metrics["ai_code_percentage"]; !ok || m.Used == nil || *m.Used < 86 || *m.Used > 87 {
-		t.Fatalf("ai_code_percentage = %v, want ~86.96", m.Used)
+	if _, ok := snap.Metrics["ai_code_percentage"]; ok {
+		t.Fatal("ai_code_percentage should be absent for heuristic-only Gemini stats")
+	}
+	if snap.Raw["code_stats_source"] != "tracked_edits" {
+		t.Fatalf("code_stats_source = %q, want tracked_edits", snap.Raw["code_stats_source"])
 	}
 	if !strings.Contains(snap.Raw["language_usage"], "go: 3 req") {
 		t.Fatalf("language_usage = %q, want go usage summary", snap.Raw["language_usage"])
@@ -675,6 +679,108 @@ func TestApplyQuotaBuckets(t *testing.T) {
 	}
 }
 
+func TestReadSessionUsageBreakdowns_UsesGitCommitDiffsForCodeStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo dir: %v", err)
+	}
+	runGitGeminiTest(t, repoDir, nil, "init")
+	runGitGeminiTest(t, repoDir, nil, "config", "user.email", "gemini@example.com")
+	runGitGeminiTest(t, repoDir, nil, "config", "user.name", "Gemini Test")
+
+	filePath := filepath.Join(repoDir, "main.go")
+	if err := os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitGeminiTest(t, repoDir, nil, "add", "main.go")
+	runGitGeminiTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=2026-02-24T09:55:00Z",
+		"GIT_COMMITTER_DATE=2026-02-24T09:55:00Z",
+	}, "commit", "-m", "seed")
+
+	if err := os.WriteFile(filePath, []byte("one\nthree\nalpha\nbeta\ngamma\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitGeminiTest(t, repoDir, nil, "add", "main.go")
+	commitTime := time.Date(2026, 2, 24, 10, 0, 5, 0, time.UTC)
+	runGitGeminiTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
+	}, "commit", "-m", "ship")
+
+	chatDir := filepath.Join(tmpDir, "tmp", "proj-hash", "chats")
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+	chat := map[string]any{
+		"sessionId":   "session-git",
+		"startTime":   commitTime.Add(-30 * time.Second).Format(time.RFC3339),
+		"lastUpdated": commitTime.Format(time.RFC3339),
+		"projectHash": "proj-hash",
+		"messages": []map[string]any{
+			{
+				"type":      "user",
+				"timestamp": commitTime.Add(-10 * time.Second).Format(time.RFC3339),
+				"toolCalls": []map[string]any{
+					{
+						"name":   "replace",
+						"status": "success",
+						"args": map[string]any{
+							"file_path":  filepath.Join(repoDir, "main.go"),
+							"old_string": "two",
+							"new_string": "alpha\nbeta",
+						},
+					},
+					{
+						"name":      "run_shell_command",
+						"status":    "success",
+						"timestamp": commitTime.Add(-5 * time.Second).Format(time.RFC3339),
+						"args": map[string]any{
+							"command": "git commit -m \"ship\"",
+							"cwd":     repoDir,
+						},
+					},
+				},
+			},
+		},
+	}
+	writeJSON(t, filepath.Join(chatDir, "session-2026-02-24T10-00-git.json"), chat)
+
+	p := New()
+	snap := core.UsageSnapshot{
+		Metrics:     make(map[string]core.Metric),
+		Raw:         make(map[string]string),
+		Resets:      make(map[string]time.Time),
+		DailySeries: make(map[string][]core.TimePoint),
+	}
+	count, err := p.readSessionUsageBreakdowns(context.Background(), tmpDir, &snap)
+	if err != nil {
+		t.Fatalf("readSessionUsageBreakdowns() error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("session count = %d, want 1", count)
+	}
+	if m := snap.Metrics["composer_lines_added"]; m.Used == nil || *m.Used != 4 {
+		t.Fatalf("composer_lines_added = %+v, want 4", m)
+	}
+	if m := snap.Metrics["composer_lines_removed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_lines_removed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["composer_files_changed"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("composer_files_changed = %+v, want 1", m)
+	}
+	if m := snap.Metrics["scored_commits"]; m.Used == nil || *m.Used != 1 {
+		t.Fatalf("scored_commits = %+v, want 1", m)
+	}
+	if m := snap.Metrics["ai_code_percentage"]; m.Used == nil || *m.Used != 60 {
+		t.Fatalf("ai_code_percentage = %+v, want 60", m)
+	}
+	if snap.Raw["code_stats_source"] != "git_commits" {
+		t.Fatalf("code_stats_source = %q, want git_commits", snap.Raw["code_stats_source"])
+	}
+}
+
 func TestFormatWindow(t *testing.T) {
 	tests := []struct {
 		name string
@@ -711,6 +817,17 @@ func writeJSON(t *testing.T, path string, v interface{}) {
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func runGitGeminiTest(t *testing.T, repoDir string, env []string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func float64Ptr(v float64) *float64 {

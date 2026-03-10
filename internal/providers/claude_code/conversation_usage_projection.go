@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 type conversationUsageProjection struct {
@@ -68,6 +69,7 @@ type conversationUsageProjection struct {
 	allTimeLinesAdded    int
 	allTimeLinesRemoved  int
 	allTimeCommitCount   int
+	commitAttribution    shared.GitCommitAttribution
 
 	modelTotals        map[string]*modelUsageTotals
 	clientTotals       map[string]*modelUsageTotals
@@ -353,22 +355,42 @@ func applyConversationUsageProjection(snap *core.UsageSnapshot, p conversationUs
 	if len(p.seenUsageKeys) > 0 {
 		setMetricMax(snap, "total_prompts", float64(len(p.seenUsageKeys)), "prompts", "all-time estimate")
 	}
-	if len(p.changedFiles) > 0 {
-		setMetricMax(snap, "composer_files_changed", float64(len(p.changedFiles)), "files", "all-time estimate")
+	linesAdded := p.allTimeLinesAdded
+	linesRemoved := p.allTimeLinesRemoved
+	filesChanged := len(p.changedFiles)
+	commitCount := p.allTimeCommitCount
+	snap.Raw["code_stats_source"] = "tracked_edits"
+	if p.commitAttribution.MatchedCommits > 0 {
+		linesAdded = p.commitAttribution.LinesAdded
+		linesRemoved = p.commitAttribution.LinesRemoved
+		filesChanged = len(p.commitAttribution.Files)
+		commitCount = p.commitAttribution.MatchedCommits
+		snap.Raw["code_stats_source"] = "git_commits"
+		snap.Raw["git_scored_commits_matched"] = fmt.Sprintf("%d", p.commitAttribution.MatchedCommits)
+		if p.commitAttribution.UnmatchedCommits > 0 {
+			snap.Raw["git_scored_commits_unmatched"] = fmt.Sprintf("%d", p.commitAttribution.UnmatchedCommits)
+		}
+		snap.Raw["git_commit_ai_lines_added"] = fmt.Sprintf("%d", p.commitAttribution.AIAdded)
+		snap.Raw["git_commit_ai_lines_removed"] = fmt.Sprintf("%d", p.commitAttribution.AIRemoved)
+		totalCommitLines := p.commitAttribution.LinesAdded + p.commitAttribution.LinesRemoved
+		if totalCommitLines > 0 {
+			aiPct := float64(p.commitAttribution.AIAdded+p.commitAttribution.AIRemoved) / float64(totalCommitLines) * 100
+			remaining := max(0.0, 100-aiPct)
+			limit := 100.0
+			snap.Metrics["ai_code_percentage"] = core.Metric{Used: &aiPct, Remaining: &remaining, Limit: &limit, Unit: "%", Window: "all-commits"}
+		}
 	}
-	if p.allTimeLinesAdded > 0 {
-		setMetricMax(snap, "composer_lines_added", float64(p.allTimeLinesAdded), "lines", "all-time estimate")
+	if filesChanged > 0 {
+		setMetricMax(snap, "composer_files_changed", float64(filesChanged), "files", "all-time estimate")
 	}
-	if p.allTimeLinesRemoved > 0 {
-		setMetricMax(snap, "composer_lines_removed", float64(p.allTimeLinesRemoved), "lines", "all-time estimate")
+	if linesAdded > 0 {
+		setMetricMax(snap, "composer_lines_added", float64(linesAdded), "lines", "all-time estimate")
 	}
-	if p.allTimeCommitCount > 0 {
-		setMetricMax(snap, "scored_commits", float64(p.allTimeCommitCount), "commits", "all-time estimate")
+	if linesRemoved > 0 {
+		setMetricMax(snap, "composer_lines_removed", float64(linesRemoved), "lines", "all-time estimate")
 	}
-	if p.allTimeLinesAdded > 0 || p.allTimeLinesRemoved > 0 {
-		hundred := 100.0
-		zero := 0.0
-		snap.Metrics["ai_code_percentage"] = core.Metric{Used: &hundred, Remaining: &zero, Limit: &hundred, Unit: "%", Window: "all-time estimate"}
+	if commitCount > 0 {
+		setMetricMax(snap, "scored_commits", float64(commitCount), "commits", "all-time estimate")
 	}
 	for lang, count := range p.languageUsageCounts {
 		if count > 0 {

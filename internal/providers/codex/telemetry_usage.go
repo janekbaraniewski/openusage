@@ -512,10 +512,7 @@ func codexBuildToolPayload(sourcePath string, lineNumber int, item responseItemP
 	}
 
 	if strings.EqualFold(strings.TrimSpace(item.Name), "apply_patch") && strings.TrimSpace(item.Input) != "" {
-		stats := patchStats{
-			Files:   make(map[string]struct{}),
-			Deleted: make(map[string]struct{}),
-		}
+		stats := patchStats{PatchStats: shared.NewPatchStats()}
 		accumulatePatchStats(item.Input, &stats, make(map[string]int))
 		if stats.Added > 0 {
 			payload["lines_added"] = stats.Added

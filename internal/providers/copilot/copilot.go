@@ -301,7 +301,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
 
-	p.fetchLocalData(acct, &snap)
+	p.fetchLocalData(ctx, acct, &snap)
 
 	p.resolveStatus(&snap, authOutput)
 
@@ -365,11 +365,11 @@ func detectCopilotVersion(ctx context.Context, ghBinary, copilotBinary string) (
 	return "", "", fmt.Errorf("failed to resolve a working copilot version command")
 }
 
-func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.UsageSnapshot) {
+func (p *Provider) fetchLocalData(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) {
 	if dir := strings.TrimSpace(acct.Hint("config_dir", "")); dir != "" {
 		p.readConfig(dir, snap)
 		logData := p.readLogs(dir, snap)
-		p.readSessions(dir, snap, logData)
+		p.readSessions(ctx, dir, snap, logData)
 		return
 	}
 
@@ -383,7 +383,7 @@ func (p *Provider) fetchLocalData(acct core.AccountConfig, snap *core.UsageSnaps
 
 	logData := p.readLogs(copilotDir, snap)
 
-	p.readSessions(copilotDir, snap, logData)
+	p.readSessions(ctx, copilotDir, snap, logData)
 }
 
 func (p *Provider) resolveStatus(snap *core.UsageSnapshot, authOutput string) {

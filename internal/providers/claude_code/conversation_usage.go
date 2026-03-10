@@ -1,6 +1,7 @@
 package claude_code
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -8,10 +9,11 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/samber/lo"
 )
 
-func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
+func (p *Provider) readConversationJSONL(ctx context.Context, projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
 	jsonlFiles := collectJSONLFiles(projectsDir)
 	if altProjectsDir != "" {
 		jsonlFiles = append(jsonlFiles, collectJSONLFiles(altProjectsDir)...)
@@ -76,6 +78,8 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	agentSessions := make(map[string]map[string]bool)
 	seenUsageKeys := make(map[string]bool)
 	seenToolKeys := make(map[string]bool)
+	pendingCommitStats := make(map[string]shared.PatchStats)
+	var commitCandidates []shared.GitCommitCandidate
 	dailyClientTokens := make(map[string]map[string]float64)
 	dailyTokenTotals := make(map[string]int)
 	dailyMessages := make(map[string]int)
@@ -145,6 +149,12 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		}
 		return sanitizeModelName(dir)
 	}
+	sessionKeyForRecord := func(record conversationRecord) string {
+		if strings.TrimSpace(record.sessionID) != "" {
+			return strings.TrimSpace(record.sessionID)
+		}
+		return strings.TrimSpace(record.sourcePath)
+	}
 	for _, fpath := range jsonlFiles {
 		allUsages = append(allUsages, parseConversationRecords(fpath)...)
 	}
@@ -191,6 +201,11 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 			if toolName == "" {
 				toolName = "unknown"
 			}
+			recordKey := sessionKeyForRecord(u)
+			pending := pendingCommitStats[recordKey]
+			if pending.FileDelta == nil {
+				pending = shared.NewPatchStats()
+			}
 			toolUsageCounts[toolName]++
 			allTimeToolCalls++
 
@@ -207,12 +222,24 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 				added, removed := estimateToolLineDelta(toolName, item.Input)
 				allTimeLinesAdded += added
 				allTimeLinesRemoved += removed
+				shared.ApplyTrackedChange(&pending, pathCandidates, added, removed, strings.Contains(toolName, "delete"))
+				pendingCommitStats[recordKey] = pending
 			}
 			if cmd := extractToolCommand(item.Input); cmd != "" && strings.Contains(strings.ToLower(cmd), "git commit") {
-				if !seenCommitCommands[cmd] {
-					seenCommitCommands[cmd] = true
+				commitKey := recordKey + "|" + u.timestamp.UTC().Format(time.RFC3339Nano) + "|" + cmd
+				if !seenCommitCommands[commitKey] {
+					seenCommitCommands[commitKey] = true
 					allTimeCommitCount++
 				}
+				if cwd := shared.BestEffortWorkingDir(u.cwd, pathCandidates, pending); cwd != "" {
+					commitCandidates = append(commitCandidates, shared.GitCommitCandidate{
+						CWD:        cwd,
+						OccurredAt: u.timestamp.UTC(),
+						Message:    shared.ExtractGitCommitMessage(cmd),
+						Patch:      shared.ClonePatchStats(pending),
+					})
+				}
+				pendingCommitStats[recordKey] = shared.NewPatchStats()
 			}
 
 			if u.timestamp.After(todayStart) || u.timestamp.Equal(todayStart) {
@@ -433,6 +460,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		allTimeLinesAdded:    allTimeLinesAdded,
 		allTimeLinesRemoved:  allTimeLinesRemoved,
 		allTimeCommitCount:   allTimeCommitCount,
+		commitAttribution:    shared.CollectGitCommitAttribution(ctx, commitCandidates),
 		modelTotals:          modelTotals,
 		clientTotals:         clientTotals,
 		projectTotals:        projectTotals,

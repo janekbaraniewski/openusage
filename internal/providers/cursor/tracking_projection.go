@@ -138,6 +138,7 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 	tc := float64(totalCommits)
 	snap.Metrics["scored_commits"] = core.Metric{Used: &tc, Unit: "commits", Window: "all-time"}
 	snap.Raw["scored_commits_total"] = strconv.Itoa(totalCommits)
+	snap.Raw["code_stats_source"] = "provider_native"
 
 	if countWithPct > 0 {
 		avgPct := math.Round((sumAIPct/float64(countWithPct))*10) / 10

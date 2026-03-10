@@ -1,10 +1,12 @@
 package gemini_cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/samber/lo"
 )
 
@@ -46,7 +48,7 @@ func (t geminiMessageToken) toUsage() tokenUsage {
 	}
 }
 
-func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSnapshot) (int, error) {
+func (p *Provider) readSessionUsageBreakdowns(ctx context.Context, tmpDir string, snap *core.UsageSnapshot) (int, error) {
 	files, err := findGeminiSessionFiles(tmpDir)
 	if err != nil {
 		return 0, err
@@ -100,6 +102,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	userCharsRemoved := 0
 	diffStatEvents := 0
 	inferredCommitCount := 0
+	var commitCandidates []shared.GitCommitCandidate
 
 	var lastModelName string
 	var lastModelTokens int
@@ -133,6 +136,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 		var hasPrevious bool
 		fileHasUsage := false
 		sessionModels := make(map[string]bool)
+		pendingCommitStats := shared.NewPatchStats()
 
 		for _, msg := range chat.Messages {
 			day := dayFromTimestamp(msg.Timestamp)
@@ -197,6 +201,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 					}
 
 					if successfulToolCall && isGeminiMutatingTool(toolLower) {
+						paths := extractGeminiToolPaths(tc.Args)
 						if diff, ok := extractGeminiToolDiffStat(tc.ResultDisplay); ok {
 							modelLinesAdded += diff.ModelAddedLines
 							modelLinesRemoved += diff.ModelRemovedLines
@@ -207,10 +212,12 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 							userCharsAdded += diff.UserAddedChars
 							userCharsRemoved += diff.UserRemovedChars
 							diffStatEvents++
+							shared.ApplyTrackedChange(&pendingCommitStats, paths, diff.ModelAddedLines, diff.ModelRemovedLines, strings.Contains(toolLower, "delete"))
 						} else {
 							added, removed := estimateGeminiToolLineDelta(tc.Args)
 							modelLinesAdded += added
 							modelLinesRemoved += removed
+							shared.ApplyTrackedChange(&pendingCommitStats, paths, added, removed, strings.Contains(toolLower, "delete"))
 						}
 					}
 
@@ -219,9 +226,26 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 					}
 					cmd := strings.ToLower(extractGeminiToolCommand(tc.Args))
 					if strings.Contains(cmd, "git commit") {
-						if !commitCommands[cmd] {
-							commitCommands[cmd] = true
+						commitTime := msg.Timestamp
+						if strings.TrimSpace(tc.Timestamp) != "" {
+							commitTime = tc.Timestamp
+						}
+						commitKey := sessionID + "|" + commitTime + "|" + cmd
+						if !commitCommands[commitKey] {
+							commitCommands[commitKey] = true
 							inferredCommitCount++
+							if ts, err := shared.ParseTimestampString(commitTime); err == nil {
+								workingDir := shared.BestEffortWorkingDir(extractGeminiToolWorkingDir(tc.Args), extractGeminiToolPaths(tc.Args), pendingCommitStats)
+								if workingDir != "" {
+									commitCandidates = append(commitCandidates, shared.GitCommitCandidate{
+										CWD:        workingDir,
+										OccurredAt: ts.UTC(),
+										Message:    shared.ExtractGitCommitMessage(extractGeminiToolCommand(tc.Args)),
+										Patch:      shared.ClonePatchStats(pendingCommitStats),
+									})
+								}
+							}
+							pendingCommitStats = shared.NewPatchStats()
 						}
 					} else if strings.Contains(toolLower, "commit") {
 						inferredCommitCount++
@@ -286,6 +310,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	if sessionCount == 0 {
 		return 0, nil
 	}
+	commitStats := shared.CollectGitCommitAttribution(ctx, commitCandidates)
 
 	if lastModelName != "" && lastModelTokens > 0 {
 		limit := getModelContextLimit(lastModelName)
@@ -426,6 +451,30 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	setUsedMetric(snap, "7d_reasoning_tokens", sumLastNDays(dailyReasoningTokens, 7), "tokens", "7d")
 	setUsedMetric(snap, "7d_tool_tokens", sumLastNDays(dailyToolTokens, 7), "tokens", "7d")
 
+	snap.Raw["code_stats_source"] = "tracked_edits"
+	if commitStats.MatchedCommits > 0 {
+		modelLinesAdded = commitStats.LinesAdded
+		modelLinesRemoved = commitStats.LinesRemoved
+		inferredCommitCount = commitStats.MatchedCommits
+		if len(commitStats.Files) > 0 {
+			changedFiles = make(map[string]bool, len(commitStats.Files))
+			for path := range commitStats.Files {
+				changedFiles[path] = true
+			}
+		}
+		snap.Raw["code_stats_source"] = "git_commits"
+		snap.Raw["git_scored_commits_matched"] = fmt.Sprintf("%d", commitStats.MatchedCommits)
+		if commitStats.UnmatchedCommits > 0 {
+			snap.Raw["git_scored_commits_unmatched"] = fmt.Sprintf("%d", commitStats.UnmatchedCommits)
+		}
+		snap.Raw["git_commit_ai_lines_added"] = fmt.Sprintf("%d", commitStats.AIAdded)
+		snap.Raw["git_commit_ai_lines_removed"] = fmt.Sprintf("%d", commitStats.AIRemoved)
+		totalCommitLines := commitStats.LinesAdded + commitStats.LinesRemoved
+		if totalCommitLines > 0 {
+			aiPct := float64(commitStats.AIAdded+commitStats.AIRemoved) / float64(totalCommitLines) * 100
+			setPercentMetric(snap, "ai_code_percentage", aiPct, "all-commits")
+		}
+	}
 	if modelLinesAdded > 0 {
 		setUsedMetric(snap, "composer_lines_added", float64(modelLinesAdded), "lines", defaultUsageWindowLabel)
 	}
@@ -459,16 +508,6 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	if diffStatEvents > 0 {
 		setUsedMetric(snap, "composer_diffstat_events", float64(diffStatEvents), "calls", defaultUsageWindowLabel)
 	}
-	totalModelLineDelta := modelLinesAdded + modelLinesRemoved
-	totalUserLineDelta := userLinesAdded + userLinesRemoved
-	if totalModelLineDelta > 0 || totalUserLineDelta > 0 {
-		totalLineDelta := totalModelLineDelta + totalUserLineDelta
-		if totalLineDelta > 0 {
-			aiPct := float64(totalModelLineDelta) / float64(totalLineDelta) * 100
-			setPercentMetric(snap, "ai_code_percentage", aiPct, defaultUsageWindowLabel)
-		}
-	}
-
 	if quotaLimitEvents > 0 {
 		snap.Raw["quota_limit_detected"] = "true"
 		if _, hasQuota := snap.Metrics["quota"]; !hasQuota {

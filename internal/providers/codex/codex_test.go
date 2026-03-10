@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 func TestProviderID(t *testing.T) {
@@ -790,6 +792,116 @@ func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
 	if got := metricUsed(t, snap, "requests_today"); got != 2 {
 		t.Fatalf("requests_today = %.1f, want 2", got)
 	}
+	if _, ok := snap.Metrics["ai_code_percentage"]; ok {
+		t.Fatal("ai_code_percentage should be absent when Codex only has tracked edits")
+	}
+	if snap.Raw["code_stats_source"] != "tracked_edits" {
+		t.Fatalf("code_stats_source = %q, want tracked_edits", snap.Raw["code_stats_source"])
+	}
+}
+
+func TestFetchUsesGitCommitDiffsForCodexCodeStats(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runGitForTest(t, repoDir, nil, "init")
+	runGitForTest(t, repoDir, nil, "config", "user.email", "codex@example.com")
+	runGitForTest(t, repoDir, nil, "config", "user.name", "Codex Test")
+
+	filePath := filepath.Join(repoDir, "main.go")
+	if err := os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repoDir, nil, "add", "main.go")
+	runGitForTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=2026-02-20T10:00:00Z",
+		"GIT_COMMITTER_DATE=2026-02-20T10:00:00Z",
+	}, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filePath, []byte("one\nthree\nalpha\nbeta\ngamma\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repoDir, nil, "add", "main.go")
+
+	commitTime := time.Date(2026, 2, 21, 14, 0, 5, 0, time.UTC)
+	runGitForTest(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
+	}, "commit", "-m", "ship")
+
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "02", "21")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	patchTime := commitTime.Add(-20 * time.Second).Format(time.RFC3339)
+	commandTime := commitTime.Add(-5 * time.Second).Format(time.RFC3339)
+	tokenTime := commitTime.Add(-30 * time.Second).Format(time.RFC3339)
+	sessionFile := filepath.Join(dayDir, "rollout-commit-attribution.jsonl")
+	sessionContent := fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"sess-commit","source":"cli","originator":"codex_cli_rs","cwd":"%s"}}
+{"timestamp":"%s","type":"turn_context","payload":{"model":"gpt-5-codex"}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"user_message","text":"commit it"}}
+{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"cached_input_tokens":10,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":80},"model_context_window":128000}}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call-1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: main.go\n@@\n-two\n+alpha\n+beta\n*** End Patch\n"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-1","output":"{\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-2","arguments":{"cmd":"git commit -m \\\"ship\\\""}}}
+{"timestamp":"%s","type":"response_item","payload":{"type":"function_call_output","call_id":"call-2","output":"Process exited with code 0"}}`,
+		tokenTime, repoDir,
+		tokenTime,
+		tokenTime,
+		tokenTime,
+		patchTime,
+		patchTime,
+		commandTime,
+		commandTime,
+	)
+	if err := os.WriteFile(sessionFile, []byte(sessionContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-commit-stats",
+		Provider: "codex",
+		Auth:     "local",
+		ExtraData: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "composer_lines_added"); got != 4 {
+		t.Fatalf("composer_lines_added = %.1f, want 4", got)
+	}
+	if got := metricUsed(t, snap, "composer_lines_removed"); got != 1 {
+		t.Fatalf("composer_lines_removed = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "composer_files_changed"); got != 1 {
+		t.Fatalf("composer_files_changed = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "scored_commits"); got != 1 {
+		t.Fatalf("scored_commits = %.1f, want 1", got)
+	}
+	if got := metricUsed(t, snap, "ai_code_percentage"); got != 60 {
+		t.Fatalf("ai_code_percentage = %.1f, want 60", got)
+	}
+	if snap.Raw["code_stats_source"] != "git_commits" {
+		t.Fatalf("code_stats_source = %q, want git_commits", snap.Raw["code_stats_source"])
+	}
+	if snap.Raw["git_scored_commits_matched"] != "1" {
+		t.Fatalf("git_scored_commits_matched = %q, want 1", snap.Raw["git_scored_commits_matched"])
+	}
 }
 
 func TestFormatWindow(t *testing.T) {
@@ -814,6 +926,24 @@ func TestFormatWindow(t *testing.T) {
 				t.Errorf("formatWindow(%d) = %q, want %q", tc.minutes, got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestExtractGitCommitMessage(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want string
+	}{
+		{cmd: `git commit -m "ship it"`, want: "ship it"},
+		{cmd: `git commit --message='tighten stats'`, want: "tighten stats"},
+		{cmd: `git commit -m=release`, want: "release"},
+		{cmd: `git status`, want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := shared.ExtractGitCommitMessage(tt.cmd); got != tt.want {
+			t.Fatalf("ExtractGitCommitMessage(%q) = %q, want %q", tt.cmd, got, tt.want)
+		}
 	}
 }
 
@@ -851,4 +981,15 @@ func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 		t.Fatalf("metric %q has nil Used", key)
 	}
 	return *metric.Used
+}
+
+func runGitForTest(t *testing.T, repoDir string, env []string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out))
 }

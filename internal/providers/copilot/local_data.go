@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,9 +11,10 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, logs logSummary) {
+func (p *Provider) readSessions(ctx context.Context, copilotDir string, snap *core.UsageSnapshot, logs logSummary) {
 	sessionDir := filepath.Join(copilotDir, "session-state")
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
@@ -26,6 +28,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		createdAt               time.Time
 		updatedAt               time.Time
 		cwd                     string
+		gitRoot                 string
 		repo                    string
 		branch                  string
 		client                  string
@@ -87,6 +90,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	dailyClientTokens := make(map[string]map[string]float64)
 	var inferredLinesAdded, inferredLinesRemoved int
 	var inferredCommitCount int
+	var commitCandidates []shared.GitCommitCandidate
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -98,6 +102,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 		if wsData, err := os.ReadFile(filepath.Join(sessPath, "workspace.yaml")); err == nil {
 			ws := parseSimpleYAML(string(wsData))
 			si.cwd = ws["cwd"]
+			si.gitRoot = ws["git_root"]
 			si.repo = ws["repository"]
 			si.branch = ws["branch"]
 			si.summary = ws["summary"]
@@ -123,6 +128,7 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 
 		if evtData, err := os.ReadFile(filepath.Join(sessPath, "events.jsonl")); err == nil {
 			currentModel := logs.DefaultModel
+			pendingCommitStats := shared.NewPatchStats()
 			var firstEventAt, lastEventAt time.Time
 			lines := strings.Split(string(evtData), "\n")
 			for _, line := range lines {
@@ -150,6 +156,9 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 					if json.Unmarshal(evt.Data, &start) == nil {
 						if si.cwd == "" {
 							si.cwd = start.Context.CWD
+						}
+						if si.gitRoot == "" {
+							si.gitRoot = start.Context.GitRoot
 						}
 						if si.repo == "" {
 							si.repo = start.Context.Repository
@@ -236,12 +245,23 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 									added, removed := estimateCopilotToolLineDelta(toolReq)
 									inferredLinesAdded += added
 									inferredLinesRemoved += removed
+									shared.ApplyTrackedChange(&pendingCommitStats, paths, added, removed, strings.Contains(toolLower, "delete"))
 								}
 								cmd := extractCopilotToolCommand(toolReq)
 								if cmd != "" {
-									if strings.Contains(strings.ToLower(cmd), "git commit") && !commitCommands[cmd] {
-										commitCommands[cmd] = true
+									commitKey := si.id + "|" + strings.TrimSpace(evt.Timestamp) + "|" + cmd
+									if strings.Contains(strings.ToLower(cmd), "git commit") && !commitCommands[commitKey] {
+										commitCommands[commitKey] = true
 										inferredCommitCount++
+										if cwd := shared.BestEffortWorkingDir(core.FirstNonEmpty(si.gitRoot, si.cwd), paths, pendingCommitStats); cwd != "" && !evtTime.IsZero() {
+											commitCandidates = append(commitCandidates, shared.GitCommitCandidate{
+												CWD:        cwd,
+												OccurredAt: evtTime.UTC(),
+												Message:    shared.ExtractGitCommitMessage(cmd),
+												Patch:      shared.ClonePatchStats(pendingCommitStats),
+											})
+										}
+										pendingCommitStats = shared.NewPatchStats()
 									}
 								} else if strings.Contains(toolLower, "commit") {
 									inferredCommitCount++
@@ -632,6 +652,34 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	if len(changedFiles) > filesChanged {
 		filesChanged = len(changedFiles)
 	}
+	commitStats := shared.CollectGitCommitAttribution(ctx, commitCandidates)
+	snap.Raw["code_stats_source"] = "tracked_edits"
+	if commitStats.MatchedCommits > 0 {
+		linesAdded = commitStats.LinesAdded
+		linesRemoved = commitStats.LinesRemoved
+		filesChanged = len(commitStats.Files)
+		inferredCommitCount = commitStats.MatchedCommits
+		snap.Raw["code_stats_source"] = "git_commits"
+		snap.Raw["git_scored_commits_matched"] = fmt.Sprintf("%d", commitStats.MatchedCommits)
+		if commitStats.UnmatchedCommits > 0 {
+			snap.Raw["git_scored_commits_unmatched"] = fmt.Sprintf("%d", commitStats.UnmatchedCommits)
+		}
+		snap.Raw["git_commit_ai_lines_added"] = fmt.Sprintf("%d", commitStats.AIAdded)
+		snap.Raw["git_commit_ai_lines_removed"] = fmt.Sprintf("%d", commitStats.AIRemoved)
+		totalCommitLines := commitStats.LinesAdded + commitStats.LinesRemoved
+		if totalCommitLines > 0 {
+			aiPct := float64(commitStats.AIAdded+commitStats.AIRemoved) / float64(totalCommitLines) * 100
+			hundred := 100.0
+			remaining := max(hundred-aiPct, 0)
+			snap.Metrics["ai_code_percentage"] = core.Metric{
+				Used:      &aiPct,
+				Remaining: &remaining,
+				Limit:     &hundred,
+				Unit:      "%",
+				Window:    "all-commits",
+			}
+		}
+	}
 	if linesAdded > 0 {
 		setUsedMetric(snap, "composer_lines_added", float64(linesAdded), "lines", copilotAllTimeWindow)
 	}
@@ -643,17 +691,6 @@ func (p *Provider) readSessions(copilotDir string, snap *core.UsageSnapshot, log
 	}
 	if inferredCommitCount > 0 {
 		setUsedMetric(snap, "scored_commits", float64(inferredCommitCount), "commits", copilotAllTimeWindow)
-	}
-	if linesAdded > 0 || linesRemoved > 0 {
-		hundred := 100.0
-		zero := 0.0
-		snap.Metrics["ai_code_percentage"] = core.Metric{
-			Used:      &hundred,
-			Remaining: &zero,
-			Limit:     &hundred,
-			Unit:      "%",
-			Window:    copilotAllTimeWindow,
-		}
 	}
 
 	if len(sessions) > 0 {
