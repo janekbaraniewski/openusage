@@ -198,10 +198,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	configDir := ""
-	if acct.ExtraData != nil {
-		configDir = acct.ExtraData["config_dir"]
-	}
+	configDir := acct.Hint("config_dir", "")
 	if configDir == "" {
 		home, _ := os.UserHomeDir()
 		if home != "" {
@@ -218,8 +215,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	var hasLocalData bool
 
 	sessionsDir := filepath.Join(configDir, "sessions")
-	if acct.ExtraData != nil && acct.ExtraData["sessions_dir"] != "" {
-		sessionsDir = acct.ExtraData["sessions_dir"]
+	if override := acct.Hint("sessions_dir", ""); override != "" {
+		sessionsDir = override
 	}
 
 	if err := p.readLatestSession(sessionsDir, &snap); err != nil {

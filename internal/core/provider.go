@@ -32,12 +32,13 @@ type AccountConfig struct {
 	// should use ProviderPaths through Path/SetPath helpers.
 	Paths map[string]string `json:"paths,omitempty"`
 
-	Token     string            `json:"-"` // runtime-only: access token (never persisted)
-	ExtraData map[string]string `json:"-"` // runtime-only: extra detection data (never persisted)
+	Token        string            `json:"-"` // runtime-only: access token (never persisted)
+	RuntimeHints map[string]string `json:"-"` // runtime-only: non-persisted local/runtime hints
+	ExtraData    map[string]string `json:"-"` // runtime-only: extra detection metadata (never persisted)
 }
 
 // Path returns the named provider-specific path. It checks ProviderPaths first,
-// then legacy Paths, then ExtraData (for backward compat with detect), then the fallback.
+// then legacy Paths, then runtime hints, then legacy ExtraData fallbacks, then the fallback.
 func (c AccountConfig) Path(key, fallback string) string {
 	if c.ProviderPaths != nil {
 		if v, ok := c.ProviderPaths[key]; ok && v != "" {
@@ -46,6 +47,11 @@ func (c AccountConfig) Path(key, fallback string) string {
 	}
 	if c.Paths != nil {
 		if v, ok := c.Paths[key]; ok && v != "" {
+			return v
+		}
+	}
+	if c.RuntimeHints != nil {
+		if v, ok := c.RuntimeHints[key]; ok && v != "" {
 			return v
 		}
 	}
@@ -69,6 +75,33 @@ func (c *AccountConfig) SetPath(key, value string) {
 		c.ProviderPaths = make(map[string]string)
 	}
 	c.ProviderPaths[key] = strings.TrimSpace(value)
+}
+
+func (c AccountConfig) Hint(key, fallback string) string {
+	if c.RuntimeHints != nil {
+		if v, ok := c.RuntimeHints[key]; ok && v != "" {
+			return v
+		}
+	}
+	if c.ExtraData != nil {
+		if v, ok := c.ExtraData[key]; ok && v != "" {
+			return v
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return ""
+}
+
+func (c *AccountConfig) SetHint(key, value string) {
+	if c == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return
+	}
+	if c.RuntimeHints == nil {
+		c.RuntimeHints = make(map[string]string)
+	}
+	c.RuntimeHints[strings.TrimSpace(key)] = strings.TrimSpace(value)
 }
 
 // PathMap returns a merged copy of provider-local paths, preferring

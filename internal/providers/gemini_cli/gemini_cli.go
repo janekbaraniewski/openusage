@@ -242,10 +242,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	configDir := ""
-	if acct.ExtraData != nil {
-		configDir = acct.ExtraData["config_dir"]
-	}
+	configDir := acct.Hint("config_dir", "")
 	if configDir == "" {
 		home, _ := os.UserHomeDir()
 		if home != "" {

@@ -51,13 +51,16 @@ func detectCodex(result *Result) {
 		ExtraData: make(map[string]string),
 	}
 
+	acct.SetHint("config_dir", configDir)
 	acct.ExtraData["config_dir"] = configDir
 
 	if hasSessions {
+		acct.SetHint("sessions_dir", sessionsDir)
 		acct.ExtraData["sessions_dir"] = sessionsDir
 	}
 
 	if hasAuth {
+		acct.SetHint("auth_file", authFile)
 		acct.ExtraData["auth_file"] = authFile
 		email, accountID, planType := extractCodexAuth(authFile)
 		if email != "" {

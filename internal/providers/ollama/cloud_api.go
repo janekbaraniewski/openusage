@@ -314,10 +314,8 @@ func resolveCloudBaseURL(acct core.AccountConfig) string {
 		return strings.TrimRight(u.String(), "/")
 	}
 
-	if acct.ExtraData != nil {
-		if v := strings.TrimSpace(acct.ExtraData["cloud_base_url"]); v != "" {
-			return normalize(v)
-		}
+	if v := strings.TrimSpace(acct.Hint("cloud_base_url", "")); v != "" {
+		return normalize(v)
 	}
 	if strings.HasPrefix(strings.ToLower(acct.BaseURL), "https://") && strings.Contains(strings.ToLower(acct.BaseURL), "ollama.com") {
 		return normalize(acct.BaseURL)

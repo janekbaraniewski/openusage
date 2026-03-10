@@ -19,8 +19,8 @@ import (
 
 func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, configDir string, snap *core.UsageSnapshot) (bool, error) {
 	authPath := filepath.Join(configDir, "auth.json")
-	if acct.ExtraData != nil && acct.ExtraData["auth_file"] != "" {
-		authPath = acct.ExtraData["auth_file"]
+	if override := acct.Hint("auth_file", ""); override != "" {
+		authPath = override
 	}
 
 	data, err := os.ReadFile(authPath)
@@ -48,8 +48,8 @@ func (p *Provider) fetchLiveUsage(ctx context.Context, acct core.AccountConfig, 
 	req.Header.Set("Accept", "application/json")
 
 	accountID := core.FirstNonEmpty(auth.Tokens.AccountID, auth.AccountID)
-	if accountID == "" && acct.ExtraData != nil {
-		accountID = acct.ExtraData["account_id"]
+	if accountID == "" {
+		accountID = acct.Hint("account_id", "")
 	}
 	if accountID != "" {
 		req.Header.Set("ChatGPT-Account-Id", accountID)

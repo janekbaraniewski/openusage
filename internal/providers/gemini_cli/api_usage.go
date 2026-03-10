@@ -33,8 +33,8 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	} else if v := os.Getenv("GOOGLE_CLOUD_PROJECT_ID"); v != "" {
 		projectID = v
 	}
-	if projectID == "" && acct.ExtraData != nil {
-		projectID = acct.ExtraData["project_id"]
+	if projectID == "" {
+		projectID = acct.Hint("project_id", "")
 	}
 
 	loadResp, err := loadCodeAssistDetails(ctx, accessToken, projectID, client)

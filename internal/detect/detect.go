@@ -259,6 +259,10 @@ func detectGHCopilot(result *Result) {
 			"copilot_binary": copilotBin,
 			"config_dir":     copilotDir,
 		},
+		RuntimeHints: map[string]string{
+			"copilot_binary": copilotBin,
+			"config_dir":     copilotDir,
+		},
 	})
 }
 
@@ -306,6 +310,7 @@ func detectGeminiCLI(result *Result) {
 		Binary:    bin,
 		ExtraData: make(map[string]string),
 	}
+	acct.SetHint("config_dir", configDir)
 	acct.ExtraData["config_dir"] = configDir
 
 	if hasAccounts {
@@ -321,9 +326,11 @@ func detectGeminiCLI(result *Result) {
 	}
 
 	if v := os.Getenv("GOOGLE_CLOUD_PROJECT"); v != "" {
+		acct.SetHint("project_id", v)
 		acct.ExtraData["project_id"] = v
 		log.Printf("[detect] Gemini CLI project from GOOGLE_CLOUD_PROJECT: %s", v)
 	} else if v := os.Getenv("GOOGLE_CLOUD_PROJECT_ID"); v != "" {
+		acct.SetHint("project_id", v)
 		acct.ExtraData["project_id"] = v
 		log.Printf("[detect] Gemini CLI project from GOOGLE_CLOUD_PROJECT_ID: %s", v)
 	}

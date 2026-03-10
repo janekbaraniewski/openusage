@@ -11,11 +11,9 @@ import (
 )
 
 func resolveDesktopDBPath(acct core.AccountConfig) string {
-	if acct.ExtraData != nil {
-		for _, key := range []string{"db_path", "app_db"} {
-			if v := strings.TrimSpace(acct.ExtraData[key]); v != "" {
-				return v
-			}
+	for _, key := range []string{"db_path", "app_db"} {
+		if v := strings.TrimSpace(acct.Hint(key, "")); v != "" {
+			return v
 		}
 	}
 
@@ -50,13 +48,11 @@ func resolveDesktopDBPath(acct core.AccountConfig) string {
 }
 
 func resolveServerConfigPath(acct core.AccountConfig) string {
-	if acct.ExtraData != nil {
-		if v := strings.TrimSpace(acct.ExtraData["server_config"]); v != "" {
-			return v
-		}
-		if configDir := strings.TrimSpace(acct.ExtraData["config_dir"]); configDir != "" {
-			return filepath.Join(configDir, "server.json")
-		}
+	if v := strings.TrimSpace(acct.Hint("server_config", "")); v != "" {
+		return v
+	}
+	if configDir := strings.TrimSpace(acct.Hint("config_dir", "")); configDir != "" {
+		return filepath.Join(configDir, "server.json")
 	}
 
 	home, err := os.UserHomeDir()
@@ -67,13 +63,10 @@ func resolveServerConfigPath(acct core.AccountConfig) string {
 }
 
 func resolveServerLogFiles(acct core.AccountConfig) []string {
-	logDir := ""
-	if acct.ExtraData != nil {
-		logDir = strings.TrimSpace(acct.ExtraData["logs_dir"])
-		if logDir == "" {
-			if configDir := strings.TrimSpace(acct.ExtraData["config_dir"]); configDir != "" {
-				logDir = filepath.Join(configDir, "logs")
-			}
+	logDir := strings.TrimSpace(acct.Hint("logs_dir", ""))
+	if logDir == "" {
+		if configDir := strings.TrimSpace(acct.Hint("config_dir", "")); configDir != "" {
+			logDir = filepath.Join(configDir, "logs")
 		}
 	}
 	if logDir == "" {
