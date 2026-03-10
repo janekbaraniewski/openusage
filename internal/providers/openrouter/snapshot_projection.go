@@ -242,28 +242,28 @@ func synthesizeClientMetricsFromProviderMetrics(snap *core.UsageSnapshot) {
 
 		if agg.InputTokens > 0 {
 			v := agg.InputTokens
-			snap.Metrics[clientPrefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+			snap.Metrics[clientPrefix+"_input_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window, Source: core.MetricSourceInferred}
 		}
 		if agg.OutputTokens > 0 {
 			v := agg.OutputTokens
-			snap.Metrics[clientPrefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+			snap.Metrics[clientPrefix+"_output_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window, Source: core.MetricSourceInferred}
 		}
 		if agg.ReasoningTokens > 0 {
 			v := agg.ReasoningTokens
-			snap.Metrics[clientPrefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+			snap.Metrics[clientPrefix+"_reasoning_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window, Source: core.MetricSourceInferred}
 		}
 		totalTokens := agg.InputTokens + agg.OutputTokens + agg.ReasoningTokens
 		if totalTokens > 0 {
 			v := totalTokens
-			snap.Metrics[clientPrefix+"_total_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window}
+			snap.Metrics[clientPrefix+"_total_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: window, Source: core.MetricSourceInferred}
 		}
 		if agg.Requests > 0 {
 			v := agg.Requests
-			snap.Metrics[clientPrefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: window}
+			snap.Metrics[clientPrefix+"_requests"] = core.Metric{Used: &v, Unit: "requests", Window: window, Source: core.MetricSourceInferred}
 		}
 		if agg.CostUSD > 0 {
 			v := agg.CostUSD
-			snap.Metrics[clientPrefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: window}
+			snap.Metrics[clientPrefix+"_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: window, Source: core.MetricSourceInferred}
 		}
 	}
 }
@@ -310,7 +310,7 @@ func synthesizeLanguageMetricsFromModelRequests(snap *core.UsageSnapshot) {
 			continue
 		}
 		v := count
-		snap.Metrics["lang_"+sanitizeName(lang)] = core.Metric{Used: &v, Unit: "requests", Window: window}
+		snap.Metrics["lang_"+sanitizeName(lang)] = core.Metric{Used: &v, Unit: "requests", Window: window, Source: core.MetricSourceInferred}
 	}
 	if summary := summarizeCountUsage(byLanguage, "req", 6); summary != "" {
 		snap.Raw["language_usage"] = summary
@@ -492,7 +492,7 @@ func emitModelDerivedToolUsageMetrics(snap *core.UsageSnapshot, modelRequests ma
 		}
 		key := "tool_" + sanitizeName(model)
 		v := requests
-		snap.Metrics[key] = core.Metric{Used: &v, Unit: "calls", Window: window}
+		snap.Metrics[key] = core.Metric{Used: &v, Unit: "calls", Window: window, Source: core.MetricSourceInferred}
 		totalCalls += requests
 		counts[model] = int(math.Round(requests))
 		rows = append(rows, modelUsageCount{name: model, count: requests})
@@ -509,7 +509,7 @@ func emitModelDerivedToolUsageMetrics(snap *core.UsageSnapshot, modelRequests ma
 		snap.Raw["tool_usage"] = summarizeTopCounts(counts, 6)
 	}
 	totalV := totalCalls
-	snap.Metrics["tool_calls_total"] = core.Metric{Used: &totalV, Unit: "calls", Window: "30d"}
+	snap.Metrics["tool_calls_total"] = core.Metric{Used: &totalV, Unit: "calls", Window: "30d", Source: core.MetricSourceInferred}
 }
 
 func emitToolOutcomeMetrics(snap *core.UsageSnapshot, totalRequests, totalCancelled int, window string) {

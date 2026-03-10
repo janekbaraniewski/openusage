@@ -159,6 +159,7 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 			Used:      core.Float64Ptr(used),
 			Unit:      unit,
 			Window:    "month",
+			Source:    core.MetricSourceProviderNative,
 		}
 		return true
 	case pct >= 0:
@@ -170,6 +171,7 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 			Used:      core.Float64Ptr(used),
 			Unit:      "%",
 			Window:    "month",
+			Source:    core.MetricSourceProviderNative,
 		}
 		return true
 	case remaining != nil:
@@ -177,6 +179,7 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 			Used:   core.Float64Ptr(*remaining),
 			Unit:   unit,
 			Window: "month",
+			Source: core.MetricSourceProviderNative,
 		}
 		return true
 	default:
@@ -212,6 +215,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 			Used:      &used,
 			Unit:      "requests",
 			Window:    "1h",
+			Source:    core.MetricSourceProviderNative,
 		}
 		if res.Reset > 0 {
 			snap.Resets[key+"_reset"] = time.Unix(res.Reset, 0)
@@ -261,6 +265,7 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap
 			Used:   &active,
 			Unit:   "seats",
 			Window: "cycle",
+			Source: core.MetricSourceProviderNative,
 		}
 	}
 }
@@ -333,20 +338,20 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 
 	if len(activeUsers) > 0 {
 		lastActive := activeUsers[len(activeUsers)-1].Value
-		snap.Metrics[prefix+"active_users"] = core.Metric{Used: core.Float64Ptr(lastActive), Unit: "users", Window: "day"}
+		snap.Metrics[prefix+"active_users"] = core.Metric{Used: core.Float64Ptr(lastActive), Unit: "users", Window: "day", Source: core.MetricSourceProviderNative}
 	}
 	if len(engagedUsers) > 0 {
 		lastEngaged := engagedUsers[len(engagedUsers)-1].Value
-		snap.Metrics[prefix+"engaged_users"] = core.Metric{Used: core.Float64Ptr(lastEngaged), Unit: "users", Window: "day"}
+		snap.Metrics[prefix+"engaged_users"] = core.Metric{Used: core.Float64Ptr(lastEngaged), Unit: "users", Window: "day", Source: core.MetricSourceProviderNative}
 	}
 	if aggSuggestions > 0 {
-		snap.Metrics[prefix+"suggestions"] = core.Metric{Used: core.Float64Ptr(aggSuggestions), Unit: "suggestions", Window: "series"}
+		snap.Metrics[prefix+"suggestions"] = core.Metric{Used: core.Float64Ptr(aggSuggestions), Unit: "suggestions", Window: "series", Source: core.MetricSourceProviderNative}
 	}
 	if aggAcceptances > 0 {
-		snap.Metrics[prefix+"acceptances"] = core.Metric{Used: core.Float64Ptr(aggAcceptances), Unit: "acceptances", Window: "series"}
+		snap.Metrics[prefix+"acceptances"] = core.Metric{Used: core.Float64Ptr(aggAcceptances), Unit: "acceptances", Window: "series", Source: core.MetricSourceProviderNative}
 	}
 	if aggChats > 0 {
-		snap.Metrics[prefix+"chats"] = core.Metric{Used: core.Float64Ptr(aggChats), Unit: "chats", Window: "series"}
+		snap.Metrics[prefix+"chats"] = core.Metric{Used: core.Float64Ptr(aggChats), Unit: "chats", Window: "series", Source: core.MetricSourceProviderNative}
 	}
 }
 

@@ -395,6 +395,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	annotateGeminiMetricSources(&snap)
+
 	if snap.Message == "" {
 		if email := snap.Raw["account_email"]; email != "" {
 			snap.Message = fmt.Sprintf("Gemini CLI (%s)", email)
@@ -404,4 +406,33 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	return snap, nil
+}
+
+func annotateGeminiMetricSources(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	for _, key := range []string{
+		"allowed_tiers", "ineligible_tiers", "quota", "quota_pro", "quota_flash",
+		"quota_models_tracked", "quota_models_low", "quota_models_exhausted",
+	} {
+		snap.SetMetricSource(key, core.MetricSourceProviderNative)
+	}
+	snap.SetMetricSourceByPrefix("quota_model_", core.MetricSourceProviderNative)
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
+
+	codeStatsSource := strings.TrimSpace(snap.Raw["code_stats_source"])
+	if codeStatsSource == "" {
+		return
+	}
+	for _, key := range []string{
+		"composer_lines_added",
+		"composer_lines_removed",
+		"composer_files_changed",
+		"scored_commits",
+		"ai_code_percentage",
+		"ai_tracked_files",
+	} {
+		snap.SetMetricSource(key, codeStatsSource)
+	}
 }

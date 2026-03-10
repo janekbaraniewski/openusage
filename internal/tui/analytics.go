@@ -445,7 +445,7 @@ func renderTrendPercent(current, previous float64) string {
 }
 
 func renderProviderCostStackedChart(data costData, w, h int) string {
-	series, observedCount, estimatedCount := buildProviderDailyCostSeries(data)
+	series, observedCount := buildProviderDailyCostSeries(data)
 	if len(series) == 0 {
 		return ""
 	}
@@ -459,14 +459,14 @@ func renderProviderCostStackedChart(data costData, w, h int) string {
 		WindowDays: 30,
 		YFmt:       formatCostAxis,
 	}, w)
-	if estimatedCount > 0 {
-		chart += "  " + dimStyle.Render(fmt.Sprintf("Observed daily cost: %d provider(s). Estimated from activity shape: %d provider(s).", observedCount, estimatedCount)) + "\n"
+	if observedCount > 0 {
+		chart += "  " + dimStyle.Render(fmt.Sprintf("Observed daily cost: %d provider(s).", observedCount)) + "\n"
 	}
 	return chart
 }
 
 func renderTotalCostTrend(data costData, summary analyticsSummary, w, h int) string {
-	providerSeries, _, _ := buildProviderDailyCostSeries(data)
+	providerSeries, _ := buildProviderDailyCostSeries(data)
 	daily := aggregateSeriesByDate(providerSeries)
 	if !hasNonZeroData(daily) {
 		daily = summary.dailyCost
@@ -495,7 +495,7 @@ func renderProviderModelDailyUsage(data costData, w, maxRows int) string {
 	return RenderHeatmap(spec, w)
 }
 
-func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
+func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int) {
 	groupByProvider := make(map[string]timeSeriesGroup, len(data.timeSeries))
 	for _, g := range data.timeSeries {
 		groupByProvider[g.providerName] = g
@@ -503,7 +503,6 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 
 	var out []BrailleSeries
 	observedCount := 0
-	estimatedCount := 0
 	for _, p := range data.providers {
 		if p.cost <= 0 && p.todayCost <= 0 && p.weekCost <= 0 {
 			continue
@@ -512,15 +511,13 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 		if gg, ok := groupByProvider[p.name]; ok {
 			g = &gg
 		}
-		pts, observed, estimated := deriveProviderDailyCostPoints(p, g, data.referenceTime)
+		pts, observed := deriveProviderDailyCostPoints(p, g, data.referenceTime)
 		if !hasNonZeroData(pts) {
 			continue
 		}
 		pts = clipSeriesPointsByRecentDates(pts, 30)
 		if observed {
 			observedCount++
-		} else if estimated {
-			estimatedCount++
 		}
 		out = append(out, BrailleSeries{
 			Label:  truncStr(p.name, 20),
@@ -550,14 +547,14 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 			})
 		}
 	}
-	return out, observedCount, estimatedCount
+	return out, observedCount
 }
 
-func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup, referenceTime time.Time) ([]core.TimePoint, bool, bool) {
+func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup, referenceTime time.Time) ([]core.TimePoint, bool) {
 	if group != nil {
 		for _, key := range []string{"cost", "analytics_cost", "daily_cost"} {
 			if pts, ok := group.series[key]; ok && hasNonZeroData(pts) {
-				return pts, true, false
+				return pts, true
 			}
 		}
 	}
@@ -567,36 +564,9 @@ func deriveProviderDailyCostPoints(p providerCostEntry, group *timeSeriesGroup, 
 	nowDate := referenceTime.Format("2006-01-02")
 
 	if p.todayCost > 0 {
-		return []core.TimePoint{{Date: nowDate, Value: p.todayCost}}, true, false
+		return []core.TimePoint{{Date: nowDate, Value: p.todayCost}}, true
 	}
-
-	if group != nil && p.weekCost > 0 {
-		if activity := clipSeriesPointsByRecentDates(selectBestProviderCostWeightSeries(group.series), 7); hasNonZeroData(activity) {
-			if scaled := scaleSeriesToTotal(activity, p.weekCost); hasNonZeroData(scaled) {
-				return scaled, false, true
-			}
-		}
-	}
-
-	return nil, false, false
-}
-
-func scaleSeriesToTotal(activity []core.TimePoint, total float64) []core.TimePoint {
-	if len(activity) == 0 || total <= 0 {
-		return nil
-	}
-	sum := seriesTotal(activity)
-	if sum <= 0 {
-		return nil
-	}
-	out := make([]core.TimePoint, 0, len(activity))
-	for _, a := range activity {
-		out = append(out, core.TimePoint{
-			Date:  a.Date,
-			Value: total * (a.Value / sum),
-		})
-	}
-	return out
+	return nil, false
 }
 
 func aggregateSeriesByDate(series []BrailleSeries) []core.TimePoint {
@@ -680,13 +650,6 @@ func buildProviderModelTokenDistributionSeries(data costData, limit int) []Brail
 		out = append(out, c.series)
 	}
 	return out
-}
-
-func selectBestProviderCostWeightSeries(series map[string][]core.TimePoint) []core.TimePoint {
-	if pts := core.SelectAnalyticsWeightSeries(series); hasNonZeroData(pts) {
-		return pts
-	}
-	return nil
 }
 
 func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (HeatmapSpec, bool) {

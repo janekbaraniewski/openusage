@@ -302,6 +302,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.fetchLocalData(ctx, acct, &snap)
+	annotateCopilotMetricSources(&snap)
 
 	p.resolveStatus(&snap, authOutput)
 
@@ -434,6 +435,32 @@ func usageStatusMessage(snap *core.UsageSnapshot) string {
 	}
 
 	return strings.Join(parts, " · ")
+}
+
+func annotateCopilotMetricSources(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	snap.SetMetricSourceByPrefix("gh_", core.MetricSourceProviderNative)
+	snap.SetMetricSourceByPrefix("org_", core.MetricSourceProviderNative)
+	for _, key := range []string{"chat_quota", "completions_quota", "premium_interactions_quota"} {
+		snap.SetMetricSource(key, core.MetricSourceProviderNative)
+	}
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
+
+	codeStatsSource := strings.TrimSpace(snap.Raw["code_stats_source"])
+	if codeStatsSource == "" {
+		return
+	}
+	for _, key := range []string{
+		"composer_lines_added",
+		"composer_lines_removed",
+		"composer_files_changed",
+		"scored_commits",
+		"ai_code_percentage",
+	} {
+		snap.SetMetricSource(key, codeStatsSource)
+	}
 }
 
 func skuLabel(sku string) string {

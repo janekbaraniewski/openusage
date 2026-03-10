@@ -173,6 +173,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["credits_error"] = err.Error()
 	}
 
+	snap.SetMissingMetricSource(core.MetricSourceProviderNative)
 	p.finalizeStatusAndMessage(&snap, &state)
 	return snap, nil
 }

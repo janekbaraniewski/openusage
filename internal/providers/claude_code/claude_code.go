@@ -341,6 +341,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	normalizeModelUsage(&snap)
+	annotateClaudeMetricSources(&snap)
 
 	if !hasData {
 		snap.Status = core.StatusError
@@ -350,6 +351,36 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	snap.Message = "Claude Code CLI · costs are API-equivalent estimates, not subscription charges"
 	return snap, nil
+}
+
+func annotateClaudeMetricSources(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	snap.SetMetricSourceByPrefix("usage_", core.MetricSourceProviderNative)
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
+
+	for key, metric := range snap.Metrics {
+		if strings.Contains(key, "cost") || strings.Contains(strings.ToLower(metric.Window), "estimate") || key == "burn_rate" {
+			snap.SetMetricSource(key, core.MetricSourceEstimated)
+		}
+	}
+
+	codeStatsSource := strings.TrimSpace(snap.Raw["code_stats_source"])
+	if codeStatsSource == "" {
+		return
+	}
+	for _, key := range []string{
+		"composer_lines_added",
+		"composer_lines_removed",
+		"composer_files_changed",
+		"scored_commits",
+		"ai_code_percentage",
+		"ai_tracked_files",
+		"ai_deleted_files",
+	} {
+		snap.SetMetricSource(key, codeStatsSource)
+	}
 }
 
 func (p *Provider) readUsageAPI(orgUUID string, snap *core.UsageSnapshot) error {

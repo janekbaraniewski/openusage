@@ -197,6 +197,7 @@ func setUsageMetric(snap *core.UsageSnapshot, key string, value float64) {
 		Used:   &value,
 		Unit:   "tokens",
 		Window: defaultUsageWindowLabel,
+		Source: core.MetricSourceLocalObserved,
 	}
 }
 
@@ -313,6 +314,7 @@ func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, wi
 		Used:   &v,
 		Unit:   unit,
 		Window: window,
+		Source: core.MetricSourceLocalObserved,
 	}
 }
 
@@ -332,5 +334,6 @@ func setPercentMetric(snap *core.UsageSnapshot, key string, value float64, windo
 		Remaining: &remaining,
 		Unit:      "%",
 		Window:    window,
+		Source:    core.MetricSourceLocalObserved,
 	}
 }

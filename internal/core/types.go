@@ -25,6 +25,7 @@ type Metric struct {
 	Used      *float64 `json:"used,omitempty"`
 	Unit      string   `json:"unit"`   // "requests", "tokens", "USD", "credits"
 	Window    string   `json:"window"` // "1m", "1d", "month", "rolling-5h", etc.
+	Source    string   `json:"source,omitempty"`
 }
 
 // Percent returns the remaining percentage (0–100) or -1 if unknown.
@@ -197,6 +198,7 @@ func deepCloneMetrics(m map[string]Metric) map[string]Metric {
 			Used:      cloneFloat64Ptr(v.Used),
 			Unit:      v.Unit,
 			Window:    v.Window,
+			Source:    v.Source,
 		}
 	}
 	return out

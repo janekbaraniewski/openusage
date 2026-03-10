@@ -28,6 +28,7 @@ func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	interfaceTotals := make(map[string]*usageRollup)
 	endpointTotals := make(map[string]*usageRollup)
 	languageTotals := make(map[string]*usageRollup)
+	languageInferred := false
 	dailyCost := make(map[string]float64)
 	dailyReq := make(map[string]float64)
 	dailyTokens := make(map[string]float64)
@@ -129,6 +130,9 @@ func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		lang := normalizeUsageDimension(sample.Language)
 		if lang == "" {
 			lang = inferModelUsageLanguage(modelName)
+			if lang != "" {
+				languageInferred = true
+			}
 		}
 		if lang != "" {
 			accumulateUsageRollup(languageTotals, lang, sample)
@@ -239,6 +243,10 @@ func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		}
 		setUsedMetric(snap, "lang_"+slug, value, "requests", "7d")
 		languageReqSummary[lang] = stats.Requests
+	}
+	if languageInferred {
+		snap.SetMetricSourceByPrefix("lang_", core.MetricSourceInferred)
+		snap.Raw["language_usage_source"] = "inferred_from_model_names"
 	}
 	setUsedMetric(snap, "active_languages", float64(len(languageTotals)), "languages", "7d")
 	setUsedMetric(snap, "activity_providers", float64(len(providerTotals)), "providers", "7d")

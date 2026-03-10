@@ -63,6 +63,7 @@ func applyUsageResponse(usage *usageResponse, snap *core.UsageSnapshot, now time
 			Limit:  &limit,
 			Unit:   "%",
 			Window: window,
+			Source: core.MetricSourceProviderNative,
 		}
 	}
 

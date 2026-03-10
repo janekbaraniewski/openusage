@@ -122,8 +122,8 @@ func formatUsageDetail(m core.Metric) string {
 	} else if m.Used != nil && m.Limit != nil {
 		parts = append(parts, fmt.Sprintf("%.0f%% remaining", *m.Limit-*m.Used))
 	}
-	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
-		parts = append(parts, "["+m.Window+"]")
+	if tag := formatMetricMetaTag(m); tag != "" {
+		parts = append(parts, tag)
 	}
 	return strings.Join(parts, " ")
 }
@@ -140,10 +140,24 @@ func formatMetricDetail(m core.Metric) string {
 	case m.Remaining != nil:
 		parts = append(parts, fmt.Sprintf("%s %s remaining", formatNumber(*m.Remaining), m.Unit))
 	}
-	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
-		parts = append(parts, "["+m.Window+"]")
+	if tag := formatMetricMetaTag(m); tag != "" {
+		parts = append(parts, tag)
 	}
 	return strings.Join(parts, " ")
+}
+
+func formatMetricMetaTag(m core.Metric) string {
+	var parts []string
+	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
+		parts = append(parts, m.Window)
+	}
+	if label := core.MetricSourceLabel(m.Source); label != "" && label != "native" {
+		parts = append(parts, label)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, " · ") + "]"
 }
 
 func formatNumber(n float64) string {

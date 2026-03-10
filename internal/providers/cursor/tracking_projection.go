@@ -51,6 +51,7 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 	p.readScoredCommits(ctx, db, snap)
 	p.readDeletedFiles(ctx, db, snap)
 	p.readTrackedFileContent(ctx, db, snap)
+	snap.SetMissingMetricSource(core.MetricSourceProviderNative)
 	return nil
 }
 

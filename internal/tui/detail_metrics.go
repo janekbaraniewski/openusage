@@ -379,8 +379,8 @@ func formatMetricValue(m core.Metric) string {
 		value = fmt.Sprintf("%s %s remaining", formatNumber(*m.Remaining), m.Unit)
 	}
 
-	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
-		value += " " + dimStyle.Render("["+m.Window+"]")
+	if tag := formatMetricMetaTag(m); tag != "" {
+		value += " " + dimStyle.Render(tag)
 	}
 	return value
 }

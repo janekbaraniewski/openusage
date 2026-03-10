@@ -48,6 +48,10 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 		}
 		return m[key]
 	}
+	setEstimatedMetric := func(key string, value float64, unit, window string) {
+		setValueMetric(snap, key, value, unit, window)
+		snap.SetMetricSource(key, core.MetricSourceEstimated)
+	}
 
 	modelAgg := make(map[string]*tokenAgg)
 	sourceAgg := make(map[string]*tokenAgg)
@@ -187,9 +191,9 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 	var topModels []modelTotal
 	for model, totals := range modelAgg {
 		modelKey := sanitizeMetricPart(model)
-		setValueMetric(snap, "model_"+modelKey+"_input_tokens", totals.input, "tokens", "all-time")
-		setValueMetric(snap, "model_"+modelKey+"_output_tokens", totals.output, "tokens", "all-time")
-		setValueMetric(snap, "model_"+modelKey+"_total_tokens", totals.input+totals.output, "tokens", "all-time")
+		setEstimatedMetric("model_"+modelKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setEstimatedMetric("model_"+modelKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setEstimatedMetric("model_"+modelKey+"_total_tokens", totals.input+totals.output, "tokens", "all-time")
 
 		rec := core.ModelUsageRecord{
 			RawModelID:   model,
@@ -222,17 +226,17 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 
 	for sourceKey, totals := range sourceAgg {
 		totalTokens := totals.input + totals.output
-		setValueMetric(snap, "client_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
-		setValueMetric(snap, "client_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
-		setValueMetric(snap, "client_"+sourceKey+"_total_tokens", totalTokens, "tokens", "all-time")
-		setValueMetric(snap, "client_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
+		setEstimatedMetric("client_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setEstimatedMetric("client_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setEstimatedMetric("client_"+sourceKey+"_total_tokens", totalTokens, "tokens", "all-time")
+		setEstimatedMetric("client_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
 		if sessions := sessionsBySource[sourceKey]; sessions > 0 {
-			setValueMetric(snap, "client_"+sourceKey+"_sessions", sessions, "sessions", "all-time")
+			setEstimatedMetric("client_"+sourceKey+"_sessions", sessions, "sessions", "all-time")
 		}
 
-		setValueMetric(snap, "provider_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
-		setValueMetric(snap, "provider_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
-		setValueMetric(snap, "provider_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
+		setEstimatedMetric("provider_"+sourceKey+"_input_tokens", totals.input, "tokens", "all-time")
+		setEstimatedMetric("provider_"+sourceKey+"_output_tokens", totals.output, "tokens", "all-time")
+		setEstimatedMetric("provider_"+sourceKey+"_requests", totals.requests, "requests", "all-time")
 	}
 
 	for sourceKey, byDay := range sourceDailyTokens {
@@ -261,16 +265,16 @@ func populateEstimatedTokenUsageFromDB(ctx context.Context, db *sql.DB, snap *co
 	}
 
 	if tokensToday > 0 {
-		setValueMetric(snap, "tokens_today", tokensToday, "tokens", "today")
+		setEstimatedMetric("tokens_today", tokensToday, "tokens", "today")
 	}
 	if tokens5h > 0 {
-		setValueMetric(snap, "tokens_5h", tokens5h, "tokens", "5h")
+		setEstimatedMetric("tokens_5h", tokens5h, "tokens", "5h")
 	}
 	if tokens1d > 0 {
-		setValueMetric(snap, "tokens_1d", tokens1d, "tokens", "1d")
+		setEstimatedMetric("tokens_1d", tokens1d, "tokens", "1d")
 	}
 	if tokens7d > 0 {
-		setValueMetric(snap, "7d_tokens", tokens7d, "tokens", "7d")
+		setEstimatedMetric("7d_tokens", tokens7d, "tokens", "7d")
 	}
 
 	snap.SetAttribute("token_estimation", "chars_div_4")

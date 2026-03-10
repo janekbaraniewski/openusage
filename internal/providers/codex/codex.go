@@ -267,6 +267,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.applyCursorCompatibilityMetrics(&snap)
+	annotateCodexMetricSources(&snap)
 	p.applyRateLimitStatus(&snap)
 
 	switch {
@@ -279,6 +280,40 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	return snap, nil
+}
+
+func annotateCodexMetricSources(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	for _, key := range []string{
+		"plan_percent_used",
+		"plan_auto_percent_used",
+		"plan_api_percent_used",
+		"credit_balance",
+		"context_window",
+		"rate_limit_primary",
+		"rate_limit_secondary",
+	} {
+		snap.SetMetricSource(key, core.MetricSourceProviderNative)
+	}
+	snap.SetMissingMetricSource(core.MetricSourceLocalObserved)
+
+	codeStatsSource := strings.TrimSpace(snap.Raw["code_stats_source"])
+	if codeStatsSource == "" {
+		return
+	}
+	for _, key := range []string{
+		"composer_lines_added",
+		"composer_lines_removed",
+		"composer_files_changed",
+		"scored_commits",
+		"ai_code_percentage",
+		"ai_tracked_files",
+		"ai_deleted_files",
+	} {
+		snap.SetMetricSource(key, codeStatsSource)
+	}
 }
 
 func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {

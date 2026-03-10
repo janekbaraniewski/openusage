@@ -110,6 +110,7 @@ func setUsedMetric(snap *core.UsageSnapshot, key string, value float64, unit, wi
 		Used:   &v,
 		Unit:   unit,
 		Window: window,
+		Source: core.MetricSourceLocalObserved,
 	}
 }
 

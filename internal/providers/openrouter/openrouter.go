@@ -284,6 +284,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["generation_error"] = err.Error()
 	}
 	enrichDashboardRepresentations(&snap)
+	snap.SetMissingMetricSource(core.MetricSourceProviderNative)
 
 	return snap, nil
 }
