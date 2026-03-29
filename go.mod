@@ -10,7 +10,7 @@ require (
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.49.0
-	golang.org/x/mod v0.33.0
+	golang.org/x/mod v0.34.0
 )
 
 require (
