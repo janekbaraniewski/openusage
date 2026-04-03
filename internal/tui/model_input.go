@@ -11,13 +11,7 @@ import (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.animFrame++
-		interval := m.nextTickInterval()
-		if interval == 0 {
-			m.tickRunning = false
-			return m, nil
-		}
-		return m, scheduleTickCmd(interval)
+		return m.handleTickMsg(msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -40,52 +34,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case daemonInstallResultMsg:
-		m.daemon.installing = false
-		if msg.err != nil {
-			m.daemon.status = DaemonError
-			m.daemon.message = msg.err.Error()
-		} else {
-			m.daemon.installDone = true
-			m.daemon.status = DaemonStarting
-		}
-		return m, nil
+		return m.handleDaemonInstallResultMsg(msg)
 
 	case SnapshotsMsg:
-		msgWindow := msg.TimeWindow
-		if msgWindow == "" {
-			msgWindow = core.TimeWindow30d
-		}
-		if msgWindow != m.timeWindow {
-			return m, nil
-		}
-		if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID {
-			return m, nil
-		}
-		if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {
-			return m, nil
-		}
-		m.snapshots = msg.Snapshots
-		m.refreshing = false
-		m.lastDataUpdate = time.Now()
-		m.invalidateRenderCaches()
-		if msg.RequestID > m.lastSnapshotRequestID {
-			m.lastSnapshotRequestID = msg.RequestID
-		}
-		if len(msg.Snapshots) > 0 || snapshotsReady(msg.Snapshots) {
-			m.hasData = true
-			m.daemon.status = DaemonRunning
-		}
-		for id, snap := range m.snapshots {
-			info := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
-			if info.reason != "" {
-				snap.EnsureMaps()
-				snap.Diagnostics["display_branch"] = info.reason
-				m.snapshots[id] = snap
-			}
-		}
-		m.ensureSnapshotProvidersKnown()
-		m.rebuildSortedIDs()
-		return m, m.restartTickIfNeeded()
+		return m.handleSnapshotsMsg(msg)
 
 	case dashboardPrefsPersistedMsg:
 		if msg.err != nil {
@@ -136,45 +88,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case validateKeyResultMsg:
-		if msg.Valid {
-			m.settings.apiKeyStatus = "valid ✓ — saving..."
-			return m, m.saveCredentialCmd(msg.AccountID, m.settings.apiKeyInput)
-		}
-		m.settings.apiKeyStatus = "invalid ✗"
-		if msg.Error != "" {
-			errMsg := msg.Error
-			if len(errMsg) > 40 {
-				errMsg = errMsg[:37] + "..."
-			}
-			m.settings.apiKeyStatus = "invalid: " + errMsg
-		}
-		return m, nil
+		return m.handleValidateKeyResultMsg(msg)
 
 	case credentialSavedMsg:
-		if msg.Err != nil {
-			m.settings.apiKeyStatus = "save failed"
-		} else {
-			m.settings.apiKeyStatus = "saved ✓"
-			apiKey := m.settings.apiKeyInput
-			m.settings.apiKeyEditing = false
-			m.settings.apiKeyInput = ""
-			if m.onAddAccount != nil {
-				providerID := m.accountProviders[msg.AccountID]
-				acct := core.AccountConfig{
-					ID:       msg.AccountID,
-					Provider: providerID,
-					Auth:     "api_key",
-					Token:    apiKey,
-				}
-				m.onAddAccount(acct)
-			}
-			if m.providerOrderIndex(msg.AccountID) < 0 {
-				m.providerOrder = append(m.providerOrder, msg.AccountID)
-				m.providerEnabled[msg.AccountID] = true
-			}
-			m.refreshing = true
-		}
-		return m, nil
+		return m.handleCredentialSavedMsg(msg)
 
 	case credentialDeletedMsg:
 		if msg.Err != nil {
@@ -185,17 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case integrationInstallResultMsg:
-		m.settings.integrationStatus = msg.Statuses
-		if msg.Err != nil {
-			errMsg := msg.Err.Error()
-			if len(errMsg) > 80 {
-				errMsg = errMsg[:77] + "..."
-			}
-			m.settings.status = "integration install failed: " + errMsg
-		} else {
-			m.settings.status = "integration installed"
-		}
-		return m, nil
+		return m.handleIntegrationInstallResultMsg(msg)
 
 	case tea.KeyMsg:
 		m.lastInteraction = time.Now()
@@ -211,6 +118,123 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.restartTickIfNeeded()
 		mdl, mouseCmd := m.handleMouse(msg)
 		return mdl, tea.Batch(cmd, mouseCmd)
+	}
+	return m, nil
+}
+
+func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
+	m.animFrame++
+	interval := m.nextTickInterval()
+	if interval == 0 {
+		m.tickRunning = false
+		return m, nil
+	}
+	return m, scheduleTickCmd(interval)
+}
+
+func (m Model) handleDaemonInstallResultMsg(msg daemonInstallResultMsg) (tea.Model, tea.Cmd) {
+	m.daemon.installing = false
+	if msg.err != nil {
+		m.daemon.status = DaemonError
+		m.daemon.message = msg.err.Error()
+	} else {
+		m.daemon.installDone = true
+		m.daemon.status = DaemonStarting
+	}
+	return m, nil
+}
+
+func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
+	msgWindow := msg.TimeWindow
+	if msgWindow == "" {
+		msgWindow = core.TimeWindow30d
+	}
+	if msgWindow != m.timeWindow {
+		return m, nil
+	}
+	if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID {
+		return m, nil
+	}
+	if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {
+		return m, nil
+	}
+	m.snapshots = msg.Snapshots
+	m.refreshing = false
+	m.lastDataUpdate = time.Now()
+	m.invalidateRenderCaches()
+	if msg.RequestID > m.lastSnapshotRequestID {
+		m.lastSnapshotRequestID = msg.RequestID
+	}
+	if len(msg.Snapshots) > 0 || snapshotsReady(msg.Snapshots) {
+		m.hasData = true
+		m.daemon.status = DaemonRunning
+	}
+	for id, snap := range m.snapshots {
+		info := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID))
+		if info.reason != "" {
+			snap.EnsureMaps()
+			snap.Diagnostics["display_branch"] = info.reason
+			m.snapshots[id] = snap
+		}
+	}
+	m.ensureSnapshotProvidersKnown()
+	m.rebuildSortedIDs()
+	return m, m.restartTickIfNeeded()
+}
+
+func (m Model) handleValidateKeyResultMsg(msg validateKeyResultMsg) (tea.Model, tea.Cmd) {
+	if msg.Valid {
+		m.settings.apiKeyStatus = "valid ✓ — saving..."
+		return m, m.saveCredentialCmd(msg.AccountID, m.settings.apiKeyInput)
+	}
+	m.settings.apiKeyStatus = "invalid ✗"
+	if msg.Error != "" {
+		errMsg := msg.Error
+		if len(errMsg) > 40 {
+			errMsg = errMsg[:37] + "..."
+		}
+		m.settings.apiKeyStatus = "invalid: " + errMsg
+	}
+	return m, nil
+}
+
+func (m Model) handleCredentialSavedMsg(msg credentialSavedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.settings.apiKeyStatus = "save failed"
+	} else {
+		m.settings.apiKeyStatus = "saved ✓"
+		apiKey := m.settings.apiKeyInput
+		m.settings.apiKeyEditing = false
+		m.settings.apiKeyInput = ""
+		if m.onAddAccount != nil {
+			providerID := m.accountProviders[msg.AccountID]
+			acct := core.AccountConfig{
+				ID:       msg.AccountID,
+				Provider: providerID,
+				Auth:     "api_key",
+				Token:    apiKey,
+			}
+			m.onAddAccount(acct)
+		}
+		if m.providerOrderIndex(msg.AccountID) < 0 {
+			m.providerOrder = append(m.providerOrder, msg.AccountID)
+			m.providerEnabled[msg.AccountID] = true
+		}
+		m.refreshing = true
+	}
+	return m, nil
+}
+
+func (m Model) handleIntegrationInstallResultMsg(msg integrationInstallResultMsg) (tea.Model, tea.Cmd) {
+	m.settings.integrationStatus = msg.Statuses
+	if msg.Err != nil {
+		errMsg := msg.Err.Error()
+		if len(errMsg) > 80 {
+			errMsg = errMsg[:77] + "..."
+		}
+		m.settings.status = "integration install failed: " + errMsg
+	} else {
+		m.settings.status = "integration installed"
 	}
 	return m, nil
 }
