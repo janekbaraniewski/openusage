@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -229,6 +230,7 @@ func StartBroadcaster(
 			return
 		}
 
+		var lastFingerprint string
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -238,12 +240,41 @@ func StartBroadcaster(
 			case <-ticker.C:
 				frame := rt.ReadWithFallback(ctx)
 				emitState()
-				if len(frame.Snapshots) > 0 {
-					handler(frame)
+				if len(frame.Snapshots) == 0 {
+					continue
 				}
+				fp := snapshotFingerprint(frame.Snapshots)
+				if fp == lastFingerprint {
+					continue
+				}
+				lastFingerprint = fp
+				handler(frame)
 			}
 		}
 	}()
+}
+
+// snapshotFingerprint builds a lightweight fingerprint from snapshot keys,
+// timestamps, and metric counts so the broadcaster can skip sending unchanged
+// frames. We include metric/model/series counts to detect telemetry-derived
+// changes that don't alter the root limit_snapshot timestamp.
+func snapshotFingerprint(snaps map[string]core.UsageSnapshot) string {
+	if len(snaps) == 0 {
+		return ""
+	}
+	keys := core.SortedStringKeys(snaps)
+	var b strings.Builder
+	for _, k := range keys {
+		snap := snaps[k]
+		b.WriteString(k)
+		b.WriteByte(':')
+		b.WriteString(snap.Timestamp.UTC().Format(time.RFC3339Nano))
+		fmt.Fprintf(&b, ":%d:%d:%d:%d",
+			len(snap.Metrics), len(snap.ModelUsage),
+			len(snap.DailySeries), len(snap.Raw))
+		b.WriteByte(',')
+	}
+	return b.String()
 }
 
 func warmUp(ctx context.Context, rt *ViewRuntime, handler SnapshotHandler, emitState func()) (cancelled bool) {
