@@ -396,9 +396,6 @@ func queryCodeStatsAgg(ctx context.Context, db *sql.DB, filter usageFilter) (tel
 func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryDayPoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	dailyTimeFilter := ""
-	if filter.TimeWindowHours <= 0 {
-		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
-	}
 	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			date(occurred_at) AS day,
@@ -440,9 +437,6 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, dimension string) (map[string][]core.TimePoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	dailyTimeFilter := ""
-	if filter.TimeWindowHours <= 0 {
-		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
-	}
 	var query string
 
 	switch dimension {
@@ -534,9 +528,6 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter) (map[string][]core.TimePoint, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
 	dailyTimeFilter := ""
-	if filter.TimeWindowHours <= 0 {
-		dailyTimeFilter = "\n\t\t\t  AND occurred_at >= datetime('now', '-30 day')"
-	}
 	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			date(occurred_at) AS day,
