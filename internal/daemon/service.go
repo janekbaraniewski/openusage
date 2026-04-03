@@ -143,7 +143,7 @@ func UninstallService(socketPath string) error {
 	return manager.Uninstall()
 }
 
-func ServiceStatus(socketPath string, details bool) error {
+func ServiceStatus(ctx context.Context, socketPath string, details bool) error {
 	socketPath = strings.TrimSpace(socketPath)
 	manager, err := NewServiceManager(socketPath)
 	if err != nil {
@@ -159,7 +159,7 @@ func ServiceStatus(socketPath string, details bool) error {
 	}
 
 	client := NewClient(socketPath)
-	healthCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	healthCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 	health, healthErr := client.HealthInfo(healthCtx)
 

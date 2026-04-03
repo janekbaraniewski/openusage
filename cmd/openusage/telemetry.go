@@ -282,7 +282,7 @@ func newDaemonStatusCommand() *cobra.Command {
 		Short: "Show telemetry daemon status",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socketPath, _ := cmd.Flags().GetString("socket-path")
-			return daemon.ServiceStatus(strings.TrimSpace(socketPath), details)
+			return daemon.ServiceStatus(cmd.Context(), strings.TrimSpace(socketPath), details)
 		},
 	}
 	cmd.Flags().BoolVar(&details, "details", false, "include verbose startup diagnostics")

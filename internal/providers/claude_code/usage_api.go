@@ -1,6 +1,7 @@
 package claude_code
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha1"
@@ -173,10 +174,10 @@ func decryptChromiumCookie(encrypted []byte, key []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-func fetchUsageAPI(orgUUID string, cookies map[string]string) (*usageResponse, error) {
+func fetchUsageAPI(ctx context.Context, orgUUID string, cookies map[string]string) (*usageResponse, error) {
 	url := fmt.Sprintf("https://claude.ai/api/organizations/%s/usage", orgUUID)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

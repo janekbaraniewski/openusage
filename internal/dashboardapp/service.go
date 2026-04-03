@@ -58,11 +58,7 @@ func (s *Service) ValidateAPIKey(accountID, providerID, apiKey string) (bool, st
 		return false, "unknown provider"
 	}
 
-	parent := context.Background()
-	if s != nil && s.ctx != nil {
-		parent = s.ctx
-	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 
 	snap, err := provider.Fetch(ctx, core.AccountConfig{

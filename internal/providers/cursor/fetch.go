@@ -49,6 +49,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	apiCh := make(chan apiResult, 1)
 	if token != "" {
 		go func() {
+			apiCtx, apiCancel := context.WithTimeout(ctx, 10*time.Second)
+			defer apiCancel()
 			apiSnap := core.UsageSnapshot{
 				AccountID:   acct.ID,
 				Metrics:     make(map[string]core.Metric),
@@ -56,7 +58,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 				Raw:         make(map[string]string),
 				DailySeries: make(map[string][]core.TimePoint),
 			}
-			err := p.fetchFromAPI(ctx, token, &apiSnap)
+			err := p.fetchFromAPI(apiCtx, token, &apiSnap)
 			apiCh <- apiResult{snap: &apiSnap, err: err}
 		}()
 	} else {

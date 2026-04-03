@@ -333,7 +333,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	if orgUUID, ok := snap.Raw["organization_uuid"]; ok && orgUUID != "" {
-		if err := p.readUsageAPI(orgUUID, &snap); err != nil {
+		if err := p.readUsageAPI(ctx, orgUUID, &snap); err != nil {
 			snap.Raw["usage_api_error"] = err.Error()
 		} else {
 			hasData = true
@@ -352,7 +352,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
-func (p *Provider) readUsageAPI(orgUUID string, snap *core.UsageSnapshot) error {
+func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.UsageSnapshot) error {
 	cookies, err := getClaudeSessionCookies()
 	if err != nil {
 		if cached := p.getCachedUsage(); cached != nil {
@@ -363,7 +363,7 @@ func (p *Provider) readUsageAPI(orgUUID string, snap *core.UsageSnapshot) error 
 		return fmt.Errorf("cookie extraction: %w", err)
 	}
 
-	usage, err := fetchUsageAPI(orgUUID, cookies)
+	usage, err := fetchUsageAPI(ctx, orgUUID, cookies)
 	if err != nil {
 		if cached := p.getCachedUsage(); cached != nil {
 			applyUsageResponse(cached, snap, time.Now())
