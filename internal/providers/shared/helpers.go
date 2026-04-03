@@ -2,7 +2,9 @@ package shared
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -77,6 +79,44 @@ func ResolveBaseURL(acct core.AccountConfig, defaultURL string) string {
 		return acct.BaseURL
 	}
 	return defaultURL
+}
+
+// FetchJSON performs an authenticated GET request and decodes the JSON response
+// body into out. Returns the HTTP status code and response headers on success.
+// For non-200 responses, returns an error with the status code.
+// If client is nil a default client with a 30-second timeout is used.
+func FetchJSON(ctx context.Context, url, apiKey string, out any, client *http.Client) (int, http.Header, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, resp.Header, fmt.Errorf("reading body: %w", err)
+	}
+
+	if out != nil && len(body) > 0 {
+		if err := json.Unmarshal(body, out); err != nil {
+			return resp.StatusCode, resp.Header, fmt.Errorf("parsing response: %w", err)
+		}
+	}
+
+	return resp.StatusCode, resp.Header, nil
 }
 
 // ProbeRateLimits performs a GET request to the given URL with Bearer auth,

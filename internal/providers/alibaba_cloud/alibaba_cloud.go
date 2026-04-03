@@ -2,9 +2,7 @@ package alibaba_cloud
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -56,12 +54,6 @@ type billingPeriod struct {
 	End   string `json:"end"`
 }
 
-type errorResponse struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
-}
-
 type Provider struct {
 	providerbase.Base
 }
@@ -101,49 +93,48 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
 	// Fetch quotas data
-	quotasResp, statusCode, err := fetchQuotas(ctx, baseURL, apiKey, p.Client())
+	var quotasResp quotasResponse
+	statusCode, _, err := shared.FetchJSON(ctx, baseURL+"/quotas", apiKey, &quotasResp, p.Client())
 	if err != nil {
-		return core.UsageSnapshot{}, fmt.Errorf("alibaba_cloud: fetching quotas: %w", err)
+		// FetchJSON returns an error for non-200 status codes; handle gracefully.
+		switch {
+		case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+			snap.Status = core.StatusAuth
+			snap.Message = "Invalid or expired API key"
+			return snap, nil
+		case statusCode == http.StatusTooManyRequests:
+			snap.Status = core.StatusLimited
+			snap.Message = "Rate limited (HTTP 429)"
+			return snap, nil
+		case statusCode > 0 && statusCode != http.StatusOK:
+			snap.Status = core.StatusError
+			snap.Message = fmt.Sprintf("HTTP %d error", statusCode)
+			return snap, nil
+		default:
+			// Network errors (statusCode==0) or parse errors (statusCode==200)
+			return core.UsageSnapshot{}, fmt.Errorf("alibaba_cloud: fetching quotas: %w", err)
+		}
 	}
 
-	// Handle HTTP error codes
-	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-		snap.Status = core.StatusAuth
-		snap.Message = "Invalid or expired API key"
-		return snap, nil
+	// Check for API-level errors in response body
+	if quotasResp.Code != "" && quotasResp.Code != "Success" {
+		return core.UsageSnapshot{}, fmt.Errorf("alibaba_cloud: API error: %s - %s", quotasResp.Code, quotasResp.Message)
 	}
 
-	if statusCode == http.StatusTooManyRequests {
-		snap.Status = core.StatusLimited
-		snap.Message = "Rate limited (HTTP 429)"
-		return snap, nil
-	}
-
-	if statusCode != http.StatusOK {
-		snap.Status = core.StatusError
-		snap.Message = fmt.Sprintf("HTTP %d error", statusCode)
-		return snap, nil
-	}
-
-	// Process the quotas response
-	if quotasResp == nil {
-		snap.Status = core.StatusOK
-		snap.Message = "No quota data available"
-		return snap, nil
-	}
+	quotasData := &quotasResp.Data
 
 	// Parse rate limits
-	if quotasResp.RateLimit != nil {
-		if quotasResp.RateLimit.RPM != nil {
+	if quotasData.RateLimit != nil {
+		if quotasData.RateLimit.RPM != nil {
 			snap.Metrics["rpm"] = core.Metric{
-				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.RPM),
+				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasData.RateLimit.RPM),
 				Unit:   "requests",
 				Window: "1m",
 			}
 		}
-		if quotasResp.RateLimit.TPM != nil {
+		if quotasData.RateLimit.TPM != nil {
 			snap.Metrics["tpm"] = core.Metric{
-				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasResp.RateLimit.TPM),
+				Limit:  func(v int) *float64 { f := float64(v); return &f }(*quotasData.RateLimit.TPM),
 				Unit:   "tokens",
 				Window: "1m",
 			}
@@ -151,67 +142,67 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	// Parse credits and balance
-	if quotasResp.Credits != nil {
+	if quotasData.Credits != nil {
 		snap.Metrics["credit_balance"] = core.Metric{
-			Limit:  quotasResp.Credits,
+			Limit:  quotasData.Credits,
 			Unit:   "USD",
 			Window: "current",
 		}
 	}
 
-	if quotasResp.Available != nil {
+	if quotasData.Available != nil {
 		snap.Metrics["available_balance"] = core.Metric{
-			Limit:  quotasResp.Available,
+			Limit:  quotasData.Available,
 			Unit:   "USD",
 			Window: "current",
 		}
 	}
 
-	if quotasResp.SpendLimit != nil {
+	if quotasData.SpendLimit != nil {
 		snap.Metrics["spend_limit"] = core.Metric{
-			Limit:  quotasResp.SpendLimit,
+			Limit:  quotasData.SpendLimit,
 			Unit:   "USD",
 			Window: "current",
 		}
 	}
 
 	// Parse spending
-	if quotasResp.DailySpend != nil {
+	if quotasData.DailySpend != nil {
 		snap.Metrics["daily_spend"] = core.Metric{
-			Used:   quotasResp.DailySpend,
+			Used:   quotasData.DailySpend,
 			Unit:   "USD",
 			Window: "1d",
 		}
 	}
 
-	if quotasResp.MonthlySpend != nil {
+	if quotasData.MonthlySpend != nil {
 		snap.Metrics["monthly_spend"] = core.Metric{
-			Used:   quotasResp.MonthlySpend,
+			Used:   quotasData.MonthlySpend,
 			Unit:   "USD",
 			Window: "30d",
 		}
 	}
 
 	// Parse usage counts
-	if quotasResp.TokensUsed != nil {
+	if quotasData.TokensUsed != nil {
 		snap.Metrics["tokens_used"] = core.Metric{
-			Used:   quotasResp.TokensUsed,
+			Used:   quotasData.TokensUsed,
 			Unit:   "tokens",
 			Window: "current",
 		}
 	}
 
-	if quotasResp.RequestsUsed != nil {
+	if quotasData.RequestsUsed != nil {
 		snap.Metrics["requests_used"] = core.Metric{
-			Used:   quotasResp.RequestsUsed,
+			Used:   quotasData.RequestsUsed,
 			Unit:   "requests",
 			Window: "current",
 		}
 	}
 
 	// Parse per-model quotas
-	if quotasResp.Models != nil {
-		for modelName, modelQuota := range quotasResp.Models {
+	if quotasData.Models != nil {
+		for modelName, modelQuota := range quotasData.Models {
 			if modelQuota.Limit != nil && modelQuota.Used != nil {
 				pctVal := (*modelQuota.Used / *modelQuota.Limit) * 100
 				snap.Metrics[fmt.Sprintf("model_%s_usage_pct", modelName)] = core.Metric{
@@ -230,58 +221,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	// Set billing cycle dates as attributes
-	if quotasResp.BillingPeriod != nil {
-		snap.SetAttribute("billing_cycle_start", quotasResp.BillingPeriod.Start)
-		snap.SetAttribute("billing_cycle_end", quotasResp.BillingPeriod.End)
+	if quotasData.BillingPeriod != nil {
+		snap.SetAttribute("billing_cycle_start", quotasData.BillingPeriod.Start)
+		snap.SetAttribute("billing_cycle_end", quotasData.BillingPeriod.End)
 	}
 
 	snap.Status = core.StatusOK
 	snap.Message = "OK"
 
 	return snap, nil
-}
-
-func fetchQuotas(ctx context.Context, baseURL, apiKey string, client *http.Client) (*quotasData, int, error) {
-	url := baseURL + "/quotas"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
-	req.Header.Set("User-Agent", "openusage/1.0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("reading response: %w", err)
-	}
-
-	// Handle rate limiting early
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, resp.StatusCode, nil
-	}
-
-	// Handle auth errors
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, resp.StatusCode, nil
-	}
-
-	// Parse response
-	var quotasResp quotasResponse
-	if err := json.Unmarshal(bodyBytes, &quotasResp); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("parsing response: %w", err)
-	}
-
-	// Check for API errors in response
-	if quotasResp.Code != "" && quotasResp.Code != "Success" {
-		return nil, resp.StatusCode, fmt.Errorf("API error: %s - %s", quotasResp.Code, quotasResp.Message)
-	}
-
-	return &quotasResp.Data, resp.StatusCode, nil
 }
