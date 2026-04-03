@@ -54,7 +54,10 @@ func (c *Client) HealthInfo(ctx context.Context) (HealthResponse, error) {
 	if resp.StatusCode != http.StatusOK {
 		return HealthResponse{}, fmt.Errorf("daemon health status: %s", resp.Status)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return HealthResponse{}, fmt.Errorf("daemon: reading health response body: %w", err)
+	}
 	if len(body) == 0 {
 		return HealthResponse{Status: "ok"}, nil
 	}
@@ -93,9 +96,14 @@ func (c *Client) ReadModel(
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("daemon read-model failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: reading read-model response body: %w", err)
 	}
 
 	var out ReadModelResponse
@@ -131,9 +139,14 @@ func (c *Client) IngestHook(
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
 		return HookResponse{}, fmt.Errorf("daemon hook ingest failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return HookResponse{}, fmt.Errorf("daemon: reading hook response body: %w", err)
 	}
 
 	var out HookResponse
