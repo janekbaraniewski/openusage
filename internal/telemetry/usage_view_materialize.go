@@ -4,10 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
+
+// materializedTableName is the fixed temp table name used for materialized
+// deduped usage queries. Defined as a constant so it cannot be changed at
+// runtime, eliminating SQL injection risk from table-name interpolation.
+const materializedTableName = "_deduped_tmp"
+
+// validTableNameRE matches only lowercase ASCII letters and underscores.
+var validTableNameRE = regexp.MustCompile(`^[a-z_]+$`)
+
+// allowedMaterializedTables is the set of table names that may be interpolated
+// into SQL queries. Any name not in this set is rejected.
+var allowedMaterializedTables = map[string]bool{
+	materializedTableName: true,
+}
+
+// validateMaterializedTable ensures name is safe for SQL interpolation.
+// It must match the allowed character pattern and appear in the allowlist.
+func validateMaterializedTable(name string) error {
+	if !validTableNameRE.MatchString(name) {
+		return fmt.Errorf("invalid materialized table name %q: must match [a-z_]+", name)
+	}
+	if !allowedMaterializedTables[name] {
+		return fmt.Errorf("disallowed materialized table name %q", name)
+	}
+	return nil
+}
 
 func newTelemetryUsageAgg() *telemetryUsageAgg {
 	return &telemetryUsageAgg{
@@ -21,7 +48,11 @@ func newTelemetryUsageAgg() *telemetryUsageAgg {
 
 func materializeUsageFilter(ctx context.Context, db *sql.DB, filter usageFilter) (usageFilter, func(), error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	tempTable := "_deduped_tmp"
+	tempTable := materializedTableName
+
+	if err := validateMaterializedTable(tempTable); err != nil {
+		return usageFilter{}, nil, fmt.Errorf("materialize: %w", err)
+	}
 
 	matStart := time.Now()
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTable))
