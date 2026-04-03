@@ -13,8 +13,23 @@ import (
 
 type tickMsg time.Time
 
+// Adaptive tick intervals to reduce CPU/power when idle.
+const (
+	tickFast   = 150 * time.Millisecond // loading: spinner/shimmer animations
+	tickNormal = 500 * time.Millisecond // recently active: smooth animations
+	tickSlow   = 2 * time.Second        // data recently changed: minimal animation
+	// When fully idle, ticking stops entirely (no CPU wake-ups).
+
+	idleAfterInteraction = 5 * time.Second  // fast→normal→slow after no user input
+	idleAfterData        = 15 * time.Second // slow→paused after no data change
+)
+
 func tickCmd() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+	return scheduleTickCmd(tickFast)
+}
+
+func scheduleTickCmd(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -158,6 +173,10 @@ type Model struct {
 	refreshing bool
 	hasData    bool
 
+	tickRunning     bool      // true while the tick chain is active
+	lastInteraction time.Time // last user keypress/mouse event
+	lastDataUpdate  time.Time // last SnapshotsMsg with new data
+
 	experimentalAnalytics bool // when false, only the Dashboard screen is available
 
 	daemon daemonState
@@ -200,6 +219,7 @@ func NewModel(
 		detailCache:           detailRenderCacheEntry{},
 		daemon:                daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
+		tickRunning:           true, // Init() starts the first tick chain
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
@@ -269,6 +289,40 @@ type integrationInstallResultMsg struct {
 }
 
 func (m Model) Init() tea.Cmd { return tickCmd() }
+
+// nextTickInterval determines the appropriate tick interval based on activity.
+// Returns 0 when the tick chain should stop (fully idle).
+func (m Model) nextTickInterval() time.Duration {
+	// Loading state: fast tick for spinner/shimmer animations.
+	if !m.hasData || m.refreshing {
+		return tickFast
+	}
+
+	now := time.Now()
+
+	// Recent user interaction: normal animation speed.
+	if !m.lastInteraction.IsZero() && now.Sub(m.lastInteraction) < idleAfterInteraction {
+		return tickNormal
+	}
+
+	// Data recently changed: slow tick for status indicators.
+	if !m.lastDataUpdate.IsZero() && now.Sub(m.lastDataUpdate) < idleAfterData {
+		return tickSlow
+	}
+
+	// Fully idle: stop ticking. The chain restarts on the next message.
+	return 0
+}
+
+// restartTickIfNeeded returns a tick command if the tick chain is not running.
+// Call this from message handlers that should wake the UI from idle.
+func (m *Model) restartTickIfNeeded() tea.Cmd {
+	if m.tickRunning {
+		return nil
+	}
+	m.tickRunning = true
+	return scheduleTickCmd(tickNormal)
+}
 
 func (m Model) selectedTileID(ids []string) string {
 	if len(ids) == 0 {

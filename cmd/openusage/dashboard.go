@@ -115,7 +115,7 @@ func runDashboard(cfg config.Config) {
 		return nil
 	})
 
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
 	dispatcher.bind(program)
 
 	go func() {

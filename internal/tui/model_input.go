@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -11,7 +12,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.animFrame++
-		return m, tickCmd()
+		interval := m.nextTickInterval()
+		if interval == 0 {
+			m.tickRunning = false
+			return m, nil
+		}
+		return m, scheduleTickCmd(interval)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -25,7 +31,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Status == DaemonRunning {
 			m.daemon.installing = false
 		}
-		return m, nil
+		return m, m.restartTickIfNeeded()
 
 	case AppUpdateMsg:
 		m.daemon.appUpdateCurrent = strings.TrimSpace(msg.CurrentVersion)
@@ -60,6 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snapshots = msg.Snapshots
 		m.refreshing = false
+		m.lastDataUpdate = time.Now()
 		m.invalidateRenderCaches()
 		if msg.RequestID > m.lastSnapshotRequestID {
 			m.lastSnapshotRequestID = msg.RequestID
@@ -78,7 +85,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureSnapshotProvidersKnown()
 		m.rebuildSortedIDs()
-		return m, nil
+		return m, m.restartTickIfNeeded()
 
 	case dashboardPrefsPersistedMsg:
 		if msg.err != nil {
@@ -191,12 +198,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		m.lastInteraction = time.Now()
+		cmd := m.restartTickIfNeeded()
 		if !m.hasData {
-			return m.handleSplashKey(msg)
+			mdl, keyCmd := m.handleSplashKey(msg)
+			return mdl, tea.Batch(cmd, keyCmd)
 		}
-		return m.handleKey(msg)
+		mdl, keyCmd := m.handleKey(msg)
+		return mdl, tea.Batch(cmd, keyCmd)
 	case tea.MouseMsg:
-		return m.handleMouse(msg)
+		m.lastInteraction = time.Now()
+		cmd := m.restartTickIfNeeded()
+		mdl, mouseCmd := m.handleMouse(msg)
+		return mdl, tea.Batch(cmd, mouseCmd)
 	}
 	return m, nil
 }
@@ -398,7 +412,6 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.cursor = idx
 	m.tileOffset = 0
-	m.invalidateDetailCache()
 	return m, nil
 }
 
@@ -425,14 +438,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeList
 			m.detailOffset = 0
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 			return m, nil
 		case "shift+tab":
 			m.screen = m.nextScreen(-1)
 			m.mode = modeList
 			m.detailOffset = 0
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 			return m, nil
 		case "t":
 			m.invalidateRenderCaches()
@@ -560,7 +571,6 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 			m.detailTab = 0
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "down", "j":
 		if m.cursor < len(ids)-1 {
@@ -568,22 +578,18 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 			m.detailTab = 0
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "pgdown", "ctrl+d":
 		if len(ids) > 0 {
 			m.cursor = clamp(m.cursor+pageStep, 0, len(ids)-1)
-			m.invalidateDetailCache()
 		}
 	case "pgup", "ctrl+u":
 		if len(ids) > 0 {
 			m.cursor = clamp(m.cursor-pageStep, 0, len(ids)-1)
-			m.invalidateDetailCache()
 		}
 	case "enter", "right", "l":
 		m.mode = modeDetail
 		m.detailOffset = 0
-		m.invalidateDetailCache()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
@@ -599,7 +605,6 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "left", "h", "backspace":
 		m.mode = modeList
-		m.invalidateDetailCache()
 	case "up", "k":
 		if m.detailOffset > 0 {
 			m.detailOffset--
@@ -614,16 +619,13 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detailTab > 0 {
 			m.detailTab--
 			m.detailOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "]":
 		m.detailTab++
 		m.detailOffset = 0
-		m.invalidateDetailCache()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.detailTab = int(msg.String()[0] - '1')
 		m.detailOffset = 0
-		m.invalidateDetailCache()
 	}
 	return m, nil
 }
@@ -634,13 +636,11 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
-		m.invalidateDetailCache()
 	case "esc":
 		m.filter.text = ""
 		m.filter.active = false
 		m.cursor = 0
 		m.tileOffset = 0
-		m.invalidateDetailCache()
 	case "backspace":
 		if len(m.filter.text) > 0 {
 			m.filter.text = m.filter.text[:len(m.filter.text)-1]
@@ -664,25 +664,21 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= cols {
 			m.cursor -= cols
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "down", "j":
 		if m.cursor+cols < len(ids) {
 			m.cursor += cols
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "left", "h":
 		if m.cursor > 0 {
 			m.cursor--
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "right", "l":
 		if m.cursor < len(ids)-1 {
 			m.cursor++
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "pgdown", "ctrl+d":
 		if scrollModeWidget {
@@ -710,7 +706,6 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.mode = modeDetail
 		m.detailOffset = 0
-		m.invalidateDetailCache()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
@@ -719,7 +714,6 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.text = ""
 			m.cursor = 0
 			m.tileOffset = 0
-			m.invalidateDetailCache()
 		}
 	case "r":
 		m = m.requestRefresh()

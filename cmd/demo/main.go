@@ -36,7 +36,7 @@ func main() {
 		accounts,
 		core.TimeWindow30d,
 	)
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
