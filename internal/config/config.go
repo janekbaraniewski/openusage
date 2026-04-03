@@ -174,15 +174,7 @@ func LoadFrom(path string) (Config, error) {
 		return DefaultConfig(), fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
-	if cfg.UI.RefreshIntervalSeconds <= 0 {
-		cfg.UI.RefreshIntervalSeconds = 30
-	}
-	if cfg.UI.WarnThreshold <= 0 {
-		cfg.UI.WarnThreshold = 0.20
-	}
-	if cfg.UI.CritThreshold <= 0 {
-		cfg.UI.CritThreshold = 0.05
-	}
+	cfg.UI = normalizeUIConfig(cfg.UI)
 	if cfg.Theme == "" {
 		cfg.Theme = DefaultConfig().Theme
 	}
@@ -198,17 +190,54 @@ func LoadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
+func normalizeUIConfig(in UIConfig) UIConfig {
+	defaults := DefaultConfig().UI
+
+	if in.RefreshIntervalSeconds <= 0 {
+		core.Tracef("config: refresh_interval_seconds=%d is invalid, using default %d",
+			in.RefreshIntervalSeconds, defaults.RefreshIntervalSeconds)
+		in.RefreshIntervalSeconds = defaults.RefreshIntervalSeconds
+	}
+
+	if in.WarnThreshold <= 0 {
+		core.Tracef("config: warn_threshold=%f is invalid, using default %f",
+			in.WarnThreshold, defaults.WarnThreshold)
+		in.WarnThreshold = defaults.WarnThreshold
+	} else if in.WarnThreshold > 1 {
+		core.Tracef("config: warn_threshold=%f exceeds 1.0, clamping to 1.0",
+			in.WarnThreshold)
+		in.WarnThreshold = 1.0
+	}
+
+	if in.CritThreshold <= 0 {
+		core.Tracef("config: crit_threshold=%f is invalid, using default %f",
+			in.CritThreshold, defaults.CritThreshold)
+		in.CritThreshold = defaults.CritThreshold
+	} else if in.CritThreshold > 1 {
+		core.Tracef("config: crit_threshold=%f exceeds 1.0, clamping to 1.0",
+			in.CritThreshold)
+		in.CritThreshold = 1.0
+	}
+
+	return in
+}
+
 func normalizeDataConfig(in DataConfig) DataConfig {
 	tw := core.ParseTimeWindow(in.TimeWindow)
 	retention := in.RetentionDays
 	if retention <= 0 {
+		core.Tracef("config: retention_days=%d is invalid, using default 30", retention)
 		retention = 30
 	}
 	if retention > 90 {
+		core.Tracef("config: retention_days=%d exceeds maximum 90, clamping to 90", retention)
 		retention = 90
 	}
 	if tw.Days() > retention {
-		tw = core.LargestWindowFitting(retention)
+		newTW := core.LargestWindowFitting(retention)
+		core.Tracef("config: time_window %q (%d days) exceeds retention_days=%d, reducing to %q",
+			tw, tw.Days(), retention, newTW)
+		tw = newTW
 	}
 	return DataConfig{
 		TimeWindow:    string(tw),
