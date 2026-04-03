@@ -588,7 +588,13 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 
 func dedupedUsageCTE(filter usageFilter) (string, []any) {
 	if filter.materializedTbl != "" {
-		return fmt.Sprintf(`WITH deduped_usage AS (SELECT * FROM %s) `, filter.materializedTbl), nil
+		if err := validateMaterializedTable(filter.materializedTbl); err != nil {
+			// Defensive: fall through to full CTE rather than interpolating
+			// an unvalidated table name into SQL.
+			core.Tracef("[dedupedUsageCTE] %v — falling back to full CTE", err)
+		} else {
+			return fmt.Sprintf(`WITH deduped_usage AS (SELECT * FROM %s) `, filter.materializedTbl), nil
+		}
 	}
 	where, args := usageWhereClause("e", filter)
 	cte := fmt.Sprintf(`

@@ -13,6 +13,42 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func TestValidateMaterializedTable(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "valid constant", input: "_deduped_tmp", wantErr: false},
+		{name: "empty string", input: "", wantErr: true},
+		{name: "SQL injection attempt", input: "t; DROP TABLE usage_events; --", wantErr: true},
+		{name: "uppercase letters", input: "_Deduped_Tmp", wantErr: true},
+		{name: "digits", input: "_deduped_tmp1", wantErr: true},
+		{name: "valid pattern but not in allowlist", input: "_other_table", wantErr: true},
+		{name: "spaces", input: "_deduped tmp", wantErr: true},
+		{name: "special characters", input: "_deduped$tmp", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMaterializedTable(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateMaterializedTable(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMaterializedTableNameConstant(t *testing.T) {
+	// Verify the constant is what we expect, so any future change is deliberate.
+	if materializedTableName != "_deduped_tmp" {
+		t.Errorf("materializedTableName = %q, want %q", materializedTableName, "_deduped_tmp")
+	}
+	// Verify the constant passes validation.
+	if err := validateMaterializedTable(materializedTableName); err != nil {
+		t.Errorf("materializedTableName failed validation: %v", err)
+	}
+}
+
 func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *testing.T) {
 	dbPath, store := openUsageViewTestStore(t)
 

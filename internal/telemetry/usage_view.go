@@ -299,6 +299,9 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	defer cleanup()
 
 	// Count from the materialized table.
+	if err := validateMaterializedTable(matFilter.materializedTbl); err != nil {
+		return nil, fmt.Errorf("loadUsageViewForFilter: %w", err)
+	}
 	countStart := time.Now()
 	countQuery := fmt.Sprintf(`
 		SELECT COALESCE(MAX(occurred_at), ''), COUNT(*)
