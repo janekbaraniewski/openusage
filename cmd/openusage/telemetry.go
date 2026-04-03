@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/detect"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
+	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 	"github.com/spf13/cobra"
 )
@@ -49,7 +51,16 @@ func newTelemetryHookCommand() *cobra.Command {
 		}, "\n"),
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			sourceName := args[0]
+			sourceName := strings.TrimSpace(args[0])
+			if _, ok := providers.TelemetrySourceBySystem(sourceName); !ok {
+				var known []string
+				for _, p := range providers.AllProviders() {
+					if src, ok := p.(interface{ System() string }); ok {
+						known = append(known, src.System())
+					}
+				}
+				return fmt.Errorf("unknown telemetry source %q; known sources: %s", sourceName, strings.Join(known, ", "))
+			}
 
 			payload, err := io.ReadAll(os.Stdin)
 			if err != nil {
@@ -157,6 +168,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 	runDaemon := func(_ *cobra.Command, _ []string) error {
 		cfgFile, loadErr := config.Load()
 		if loadErr != nil {
+			log.Printf("warning: failed to load config, using defaults: %v", loadErr)
 			cfgFile = config.DefaultConfig()
 		}
 
