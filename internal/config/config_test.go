@@ -139,6 +139,40 @@ func TestLoadFrom_ZeroThresholdsGetDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_ThresholdsAboveOneClamped(t *testing.T) {
+	cfg := loadConfigJSON(t, `{"ui":{"warn_threshold":1.5,"crit_threshold":2.0}}`)
+	if cfg.UI.WarnThreshold != 1.0 {
+		t.Errorf("warn = %f, want 1.0 (clamped from 1.5)", cfg.UI.WarnThreshold)
+	}
+	if cfg.UI.CritThreshold != 1.0 {
+		t.Errorf("crit = %f, want 1.0 (clamped from 2.0)", cfg.UI.CritThreshold)
+	}
+}
+
+func TestLoadFrom_NegativeThresholdsGetDefaults(t *testing.T) {
+	cfg := loadConfigJSON(t, `{"ui":{"warn_threshold":-0.1,"crit_threshold":-0.5}}`)
+	if cfg.UI.WarnThreshold != 0.20 {
+		t.Errorf("warn = %f, want 0.20 (default for negative)", cfg.UI.WarnThreshold)
+	}
+	if cfg.UI.CritThreshold != 0.05 {
+		t.Errorf("crit = %f, want 0.05 (default for negative)", cfg.UI.CritThreshold)
+	}
+}
+
+func TestLoadFrom_RetentionDaysExceedingMaxClamped(t *testing.T) {
+	cfg := loadConfigJSON(t, `{"data":{"retention_days":200}}`)
+	if cfg.Data.RetentionDays != 90 {
+		t.Errorf("retention_days = %d, want 90 (clamped from 200)", cfg.Data.RetentionDays)
+	}
+}
+
+func TestLoadFrom_NegativeRetentionDaysGetDefault(t *testing.T) {
+	cfg := loadConfigJSON(t, `{"data":{"retention_days":-5}}`)
+	if cfg.Data.RetentionDays != 30 {
+		t.Errorf("retention_days = %d, want 30 (default for negative)", cfg.Data.RetentionDays)
+	}
+}
+
 func TestSaveTo_CreatesFileAndDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "dir")
 	path := filepath.Join(dir, "settings.json")
