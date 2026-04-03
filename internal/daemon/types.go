@@ -82,9 +82,10 @@ func (c *readModelCache) get(cacheKey string) (map[string]core.UsageSnapshot, ti
 		c.mu.RUnlock()
 		return nil, time.Time{}, false
 	}
-	cloned := core.DeepCloneSnapshots(entry.snapshots)
+	// Return direct reference — snapshots are deep-cloned on set() and
+	// treated as immutable once cached. Consumers must not mutate.
 	c.mu.RUnlock()
-	return cloned, entry.updatedAt, true
+	return entry.snapshots, entry.updatedAt, true
 }
 
 func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSnapshot) {
@@ -107,10 +108,10 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 				delete(c.entries, k)
 			}
 		}
-		// If still over limit, remove oldest entries until at cap.
+		// If still over limit, find and remove oldest in a single pass.
 		for len(c.entries) > maxEntries {
 			oldestKey := ""
-			oldestTime := now
+			oldestTime := now.Add(time.Hour) // sentinel
 			for k, e := range c.entries {
 				if e.updatedAt.Before(oldestTime) {
 					oldestKey = k
