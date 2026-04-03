@@ -125,7 +125,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "rpm", "requests", "1m",
 		"x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset")
 
-	snap.Status = core.StatusOK
+	shared.FinalizeStatus(&snap)
 	snap.Message = fmt.Sprintf("auth OK; %d models available", int(modelCount))
 
 	return snap, nil

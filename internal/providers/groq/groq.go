@@ -66,8 +66,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	parsers.ApplyRateLimitGroup(resp.Header, &snap, "tpd", "tokens", "1d",
 		"x-ratelimit-limit-tokens-day", "x-ratelimit-remaining-tokens-day", "x-ratelimit-reset-tokens-day")
 
-	if snap.Status == "" {
-		snap.Status = core.StatusOK
+	shared.FinalizeStatus(&snap)
+	if snap.Status == core.StatusOK {
 		snap.Message = buildStatusMessage(snap)
 	}
 

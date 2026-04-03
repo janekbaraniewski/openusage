@@ -47,7 +47,11 @@ func getClaudeSessionCookies() (map[string]string, error) {
 		return nil, fmt.Errorf("getting encryption key: %w", err)
 	}
 
-	cookiesPath := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Claude", "Cookies")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolving home directory: %w", err)
+	}
+	cookiesPath := filepath.Join(home, "Library", "Application Support", "Claude", "Cookies")
 	if _, err := os.Stat(cookiesPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("Claude desktop Cookies DB not found: %s", cookiesPath)
 	}
