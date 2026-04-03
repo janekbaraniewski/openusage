@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -68,6 +69,11 @@ func SaveCredentialTo(path, accountID, apiKey string) error {
 		return fmt.Errorf("account ID is empty")
 	}
 
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return fmt.Errorf("api key is empty")
+	}
+
 	credMu.Lock()
 	defer credMu.Unlock()
 
@@ -118,6 +124,10 @@ func writeCredentials(path string, creds Credentials) error {
 
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing credentials: %w", err)
+	}
+	// Enforce permissions even if the file pre-existed with wrong mode.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("setting credentials permissions: %w", err)
 	}
 	return nil
 }

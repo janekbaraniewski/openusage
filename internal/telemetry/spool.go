@@ -251,9 +251,10 @@ func writeSpoolFile(path string, rec SpoolRecord) error {
 	data = append(data, '\n')
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("telemetry spool: write tmp file: %w", err)
 	}
+	defer os.Remove(tmpPath) // no-op if rename succeeded; cleans up on rename failure
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("telemetry spool: rename tmp file: %w", err)
 	}
