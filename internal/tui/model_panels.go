@@ -15,7 +15,7 @@ func (m Model) renderList(w, h int) string {
 			"",
 			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
+			labelStyle.Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
@@ -46,10 +46,10 @@ func (m Model) renderList(w, h int) string {
 	}
 
 	if scrollStart > 0 {
-		lines = append([]string{lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ " + fmt.Sprintf("%d more", scrollStart))}, lines...)
+		lines = append([]string{dimStyle.Render("  ▲ " + fmt.Sprintf("%d more", scrollStart))}, lines...)
 	}
 	if scrollEnd < len(ids) {
-		lines = append(lines, lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ "+fmt.Sprintf("%d more", len(ids)-scrollEnd)))
+		lines = append(lines, dimStyle.Render("  ▼ "+fmt.Sprintf("%d more", len(ids)-scrollEnd)))
 	}
 
 	content := strings.Join(lines, "\n")
@@ -192,14 +192,14 @@ func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) str
 	}
 
 	result := line1 + "\n" +
-		"   " + lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(summary) + miniGauge + "\n" +
-		"  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4))
+		"   " + textBoldStyle.Render(summary) + miniGauge + "\n" +
+		"  " + surface1Style.Render(strings.Repeat("─", w-4))
 
 	if !selected {
 		return result
 	}
 
-	indicator := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("┃")
+	indicator := accentBoldStyle.Render("┃")
 	lines := strings.Split(result, "\n")
 	for i, line := range lines {
 		if len(line) > 0 {
@@ -248,10 +248,9 @@ func (m Model) renderDetailPanel(w, h int) string {
 }
 
 func renderVerticalSep(h int) string {
-	style := lipgloss.NewStyle().Foreground(colorSurface1)
 	lines := make([]string, h)
 	for i := range lines {
-		lines[i] = style.Render("┃")
+		lines[i] = surface1Style.Render("┃")
 	}
 	return strings.Join(lines, "\n")
 }

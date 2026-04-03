@@ -39,7 +39,7 @@ func renderStatusBar(sb *strings.Builder, sortBy int, filter string, w int) {
 	}
 	if filter != "" {
 		parts = append(parts,
-			lipgloss.NewStyle().Foreground(colorSapphire).Render("/ "+filter))
+			sapphireStyle.Render("/ "+filter))
 	}
 	left := "  " + strings.Join(parts, "  "+dimStyle.Render("|")+"  ")
 	hints := dimStyle.Render("s:sort  /:filter  ?:help")
@@ -149,7 +149,7 @@ func renderCostTable(data costData, w int) string {
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater)
 	sb.WriteString("  " + sectionStyle.Render("COST & SPEND") + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
 	provW := 20
 	colW := 12
@@ -186,22 +186,22 @@ func renderCostTable(data costData, w int) string {
 		provStyle := lipgloss.NewStyle().Foreground(provColor).Bold(true)
 		provName := provStyle.Render(truncStr(p.name, provW-2))
 		if p.status == core.StatusLimited {
-			provName += " " + lipgloss.NewStyle().Foreground(colorRed).Render("!")
+			provName += " " + redStyle.Render("!")
 		}
 
 		todayStr := dimStyle.Render("—")
 		if p.todayCost > 0 {
-			todayStr = lipgloss.NewStyle().Foreground(colorTeal).Render(formatUSD(p.todayCost))
+			todayStr = tealStyle.Render(formatUSD(p.todayCost))
 		}
 
 		weekStr := dimStyle.Render("—")
 		if p.weekCost > 0 {
-			weekStr = lipgloss.NewStyle().Foreground(colorTeal).Render(formatUSD(p.weekCost))
+			weekStr = tealStyle.Render(formatUSD(p.weekCost))
 		}
 
 		allTimeStr := dimStyle.Render("—")
 		if p.cost > 0 {
-			allTimeStr = lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(formatUSD(p.cost))
+			allTimeStr = tealBoldStyle.Render(formatUSD(p.cost))
 		}
 
 		budgetStr := dimStyle.Render("—")
@@ -251,7 +251,7 @@ func renderTopModelsSummary(models []modelCostEntry, w int, limit int) string {
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorTeal)
 	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (Daily volume & efficiency)") + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
 	nameW := clamp(w/3, 20, 34)
 	provW := clamp(w/5, 14, 22)
@@ -278,9 +278,9 @@ func renderTopModelsSummary(models []modelCostEntry, w int, limit int) string {
 		sb.WriteString("  " +
 			padRight(lipgloss.NewStyle().Foreground(m.color).Render(truncStr(m.name, nameW)), nameW) + " " +
 			padRight(dimStyle.Render(truncStr(primaryProvider(m), provW)), provW) + " " +
-			padLeft(lipgloss.NewStyle().Foreground(colorSapphire).Render(formatTokens(tokens)), tokW) + " " +
-			padLeft(lipgloss.NewStyle().Foreground(colorTeal).Render(formatUSD(m.cost)), costW) + " " +
-			padLeft(lipgloss.NewStyle().Foreground(colorYellow).Render(eff), effW) + "\n")
+			padLeft(sapphireStyle.Render(formatTokens(tokens)), tokW) + " " +
+			padLeft(tealStyle.Render(formatUSD(m.cost)), costW) + " " +
+			padLeft(yellowStyle.Render(eff), effW) + "\n")
 	}
 	return sb.String()
 }
@@ -305,7 +305,7 @@ func renderTopModelsCompact(models []modelCostEntry, w int, limit int) string {
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorTeal)
 	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (compact)") + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
 	nameW := clamp(w/2, 16, 26)
 	provW := clamp(w/4, 10, 16)
@@ -330,8 +330,8 @@ func renderTopModelsCompact(models []modelCostEntry, w int, limit int) string {
 		sb.WriteString("  " +
 			padRight(lipgloss.NewStyle().Foreground(m.color).Render(truncStr(m.name, nameW)), nameW) + " " +
 			padRight(dimStyle.Render(truncStr(primaryProvider(m), provW)), provW) + " " +
-			padLeft(lipgloss.NewStyle().Foreground(colorSapphire).Render(formatTokens(tokens)), tokW) + " " +
-			padLeft(lipgloss.NewStyle().Foreground(colorYellow).Render(eff), effW) + "\n")
+			padLeft(sapphireStyle.Render(formatTokens(tokens)), tokW) + " " +
+			padLeft(yellowStyle.Render(eff), effW) + "\n")
 	}
 	return sb.String()
 }
@@ -373,7 +373,7 @@ func renderCostTableCompact(data costData, w int, limit int) string {
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater)
 	sb.WriteString("  " + sectionStyle.Render("COST & SPEND (compact)") + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
 	provW := clamp(w/3, 14, 24)
 	colW := clamp((w-provW-8)/3, 8, 12)
@@ -391,15 +391,15 @@ func renderCostTableCompact(data costData, w int, limit int) string {
 		name := lipgloss.NewStyle().Foreground(provColor).Bold(true).Render(truncStr(p.name, provW))
 		todayStr := dimStyle.Render("—")
 		if p.todayCost > 0 {
-			todayStr = lipgloss.NewStyle().Foreground(colorTeal).Render(formatUSD(p.todayCost))
+			todayStr = tealStyle.Render(formatUSD(p.todayCost))
 		}
 		weekStr := dimStyle.Render("—")
 		if p.weekCost > 0 {
-			weekStr = lipgloss.NewStyle().Foreground(colorTeal).Render(formatUSD(p.weekCost))
+			weekStr = tealStyle.Render(formatUSD(p.weekCost))
 		}
 		allStr := dimStyle.Render("—")
 		if p.cost > 0 {
-			allStr = lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(formatUSD(p.cost))
+			allStr = tealBoldStyle.Render(formatUSD(p.cost))
 		}
 		sb.WriteString("  " + padRight(name, provW) + " " +
 			padLeft(todayStr, colW) + " " +

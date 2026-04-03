@@ -120,7 +120,7 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 			"",
 			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
+			labelStyle.Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
@@ -234,12 +234,12 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 	visible := contentLines[scrollLine:endLine]
 
 	if scrollLine > 0 {
-		visible[0] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▲ more above")
+		visible[0] = dimStyle.Render("  ▲ more above")
 	}
 	if bar := renderVerticalScrollBarLine(w, scrollLine, h, totalLines); bar != "" && len(visible) > 0 {
 		visible[len(visible)-1] = bar
 	} else if endLine < totalLines {
-		visible[len(visible)-1] = lipgloss.NewStyle().Foreground(colorDim).Render("  ▼ more below")
+		visible[len(visible)-1] = dimStyle.Render("  ▼ more below")
 	}
 
 	return padToSize(strings.Join(visible, "\n"), w, h)
@@ -252,7 +252,7 @@ func (m Model) renderTilesTabs(w, h int) string {
 			"",
 			dimStyle.Render("  Loading providers…"),
 			"",
-			lipgloss.NewStyle().Foreground(colorSubtext).Render("  Fetching usage and spend data."),
+			labelStyle.Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
@@ -323,7 +323,7 @@ func (m Model) renderTilesTabs(w, h int) string {
 		sep = renderHorizontalScrollBarLine(w, clamp(m.cursor, 0, len(ids)-1), 1, len(ids))
 	}
 	if sep == "" {
-		sep = lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w))
+		sep = surface1Style.Render(strings.Repeat("─", w))
 	}
 
 	return padToSize(visibleTabs+"\n"+sep+"\n"+window, w, h)
@@ -374,7 +374,7 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	di := computeDisplayInfo(snap, widget)
 	provColor := ProviderColor(snap.ProviderID)
 	accentSep := lipgloss.NewStyle().Foreground(provColor).Render(strings.Repeat("━", innerW))
-	dimSep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", innerW))
+	dimSep := surface1Style.Render(strings.Repeat("─", innerW))
 
 	icon := StatusIcon(snap.Status)
 	iconStr := lipgloss.NewStyle().Foreground(StatusColor(snap.Status)).Render(icon)
@@ -528,7 +528,7 @@ func buildEmptyTileSectionLines(sectionID core.DashboardStandardSection, widget 
 		return nil
 	}
 	return []string{
-		lipgloss.NewStyle().Foreground(colorSubtext).Bold(true).Render(heading),
+		subtextBoldStyle.Render(heading),
 		dimStyle.Render("  " + message),
 	}
 }

@@ -47,7 +47,7 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 
 func (m Model) renderHeader(w int) string {
 	bolt := PulseChar(
-		lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("⚡"),
+		accentBoldStyle.Render("⚡"),
 		lipgloss.NewStyle().Foreground(colorDim).Bold(true).Render("⚡"),
 		m.animFrame,
 	)
@@ -106,15 +106,15 @@ func (m Model) renderHeader(w int) string {
 	statusInfo := ""
 	if okCount > 0 {
 		dot := PulseChar("●", "◉", m.animFrame)
-		statusInfo += lipgloss.NewStyle().Foreground(colorGreen).Render(fmt.Sprintf(" %d%s", okCount, dot))
+		statusInfo += greenStyle.Render(fmt.Sprintf(" %d%s", okCount, dot))
 	}
 	if warnCount > 0 {
 		dot := PulseChar("◐", "◑", m.animFrame)
-		statusInfo += lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf(" %d%s", warnCount, dot))
+		statusInfo += yellowStyle.Render(fmt.Sprintf(" %d%s", warnCount, dot))
 	}
 	if errCount > 0 {
 		dot := PulseChar("✗", "✕", m.animFrame)
-		statusInfo += lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %d%s", errCount, dot))
+		statusInfo += redStyle.Render(fmt.Sprintf(" %d%s", errCount, dot))
 	}
 	if len(unmappedProviders) > 0 {
 		statusInfo += lipgloss.NewStyle().
@@ -122,7 +122,7 @@ func (m Model) renderHeader(w int) string {
 			Render(fmt.Sprintf(" ⚠ %d unmapped", len(unmappedProviders)))
 	}
 
-	infoRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(info)
+	infoRendered := labelStyle.Render(info)
 
 	left := bolt + " " + brandText + " " + tabs + statusInfo + spinnerStr
 	gap := w - lipgloss.Width(left) - lipgloss.Width(infoRendered)
@@ -138,8 +138,7 @@ func (m Model) renderGradientSeparator(w int) string {
 	if w <= 0 {
 		return ""
 	}
-	sepStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-	return sepStyle.Render(strings.Repeat("━", w))
+	return surface1Style.Render(strings.Repeat("━", w))
 }
 
 func (m Model) renderScreenTabs() string {
@@ -161,13 +160,13 @@ func (m Model) renderScreenTabs() string {
 }
 
 func (m Model) renderFooter(w int) string {
-	sep := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("━", w))
+	sep := surface1Style.Render(strings.Repeat("━", w))
 	statusLine := m.renderFooterStatusLine(w)
 	return sep + "\n" + statusLine
 }
 
 func (m Model) renderFooterStatusLine(w int) string {
-	searchStyle := lipgloss.NewStyle().Foreground(colorSapphire)
+	searchStyle := sapphireStyle
 
 	switch {
 	case m.settings.show:
@@ -216,7 +215,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		if w > 2 {
 			msg = truncateToWidth(msg, w-2)
 		}
-		return " " + lipgloss.NewStyle().Foreground(colorYellow).Render(msg)
+		return " " + yellowStyle.Render(msg)
 	}
 
 	return " " + helpStyle.Render("? help")

@@ -157,6 +157,19 @@ var (
 	tileTimestampStyle      lipgloss.Style
 	tileHeroStyle           lipgloss.Style
 	tileDotLeaderStyle      lipgloss.Style
+
+	// Cached simple foreground styles for hot render paths.
+	// Use these instead of lipgloss.NewStyle().Foreground(color) in loops.
+	accentBoldStyle    lipgloss.Style
+	subtextBoldStyle   lipgloss.Style
+	subtextItalicStyle lipgloss.Style
+	sapphireStyle      lipgloss.Style
+	redStyle           lipgloss.Style
+	greenStyle         lipgloss.Style
+	yellowStyle        lipgloss.Style
+	textBoldStyle      lipgloss.Style
+	surface1Style      lipgloss.Style
+	tealBoldStyle      lipgloss.Style
 )
 
 func applyTheme(t Theme) {
@@ -278,6 +291,17 @@ func applyTheme(t Theme) {
 	tileTimestampStyle = lipgloss.NewStyle().Foreground(colorDim)
 	tileHeroStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
 	tileDotLeaderStyle = lipgloss.NewStyle().Foreground(colorSurface2)
+
+	accentBoldStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	subtextBoldStyle = lipgloss.NewStyle().Foreground(colorSubtext).Bold(true)
+	subtextItalicStyle = lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
+	sapphireStyle = lipgloss.NewStyle().Foreground(colorSapphire)
+	redStyle = lipgloss.NewStyle().Foreground(colorRed)
+	greenStyle = lipgloss.NewStyle().Foreground(colorGreen)
+	yellowStyle = lipgloss.NewStyle().Foreground(colorYellow)
+	textBoldStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
+	surface1Style = lipgloss.NewStyle().Foreground(colorSurface1)
+	tealBoldStyle = lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
 }
 
 var modelColorPalette []lipgloss.Color
