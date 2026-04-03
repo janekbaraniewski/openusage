@@ -172,6 +172,13 @@ var (
 	tealBoldStyle      lipgloss.Style
 )
 
+// applyTheme sets all package-level color and style globals from the given
+// theme. It MUST only be called while themeMu is held for writing, or during
+// init() (before any concurrent access is possible). Rendering functions read
+// these globals from the Bubble Tea View goroutine, which is the same goroutine
+// that calls Update (where theme switches happen), so no additional
+// synchronization is needed. See the themeMu comment in themes.go for the full
+// locking protocol.
 func applyTheme(t Theme) {
 	colorBase = t.Base
 	colorMantle = t.Mantle

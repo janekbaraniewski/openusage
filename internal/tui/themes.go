@@ -55,6 +55,28 @@ type Theme struct {
 	Maroon    lipgloss.Color `json:"maroon"`
 }
 
+// themeMu protects the theme catalog (themes slice) and the active theme index
+// (activeThemeIdx). These are the only variables guarded by this mutex.
+//
+// The color and style globals in styles.go (colorBase, colorAccent, headerStyle,
+// etc.) are written by applyTheme and read by all rendering functions. These
+// globals are intentionally NOT protected by themeMu because Bubble Tea's
+// concurrency model provides safety:
+//
+//   - applyTheme is called from init() (single-threaded startup), from
+//     LoadThemes/SetThemeByName (called before tea.Program.Run), and from
+//     CycleTheme/SetThemeByName (called from Update key handlers).
+//   - All rendering (View, renderHeader, etc.) runs on the same Bubble Tea
+//     goroutine as Update, so there is no concurrent read/write on the globals.
+//
+// Callers outside the Bubble Tea goroutine (e.g., background tasks) MUST NOT
+// call CycleTheme, SetThemeByName, or read color globals directly. Use
+// AvailableThemes/ActiveTheme/ActiveThemeIndex for safe catalog access.
+//
+// Locking protocol:
+//   - Write lock (themeMu.Lock): LoadThemes, CycleTheme, SetThemeByName
+//   - Read lock (themeMu.RLock): AvailableThemes, ActiveTheme, ActiveThemeIndex
+//   - No lock: applyTheme (always called while write lock is held, or at init)
 var (
 	themeMu        sync.RWMutex
 	themes         []Theme
@@ -284,6 +306,9 @@ func mergeThemes(base, extra []Theme) []Theme {
 	return merged
 }
 
+// setActiveThemeByNameLocked sets the active theme by name. The caller MUST
+// hold themeMu for writing (the "Locked" suffix indicates the lock is already
+// held). This function writes to activeThemeIdx and calls applyTheme.
 func setActiveThemeByNameLocked(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" || len(themes) == 0 {
