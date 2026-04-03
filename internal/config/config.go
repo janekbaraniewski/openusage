@@ -332,8 +332,13 @@ func SaveTo(path string, cfg Config) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("writing config: %w", err)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("writing config tmp file: %w", err)
+	}
+	defer os.Remove(tmpPath) // no-op if rename succeeded; cleans up on rename failure
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("renaming config tmp file: %w", err)
 	}
 	return nil
 }
