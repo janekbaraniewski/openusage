@@ -41,7 +41,10 @@ func (m Model) renderList(w, h int) string {
 
 	var lines []string
 	for i := scrollStart; i < scrollEnd; i++ {
-		snap := m.snapshots[ids[i]]
+		snap, ok := m.snapshots[ids[i]]
+		if !ok {
+			continue
+		}
 		lines = append(lines, m.renderListItem(snap, i == m.cursor, w))
 	}
 

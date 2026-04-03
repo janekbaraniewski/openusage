@@ -66,7 +66,10 @@ func (m Model) renderHeader(w int) string {
 
 	okCount, warnCount, errCount := 0, 0, 0
 	for _, id := range ids {
-		snap := m.snapshots[id]
+		snap, ok := m.snapshots[id]
+		if !ok {
+			continue
+		}
 		switch snap.Status {
 		case core.StatusOK:
 			okCount++

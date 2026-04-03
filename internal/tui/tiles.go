@@ -137,7 +137,10 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 
 	var tiles [][]string
 	for i, id := range ids {
-		snap := m.snapshots[id]
+		snap, ok := m.snapshots[id]
+		if !ok {
+			continue
+		}
 		selected := i == m.cursor
 		modelMixExpanded := selected && m.expandedModelMixTiles[id]
 		bodyOffset := 0
