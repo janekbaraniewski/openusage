@@ -18,15 +18,15 @@ func (m *Model) cachedTileBodyLines(
 ) []string {
 	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData)
 	if lines, ok := m.tileBodyCache[key]; ok {
-		return append([]string(nil), lines...)
+		return lines
 	}
 
 	lines := m.buildTileBodyLines(snap, widget, di, innerW, modelMixExpanded)
 	if m.tileBodyCache == nil {
 		m.tileBodyCache = make(map[string][]string)
 	}
-	m.tileBodyCache[key] = append([]string(nil), lines...)
-	return append([]string(nil), lines...)
+	m.tileBodyCache[key] = lines
+	return lines
 }
 
 func tileBodyCacheKey(
@@ -41,7 +41,7 @@ func tileBodyCacheKey(
 		snap.ProviderID,
 		snap.AccountID,
 		string(snap.Status),
-		strconv.FormatInt(snap.Timestamp.UnixNano(), 10),
+		strconv.FormatInt(snap.Timestamp.Unix(), 10),
 		strconv.Itoa(len(snap.Metrics)),
 		strconv.Itoa(len(snap.Raw)),
 		strconv.Itoa(len(snap.DailySeries)),

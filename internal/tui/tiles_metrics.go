@@ -449,23 +449,22 @@ func prioritizeMetricKeys(keys, priority []string) []string {
 	if len(priority) == 0 || len(keys) == 0 {
 		return keys
 	}
+	keySet := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		keySet[k] = true
+	}
 	seen := make(map[string]bool, len(keys))
 	ordered := make([]string, 0, len(keys))
 	for _, key := range priority {
-		for _, existing := range keys {
-			if existing != key || seen[existing] {
-				continue
-			}
-			ordered = append(ordered, existing)
-			seen[existing] = true
-			break
+		if keySet[key] && !seen[key] {
+			ordered = append(ordered, key)
+			seen[key] = true
 		}
 	}
 	for _, key := range keys {
-		if seen[key] {
-			continue
+		if !seen[key] {
+			ordered = append(ordered, key)
 		}
-		ordered = append(ordered, key)
 	}
 	return ordered
 }

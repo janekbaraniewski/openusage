@@ -32,7 +32,7 @@ func (m *Model) cachedDetailContent(id string, snap core.UsageSnapshot, w int, a
 		snap.ProviderID,
 		strconv.Itoa(w),
 		strconv.Itoa(activeTab),
-		strconv.FormatInt(snap.Timestamp.UTC().UnixNano(), 10),
+		strconv.FormatInt(snap.Timestamp.UTC().Unix(), 10),
 		strconv.Itoa(len(snap.Metrics)),
 		strconv.Itoa(len(snap.DailySeries)),
 		strconv.Itoa(len(snap.ModelUsage)),
