@@ -131,7 +131,7 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 		}
 		emptyLen := barW - barLen
 		bar := lipgloss.NewStyle().Foreground(item.Color).Render(strings.Repeat("█", barLen))
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", emptyLen))
+		track := surface1Style.Render(strings.Repeat("░", emptyLen))
 
 		pctStr := lipgloss.NewStyle().Foreground(item.Color).Render(fmt.Sprintf("%4.1f%%", pct))
 		countStr := dimStyle.Render(formatNumber(item.Value) + " req")
