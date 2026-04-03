@@ -2,10 +2,7 @@ package deepseek
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -82,30 +79,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("creating balance request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := p.Client().Do(req)
-	if err != nil {
-		return fmt.Errorf("balance request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading balance body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("balance endpoint returned HTTP %d", resp.StatusCode)
-	}
-
 	var balResp balanceResponse
-	if err := json.Unmarshal(body, &balResp); err != nil {
-		return fmt.Errorf("parsing balance response: %w", err)
+	if _, _, err := shared.FetchJSON(ctx, url, apiKey, &balResp, p.Client()); err != nil {
+		return fmt.Errorf("balance: %w", err)
 	}
 
 	snap.Raw["account_available"] = strconv.FormatBool(balResp.IsAvailable)

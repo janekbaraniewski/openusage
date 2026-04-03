@@ -2,10 +2,7 @@ package xai
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
@@ -79,30 +76,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func (p *Provider) fetchAPIKeyInfo(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
-	url := baseURL + "/api-key"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := p.Client().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
 	var keyInfo apiKeyResponse
-	if err := json.Unmarshal(body, &keyInfo); err != nil {
+	if _, _, err := shared.FetchJSON(ctx, baseURL+"/api-key", apiKey, &keyInfo, p.Client()); err != nil {
 		return err
 	}
 

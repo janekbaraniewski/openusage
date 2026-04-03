@@ -2,9 +2,7 @@ package mistral
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -91,30 +89,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 func (p *Provider) fetchSubscription(ctx context.Context, baseURL, apiKey string, snap *core.UsageSnapshot) error {
-	url := baseURL + "/billing/subscription"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := p.Client().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
 	var sub subscriptionResponse
-	if err := json.Unmarshal(body, &sub); err != nil {
+	if _, _, err := shared.FetchJSON(ctx, baseURL+"/billing/subscription", apiKey, &sub, p.Client()); err != nil {
 		return err
 	}
 
@@ -151,29 +127,8 @@ func (p *Provider) fetchUsage(ctx context.Context, baseURL, apiKey string, snap 
 		now.Format("2006-01-02"),
 	)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := p.Client().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
 	var usage usageResponse
-	if err := json.Unmarshal(body, &usage); err != nil {
+	if _, _, err := shared.FetchJSON(ctx, url, apiKey, &usage, p.Client()); err != nil {
 		return err
 	}
 
