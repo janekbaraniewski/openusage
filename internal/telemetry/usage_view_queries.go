@@ -81,6 +81,9 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 		}
 		out = append(out, row)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
 	return out, nil
 }
 
@@ -134,6 +137,9 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 		}
 		out = append(out, row)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
 	return out, nil
 }
 
@@ -166,6 +172,9 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 			continue
 		}
 		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 	return out, nil
 }
@@ -214,6 +223,9 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 		}
 		out = append(out, row)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
 	return out, nil
 }
 
@@ -252,6 +264,9 @@ func queryLanguageAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		if lang != "" {
 			langCounts[lang] += requests
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 
 	out := make([]telemetryLanguageAgg, 0, len(langCounts))
@@ -305,6 +320,9 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 			continue
 		}
 		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 	return out, nil
 }
@@ -413,6 +431,9 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		}
 		out = append(out, row)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
 	return out, nil
 }
 
@@ -499,6 +520,9 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 		}
 		byDim[key][day] += value
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
 
 	out := make(map[string][]core.TimePoint, len(byDim))
 	for key, dayMap := range byDim {
@@ -550,6 +574,9 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 			byClient[client] = make(map[string]float64)
 		}
 		byClient[client][day] += value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 
 	out := make(map[string][]core.TimePoint, len(byClient))
