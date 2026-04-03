@@ -204,9 +204,9 @@ func TestFetch_RateLimited(t *testing.T) {
 
 func TestBuildStatusMessage(t *testing.T) {
 	tests := []struct {
-		name    string
-		snap    core.UsageSnapshot
-		want    string
+		name string
+		snap core.UsageSnapshot
+		want string
 	}{
 		{
 			name: "both rpm and rpd",

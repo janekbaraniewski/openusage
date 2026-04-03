@@ -22,7 +22,7 @@ func TestSnapshotFingerprint_Empty(t *testing.T) {
 func TestSnapshotFingerprint_Deterministic(t *testing.T) {
 	ts := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
 	snaps := map[string]core.UsageSnapshot{
-		"openai": {Timestamp: ts},
+		"openai":    {Timestamp: ts},
 		"anthropic": {Timestamp: ts.Add(time.Hour)},
 	}
 
