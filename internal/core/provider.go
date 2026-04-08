@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 )
 
 type AccountConfig struct {
@@ -160,4 +161,12 @@ type UsageProvider interface {
 	DetailWidget() DetailWidget
 
 	Fetch(ctx context.Context, acct AccountConfig) (UsageSnapshot, error)
+}
+
+// ChangeDetector is an optional interface that UsageProvider implementations
+// may implement to skip expensive Fetch() calls when data hasn't changed.
+// Implementations should be cheap (stat() calls, not file reads).
+// On error, callers assume changed=true (safe fallback).
+type ChangeDetector interface {
+	HasChanged(acct AccountConfig, since time.Time) (bool, error)
 }

@@ -153,6 +153,13 @@ type ingestTally struct {
 	failed    int
 }
 
+// providerPollState tracks per-account state for change detection and adaptive backoff.
+type providerPollState struct {
+	lastFetchAt time.Time
+	lastSnap    core.UsageSnapshot
+	hasSnap     bool
+}
+
 type SnapshotFrame struct {
 	Snapshots  map[string]core.UsageSnapshot
 	TimeWindow core.TimeWindow

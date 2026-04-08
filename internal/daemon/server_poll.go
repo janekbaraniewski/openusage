@@ -74,6 +74,27 @@ func (s *Service) pollProviders(ctx context.Context) {
 				return
 			}
 
+			_, hasDetector := provider.(core.ChangeDetector)
+
+			// Adaptive backoff: skip providers that are in a backoff window.
+			if !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
+				s.pollStateMu.Lock()
+				state := s.pollState[account.ID]
+				s.pollStateMu.Unlock()
+				if state != nil && state.hasSnap {
+					results <- providerResult{accountID: account.ID, snapshot: state.lastSnap}
+					return
+				}
+				// No cached snapshot yet — must fetch.
+			}
+
+			// Check if provider data has changed since last fetch (optional interface).
+			if cached := s.skipUnchangedProvider(provider, account); cached != nil {
+				s.pollScheduler.RecordPoll(account.ID, false)
+				results <- providerResult{accountID: account.ID, snapshot: *cached}
+				return
+			}
+
 			fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
 
@@ -88,6 +109,20 @@ func (s *Service) pollProviders(ctx context.Context) {
 				}
 			}
 			snap = core.NormalizeUsageSnapshotWithConfig(snap, modelNorm)
+
+			// Track whether data actually changed for adaptive backoff.
+			changed := s.pollScheduler.SnapshotChanged(account.ID, snap)
+			s.pollScheduler.RecordPoll(account.ID, changed)
+
+			// Record successful fetch for future change detection.
+			s.pollStateMu.Lock()
+			s.pollState[account.ID] = &providerPollState{
+				lastFetchAt: time.Now(),
+				lastSnap:    snap,
+				hasSnap:     true,
+			}
+			s.pollStateMu.Unlock()
+
 			results <- providerResult{accountID: account.ID, snapshot: snap}
 		}(acct)
 	}
@@ -117,6 +152,9 @@ func (s *Service) pollProviders(ctx context.Context) {
 	if ingestErr != nil && s.shouldLog("poll_ingest_warning", 10*time.Second) {
 		s.warnf("poll_ingest_warning", "error=%v", ingestErr)
 	}
+	if ingestErr == nil && len(snapshots) > 0 {
+		s.dataIngested.Store(true)
+	}
 
 	durationMs := time.Since(started).Milliseconds()
 	if ingestErr != nil || errorCount > 0 || s.shouldLog("poll_cycle_info", 45*time.Second) {
@@ -134,4 +172,30 @@ func (s *Service) pollProviders(ctx context.Context) {
 			ingestErr != nil,
 		)
 	}
+}
+
+// skipUnchangedProvider checks if a provider's data source has changed since the last
+// fetch. Returns the cached snapshot if unchanged, nil if a fresh Fetch() is needed.
+func (s *Service) skipUnchangedProvider(provider core.UsageProvider, acct core.AccountConfig) *core.UsageSnapshot {
+	detector, ok := provider.(core.ChangeDetector)
+	if !ok {
+		return nil // provider doesn't support change detection, always fetch
+	}
+
+	s.pollStateMu.Lock()
+	state := s.pollState[acct.ID]
+	s.pollStateMu.Unlock()
+
+	if state == nil || !state.hasSnap {
+		return nil // no previous fetch, must run
+	}
+
+	changed, err := detector.HasChanged(acct, state.lastFetchAt)
+	if err != nil || changed {
+		return nil // error or changed — run Fetch()
+	}
+
+	core.Tracef("[poll] %s/%s: skipped (no change since %s)", acct.Provider, acct.ID, state.lastFetchAt.Format(time.RFC3339))
+	snap := state.lastSnap
+	return &snap
 }

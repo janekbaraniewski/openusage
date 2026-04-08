@@ -43,6 +43,9 @@ func (s *Service) flushSpoolBacklog(ctx context.Context, maxTotal int) {
 	}
 
 	flush, warnings := FlushInBatches(ctx, s.pipeline, maxTotal)
+	if flush.Ingested > 0 {
+		s.dataIngested.Store(true)
+	}
 	if flush.Processed > 0 || len(warnings) > 0 {
 		s.infof(
 			"spool_flush",
@@ -178,6 +181,9 @@ func (s *Service) processHookSpool(ctx context.Context, dir string) {
 		}
 
 		tally, _ := s.ingestBatch(ctx, parsed.Requests)
+		if tally.ingested > 0 {
+			s.dataIngested.Store(true)
+		}
 		_ = os.Remove(path)
 		processed++
 

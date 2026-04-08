@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,7 +34,12 @@ type Service struct {
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
 	logThrottle *core.LogThrottle
 
-	rmCache *readModelCache
+	rmCache       *readModelCache
+	dataIngested  atomic.Bool // set when new data is ingested; read model loop skips refresh when clean
+	pollScheduler *PollScheduler
+
+	pollStateMu sync.Mutex
+	pollState   map[string]*providerPollState // per-account change detection state
 }
 
 func RunServer(cfg Config) error {
@@ -93,14 +99,16 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	svc := &Service{
-		cfg:          cfg,
-		ctx:          ctx,
-		store:        store,
-		pipeline:     telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:  telemetry.NewQuotaSnapshotIngestor(store),
-		providerByID: providersByID(),
-		logThrottle:  core.NewLogThrottle(200, 10*time.Minute),
-		rmCache:      newReadModelCache(),
+		cfg:           cfg,
+		ctx:           ctx,
+		store:         store,
+		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
+		providerByID:  providersByID(),
+		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
+		rmCache:       newReadModelCache(),
+		pollScheduler: newPollScheduler(cfg.PollInterval),
+		pollState:     make(map[string]*providerPollState),
 	}
 
 	svc.infof(

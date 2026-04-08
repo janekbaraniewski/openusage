@@ -54,7 +54,13 @@ func (s *Service) collectAndFlush(ctx context.Context) {
 	}
 
 	direct, retries := s.ingestBatch(ctx, allReqs)
+	if direct.ingested > 0 {
+		s.dataIngested.Store(true)
+	}
 	flush, enqueued, flushWarnings := s.flushBacklog(ctx, retries, backlogFlushLimit)
+	if flush.Ingested > 0 {
+		s.dataIngested.Store(true)
+	}
 	warnings = append(warnings, flushWarnings...)
 
 	durationMs := time.Since(started).Milliseconds()
@@ -162,6 +168,20 @@ func (s *Service) pruneOldData(ctx context.Context) {
 			s.warnf("retention_orphan_prune_error", "error=%v", orphanErr)
 		} else if orphaned > 0 {
 			s.infof("retention_orphan_prune", "removed=%d", orphaned)
+		}
+
+		// Reclaim disk space after significant deletions.
+		if deleted > 1000 {
+			vacCtx, vacCancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer vacCancel()
+			if err := s.store.Vacuum(vacCtx); err != nil {
+				s.warnf("retention_vacuum_error", "error=%v", err)
+			} else {
+				s.infof("retention_vacuum", "completed after deleting %d events", deleted)
+			}
+			if err := s.store.Analyze(vacCtx); err != nil {
+				s.warnf("retention_analyze_error", "error=%v", err)
+			}
 		}
 	}
 }
