@@ -2,21 +2,28 @@ package claude_code
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/samber/lo"
 )
 
 func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
-	jsonlFiles := collectJSONLFiles(projectsDir)
+	// Collect files with stat info for cache-aware parsing.
+	fileInfos := collectJSONLFilesWithStat(projectsDir)
 	if altProjectsDir != "" {
-		jsonlFiles = append(jsonlFiles, collectJSONLFiles(altProjectsDir)...)
+		for k, v := range collectJSONLFilesWithStat(altProjectsDir) {
+			fileInfos[k] = v
+		}
 	}
-	jsonlFiles = lo.Uniq(lo.Compact(jsonlFiles))
+
+	jsonlFiles := make([]string, 0, len(fileInfos))
+	for path := range fileInfos {
+		jsonlFiles = append(jsonlFiles, path)
+	}
 	sort.Strings(jsonlFiles)
 
 	if len(jsonlFiles) == 0 {
@@ -146,7 +153,7 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		return sanitizeModelName(dir)
 	}
 	for _, fpath := range jsonlFiles {
-		allUsages = append(allUsages, parseConversationRecords(fpath)...)
+		allUsages = append(allUsages, p.cachedParseConversationRecords(fpath, fileInfos[fpath])...)
 	}
 
 	sort.Slice(allUsages, func(i, j int) bool {
@@ -450,4 +457,33 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 		dailyModelTokens:     dailyModelTokens,
 	})
 	return nil
+}
+
+// cachedParseConversationRecords returns cached records for a file if the mtime and size
+// match, otherwise re-parses the file and updates the cache.
+func (p *Provider) cachedParseConversationRecords(path string, info os.FileInfo) []conversationRecord {
+	if info == nil {
+		return parseConversationRecords(path)
+	}
+
+	p.jsonlCacheMu.Lock()
+	defer p.jsonlCacheMu.Unlock()
+
+	if p.jsonlCache == nil {
+		p.jsonlCache = make(map[string]*jsonlCacheEntry)
+	}
+
+	if entry, ok := p.jsonlCache[path]; ok {
+		if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
+			return entry.records
+		}
+	}
+
+	records := parseConversationRecords(path)
+	p.jsonlCache[path] = &jsonlCacheEntry{
+		modTime: info.ModTime(),
+		size:    info.Size(),
+		records: records,
+	}
+	return records
 }

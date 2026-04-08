@@ -1,6 +1,7 @@
 package cursor
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -10,6 +11,24 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 )
 
+// scoredCommitsAggregate caches the aggregated scored_commits results so we
+// can skip the full table scan when the count has not changed.
+type scoredCommitsAggregate struct {
+	SumAIPct      float64
+	CountWithPct  int
+	TotalTabAdd   int
+	TotalTabDel   int
+	TotalCompAdd  int
+	TotalCompDel  int
+	TotalHumanAdd int
+	TotalHumanDel int
+	TotalBlankAdd int
+	TotalBlankDel int
+	TotalLinesAdd int
+	TotalLinesDel int
+	TotalCommits  int
+}
+
 var cursorAPIBase = "https://api2.cursor.sh"
 
 type Provider struct {
@@ -17,6 +36,20 @@ type Provider struct {
 	mu                    sync.RWMutex
 	clock                 core.Clock
 	modelAggregationCache map[string]cachedModelAggregation
+
+	// Incremental read caches — tracking DB
+	trackingCacheMu  sync.Mutex
+	trackingMaxRowID int64
+	trackingRecords  []cursorTrackingRecord
+
+	// Incremental read caches — state DB
+	stateCacheMu       sync.Mutex
+	composerKeys       map[string]bool
+	composerRecords    []cursorComposerSessionRecord
+	bubbleKeys         map[string]bool
+	bubbleRecords      []cursorBubbleRecord
+	scoredCommitsCount int
+	scoredCommitsAgg   *scoredCommitsAggregate
 }
 
 type cachedModelAggregation struct {
@@ -150,6 +183,20 @@ type dailyStats struct {
 type composerModelUsage struct {
 	CostInCents float64 `json:"costInCents"`
 	Amount      int     `json:"amount"`
+}
+
+// HasChanged reports whether either Cursor SQLite database has been modified since the given time.
+func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	for _, key := range []string{"tracking_db", "state_db"} {
+		path := acct.Path(key, "")
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (p *Provider) DetailWidget() core.DetailWidget {

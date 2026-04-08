@@ -17,6 +17,17 @@ type Provider struct {
 	providerbase.Base
 	mu            sync.Mutex
 	usageAPICache *usageResponse // last successful Usage API response
+
+	jsonlCacheMu sync.Mutex
+	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
+}
+
+// jsonlCacheEntry caches parsed conversation records for a single JSONL file.
+// The cache is invalidated when the file's mtime or size changes.
+type jsonlCacheEntry struct {
+	modTime time.Time
+	size    int64
+	records []conversationRecord
 }
 
 func New() *Provider {
@@ -261,6 +272,44 @@ const (
 
 func (p *Provider) DetailWidget() core.DetailWidget {
 	return core.CodingToolDetailWidget(true)
+}
+
+// HasChanged reports whether any of the local data sources have been modified since the given time.
+func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	home, _ := os.UserHomeDir()
+	claudeDir := filepath.Join(home, ".claude")
+	if override := acct.Hint("claude_dir", ""); override != "" {
+		claudeDir = override
+		home = filepath.Dir(claudeDir)
+	}
+
+	// Check projects directories (the most expensive data source).
+	projectsDirs := []string{
+		filepath.Join(claudeDir, "projects"),
+		filepath.Join(home, ".config", "claude", "projects"),
+	}
+	for _, dir := range projectsDirs {
+		if info, err := os.Stat(dir); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+
+	// Check stats cache and account config.
+	normalizeLegacyPaths(&acct)
+	for _, path := range []string{
+		acct.Path("stats_cache", ""),
+		acct.Path("account_config", filepath.Join(home, ".claude.json")),
+		filepath.Join(claudeDir, "settings.json"),
+	} {
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {

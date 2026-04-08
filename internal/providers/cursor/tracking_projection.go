@@ -22,7 +22,7 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 		return nil
 	}
 
-	trackingRecords, err := loadTrackingRecords(ctx, db, p.clock)
+	trackingRecords, err := p.loadTrackingRecordsCached(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -55,11 +55,41 @@ func (p *Provider) readTrackingDB(ctx context.Context, dbPath string, snap *core
 }
 
 func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core.UsageSnapshot) {
-	var totalCommits int
-	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scored_commits WHERE linesAdded IS NOT NULL AND linesAdded > 0`).Scan(&totalCommits) != nil || totalCommits == 0 {
+	agg, err := p.loadScoredCommitsCached(ctx, db)
+	if err != nil || agg == nil || agg.TotalCommits == 0 {
 		return
 	}
 
+	applyScoredCommitsToSnapshot(agg, snap)
+}
+
+// loadScoredCommitsCached checks whether the scored_commits count has changed;
+// if not, it reuses the cached aggregate. This avoids the full table scan on
+// every poll cycle.
+func (p *Provider) loadScoredCommitsCached(ctx context.Context, db *sql.DB) (*scoredCommitsAggregate, error) {
+	p.trackingCacheMu.Lock()
+	defer p.trackingCacheMu.Unlock()
+
+	var totalCommits int
+	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scored_commits WHERE linesAdded IS NOT NULL AND linesAdded > 0`).Scan(&totalCommits) != nil || totalCommits == 0 {
+		return nil, nil
+	}
+
+	if totalCommits == p.scoredCommitsCount && p.scoredCommitsAgg != nil {
+		return p.scoredCommitsAgg, nil
+	}
+
+	agg, err := aggregateScoredCommits(ctx, db, totalCommits)
+	if err != nil {
+		return nil, err
+	}
+	p.scoredCommitsCount = totalCommits
+	p.scoredCommitsAgg = agg
+	return agg, nil
+}
+
+// aggregateScoredCommits runs the full scored_commits query and returns the aggregate.
+func aggregateScoredCommits(ctx context.Context, db *sql.DB, totalCommits int) (*scoredCommitsAggregate, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT v2AiPercentage, linesAdded, linesDeleted,
 		       tabLinesAdded, tabLinesDeleted,
@@ -70,24 +100,11 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 		WHERE linesAdded IS NOT NULL AND linesAdded > 0
 		ORDER BY scoredAt DESC`)
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
-	var (
-		sumAIPct      float64
-		countWithPct  int
-		totalTabAdd   int
-		totalTabDel   int
-		totalCompAdd  int
-		totalCompDel  int
-		totalHumanAdd int
-		totalHumanDel int
-		totalBlankAdd int
-		totalBlankDel int
-		totalLinesAdd int
-		totalLinesDel int
-	)
+	agg := &scoredCommitsAggregate{TotalCommits: totalCommits}
 
 	for rows.Next() {
 		var pctStr sql.NullString
@@ -99,48 +116,53 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 		}
 		if pctStr.Valid && pctStr.String != "" {
 			if v, err := strconv.ParseFloat(pctStr.String, 64); err == nil {
-				sumAIPct += v
-				countWithPct++
+				agg.SumAIPct += v
+				agg.CountWithPct++
 			}
 		}
 		if linesAdded.Valid {
-			totalLinesAdd += int(linesAdded.Int64)
+			agg.TotalLinesAdd += int(linesAdded.Int64)
 		}
 		if linesDeleted.Valid {
-			totalLinesDel += int(linesDeleted.Int64)
+			agg.TotalLinesDel += int(linesDeleted.Int64)
 		}
 		if tabAdd.Valid {
-			totalTabAdd += int(tabAdd.Int64)
+			agg.TotalTabAdd += int(tabAdd.Int64)
 		}
 		if tabDel.Valid {
-			totalTabDel += int(tabDel.Int64)
+			agg.TotalTabDel += int(tabDel.Int64)
 		}
 		if compAdd.Valid {
-			totalCompAdd += int(compAdd.Int64)
+			agg.TotalCompAdd += int(compAdd.Int64)
 		}
 		if compDel.Valid {
-			totalCompDel += int(compDel.Int64)
+			agg.TotalCompDel += int(compDel.Int64)
 		}
 		if humanAdd.Valid {
-			totalHumanAdd += int(humanAdd.Int64)
+			agg.TotalHumanAdd += int(humanAdd.Int64)
 		}
 		if humanDel.Valid {
-			totalHumanDel += int(humanDel.Int64)
+			agg.TotalHumanDel += int(humanDel.Int64)
 		}
 		if blankAdd.Valid {
-			totalBlankAdd += int(blankAdd.Int64)
+			agg.TotalBlankAdd += int(blankAdd.Int64)
 		}
 		if blankDel.Valid {
-			totalBlankDel += int(blankDel.Int64)
+			agg.TotalBlankDel += int(blankDel.Int64)
 		}
 	}
 
-	tc := float64(totalCommits)
-	snap.Metrics["scored_commits"] = core.Metric{Used: &tc, Unit: "commits", Window: "all-time"}
-	snap.Raw["scored_commits_total"] = strconv.Itoa(totalCommits)
+	return agg, rows.Err()
+}
 
-	if countWithPct > 0 {
-		avgPct := math.Round((sumAIPct/float64(countWithPct))*10) / 10
+// applyScoredCommitsToSnapshot writes the scored commits aggregate into the snapshot.
+func applyScoredCommitsToSnapshot(agg *scoredCommitsAggregate, snap *core.UsageSnapshot) {
+	tc := float64(agg.TotalCommits)
+	snap.Metrics["scored_commits"] = core.Metric{Used: &tc, Unit: "commits", Window: "all-time"}
+	snap.Raw["scored_commits_total"] = strconv.Itoa(agg.TotalCommits)
+
+	if agg.CountWithPct > 0 {
+		avgPct := math.Round((agg.SumAIPct/float64(agg.CountWithPct))*10) / 10
 		hundred := 100.0
 		remaining := hundred - avgPct
 		snap.Metrics["ai_code_percentage"] = core.Metric{
@@ -151,26 +173,26 @@ func (p *Provider) readScoredCommits(ctx context.Context, db *sql.DB, snap *core
 			Window:    "all-commits",
 		}
 		snap.Raw["ai_code_pct_avg"] = fmt.Sprintf("%.1f%%", avgPct)
-		snap.Raw["ai_code_pct_sample"] = strconv.Itoa(countWithPct)
+		snap.Raw["ai_code_pct_sample"] = strconv.Itoa(agg.CountWithPct)
 	}
 
-	if totalLinesAdd > 0 || totalLinesDel > 0 {
-		snap.Raw["commit_total_lines_added"] = strconv.Itoa(totalLinesAdd)
-		snap.Raw["commit_total_lines_deleted"] = strconv.Itoa(totalLinesDel)
+	if agg.TotalLinesAdd > 0 || agg.TotalLinesDel > 0 {
+		snap.Raw["commit_total_lines_added"] = strconv.Itoa(agg.TotalLinesAdd)
+		snap.Raw["commit_total_lines_deleted"] = strconv.Itoa(agg.TotalLinesDel)
 	}
-	if totalTabAdd > 0 || totalCompAdd > 0 || totalHumanAdd > 0 {
-		snap.Raw["commit_tab_lines"] = strconv.Itoa(totalTabAdd)
-		snap.Raw["commit_composer_lines"] = strconv.Itoa(totalCompAdd)
-		snap.Raw["commit_human_lines"] = strconv.Itoa(totalHumanAdd)
+	if agg.TotalTabAdd > 0 || agg.TotalCompAdd > 0 || agg.TotalHumanAdd > 0 {
+		snap.Raw["commit_tab_lines"] = strconv.Itoa(agg.TotalTabAdd)
+		snap.Raw["commit_composer_lines"] = strconv.Itoa(agg.TotalCompAdd)
+		snap.Raw["commit_human_lines"] = strconv.Itoa(agg.TotalHumanAdd)
 	}
-	if totalTabDel > 0 || totalCompDel > 0 || totalHumanDel > 0 {
-		snap.Raw["commit_tab_lines_deleted"] = strconv.Itoa(totalTabDel)
-		snap.Raw["commit_composer_lines_deleted"] = strconv.Itoa(totalCompDel)
-		snap.Raw["commit_human_lines_deleted"] = strconv.Itoa(totalHumanDel)
+	if agg.TotalTabDel > 0 || agg.TotalCompDel > 0 || agg.TotalHumanDel > 0 {
+		snap.Raw["commit_tab_lines_deleted"] = strconv.Itoa(agg.TotalTabDel)
+		snap.Raw["commit_composer_lines_deleted"] = strconv.Itoa(agg.TotalCompDel)
+		snap.Raw["commit_human_lines_deleted"] = strconv.Itoa(agg.TotalHumanDel)
 	}
-	if totalBlankAdd > 0 || totalBlankDel > 0 {
-		snap.Raw["commit_blank_lines_added"] = strconv.Itoa(totalBlankAdd)
-		snap.Raw["commit_blank_lines_deleted"] = strconv.Itoa(totalBlankDel)
+	if agg.TotalBlankAdd > 0 || agg.TotalBlankDel > 0 {
+		snap.Raw["commit_blank_lines_added"] = strconv.Itoa(agg.TotalBlankAdd)
+		snap.Raw["commit_blank_lines_deleted"] = strconv.Itoa(agg.TotalBlankDel)
 	}
 }
 
@@ -188,6 +210,44 @@ func (p *Provider) readTrackedFileContent(ctx context.Context, db *sql.DB, snap 
 		v := float64(count)
 		snap.Metrics["ai_tracked_files"] = core.Metric{Used: &v, Unit: "files", Window: "all-time"}
 	}
+}
+
+// loadTrackingRecordsCached returns all tracking records, using the rowid
+// watermark to avoid full table scans when no new rows have been inserted.
+func (p *Provider) loadTrackingRecordsCached(ctx context.Context, db *sql.DB) ([]cursorTrackingRecord, error) {
+	p.trackingCacheMu.Lock()
+	defer p.trackingCacheMu.Unlock()
+
+	currentMax, err := trackingMaxRowID(ctx, db)
+	if err != nil {
+		// Fall back to full scan on error.
+		return loadTrackingRecords(ctx, db, p.clock)
+	}
+
+	if currentMax == p.trackingMaxRowID && p.trackingRecords != nil {
+		// No new rows — reuse cached records.
+		return p.trackingRecords, nil
+	}
+
+	if p.trackingMaxRowID > 0 && currentMax > p.trackingMaxRowID && p.trackingRecords != nil {
+		// New rows only — load incrementally and append.
+		newRecords, err := loadTrackingRecordsIncremental(ctx, db, p.clock, p.trackingMaxRowID)
+		if err != nil {
+			return loadTrackingRecords(ctx, db, p.clock)
+		}
+		p.trackingRecords = append(p.trackingRecords, newRecords...)
+		p.trackingMaxRowID = currentMax
+		return p.trackingRecords, nil
+	}
+
+	// First load or reset — full scan.
+	records, err := loadTrackingRecords(ctx, db, p.clock)
+	if err != nil {
+		return nil, err
+	}
+	p.trackingRecords = records
+	p.trackingMaxRowID = currentMax
+	return p.trackingRecords, nil
 }
 
 func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) string {

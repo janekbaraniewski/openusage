@@ -31,11 +31,32 @@ type cursorDailyStatsRecord struct {
 }
 
 func loadTrackingRecords(ctx context.Context, db *sql.DB, clock core.Clock) ([]cursorTrackingRecord, error) {
+	return loadTrackingRecordsIncremental(ctx, db, clock, 0)
+}
+
+// trackingMaxRowID returns the maximum rowid in ai_code_hashes, or 0 if the table is empty.
+func trackingMaxRowID(ctx context.Context, db *sql.DB) (int64, error) {
+	var maxID int64
+	err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(rowid), 0) FROM ai_code_hashes").Scan(&maxID)
+	return maxID, err
+}
+
+// loadTrackingRecordsIncremental loads tracking records with rowid > afterRowID.
+// Pass afterRowID=0 to load all records.
+func loadTrackingRecordsIncremental(ctx context.Context, db *sql.DB, clock core.Clock, afterRowID int64) ([]cursorTrackingRecord, error) {
 	if clock == nil {
 		clock = core.SystemClock{}
 	}
 	columns := cursorTableColumns(ctx, db, "ai_code_hashes")
 	timeExpr := chooseTrackingTimeExpr(ctx, db)
+
+	var whereClause string
+	var args []interface{}
+	if afterRowID > 0 {
+		whereClause = "WHERE rowid > ?"
+		args = append(args, afterRowID)
+	}
+
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s,
 		       %s,
@@ -46,6 +67,7 @@ func loadTrackingRecords(ctx context.Context, db *sql.DB, clock core.Clock) ([]c
 		       COALESCE(%s, 0),
 		       rowid
 		FROM ai_code_hashes
+		%s
 		ORDER BY %s ASC`,
 		cursorTrackingTextColumnExpr(columns, "source"),
 		cursorTrackingTextColumnExpr(columns, "model"),
@@ -54,7 +76,8 @@ func loadTrackingRecords(ctx context.Context, db *sql.DB, clock core.Clock) ([]c
 		cursorTrackingTextColumnExpr(columns, "requestId"),
 		cursorTrackingTextColumnExpr(columns, "conversationId"),
 		timeExpr,
-		timeExpr))
+		whereClause,
+		timeExpr), args...)
 	if err != nil {
 		return nil, fmt.Errorf("cursor: querying ai_code_hashes: %w", err)
 	}

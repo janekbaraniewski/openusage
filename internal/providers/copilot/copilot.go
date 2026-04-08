@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -20,8 +21,44 @@ const (
 	maxCopilotClients    = 6
 )
 
+// Default TTLs for the tiered cache. Binary paths and versions change rarely,
+// so they use long TTLs.  The full snapshot uses a shorter TTL to keep data
+// reasonably fresh while eliminating most subprocess spawns.
+const (
+	ttlBinaryResolution = 1 * time.Hour
+	ttlVersion          = 1 * time.Hour
+	ttlAuthStatus       = 5 * time.Minute
+	ttlSnapshot         = 2 * time.Minute
+)
+
+// copilotAPICache holds cached results from CLI subprocess calls and API
+// responses.  All fields are protected by Provider.cacheMu.
+type copilotAPICache struct {
+	// Binary resolution (1 hour TTL)
+	ghBinary         string
+	copilotBinary    string
+	binaryResolvedAt time.Time
+
+	// Version detection (1 hour TTL)
+	version          string
+	versionSource    string
+	versionFetchedAt time.Time
+
+	// Auth status (5 min TTL)
+	authOK        bool
+	authOutput    string
+	authFetchedAt time.Time
+
+	// Full snapshot cache for quick return (2 min TTL)
+	lastSnap   core.UsageSnapshot
+	lastSnapAt time.Time
+}
+
 type Provider struct {
 	providerbase.Base
+
+	cacheMu  sync.Mutex
+	apiCache *copilotAPICache
 }
 
 func New() *Provider {
@@ -240,12 +277,36 @@ type logTokenEntry struct {
 	Total     int
 }
 
-func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	configuredBinary := strings.TrimSpace(acct.Binary)
-	if configuredBinary == "" {
-		configuredBinary = "gh"
+// HasChanged reports whether Copilot's local log/session files have been modified since the given time.
+func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	configDir := acct.Hint("config_dir", "")
+	if configDir == "" {
+		if home, _ := os.UserHomeDir(); home != "" {
+			configDir = filepath.Join(home, ".copilot")
+		}
 	}
-	ghBinary, copilotBinary := resolveCopilotBinaries(configuredBinary, acct)
+	if configDir == "" {
+		return true, nil
+	}
+	for _, rel := range []string{"logs", "session-state", "config.json"} {
+		if info, err := os.Stat(filepath.Join(configDir, rel)); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	// Fast path: return cached snapshot if still fresh and successful.
+	p.cacheMu.Lock()
+	if p.apiCache != nil && time.Since(p.apiCache.lastSnapAt) < ttlSnapshot && p.apiCache.lastSnap.Status == core.StatusOK {
+		snap := p.apiCache.lastSnap
+		p.cacheMu.Unlock()
+		return snap, nil
+	}
+	p.cacheMu.Unlock()
+
+	ghBinary, copilotBinary := p.resolveAndCacheBinaries(acct)
 	if ghBinary == "" && copilotBinary == "" {
 		return core.UsageSnapshot{
 			ProviderID: p.ID(),
@@ -266,7 +327,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	version, versionSource, err := detectCopilotVersion(ctx, ghBinary, copilotBinary)
+	version, versionSource, err := p.detectAndCacheVersion(ctx, ghBinary, copilotBinary)
 	if err != nil {
 		snap.Status = core.StatusError
 		snap.Message = "copilot command not available"
@@ -280,11 +341,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	authOutput := ""
 	if ghBinary != "" {
-		authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
+		authOut, authOK := p.checkAndCacheAuth(ctx, ghBinary)
 		authOutput = authOut
 		snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
 
-		if authErr != nil {
+		if !authOK {
 			snap.Status = core.StatusAuth
 			snap.Message = "not authenticated with GitHub"
 			return snap, nil
@@ -305,7 +366,97 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	p.resolveStatus(&snap, authOutput)
 
+	// Cache successful snapshots for quick return on subsequent polls.
+	if snap.Status == core.StatusOK {
+		p.cacheMu.Lock()
+		if p.apiCache == nil {
+			p.apiCache = &copilotAPICache{}
+		}
+		p.apiCache.lastSnap = snap
+		p.apiCache.lastSnapAt = time.Now()
+		p.cacheMu.Unlock()
+	}
+
 	return snap, nil
+}
+
+// resolveAndCacheBinaries returns cached binary paths if the TTL has not expired,
+// otherwise resolves them fresh and caches the result.
+func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, string) {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+
+	if p.apiCache != nil && !p.apiCache.binaryResolvedAt.IsZero() && time.Since(p.apiCache.binaryResolvedAt) < ttlBinaryResolution {
+		return p.apiCache.ghBinary, p.apiCache.copilotBinary
+	}
+
+	configuredBinary := strings.TrimSpace(acct.Binary)
+	if configuredBinary == "" {
+		configuredBinary = "gh"
+	}
+	gh, copilot := resolveCopilotBinaries(configuredBinary, acct)
+
+	if p.apiCache == nil {
+		p.apiCache = &copilotAPICache{}
+	}
+	p.apiCache.ghBinary = gh
+	p.apiCache.copilotBinary = copilot
+	p.apiCache.binaryResolvedAt = time.Now()
+	return gh, copilot
+}
+
+// detectAndCacheVersion returns cached version info if the TTL has not expired,
+// otherwise runs the version command and caches the result.
+func (p *Provider) detectAndCacheVersion(ctx context.Context, ghBinary, copilotBinary string) (string, string, error) {
+	p.cacheMu.Lock()
+	if p.apiCache != nil && p.apiCache.version != "" && time.Since(p.apiCache.versionFetchedAt) < ttlVersion {
+		v, src := p.apiCache.version, p.apiCache.versionSource
+		p.cacheMu.Unlock()
+		return v, src, nil
+	}
+	p.cacheMu.Unlock()
+
+	version, source, err := detectCopilotVersion(ctx, ghBinary, copilotBinary)
+	if err != nil {
+		return "", "", err
+	}
+
+	p.cacheMu.Lock()
+	if p.apiCache == nil {
+		p.apiCache = &copilotAPICache{}
+	}
+	p.apiCache.version = version
+	p.apiCache.versionSource = source
+	p.apiCache.versionFetchedAt = time.Now()
+	p.cacheMu.Unlock()
+
+	return version, source, nil
+}
+
+// checkAndCacheAuth returns cached auth status if the TTL has not expired,
+// otherwise runs `gh auth status` and caches the result.
+func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary string) (string, bool) {
+	p.cacheMu.Lock()
+	if p.apiCache != nil && !p.apiCache.authFetchedAt.IsZero() && time.Since(p.apiCache.authFetchedAt) < ttlAuthStatus {
+		out, ok := p.apiCache.authOutput, p.apiCache.authOK
+		p.cacheMu.Unlock()
+		return out, ok
+	}
+	p.cacheMu.Unlock()
+
+	authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
+	authOK := authErr == nil
+
+	p.cacheMu.Lock()
+	if p.apiCache == nil {
+		p.apiCache = &copilotAPICache{}
+	}
+	p.apiCache.authOutput = authOut
+	p.apiCache.authOK = authOK
+	p.apiCache.authFetchedAt = time.Now()
+	p.cacheMu.Unlock()
+
+	return authOut, authOK
 }
 
 func resolveCopilotBinaries(configuredBinary string, acct core.AccountConfig) (string, string) {

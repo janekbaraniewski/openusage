@@ -186,6 +186,26 @@ func (p *Provider) DetailWidget() core.DetailWidget {
 	return core.CodingToolDetailWidget(true)
 }
 
+// HasChanged reports whether the Codex sessions directory has been modified since the given time.
+func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	configDir := acct.Hint("config_dir", "")
+	if configDir == "" {
+		if home, _ := os.UserHomeDir(); home != "" {
+			configDir = filepath.Join(home, ".codex")
+		}
+	}
+	if configDir == "" {
+		return true, nil
+	}
+	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
+	for _, path := range []string{sessionsDir, filepath.Join(configDir, "version.json")} {
+		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),

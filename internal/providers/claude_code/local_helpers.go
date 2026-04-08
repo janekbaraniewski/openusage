@@ -408,6 +408,27 @@ func collectJSONLFiles(dir string) []string {
 	return files
 }
 
+// collectJSONLFilesWithStat walks the directory like collectJSONLFiles but also returns
+// the os.FileInfo for each file, enabling cache invalidation by mtime+size.
+func collectJSONLFilesWithStat(dir string) map[string]os.FileInfo {
+	result := make(map[string]os.FileInfo)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return result
+	}
+
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			result[path] = info
+		}
+		return nil
+	})
+
+	return result
+}
+
 func parseJSONLFile(path string) []jsonlEntry {
 	f, err := os.Open(path)
 	if err != nil {

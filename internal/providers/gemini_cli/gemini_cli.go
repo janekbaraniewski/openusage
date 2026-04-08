@@ -230,6 +230,30 @@ type usageEntry struct {
 	Data tokenUsage
 }
 
+// HasChanged reports whether Gemini CLI's local data files have been modified since the given time.
+func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	configDir := acct.Hint("config_dir", "")
+	if configDir == "" {
+		if home, _ := os.UserHomeDir(); home != "" {
+			configDir = filepath.Join(home, ".gemini")
+		}
+	}
+	if configDir == "" {
+		return true, nil
+	}
+	for _, rel := range []string{
+		"antigravity/conversations",
+		"settings.json",
+		"oauth_creds.json",
+		"tmp",
+	} {
+		if info, err := os.Stat(filepath.Join(configDir, rel)); err == nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.UsageSnapshot{
 		ProviderID:  p.ID(),

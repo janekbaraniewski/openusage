@@ -30,11 +30,11 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 	if err != nil {
 		dailyStatsRecords = nil
 	}
-	composerRecords, err := loadComposerSessionRecords(ctx, db)
+	composerRecords, err := p.loadComposerRecordsCached(ctx, db)
 	if err != nil {
 		log.Printf("[cursor] composerData query error: %v", err)
 	}
-	bubbleRecords, err := loadBubbleRecords(ctx, db)
+	bubbleRecords, err := p.loadBubbleRecordsCached(ctx, db)
 	if err != nil {
 		log.Printf("[cursor] bubbleId query error: %v", err)
 	}
@@ -45,6 +45,112 @@ func (p *Provider) readStateDB(ctx context.Context, dbPath string, snap *core.Us
 	p.readStateMetadata(ctx, db, snap)
 	p.readToolUsage(bubbleRecords, snap)
 	return nil
+}
+
+// loadComposerRecordsCached checks for new composer session keys and only
+// loads the expensive json_extract query for keys not already in the cache.
+func (p *Provider) loadComposerRecordsCached(ctx context.Context, db *sql.DB) ([]cursorComposerSessionRecord, error) {
+	p.stateCacheMu.Lock()
+	defer p.stateCacheMu.Unlock()
+
+	currentKeys, err := loadComposerSessionKeys(ctx, db)
+	if err != nil {
+		// Fall back to full load on error.
+		return loadComposerSessionRecords(ctx, db)
+	}
+
+	// Determine which keys are new.
+	var newKeys []string
+	if p.composerKeys == nil {
+		p.composerKeys = make(map[string]bool, len(currentKeys))
+	}
+	for _, key := range currentKeys {
+		if !p.composerKeys[key] {
+			newKeys = append(newKeys, key)
+		}
+	}
+
+	if len(newKeys) == 0 && p.composerRecords != nil {
+		// No new sessions — reuse cached records.
+		return p.composerRecords, nil
+	}
+
+	if len(newKeys) > 0 && p.composerRecords != nil {
+		// Only load the new keys.
+		newRecords, err := loadComposerSessionRecordsByKeys(ctx, db, newKeys)
+		if err != nil {
+			return loadComposerSessionRecords(ctx, db)
+		}
+		p.composerRecords = append(p.composerRecords, newRecords...)
+		for _, key := range newKeys {
+			p.composerKeys[key] = true
+		}
+		return p.composerRecords, nil
+	}
+
+	// First load — full scan.
+	records, err := loadComposerSessionRecords(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	p.composerRecords = records
+	for _, key := range currentKeys {
+		p.composerKeys[key] = true
+	}
+	return p.composerRecords, nil
+}
+
+// loadBubbleRecordsCached checks for new bubble keys and only loads the
+// expensive json_extract query for keys not already in the cache.
+func (p *Provider) loadBubbleRecordsCached(ctx context.Context, db *sql.DB) ([]cursorBubbleRecord, error) {
+	p.stateCacheMu.Lock()
+	defer p.stateCacheMu.Unlock()
+
+	currentKeys, err := loadBubbleKeys(ctx, db)
+	if err != nil {
+		// Fall back to full load on error.
+		return loadBubbleRecords(ctx, db)
+	}
+
+	// Determine which keys are new.
+	var newKeys []string
+	if p.bubbleKeys == nil {
+		p.bubbleKeys = make(map[string]bool, len(currentKeys))
+	}
+	for _, key := range currentKeys {
+		if !p.bubbleKeys[key] {
+			newKeys = append(newKeys, key)
+		}
+	}
+
+	if len(newKeys) == 0 && p.bubbleRecords != nil {
+		// No new bubbles — reuse cached records.
+		return p.bubbleRecords, nil
+	}
+
+	if len(newKeys) > 0 && p.bubbleRecords != nil {
+		// Only load the new keys.
+		newRecords, err := loadBubbleRecordsByKeys(ctx, db, newKeys)
+		if err != nil {
+			return loadBubbleRecords(ctx, db)
+		}
+		p.bubbleRecords = append(p.bubbleRecords, newRecords...)
+		for _, key := range newKeys {
+			p.bubbleKeys[key] = true
+		}
+		return p.bubbleRecords, nil
+	}
+
+	// First load — full scan.
+	records, err := loadBubbleRecords(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	p.bubbleRecords = records
+	for _, key := range currentKeys {
+		p.bubbleKeys[key] = true
+	}
+	return p.bubbleRecords, nil
 }
 
 func (p *Provider) readDailyStatsToday(records []cursorDailyStatsRecord, snap *core.UsageSnapshot) {
