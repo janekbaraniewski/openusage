@@ -13,6 +13,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -241,17 +242,12 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 	if configDir == "" {
 		return true, nil
 	}
-	for _, rel := range []string{
-		"antigravity/conversations",
-		"settings.json",
-		"oauth_creds.json",
-		"tmp",
-	} {
-		if info, err := os.Stat(filepath.Join(configDir, rel)); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return shared.AnyPathModifiedAfter([]string{
+		filepath.Join(configDir, "antigravity/conversations"),
+		filepath.Join(configDir, "settings.json"),
+		filepath.Join(configDir, "oauth_creds.json"),
+		filepath.Join(configDir, "tmp"),
+	}, since), nil
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {

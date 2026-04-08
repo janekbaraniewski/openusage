@@ -81,17 +81,10 @@ func (p *Provider) now() time.Time {
 
 // HasChanged reports whether Ollama's local data files have been modified since the given time.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
-	if dbPath := resolveDesktopDBPath(acct); dbPath != "" {
-		if info, err := os.Stat(dbPath); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-	if configPath := resolveServerConfigPath(acct); configPath != "" {
-		if info, err := os.Stat(configPath); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return shared.AnyPathModifiedAfter([]string{
+		resolveDesktopDBPath(acct),
+		resolveServerConfigPath(acct),
+	}, since), nil
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {

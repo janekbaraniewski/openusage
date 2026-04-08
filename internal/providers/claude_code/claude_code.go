@@ -11,6 +11,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 type Provider struct {
@@ -283,33 +284,14 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		home = filepath.Dir(claudeDir)
 	}
 
-	// Check projects directories (the most expensive data source).
-	projectsDirs := []string{
+	normalizeLegacyPaths(&acct)
+	return shared.AnyPathModifiedAfter([]string{
 		filepath.Join(claudeDir, "projects"),
 		filepath.Join(home, ".config", "claude", "projects"),
-	}
-	for _, dir := range projectsDirs {
-		if info, err := os.Stat(dir); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-
-	// Check stats cache and account config.
-	normalizeLegacyPaths(&acct)
-	for _, path := range []string{
 		acct.Path("stats_cache", ""),
 		acct.Path("account_config", filepath.Join(home, ".claude.json")),
 		filepath.Join(claudeDir, "settings.json"),
-	} {
-		if path == "" {
-			continue
-		}
-		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	}, since), nil
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {

@@ -1,7 +1,6 @@
 package cursor
 
 import (
-	"os"
 	"sync"
 	"time"
 
@@ -9,6 +8,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 // scoredCommitsAggregate caches the aggregated scored_commits results so we
@@ -187,16 +187,10 @@ type composerModelUsage struct {
 
 // HasChanged reports whether either Cursor SQLite database has been modified since the given time.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
-	for _, key := range []string{"tracking_db", "state_db"} {
-		path := acct.Path(key, "")
-		if path == "" {
-			continue
-		}
-		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return shared.AnyPathModifiedAfter([]string{
+		acct.Path("tracking_db", ""),
+		acct.Path("state_db", ""),
+	}, since), nil
 }
 
 func (p *Provider) DetailWidget() core.DetailWidget {

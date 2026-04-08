@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -151,4 +152,18 @@ func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSn
 
 	ApplyStandardRateLimits(resp, snap)
 	return nil
+}
+
+// AnyPathModifiedAfter returns true if any of the given paths has an mtime
+// after since. Paths that don't exist or can't be stat'd are silently skipped.
+func AnyPathModifiedAfter(paths []string, since time.Time) bool {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
+			return true
+		}
+	}
+	return false
 }
