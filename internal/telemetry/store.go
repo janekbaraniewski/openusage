@@ -103,6 +103,25 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+// Vacuum reclaims disk space from deleted rows. Should be called after large
+// batch deletions (e.g. retention pruning). This can be slow on large databases.
+func (s *Store) Vacuum(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, "VACUUM")
+	return err
+}
+
+// Analyze updates SQLite's query planner statistics for all tables and indexes.
+func (s *Store) Analyze(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, "ANALYZE")
+	return err
+}
+
 func (s *Store) Init(ctx context.Context) error {
 	stmts := []string{
 		`PRAGMA foreign_keys = ON;`,
