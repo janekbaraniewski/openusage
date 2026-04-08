@@ -186,9 +186,11 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, nil
 	}
-	if _, err := os.Stat(dbPath); err != nil {
+	fi, err := os.Stat(dbPath)
+	if err != nil {
 		return nil, nil
 	}
+	dbMtime := fi.ModTime().UTC()
 
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
 	if err != nil {
@@ -216,12 +218,12 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 		out = append(out, composerEvents...)
 	}
 
-	toolEvents := toolEventsFromBubbleRecords(bubbleRecords, sessionTimestamps, dbPath)
+	toolEvents := toolEventsFromBubbleRecords(bubbleRecords, sessionTimestamps, dbMtime, dbPath)
 	if len(toolEvents) > 0 {
 		out = append(out, toolEvents...)
 	}
 
-	tokenEvents := bubbleTokenEventsFromRecords(bubbleRecords, sessionTimestamps, dbPath)
+	tokenEvents := bubbleTokenEventsFromRecords(bubbleRecords, sessionTimestamps, dbMtime, dbPath)
 	if len(tokenEvents) > 0 {
 		out = append(out, tokenEvents...)
 	}
@@ -318,7 +320,7 @@ func composerEventsFromRecords(records []cursorComposerSessionRecord, dbPath str
 	return out
 }
 
-func toolEventsFromBubbleRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbPath string) []shared.TelemetryEvent {
+func toolEventsFromBubbleRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbMtime time.Time, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
 	for _, record := range records {
 		if strings.TrimSpace(record.ToolName) == "" {
@@ -326,6 +328,9 @@ func toolEventsFromBubbleRecords(records []cursorBubbleRecord, sessionTimestamps
 		}
 		status := mapCursorToolStatus(record.ToolStatus)
 		occurredAt := sessionTimestamps[record.SessionID]
+		if occurredAt.IsZero() {
+			occurredAt = dbMtime // fallback: use DB file mtime (stable across restarts)
+		}
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetryCursorSQLiteSchema,
 			Channel:       shared.TelemetryChannelSQLite,
@@ -483,7 +488,7 @@ func normalizeFileExtension(ext string) string {
 // state DB. Each AI response bubble (type=2) may have a tokenCount with
 // inputTokens/outputTokens. These are emitted as message_usage events linked
 // to their parent composer session via conversationId.
-func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbPath string) []shared.TelemetryEvent {
+func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamps map[string]time.Time, dbMtime time.Time, dbPath string) []shared.TelemetryEvent {
 	var out []shared.TelemetryEvent
 	for _, record := range records {
 		if record.InputTokens <= 0 {
@@ -491,6 +496,9 @@ func bubbleTokenEventsFromRecords(records []cursorBubbleRecord, sessionTimestamp
 		}
 		messageID := fmt.Sprintf("cursor-bubble-tokens:%s", record.BubbleID)
 		occurredAt := sessionTimestamps[record.SessionID]
+		if occurredAt.IsZero() {
+			occurredAt = dbMtime // fallback: use DB file mtime (stable across restarts)
+		}
 		var inTok, outTok *int64
 		inTok = core.Int64Ptr(record.InputTokens)
 		if record.OutputTokens > 0 {

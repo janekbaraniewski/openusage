@@ -43,6 +43,9 @@ func (c *SourceCollector) Collect(ctx context.Context) ([]IngestRequest, error) 
 
 	out := make([]IngestRequest, 0, len(events))
 	for _, ev := range events {
+		if ev.OccurredAt.IsZero() {
+			continue // skip events without a valid timestamp
+		}
 		out = append(out, mapProviderEvent(c.Source.System(), ev, c.AccountOverride))
 	}
 	return out, nil

@@ -81,9 +81,11 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, nil
 	}
-	if _, err := os.Stat(dbPath); err != nil {
+	fi, err := os.Stat(dbPath)
+	if err != nil {
 		return nil, nil
 	}
+	dbMtime := fi.ModTime().UTC()
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -173,6 +175,9 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		seenMessages[messageKey] = true
 
 		occurredAt := shared.FlexParseTime(createdAt.String)
+		if occurredAt.IsZero() {
+			occurredAt = dbMtime // fallback: use DB file mtime (stable across restarts)
+		}
 
 		inputTokens := int64(estimateTokensFromChars(pendingInputChars))
 		outputTokens := int64(estimateTokensFromChars(contentLen + thinkingLen))
@@ -254,6 +259,9 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 				seenTools[toolKey] = true
 
 				occurredAt := shared.FlexParseTime(createdAt)
+				if occurredAt.IsZero() {
+					occurredAt = dbMtime
+				}
 
 				out = append(out, shared.TelemetryEvent{
 					SchemaVersion: telemetrySQLiteSchema,

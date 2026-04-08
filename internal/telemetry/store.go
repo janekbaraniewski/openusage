@@ -243,6 +243,18 @@ func (s *Store) RunMigrations(ctx context.Context) error {
 					SELECT raw_event_id FROM usage_raw_events WHERE LOWER(TRIM(source_system)) = 'cursor'
 				  )`,
 		},
+		{
+			name: "cleanup_zero_timestamp_events",
+			sql: `DELETE FROM usage_events
+				WHERE event_id IN (
+					SELECT e.event_id
+					FROM usage_events e
+					JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+					WHERE LOWER(TRIM(r.source_system)) IN ('cursor', 'ollama')
+					  AND (e.session_id IS NULL OR TRIM(e.session_id) = '')
+					  AND ABS(julianday(e.occurred_at) - julianday(r.ingested_at)) < 0.00002
+				)`,
+		},
 	}
 
 	for _, r := range repairs {
