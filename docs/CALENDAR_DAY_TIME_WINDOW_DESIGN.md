@@ -1,7 +1,7 @@
 # Calendar Day Time Window Design
 
 Date: 2026-04-08
-Status: Proposed
+Status: Implemented
 Author: janekbaraniewski
 
 ## 1. Problem Statement

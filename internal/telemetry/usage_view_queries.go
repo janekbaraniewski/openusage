@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/samber/lo"
@@ -33,7 +34,7 @@ func clientDimensionExpr() string {
 
 func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryModelAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), 'unknown') AS model_key,
 			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
@@ -48,7 +49,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 				COALESCE(cache_write_tokens, 0))) AS total_tokens,
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
 			SUM(COALESCE(requests, 1)) AS requests,
-			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
+			SUM(CASE WHEN %s THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
 		FROM deduped_usage
 		WHERE 1=1
 		  AND event_type = 'message_usage'
@@ -56,7 +57,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 		GROUP BY model_key
 		ORDER BY total_tokens DESC, requests DESC
 		LIMIT 500
-	`
+	`, filter.todayExpr("occurred_at"))
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage model query: %w", err)
@@ -89,11 +90,11 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 
 func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetrySourceAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
-			` + clientDimensionExpr() + ` AS source_name,
+			%s AS source_name,
 			SUM(COALESCE(requests, 1)) AS requests,
-			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today,
+			SUM(CASE WHEN %s THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today,
 			SUM(COALESCE(total_tokens,
 				COALESCE(input_tokens, 0) +
 				COALESCE(output_tokens, 0) +
@@ -112,7 +113,7 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 		GROUP BY source_name
 		ORDER BY requests DESC
 		LIMIT 500
-	`
+	`, clientDimensionExpr(), filter.todayExpr("occurred_at"))
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage source query: %w", err)
@@ -145,11 +146,11 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 
 func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryProjectAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			COALESCE(NULLIF(TRIM(workspace_id), ''), '') AS project_name,
 			SUM(COALESCE(requests, 1)) AS requests,
-			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
+			SUM(CASE WHEN %s THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
 		FROM deduped_usage
 		WHERE 1=1
 		  AND event_type = 'message_usage'
@@ -158,7 +159,7 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 		GROUP BY project_name
 		ORDER BY requests DESC
 		LIMIT 500
-	`
+	`, filter.todayExpr("occurred_at"))
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage project query: %w", err)
@@ -181,24 +182,25 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 
 func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telemetryToolAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	todayExpr := filter.todayExpr("occurred_at")
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			COALESCE(NULLIF(TRIM(LOWER(tool_name)), ''), 'unknown') AS tool_name,
 			SUM(COALESCE(requests, 1)) AS calls,
-			SUM(CASE WHEN date(occurred_at) = date('now') THEN COALESCE(requests, 1) ELSE 0 END) AS calls_today,
+			SUM(CASE WHEN %s THEN COALESCE(requests, 1) ELSE 0 END) AS calls_today,
 			SUM(CASE WHEN status = 'ok' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_ok,
-			SUM(CASE WHEN date(occurred_at) = date('now') AND status = 'ok' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_ok_today,
+			SUM(CASE WHEN %s AND status = 'ok' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_ok_today,
 			SUM(CASE WHEN status = 'error' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_error,
-			SUM(CASE WHEN date(occurred_at) = date('now') AND status = 'error' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_error_today,
+			SUM(CASE WHEN %s AND status = 'error' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_error_today,
 			SUM(CASE WHEN status = 'aborted' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_aborted,
-			SUM(CASE WHEN date(occurred_at) = date('now') AND status = 'aborted' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_aborted_today
+			SUM(CASE WHEN %s AND status = 'aborted' THEN COALESCE(requests, 1) ELSE 0 END) AS calls_aborted_today
 		FROM deduped_usage
 		WHERE 1=1
 		  AND event_type = 'tool_usage'
 		GROUP BY tool_name
 		ORDER BY calls DESC
 		LIMIT 500
-	`
+	`, todayExpr, todayExpr, todayExpr, todayExpr)
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("canonical usage tool query: %w", err)
@@ -681,10 +683,19 @@ func usageWhereClause(alias string, filter usageFilter) (string, []any) {
 		where += " AND " + prefix + "account_id = ?"
 		args = append(args, strings.TrimSpace(filter.AccountID))
 	}
-	if filter.TimeWindowHours > 0 {
-		where += fmt.Sprintf(" AND %soccurred_at >= datetime('now', '-%d hour')", prefix, filter.TimeWindowHours)
+	if !filter.Since.IsZero() {
+		where += fmt.Sprintf(" AND %soccurred_at >= '%s'", prefix, filter.Since.UTC().Format(time.RFC3339Nano))
 	}
 	return where, args
+}
+
+// todayExpr returns a SQL expression that is true for events occurring on
+// the local calendar day. Falls back to UTC date('now') if TodaySince is zero.
+func (f usageFilter) todayExpr(col string) string {
+	if f.TodaySince.IsZero() {
+		return fmt.Sprintf("date(%s) = date('now')", col)
+	}
+	return fmt.Sprintf("%s >= '%s'", col, f.TodaySince.UTC().Format(time.RFC3339Nano))
 }
 
 func normalizeProviderIDs(in []string) []string {

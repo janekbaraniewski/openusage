@@ -40,9 +40,10 @@ type storedLimitEnvelope struct {
 }
 
 type ReadModelOptions struct {
-	ProviderLinks   map[string]string
-	TimeWindowHours int
-	TimeWindow      core.TimeWindow
+	ProviderLinks map[string]string
+	Since         time.Time
+	TodaySince    time.Time
+	TimeWindow    core.TimeWindow
 }
 
 // ApplyCanonicalTelemetryView hydrates snapshots from canonical telemetry streams.
@@ -56,7 +57,7 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	totalStart := time.Now()
 	defer func() {
 		core.Tracef("[read_model_perf] TOTAL ApplyCanonicalTelemetryView: %dms (window=%s, windowHours=%d, accounts=%d)",
-			time.Since(totalStart).Milliseconds(), options.TimeWindow, options.TimeWindowHours, len(snaps))
+			time.Since(totalStart).Milliseconds(), options.TimeWindow, options.Since.Format(time.RFC3339), len(snaps))
 	}()
 
 	dbPath = strings.TrimSpace(dbPath)
@@ -104,7 +105,7 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	done()
 
 	done = trace("applyCanonicalUsageViewWithDB")
-	result, err := applyCanonicalUsageViewWithDB(ctx, db, merged, links, options.TimeWindowHours, options.TimeWindow)
+	result, err := applyCanonicalUsageViewWithDB(ctx, db, merged, links, options.Since, options.TodaySince, options.TimeWindow)
 	done()
 	return result, err
 }

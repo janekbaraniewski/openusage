@@ -19,9 +19,10 @@ func (s *Service) computeReadModel(
 	}
 	tw := normalizeReadModelTimeWindow(req.TimeWindow)
 	result, err := telemetry.ApplyCanonicalTelemetryViewWithOptions(ctx, s.cfg.DBPath, templates, telemetry.ReadModelOptions{
-		ProviderLinks:   req.ProviderLinks,
-		TimeWindowHours: tw.Hours(),
-		TimeWindow:      tw,
+		ProviderLinks: req.ProviderLinks,
+		Since:         tw.Since(),
+		TodaySince:    core.LocalMidnight(),
+		TimeWindow:    tw,
 	})
 	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
 		time.Since(start).Milliseconds(), tw, len(req.Accounts), len(result))
@@ -71,6 +72,7 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	interval = max(5*time.Second, min(30*time.Second, interval))
 
 	s.infof("read_model_cache_loop_start", "interval=%s", interval)
+	s.dataIngested.Store(true) // ensure first boot always computes
 	s.refreshReadModelCacheFromConfig(ctx)
 
 	ticker := time.NewTicker(interval)
@@ -81,6 +83,9 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 			s.infof("read_model_cache_loop_stop", "reason=context_done")
 			return
 		case <-ticker.C:
+			if !s.dataIngested.Swap(false) {
+				continue // no new data ingested since last refresh
+			}
 			s.refreshReadModelCacheFromConfig(ctx)
 		}
 	}

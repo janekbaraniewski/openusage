@@ -130,7 +130,8 @@ type telemetryUsageAgg struct {
 type usageFilter struct {
 	ProviderIDs     []string
 	AccountID       string
-	TimeWindowHours int
+	Since           time.Time
+	TodaySince      time.Time
 	materializedTbl string
 }
 
@@ -139,8 +140,7 @@ func applyCanonicalUsageViewWithDB(
 	db *sql.DB,
 	snaps map[string]core.UsageSnapshot,
 	providerLinks map[string]string,
-	timeWindowHours int,
-	timeWindow core.TimeWindow,
+	since time.Time, todaySince time.Time, timeWindow core.TimeWindow,
 ) (map[string]core.UsageSnapshot, error) {
 	if db == nil {
 		return snaps, nil
@@ -173,7 +173,7 @@ func applyCanonicalUsageViewWithDB(
 		cacheKey := strings.Join(sourceProviders, ",") + "|" + accountScope
 		agg, ok := cache[cacheKey]
 		if !ok {
-			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, sourceProviders, accountScope, timeWindowHours)
+			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, sourceProviders, accountScope, since, todaySince)
 			if loadErr != nil {
 				return snaps, loadErr
 			}
@@ -193,7 +193,7 @@ func applyCanonicalUsageViewWithDB(
 				// Telemetry is active but no events in this time window.
 				// Strip stale all-time metrics so TUI shows "no data" placeholders.
 				windowLabel := core.TimeWindowAll
-				if timeWindowHours > 0 && timeWindow != "" {
+				if !since.IsZero() && timeWindow != "" {
 					windowLabel = timeWindow
 				}
 				applyUsageViewToSnapshot(&s, agg, windowLabel)
@@ -205,7 +205,7 @@ func applyCanonicalUsageViewWithDB(
 		}
 
 		windowLabel := core.TimeWindowAll
-		if timeWindowHours > 0 && timeWindow != "" {
+		if !since.IsZero() && timeWindow != "" {
 			windowLabel = timeWindow
 		}
 		applyUsageViewToSnapshot(&s, agg, windowLabel)
@@ -246,7 +246,7 @@ func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]b
 	return out
 }
 
-func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string, timeWindowHours int) (*telemetryUsageAgg, error) {
+func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string, since time.Time, todaySince time.Time) (*telemetryUsageAgg, error) {
 	providerIDs = normalizeProviderIDs(providerIDs)
 	if len(providerIDs) == 0 {
 		return &telemetryUsageAgg{}, nil
@@ -257,7 +257,8 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 		scoped, err := loadUsageViewForFilter(ctx, db, usageFilter{
 			ProviderIDs:     providerIDs,
 			AccountID:       accountID,
-			TimeWindowHours: timeWindowHours,
+			Since:      since,
+			TodaySince: todaySince,
 		})
 		if err != nil {
 			return nil, err
@@ -275,8 +276,9 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 	}
 
 	fallback, err := loadUsageViewForFilter(ctx, db, usageFilter{
-		ProviderIDs:     providerIDs,
-		TimeWindowHours: timeWindowHours,
+		ProviderIDs: providerIDs,
+		Since:       since,
+		TodaySince:  todaySince,
 	})
 	if err != nil {
 		return nil, err
@@ -311,8 +313,8 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if err := db.QueryRowContext(ctx, countQuery).Scan(&agg.LastOccurred, &agg.EventCount); err != nil {
 		return nil, fmt.Errorf("canonical usage count query: %w", err)
 	}
-	core.Tracef("[usage_view_perf] countQuery: %dms (events=%d, providers=%v, windowHours=%d)",
-		time.Since(countStart).Milliseconds(), agg.EventCount, filter.ProviderIDs, filter.TimeWindowHours)
+	core.Tracef("[usage_view_perf] countQuery: %dms (events=%d, providers=%v, since=%s)",
+		time.Since(countStart).Milliseconds(), agg.EventCount, filter.ProviderIDs, filter.Since.Format(time.RFC3339))
 	if agg.EventCount == 0 {
 		return agg, nil
 	}

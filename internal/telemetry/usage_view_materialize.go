@@ -60,8 +60,8 @@ func materializeUsageFilter(ctx context.Context, db *sql.DB, filter usageFilter)
 	if _, err := db.ExecContext(ctx, materializeSQL, whereArgs...); err != nil {
 		return usageFilter{}, nil, fmt.Errorf("materialize deduped usage: %w", err)
 	}
-	core.Tracef("[usage_view_perf] materialize temp table: %dms (providers=%v, windowHours=%d)",
-		time.Since(matStart).Milliseconds(), filter.ProviderIDs, filter.TimeWindowHours)
+	core.Tracef("[usage_view_perf] materialize temp table: %dms (providers=%v, since=%s)",
+		time.Since(matStart).Milliseconds(), filter.ProviderIDs, filter.Since.Format(time.RFC3339))
 
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_event_status ON %s(event_type, status)", tempTable))
 	_, _ = db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_deduped_occurred ON %s(occurred_at)", tempTable))

@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 // TimeWindow represents a configurable time window for filtering usage data.
 type TimeWindow string
 
@@ -75,6 +77,34 @@ func (tw TimeWindow) SQLiteOffset() string {
 		return "-30 day"
 	default:
 		return "-30 day"
+	}
+}
+
+// LocalMidnight returns midnight (00:00:00) of the current local day.
+func LocalMidnight() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+
+// Since returns the cutoff time for this window.
+// For "1d" (Today): local midnight (calendar day boundary).
+// For "3d", "7d", "30d": rolling N*24 hours from now.
+// For "all": zero time (no filter).
+func (tw TimeWindow) Since() time.Time {
+	now := time.Now()
+	switch tw {
+	case TimeWindowAll:
+		return time.Time{}
+	case TimeWindow1d:
+		return LocalMidnight()
+	case TimeWindow3d:
+		return now.Add(-3 * 24 * time.Hour)
+	case TimeWindow7d:
+		return now.Add(-7 * 24 * time.Hour)
+	case TimeWindow30d:
+		return now.Add(-30 * 24 * time.Hour)
+	default:
+		return now.Add(-30 * 24 * time.Hour)
 	}
 }
 

@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTimeWindowHours(t *testing.T) {
 	tests := []struct {
@@ -133,6 +136,67 @@ func TestLargestWindowFitting(t *testing.T) {
 		if got := LargestWindowFitting(tt.maxDays); got != tt.want {
 			t.Errorf("LargestWindowFitting(%d) = %q, want %q", tt.maxDays, got, tt.want)
 		}
+	}
+}
+
+func TestLocalMidnight(t *testing.T) {
+	m := LocalMidnight()
+	if m.Hour() != 0 || m.Minute() != 0 || m.Second() != 0 || m.Nanosecond() != 0 {
+		t.Errorf("LocalMidnight() = %v, want 00:00:00.000000000", m)
+	}
+	now := time.Now()
+	if m.Year() != now.Year() || m.Month() != now.Month() || m.Day() != now.Day() {
+		t.Errorf("LocalMidnight() date = %v, want %v", m.Format("2006-01-02"), now.Format("2006-01-02"))
+	}
+	if m.Location() != now.Location() {
+		t.Errorf("LocalMidnight() location = %v, want %v", m.Location(), now.Location())
+	}
+}
+
+func TestTimeWindowSince(t *testing.T) {
+	now := time.Now()
+
+	// "all" returns zero time.
+	allSince := TimeWindowAll.Since()
+	if !allSince.IsZero() {
+		t.Errorf("TimeWindowAll.Since() = %v, want zero", allSince)
+	}
+
+	// "1d" returns local midnight (calendar day boundary).
+	oneDaySince := TimeWindow1d.Since()
+	if oneDaySince.Hour() != 0 || oneDaySince.Minute() != 0 || oneDaySince.Second() != 0 {
+		t.Errorf("TimeWindow1d.Since() = %v, want midnight", oneDaySince)
+	}
+	if oneDaySince.Year() != now.Year() || oneDaySince.Month() != now.Month() || oneDaySince.Day() != now.Day() {
+		t.Errorf("TimeWindow1d.Since() date = %v, want today", oneDaySince.Format("2006-01-02"))
+	}
+
+	// "3d" returns ~72h ago (rolling).
+	threeDaySince := TimeWindow3d.Since()
+	diff3d := now.Sub(threeDaySince)
+	if diff3d < 71*time.Hour || diff3d > 73*time.Hour {
+		t.Errorf("TimeWindow3d.Since() diff = %v, want ~72h", diff3d)
+	}
+
+	// "7d" returns ~168h ago (rolling).
+	sevenDaySince := TimeWindow7d.Since()
+	diff7d := now.Sub(sevenDaySince)
+	if diff7d < 167*time.Hour || diff7d > 169*time.Hour {
+		t.Errorf("TimeWindow7d.Since() diff = %v, want ~168h", diff7d)
+	}
+
+	// "30d" returns ~720h ago (rolling).
+	thirtyDaySince := TimeWindow30d.Since()
+	diff30d := now.Sub(thirtyDaySince)
+	if diff30d < 719*time.Hour || diff30d > 721*time.Hour {
+		t.Errorf("TimeWindow30d.Since() diff = %v, want ~720h", diff30d)
+	}
+
+	// Unknown defaults to 30d.
+	unknownSince := TimeWindow("bogus").Since()
+	diffUnknown := now.Sub(unknownSince)
+	if diffUnknown < 719*time.Hour || diffUnknown > 721*time.Hour {
+		t.Errorf("TimeWindow(bogus).Since() diff = %v, want ~720h", diffUnknown)
 	}
 }
 
