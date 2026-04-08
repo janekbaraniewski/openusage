@@ -38,6 +38,37 @@ func TestValidateMaterializedTable(t *testing.T) {
 	}
 }
 
+func TestTodayExpr(t *testing.T) {
+	t.Run("zero TodaySince falls back to UTC date('now')", func(t *testing.T) {
+		f := usageFilter{}
+		got := f.todayExpr("occurred_at")
+		want := "date(occurred_at) = date('now')"
+		if got != want {
+			t.Errorf("todayExpr() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("non-zero TodaySince uses formatted timestamp", func(t *testing.T) {
+		midnight := time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)
+		f := usageFilter{TodaySince: midnight}
+		got := f.todayExpr("occurred_at")
+		if !strings.Contains(got, "occurred_at >= '2026-04-08T00:00:00Z'") {
+			t.Errorf("todayExpr() = %q, want occurred_at >= timestamp", got)
+		}
+	})
+
+	t.Run("uses UTC regardless of input timezone", func(t *testing.T) {
+		loc, _ := time.LoadLocation("America/New_York")
+		midnight := time.Date(2026, 4, 8, 0, 0, 0, 0, loc)
+		f := usageFilter{TodaySince: midnight}
+		got := f.todayExpr("occurred_at")
+		// New York midnight = 2026-04-08T04:00:00Z in UTC
+		if !strings.Contains(got, "2026-04-08T04:00:00Z") {
+			t.Errorf("todayExpr() = %q, want UTC-converted timestamp", got)
+		}
+	})
+}
+
 func TestMaterializedTableNameConstant(t *testing.T) {
 	// Verify the constant is what we expect, so any future change is deliberate.
 	if materializedTableName != "_deduped_tmp" {
