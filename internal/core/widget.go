@@ -382,6 +382,135 @@ func (w DashboardWidget) EffectiveStandardSectionOrder() []DashboardStandardSect
 	return out
 }
 
+// DetailStandardSection identifies a normalized detail view section.
+type DetailStandardSection string
+
+const (
+	DetailSectionUsage          DetailStandardSection = "usage"
+	DetailSectionSpending       DetailStandardSection = "spending"
+	DetailSectionModels         DetailStandardSection = "models"
+	DetailSectionClients        DetailStandardSection = "clients"
+	DetailSectionProjects       DetailStandardSection = "projects"
+	DetailSectionTools          DetailStandardSection = "tools"
+	DetailSectionMCP            DetailStandardSection = "mcp"
+	DetailSectionLanguages      DetailStandardSection = "languages"
+	DetailSectionCodeStats      DetailStandardSection = "code_stats"
+	DetailSectionTrends         DetailStandardSection = "trends"
+	DetailSectionActivityHeatmap DetailStandardSection = "activity_heatmap"
+	DetailSectionCostRequests   DetailStandardSection = "cost_requests"
+	DetailSectionForecast       DetailStandardSection = "forecast"
+	DetailSectionUpstream       DetailStandardSection = "upstream"
+	DetailSectionProviderBurn   DetailStandardSection = "provider_burn"
+	DetailSectionOtherData      DetailStandardSection = "other_data"
+	DetailSectionTimers         DetailStandardSection = "timers"
+	DetailSectionInfo           DetailStandardSection = "info"
+)
+
+func defaultDetailSectionOrder() []DetailStandardSection {
+	return []DetailStandardSection{
+		DetailSectionUsage,
+		DetailSectionSpending,
+		DetailSectionModels,
+		DetailSectionClients,
+		DetailSectionProjects,
+		DetailSectionTools,
+		DetailSectionMCP,
+		DetailSectionLanguages,
+		DetailSectionCodeStats,
+		DetailSectionTrends,
+		DetailSectionActivityHeatmap,
+		DetailSectionCostRequests,
+		DetailSectionForecast,
+		DetailSectionUpstream,
+		DetailSectionProviderBurn,
+		DetailSectionOtherData,
+		DetailSectionTimers,
+		DetailSectionInfo,
+	}
+}
+
+// DefaultDetailSectionOrder returns the canonical detail section list
+// in the default render order.
+func DefaultDetailSectionOrder() []DetailStandardSection {
+	return append([]DetailStandardSection(nil), defaultDetailSectionOrder()...)
+}
+
+func isKnownDetailSection(section DetailStandardSection) bool {
+	switch section {
+	case DetailSectionUsage,
+		DetailSectionSpending,
+		DetailSectionModels,
+		DetailSectionClients,
+		DetailSectionProjects,
+		DetailSectionTools,
+		DetailSectionMCP,
+		DetailSectionLanguages,
+		DetailSectionCodeStats,
+		DetailSectionTrends,
+		DetailSectionActivityHeatmap,
+		DetailSectionCostRequests,
+		DetailSectionForecast,
+		DetailSectionUpstream,
+		DetailSectionProviderBurn,
+		DetailSectionOtherData,
+		DetailSectionTimers,
+		DetailSectionInfo:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsKnownDetailStandardSection reports whether section is a supported
+// detail standard section identifier.
+func IsKnownDetailStandardSection(section DetailStandardSection) bool {
+	return isKnownDetailSection(section)
+}
+
+// DetailSectionLabel returns a human-friendly label for a detail section ID.
+func DetailSectionLabel(s DetailStandardSection) string {
+	switch s {
+	case DetailSectionUsage:
+		return "Usage"
+	case DetailSectionSpending:
+		return "Spending"
+	case DetailSectionModels:
+		return "Models"
+	case DetailSectionClients:
+		return "Clients"
+	case DetailSectionProjects:
+		return "Projects"
+	case DetailSectionTools:
+		return "Tools"
+	case DetailSectionMCP:
+		return "MCP Usage"
+	case DetailSectionLanguages:
+		return "Languages"
+	case DetailSectionCodeStats:
+		return "Code Statistics"
+	case DetailSectionTrends:
+		return "Trends"
+	case DetailSectionActivityHeatmap:
+		return "Activity Heatmap"
+	case DetailSectionCostRequests:
+		return "Cost & Requests"
+	case DetailSectionForecast:
+		return "Forecast"
+	case DetailSectionUpstream:
+		return "Upstream Providers"
+	case DetailSectionProviderBurn:
+		return "Provider Burn"
+	case DetailSectionOtherData:
+		return "Other Data"
+	case DetailSectionTimers:
+		return "Timers"
+	case DetailSectionInfo:
+		return "Info"
+	default:
+		return string(s)
+	}
+}
+
 func (w DashboardWidget) MissingMetrics(snap UsageSnapshot) []string {
 	if len(w.DataSpec.RequiredMetricKeys) == 0 {
 		return nil

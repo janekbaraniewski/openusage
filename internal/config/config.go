@@ -91,10 +91,35 @@ func (s *DashboardWidgetSection) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type DetailWidgetSection struct {
+	ID      core.DetailStandardSection `json:"id"`
+	Enabled bool                       `json:"enabled"`
+}
+
+func (s *DetailWidgetSection) UnmarshalJSON(data []byte) error {
+	type rawDetailWidgetSection struct {
+		ID      string `json:"id"`
+		Enabled *bool  `json:"enabled"`
+	}
+
+	var raw rawDetailWidgetSection
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	s.ID = core.DetailStandardSection(raw.ID)
+	s.Enabled = true
+	if raw.Enabled != nil {
+		s.Enabled = *raw.Enabled
+	}
+	return nil
+}
+
 type DashboardConfig struct {
 	Providers              []DashboardProviderConfig `json:"providers"`
 	View                   string                    `json:"view"`
 	WidgetSections         []DashboardWidgetSection  `json:"widget_sections,omitempty"`
+	DetailSections         []DetailWidgetSection     `json:"detail_sections,omitempty"`
 	HideSectionsWithNoData bool                      `json:"hide_sections_with_no_data,omitempty"`
 }
 
@@ -186,6 +211,7 @@ func LoadFrom(path string) (Config, error) {
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 	cfg.Dashboard.View = normalizeDashboardView(cfg.Dashboard.View)
 	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(cfg.Dashboard.WidgetSections)
+	cfg.Dashboard.DetailSections = normalizeDetailWidgetSections(cfg.Dashboard.DetailSections)
 
 	return cfg, nil
 }
@@ -342,6 +368,32 @@ func normalizeDashboardWidgetSections(in []DashboardWidgetSection) []DashboardWi
 	return normalized
 }
 
+func normalizeDetailWidgetSections(in []DetailWidgetSection) []DetailWidgetSection {
+	if len(in) == 0 {
+		return nil
+	}
+
+	normalized := make([]DetailWidgetSection, 0, len(in))
+	seenSections := make(map[core.DetailStandardSection]bool, len(in))
+
+	for _, section := range in {
+		sectionID := core.DetailStandardSection(strings.ToLower(strings.TrimSpace(string(section.ID))))
+		if !core.IsKnownDetailStandardSection(sectionID) || seenSections[sectionID] {
+			continue
+		}
+		normalized = append(normalized, DetailWidgetSection{
+			ID:      sectionID,
+			Enabled: section.Enabled,
+		})
+		seenSections[sectionID] = true
+	}
+
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
 // saveMu guards read-modify-write cycles on the config file.
 var saveMu sync.Mutex
 
@@ -425,6 +477,18 @@ func SaveDashboardWidgetSections(sections []DashboardWidgetSection) error {
 func SaveDashboardWidgetSectionsTo(path string, sections []DashboardWidgetSection) error {
 	return modifyConfig(path, func(cfg *Config) {
 		cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(sections)
+	})
+}
+
+// SaveDetailWidgetSections persists detail view section preferences
+// into the config file (read-modify-write).
+func SaveDetailWidgetSections(sections []DetailWidgetSection) error {
+	return SaveDetailWidgetSectionsTo(ConfigPath(), sections)
+}
+
+func SaveDetailWidgetSectionsTo(path string, sections []DetailWidgetSection) error {
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.DetailSections = normalizeDetailWidgetSections(sections)
 	})
 }
 
