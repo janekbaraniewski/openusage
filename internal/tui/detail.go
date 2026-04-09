@@ -220,22 +220,26 @@ func renderDetailCard(sb *strings.Builder, sec detailSection, w int) {
 // ── Section Builders ───────────────────────────────────────────────────────
 
 // buildDetailSections constructs all dashboard-style sections for the detail view.
+// Sections are filtered and ordered according to effectiveDetailSectionOrder().
 func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w int, warnThresh, critThresh float64, chartZoom int) []detailSection {
 	innerW := w - 8 // card borders + margins + padding
 	if innerW < 30 {
 		innerW = 30
 	}
 
-	var sections []detailSection
+	// Build all candidate sections keyed by their DetailStandardSection ID.
+	candidates := make(map[core.DetailStandardSection][]detailSection)
 
 	// 1. Usage Overview — gauges and key metrics (NO summary/detail text — that's in compact header).
 	if usageLines := buildDetailUsageSection(snap, widget, innerW, warnThresh, critThresh); len(usageLines) > 0 {
-		sections = append(sections, detailSection{id: "Usage", title: "Usage", icon: "⚡", color: colorYellow, lines: usageLines})
+		candidates[core.DetailSectionUsage] = append(candidates[core.DetailSectionUsage],
+			detailSection{id: "Usage", title: "Usage", icon: "⚡", color: colorYellow, lines: usageLines})
 	}
 
 	// 2. Cost & Credits — spending summary with projections.
 	if costLines := buildDetailCostSection(snap, widget, innerW); len(costLines) > 0 {
-		sections = append(sections, detailSection{id: "Cost", title: "Spending", icon: "💰", color: colorTeal, lines: costLines})
+		candidates[core.DetailSectionSpending] = append(candidates[core.DetailSectionSpending],
+			detailSection{id: "Cost", title: "Spending", icon: "💰", color: colorTeal, lines: costLines})
 	}
 
 	// 3. Model Burn — composition bar with per-model breakdown + token detail.
@@ -253,80 +257,94 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 				modelLines = append(modelLines, strings.Split(strings.TrimRight(breakdown, "\n"), "\n")...)
 			}
 		}
-		sections = append(sections, detailSection{id: "Models", title: "Models", lines: modelLines, hasOwnHeader: true})
+		candidates[core.DetailSectionModels] = append(candidates[core.DetailSectionModels],
+			detailSection{id: "Models", title: "Models", lines: modelLines, hasOwnHeader: true})
 	}
 
 	// 4. Client Burn — if provider supports it.
 	if widget.ShowClientComposition {
 		if clientLines, _ := buildProviderClientCompositionLinesWithWidget(snap, innerW, true, widget); len(clientLines) > 0 {
-			sections = append(sections, detailSection{id: "Models", title: "Clients", lines: clientLines, hasOwnHeader: true})
+			candidates[core.DetailSectionClients] = append(candidates[core.DetailSectionClients],
+				detailSection{id: "Models", title: "Clients", lines: clientLines, hasOwnHeader: true})
 		}
 	}
 
 	// 5. Project Breakdown.
 	if projectLines, _ := buildProviderProjectBreakdownLines(snap, innerW, true); len(projectLines) > 0 {
-		sections = append(sections, detailSection{id: "Projects", title: "Projects", lines: projectLines, hasOwnHeader: true})
+		candidates[core.DetailSectionProjects] = append(candidates[core.DetailSectionProjects],
+			detailSection{id: "Projects", title: "Projects", lines: projectLines, hasOwnHeader: true})
 	}
 
 	// 6. Tool Usage.
 	if toolLines := buildDetailToolSection(snap, widget, innerW); len(toolLines) > 0 {
-		sections = append(sections, detailSection{id: "Tools", title: "Tools", lines: toolLines, hasOwnHeader: true})
+		candidates[core.DetailSectionTools] = append(candidates[core.DetailSectionTools],
+			detailSection{id: "Tools", title: "Tools", lines: toolLines, hasOwnHeader: true})
 	}
 
 	// 7. MCP Usage.
 	if hasMCPMetrics(snap) {
 		if mcpLines := buildDetailMCPLines(snap, innerW); len(mcpLines) > 0 {
-			sections = append(sections, detailSection{id: "MCP", title: "MCP Usage", icon: "🔌", color: colorSky, lines: mcpLines})
+			candidates[core.DetailSectionMCP] = append(candidates[core.DetailSectionMCP],
+				detailSection{id: "MCP", title: "MCP Usage", icon: "🔌", color: colorSky, lines: mcpLines})
 		}
 	}
 
 	// 8. Language breakdown.
 	if hasLanguageMetrics(snap) {
 		if langLines := buildDetailLanguageLines(snap, innerW); len(langLines) > 0 {
-			sections = append(sections, detailSection{id: "Languages", title: "Language", icon: "🗂", color: colorPeach, lines: langLines})
+			candidates[core.DetailSectionLanguages] = append(candidates[core.DetailSectionLanguages],
+				detailSection{id: "Languages", title: "Language", icon: "🗂", color: colorPeach, lines: langLines})
 		}
 	}
 
 	// 9. Code Statistics.
 	if widget.ShowCodeStatsComposition {
 		if codeLines, _ := buildProviderCodeStatsLines(snap, widget, innerW); len(codeLines) > 0 {
-			sections = append(sections, detailSection{id: "Tools", title: "Code Stats", lines: codeLines, hasOwnHeader: true})
+			candidates[core.DetailSectionCodeStats] = append(candidates[core.DetailSectionCodeStats],
+				detailSection{id: "Tools", title: "Code Stats", lines: codeLines, hasOwnHeader: true})
 		}
 	}
 
 	// 10. Daily Usage & Trends (with zoom support).
 	if trendLines := buildDetailTrendsSection(snap, widget, innerW, chartZoom); len(trendLines) > 0 {
-		sections = append(sections, detailSection{id: "Trends", title: "Trends", lines: trendLines, hasOwnHeader: true})
+		candidates[core.DetailSectionTrends] = append(candidates[core.DetailSectionTrends],
+			detailSection{id: "Trends", title: "Trends", lines: trendLines, hasOwnHeader: true})
 	}
 
 	// 10b. Dual-axis cost + requests overlay (detail-only).
 	if dualLines := buildDetailDualAxisChart(snap, widget, innerW, chartZoom); len(dualLines) > 0 {
-		sections = append(sections, detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
+		candidates[core.DetailSectionCostRequests] = append(candidates[core.DetailSectionCostRequests],
+			detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
 	}
 
-	// 10c. Activity Heatmap — embedded in trends, not a separate card.
+	// 10c. Activity Heatmap.
 	if heatLines := buildDetailActivityHeatmap(snap, innerW); len(heatLines) > 0 {
-		sections = append(sections, detailSection{id: "Trends", title: "Activity", icon: "📅", color: colorGreen, lines: heatLines})
+		candidates[core.DetailSectionActivityHeatmap] = append(candidates[core.DetailSectionActivityHeatmap],
+			detailSection{id: "Trends", title: "Activity", icon: "📅", color: colorGreen, lines: heatLines})
 	}
 
 	// 11. Upstream / Hosting Providers.
 	if upstreamLines, _ := buildUpstreamProviderCompositionLines(snap, innerW, true); len(upstreamLines) > 0 {
-		sections = append(sections, detailSection{id: "Cost", title: "Hosting", lines: upstreamLines, hasOwnHeader: true})
+		candidates[core.DetailSectionUpstream] = append(candidates[core.DetailSectionUpstream],
+			detailSection{id: "Cost", title: "Hosting", lines: upstreamLines, hasOwnHeader: true})
 	}
 
 	// 12. Provider Burn (vendor breakdown).
 	if vendorLines, _ := buildProviderVendorCompositionLines(snap, innerW, true); len(vendorLines) > 0 {
-		sections = append(sections, detailSection{id: "Cost", title: "Providers", lines: vendorLines, hasOwnHeader: true})
+		candidates[core.DetailSectionProviderBurn] = append(candidates[core.DetailSectionProviderBurn],
+			detailSection{id: "Cost", title: "Providers", lines: vendorLines, hasOwnHeader: true})
 	}
 
 	// 13. Budget projection (detail-only data).
 	if projLines := buildDetailProjectionSection(snap, innerW); len(projLines) > 0 {
-		sections = append(sections, detailSection{id: "Cost", title: "Forecast", icon: "📊", color: colorSapphire, lines: projLines})
+		candidates[core.DetailSectionForecast] = append(candidates[core.DetailSectionForecast],
+			detailSection{id: "Cost", title: "Forecast", icon: "📊", color: colorSapphire, lines: projLines})
 	}
 
 	// 14. Other metrics as dot-leader rows.
 	if otherLines := buildDetailOtherMetrics(snap, widget, innerW); len(otherLines) > 0 {
-		sections = append(sections, detailSection{id: "Usage", title: "Other Data", icon: "›", color: colorDim, lines: otherLines})
+		candidates[core.DetailSectionOtherData] = append(candidates[core.DetailSectionOtherData],
+			detailSection{id: "Usage", title: "Other Data", icon: "›", color: colorDim, lines: otherLines})
 	}
 
 	// 15. Timers.
@@ -336,7 +354,8 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 		if timerStr := timerSB.String(); strings.TrimSpace(timerStr) != "" {
 			lines := strings.Split(strings.TrimRight(timerStr, "\n"), "\n")
 			filtered := filterOutSectionHeader(lines)
-			sections = append(sections, detailSection{id: "Timers", title: "Timers", icon: "⏰", color: colorMaroon, lines: filtered})
+			candidates[core.DetailSectionTimers] = append(candidates[core.DetailSectionTimers],
+				detailSection{id: "Timers", title: "Timers", icon: "⏰", color: colorMaroon, lines: filtered})
 		}
 	}
 
@@ -346,7 +365,16 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 		renderInfoSection(&infoSB, snap, widget, innerW+4)
 		if infoStr := infoSB.String(); strings.TrimSpace(infoStr) != "" {
 			lines := strings.Split(strings.TrimRight(infoStr, "\n"), "\n")
-			sections = append(sections, detailSection{id: "Info", title: "Info", icon: "📋", color: colorBlue, lines: lines})
+			candidates[core.DetailSectionInfo] = append(candidates[core.DetailSectionInfo],
+				detailSection{id: "Info", title: "Info", icon: "📋", color: colorBlue, lines: lines})
+		}
+	}
+
+	// Emit sections in the configured order, skipping disabled ones.
+	var sections []detailSection
+	for _, sectionID := range effectiveDetailSectionOrder() {
+		if secs, ok := candidates[sectionID]; ok {
+			sections = append(sections, secs...)
 		}
 	}
 

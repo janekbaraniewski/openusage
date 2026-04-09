@@ -65,6 +65,20 @@ func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
 	}
 }
 
+func (m Model) persistDetailWidgetSectionsCmd() tea.Cmd {
+	sections := m.detailWidgetSectionConfigEntries()
+	return func() tea.Msg {
+		if m.services == nil {
+			return detailWidgetSectionsPersistedMsg{err: fmt.Errorf("detail sections service unavailable")}
+		}
+		err := m.services.SaveDetailWidgetSections(sections)
+		if err != nil {
+			log.Printf("detail widget sections persist: %v", err)
+		}
+		return detailWidgetSectionsPersistedMsg{err: err}
+	}
+}
+
 func (m Model) persistDashboardHideSectionsWithNoDataCmd() tea.Cmd {
 	hide := m.hideSectionsWithNoData
 	return func() tea.Msg {

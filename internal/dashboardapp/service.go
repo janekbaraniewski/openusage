@@ -38,6 +38,10 @@ func (s *Service) SaveDashboardWidgetSections(sections []config.DashboardWidgetS
 	return config.SaveDashboardWidgetSections(sections)
 }
 
+func (s *Service) SaveDetailWidgetSections(sections []config.DetailWidgetSection) error {
+	return config.SaveDetailWidgetSections(sections)
+}
+
 func (s *Service) SaveDashboardHideSectionsWithNoData(hide bool) error {
 	return config.SaveDashboardHideSectionsWithNoData(hide)
 }
