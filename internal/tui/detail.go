@@ -828,37 +828,31 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 	palette := []lipgloss.Color{colorSurface0, colorGreen, colorTeal, colorYellow, colorPeach}
 
 	dayLabels := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-	var lines []string
 
+	// Build the heatmap grid as a string block.
+	var gridSB strings.Builder
 	for dow := 0; dow < 7; dow++ {
-		var row strings.Builder
-		// Short label, only show Mon/Wed/Fri for compactness.
-		label := "   "
-		if dow == 0 || dow == 2 || dow == 4 {
-			label = dayLabels[dow]
-		}
 		labelColor := colorDim
 		if dow < 5 {
 			labelColor = colorSubtext
 		}
-		row.WriteString(lipgloss.NewStyle().Foreground(labelColor).Width(labelW).Render(label))
+		gridSB.WriteString(lipgloss.NewStyle().Foreground(labelColor).Width(labelW).Render(dayLabels[dow]))
 
 		for w := 0; w < numWeeks; w++ {
 			val := grid[dow][w]
 			ci := 0
 			if val > 0 {
-				// Map to 1-4 (skip 0 which is "empty").
 				ci = 1 + int(val/globalMax*3.99)
 				if ci >= len(palette) {
 					ci = len(palette) - 1
 				}
 			}
-			row.WriteString(lipgloss.NewStyle().Foreground(palette[ci]).Render("■ "))
+			gridSB.WriteString(lipgloss.NewStyle().Foreground(palette[ci]).Render("■ "))
 		}
-		lines = append(lines, row.String())
+		gridSB.WriteString("\n")
 	}
 
-	// Date labels row.
+	// Date labels.
 	gridW := numWeeks * 2
 	dateLine := make([]byte, gridW)
 	for i := range dateLine {
@@ -886,9 +880,53 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 			dateLine[x+j] = label[j]
 		}
 	}
-	lines = append(lines, strings.Repeat(" ", labelW)+dimStyle.Render(string(dateLine)))
+	gridSB.WriteString(strings.Repeat(" ", labelW) + dimStyle.Render(string(dateLine)))
+	heatmapBlock := gridSB.String()
 
-	return lines
+	// Build a summary stats panel for the right side.
+	var statsSB strings.Builder
+	totalVal := 0.0
+	activeDays := 0
+	peakVal := 0.0
+	peakDate := ""
+	for _, p := range pts {
+		v := p.Value
+		if v < 0 {
+			v = 0
+		}
+		totalVal += v
+		if v > 0 {
+			activeDays++
+		}
+		if v > peakVal {
+			peakVal = v
+			peakDate = p.Date
+		}
+	}
+	avgPerDay := 0.0
+	if activeDays > 0 {
+		avgPerDay = totalVal / float64(activeDays)
+	}
+
+	statsSB.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorSubtext).Render("Summary") + "\n\n")
+	statsSB.WriteString(renderDotLeaderRow("Active days", fmt.Sprintf("%d", activeDays), 28) + "\n")
+	statsSB.WriteString(renderDotLeaderRow("Total days", fmt.Sprintf("%d", numWeeks*7), 28) + "\n")
+	if activeDays > 0 {
+		pct := float64(activeDays) / float64(numWeeks*7) * 100
+		statsSB.WriteString(renderDotLeaderRow("Activity rate", fmt.Sprintf("%.0f%%", pct), 28) + "\n")
+	}
+	statsSB.WriteString(renderDotLeaderRow("Avg/active day", shortCompact(avgPerDay), 28) + "\n")
+	statsSB.WriteString(renderDotLeaderRow("Total", shortCompact(totalVal), 28) + "\n")
+	if peakDate != "" {
+		if t, err := time.Parse("2006-01-02", peakDate); err == nil {
+			statsSB.WriteString(renderDotLeaderRow("Peak", t.Format("Jan 2"), 28) + "\n")
+		}
+	}
+	statsBlock := statsSB.String()
+
+	// Join heatmap and stats side by side.
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, heatmapBlock, "    ", statsBlock)
+	return strings.Split(strings.TrimRight(combined, "\n"), "\n")
 }
 
 // buildDetailDualAxisChart builds an overlay chart showing cost and requests
