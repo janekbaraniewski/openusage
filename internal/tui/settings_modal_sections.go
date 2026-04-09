@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func (m Model) renderSettingsProvidersBody(w, h int) string {
@@ -60,7 +61,34 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 }
 
 func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
-	return m.renderSettingsWidgetSectionsList(w, h)
+	// Sub-tab selector row
+	subTabRow := m.renderSectionSubTabSelector(w)
+	subTabH := 2 // row + blank line
+	bodyH := h - subTabH
+	if bodyH < 4 {
+		bodyH = 4
+	}
+	var body string
+	if m.settings.sectionSubTab == 1 {
+		body = m.renderSettingsDetailSectionsList(w, bodyH)
+	} else {
+		body = m.renderSettingsWidgetSectionsList(w, bodyH)
+	}
+	return subTabRow + "\n\n" + body
+}
+
+func (m Model) renderSectionSubTabSelector(w int) string {
+	tileLabel := "Tile Sections"
+	detailLabel := "Detail Sections"
+	if m.settings.sectionSubTab == 0 {
+		tileLabel = lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent).Render(" " + tileLabel + " ")
+		detailLabel = lipgloss.NewStyle().Foreground(colorSubtext).Render(" " + detailLabel + " ")
+	} else {
+		tileLabel = lipgloss.NewStyle().Foreground(colorSubtext).Render(" " + tileLabel + " ")
+		detailLabel = lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent).Render(" " + detailLabel + " ")
+	}
+	nav := dimStyle.Render("◀ ") + tileLabel + dimStyle.Render(" │ ") + detailLabel + dimStyle.Render(" ▸")
+	return nav + dimStyle.Render("  (< > to switch)")
 }
 
 func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
@@ -112,6 +140,48 @@ func (m Model) renderSettingsWidgetSectionsList(w, h int) string {
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
+func (m Model) renderSettingsDetailSectionsList(w, h int) string {
+	entries := m.detailWidgetSectionEntries()
+	visibleCount := 0
+	for _, entry := range entries {
+		if entry.Enabled {
+			visibleCount++
+		}
+	}
+
+	lines := settingsBodyHeaderLines(
+		"Detail View Sections",
+		fmt.Sprintf("%d/%d sections visible · applies to detail panel", visibleCount, len(entries)),
+	)
+
+	nameW := max(12, w-24)
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %s", "#", "ON", nameW, "SECTION", "ID")))
+	lines = append(lines, settingsBodyRule(w))
+	if len(entries) == 0 {
+		lines = append(lines, dimStyle.Render("No detail sections available."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	cursor := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
+	start, end := listWindow(len(entries), cursor, max(1, h-len(lines)))
+	for i := start; i < end; i++ {
+		entry := entries[i]
+		prefix := "  "
+		if i == cursor {
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+		onText := "OFF"
+		onStyle := lipgloss.NewStyle().Foreground(colorRed)
+		if entry.Enabled {
+			onText = "ON "
+			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
+		}
+		lines = append(lines, fmt.Sprintf("%s%-3d %s %-*s %s",
+			prefix, i+1, onStyle.Render(onText), nameW, truncateToWidth(core.DetailSectionLabel(entry.ID), nameW), dimStyle.Render(string(entry.ID))))
+	}
+	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
 func (m Model) renderSettingsWidgetSectionsPreview(w, h int) string {
 	if w < 24 || h < 5 {
 		return padToSize(dimStyle.Render("Live preview unavailable at this size."), w, h)
@@ -154,6 +224,50 @@ func (m Model) renderSettingsWidgetPreviewPanel(contentW, contentH int) string {
 		Padding(1, 2, 0, 2).
 		Width(contentW).
 		Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderSettingsDetailPreviewPanel(contentW, contentH int) string {
+	innerW := max(24, contentW-4)
+	bodyH := max(4, contentH-1)
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Detail Preview"),
+		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", innerW)),
+		m.renderSettingsDetailSectionsPreview(innerW, bodyH),
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorAccent).
+		Background(colorBase).
+		Padding(1, 2, 0, 2).
+		Width(contentW).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderSettingsDetailSectionsPreview(w, h int) string {
+	if w < 24 || h < 5 {
+		return padToSize(dimStyle.Render("Live preview unavailable at this size."), w, h)
+	}
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Live Preview"),
+		dimStyle.Render("Claude Code preset · synthetic data · PgUp/PgDn scroll"),
+		"",
+	}
+	snap := settingsWidgetSectionsPreviewSnapshot()
+	all := append(lines, strings.Split(RenderDetailContent(snap, max(40, w-2), 0.20, 0.05, 0), "\n")...)
+	maxOffset := max(0, len(all)-h)
+	offset := clamp(m.settings.previewOffset, 0, maxOffset)
+	visible := all
+	if len(visible) > h {
+		visible = visible[offset:min(offset+h, len(visible))]
+	}
+	if len(visible) > 0 && offset > 0 {
+		visible[0] = dimStyle.Render("  ▲ preview above")
+	}
+	if len(visible) > 0 && offset+h < len(all) {
+		visible[len(visible)-1] = dimStyle.Render("  ▼ preview below")
+	}
+	return padToSize(strings.Join(visible, "\n"), w, h)
 }
 
 func (m Model) settingsWidgetPreviewBodyHeight(contentW, contentH int, sideBySide bool) int {

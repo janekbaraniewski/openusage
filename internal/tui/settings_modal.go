@@ -44,6 +44,7 @@ func (m *Model) openSettingsModal() {
 		m.settings.cursor = clamp(m.settings.cursor, 0, len(m.providerOrder)-1)
 	}
 	m.settings.sectionRowCursor = 0
+	m.settings.sectionSubTab = 0
 	m.settings.previewOffset = 0
 	themes := AvailableThemes()
 	if len(themes) > 0 {
@@ -63,6 +64,7 @@ func (m *Model) closeSettingsModal() {
 	m.settings.apiKeyStatus = ""
 	m.settings.bodyOffset = 0
 	m.settings.sectionRowCursor = 0
+	m.settings.sectionSubTab = 0
 	m.settings.previewOffset = 0
 }
 
