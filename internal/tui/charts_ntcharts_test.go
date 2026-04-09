@@ -221,6 +221,46 @@ func TestRenderBrailleChart_NegativeValuesClampedToZero(t *testing.T) {
 	}
 }
 
+func TestFillSeriesDateGaps(t *testing.T) {
+	pts := []core.TimePoint{
+		{Date: "2026-04-01", Value: 100},
+		{Date: "2026-04-03", Value: 200},
+		{Date: "2026-04-06", Value: 50},
+	}
+	filled := fillSeriesDateGaps(pts)
+	// Should have 6 days: Apr 1-6.
+	if len(filled) != 6 {
+		t.Fatalf("expected 6 points, got %d", len(filled))
+	}
+	// Apr 2 should be 0 (gap day).
+	if filled[1].Date != "2026-04-02" || filled[1].Value != 0 {
+		t.Errorf("expected Apr 02 = 0, got %s = %f", filled[1].Date, filled[1].Value)
+	}
+	// Apr 4 and 5 should be 0 (gap days).
+	if filled[3].Value != 0 {
+		t.Errorf("expected Apr 04 = 0, got %f", filled[3].Value)
+	}
+	if filled[4].Value != 0 {
+		t.Errorf("expected Apr 05 = 0, got %f", filled[4].Value)
+	}
+	// Original values preserved.
+	if filled[0].Value != 100 || filled[2].Value != 200 || filled[5].Value != 50 {
+		t.Error("original values not preserved")
+	}
+}
+
+func TestFillSeriesDateGaps_NoGaps(t *testing.T) {
+	pts := []core.TimePoint{
+		{Date: "2026-04-01", Value: 10},
+		{Date: "2026-04-02", Value: 20},
+		{Date: "2026-04-03", Value: 30},
+	}
+	filled := fillSeriesDateGaps(pts)
+	if len(filled) != 3 {
+		t.Fatalf("no gaps, expected 3 points, got %d", len(filled))
+	}
+}
+
 func TestRenderNTStackedBarUsesRequestedWidth(t *testing.T) {
 	out := renderNTStackedBar([]ntBarSegment{
 		{Value: 6, Color: colorTeal},

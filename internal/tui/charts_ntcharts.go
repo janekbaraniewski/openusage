@@ -138,11 +138,12 @@ func renderNTBrailleChart(title string, series []BrailleSeries, w, h int, yFmt f
 		return ""
 	}
 
-	// Sanitize: clamp negatives, dedup, trim leading/trailing zeros.
+	// Sanitize: clamp negatives, dedup, fill date gaps with zeros, trim edges.
 	for i := range filtered {
 		filtered[i].Points = trimLeadingTrailingZeros(
-			dedupeSeriesPoints(
-				sanitizeSeriesPoints(filtered[i].Points)))
+			fillSeriesDateGaps(
+				dedupeSeriesPoints(
+					sanitizeSeriesPoints(filtered[i].Points))))
 	}
 	filtered = filterChartSeries(filtered) // re-filter after sanitization
 
@@ -712,6 +713,38 @@ func ntHeatmapColorScale() []lipgloss.Color {
 		colorPeach,
 		colorRed,
 	}
+}
+
+// fillSeriesDateGaps inserts zero-value entries for any calendar days missing between
+// the first and last date in a sorted series. Without this, chart libraries draw a
+// straight line between e.g. Apr 3 and Apr 7, making it look like usage continued
+// during days when there was actually none.
+func fillSeriesDateGaps(pts []core.TimePoint) []core.TimePoint {
+	if len(pts) < 2 {
+		return pts
+	}
+	first, err1 := time.Parse("2006-01-02", pts[0].Date)
+	last, err2 := time.Parse("2006-01-02", pts[len(pts)-1].Date)
+	if err1 != nil || err2 != nil {
+		return pts
+	}
+	days := int(last.Sub(first).Hours()/24) + 1
+	if days <= len(pts) || days > 400 {
+		return pts // no gaps, or unreasonably large range
+	}
+
+	byDate := make(map[string]float64, len(pts))
+	for _, p := range pts {
+		byDate[p.Date] = p.Value
+	}
+
+	out := make([]core.TimePoint, 0, days)
+	for d := 0; d < days; d++ {
+		date := first.AddDate(0, 0, d).Format("2006-01-02")
+		val := byDate[date] // zero if absent
+		out = append(out, core.TimePoint{Date: date, Value: val})
+	}
+	return out
 }
 
 // sanitizeSeriesPoints clamps negative values to zero. Negative values in cost/token
