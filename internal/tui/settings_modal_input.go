@@ -88,29 +88,77 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case settingsTabWidgetSections:
 		switch msg.String() {
+		case "<", ">":
+			// Switch sub-tab between tile (0) and detail (1) sections.
+			if msg.String() == "<" {
+				if m.settings.sectionSubTab > 0 {
+					m.settings.sectionSubTab--
+				}
+			} else {
+				if m.settings.sectionSubTab < 1 {
+					m.settings.sectionSubTab++
+				}
+			}
+			m.settings.sectionRowCursor = 0
+			m.settings.previewOffset = 0
+			return m, nil
 		case "up", "k":
-			if m.settings.sectionRowCursor > 0 {
-				m.settings.sectionRowCursor--
+			if m.settings.sectionSubTab == 1 {
+				if m.settings.sectionRowCursor > 0 {
+					m.settings.sectionRowCursor--
+				}
+			} else {
+				if m.settings.sectionRowCursor > 0 {
+					m.settings.sectionRowCursor--
+				}
 			}
 		case "down", "j":
-			entries := m.widgetSectionEntries()
-			if m.settings.sectionRowCursor < len(entries)-1 {
-				m.settings.sectionRowCursor++
+			if m.settings.sectionSubTab == 1 {
+				entries := m.detailWidgetSectionEntries()
+				if m.settings.sectionRowCursor < len(entries)-1 {
+					m.settings.sectionRowCursor++
+				}
+			} else {
+				entries := m.widgetSectionEntries()
+				if m.settings.sectionRowCursor < len(entries)-1 {
+					m.settings.sectionRowCursor++
+				}
 			}
 		case "K", "shift+k", "shift+up", "ctrl+up", "alt+up":
-			cmd := m.moveSelectedWidgetSection(-1)
-			if cmd != nil {
-				return m, cmd
+			if m.settings.sectionSubTab == 1 {
+				cmd := m.moveSelectedDetailSection(-1)
+				if cmd != nil {
+					return m, cmd
+				}
+			} else {
+				cmd := m.moveSelectedWidgetSection(-1)
+				if cmd != nil {
+					return m, cmd
+				}
 			}
 		case "J", "shift+j", "shift+down", "ctrl+down", "alt+down":
-			cmd := m.moveSelectedWidgetSection(1)
-			if cmd != nil {
-				return m, cmd
+			if m.settings.sectionSubTab == 1 {
+				cmd := m.moveSelectedDetailSection(1)
+				if cmd != nil {
+					return m, cmd
+				}
+			} else {
+				cmd := m.moveSelectedWidgetSection(1)
+				if cmd != nil {
+					return m, cmd
+				}
 			}
 		case " ", "enter":
-			cmd := m.toggleSelectedWidgetSection()
-			if cmd != nil {
-				return m, cmd
+			if m.settings.sectionSubTab == 1 {
+				cmd := m.toggleSelectedDetailSection()
+				if cmd != nil {
+					return m, cmd
+				}
+			} else {
+				cmd := m.toggleSelectedWidgetSection()
+				if cmd != nil {
+					return m, cmd
+				}
 			}
 		case "h", "H":
 			m.hideSectionsWithNoData = !m.hideSectionsWithNoData
@@ -294,12 +342,47 @@ func (m *Model) toggleSelectedWidgetSection() tea.Cmd {
 	return m.persistDashboardWidgetSectionsCmd()
 }
 
+func (m *Model) moveSelectedDetailSection(delta int) tea.Cmd {
+	if delta == 0 {
+		return nil
+	}
+	entries := m.detailWidgetSectionEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+
+	from := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
+	to := from + delta
+	if to < 0 || to >= len(entries) {
+		return nil
+	}
+
+	entries = loMove(entries, from, to)
+	m.setDetailWidgetSectionEntries(entries)
+	m.settings.sectionRowCursor = to
+	m.settings.status = fmt.Sprintf("moved %s", entries[to].ID)
+	return m.persistDetailWidgetSectionsCmd()
+}
+
+func (m *Model) toggleSelectedDetailSection() tea.Cmd {
+	entries := m.detailWidgetSectionEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+	idx := clamp(m.settings.sectionRowCursor, 0, len(entries)-1)
+	entries[idx].Enabled = !entries[idx].Enabled
+	m.setDetailWidgetSectionEntries(entries)
+	m.settings.status = "saving detail sections..."
+	return m.persistDetailWidgetSectionsCmd()
+}
+
 func (m *Model) resetSettingsCursorForTab() {
 	switch m.settings.tab {
 	case settingsTabProviders, settingsTabAPIKeys, settingsTabIntegrations, settingsTabTelemetry:
 		m.settings.cursor = 0
 	case settingsTabWidgetSections:
 		m.settings.sectionRowCursor = 0
+		m.settings.sectionSubTab = 0
 		m.settings.previewOffset = 0
 	case settingsTabTheme:
 		m.settings.themeCursor = clamp(ActiveThemeIndex(), 0, max(0, len(AvailableThemes())-1))

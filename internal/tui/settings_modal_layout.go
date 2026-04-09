@@ -71,7 +71,12 @@ func (m Model) renderSettingsModalOverlay() string {
 	previewBodyH := contentH
 	sideBySide := m.width >= contentW*2+12
 	previewBodyH = m.settingsWidgetPreviewBodyHeight(contentW, contentH, sideBySide)
-	previewPanel := m.renderSettingsWidgetPreviewPanel(contentW, previewBodyH)
+	var previewPanel string
+	if m.settings.sectionSubTab == 1 {
+		previewPanel = m.renderSettingsDetailPreviewPanel(contentW, previewBodyH)
+	} else {
+		previewPanel = m.renderSettingsWidgetPreviewPanel(contentW, previewBodyH)
+	}
 
 	combined := ""
 	if sideBySide {
@@ -145,7 +150,7 @@ func (m Model) settingsModalHint() string {
 	case settingsTabProviders:
 		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabWidgetSections:
-		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  h: toggle hide empty sections  ·  PgUp/PgDn or Ctrl+U/D: scroll preview  ·  Esc: close"
+		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  < >: tile/detail sub-tab  ·  h: toggle hide empty  ·  PgUp/PgDn: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:
 		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
