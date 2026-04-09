@@ -1,8 +1,8 @@
 package daemon
 
 import (
-	"crypto/sha256"
 	"encoding/json"
+	"hash/fnv"
 	"sync"
 	"time"
 
@@ -144,8 +144,8 @@ func (ps *PollScheduler) effectiveIntervalLocked(state *pollBackoffState) time.D
 }
 
 func hashSnapshotMetrics(snap core.UsageSnapshot) string {
-	// Hash status + metrics keys/values for a lightweight diff.
-	h := sha256.New()
+	// Non-cryptographic hash for lightweight diff comparison (not security-sensitive).
+	h := fnv.New128a()
 	h.Write([]byte(string(snap.Status)))
 	if data, err := json.Marshal(snap.Metrics); err == nil {
 		h.Write(data)

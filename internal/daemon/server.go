@@ -38,6 +38,9 @@ type Service struct {
 	dataIngested  atomic.Bool // set when new data is ingested; read model loop skips refresh when clean
 	pollScheduler *PollScheduler
 
+	dirtyProvidersMu sync.Mutex
+	dirtyProviders   map[string]bool // provider IDs that had new data since last read model refresh
+
 	pollStateMu sync.Mutex
 	pollState   map[string]*providerPollState // per-account change detection state
 }
@@ -107,8 +110,9 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		providerByID:  providersByID(),
 		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
 		rmCache:       newReadModelCache(),
-		pollScheduler: newPollScheduler(cfg.PollInterval),
-		pollState:     make(map[string]*providerPollState),
+		pollScheduler:  newPollScheduler(cfg.PollInterval),
+		pollState:      make(map[string]*providerPollState),
+		dirtyProviders: make(map[string]bool),
 	}
 
 	svc.infof(
@@ -139,6 +143,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
+	go svc.runWatchLoop(ctx)
 	go svc.runSpoolMaintenanceLoop(ctx)
 	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
@@ -206,6 +211,25 @@ func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.Ingest
 	s.spoolMu.Unlock()
 
 	return flush, enqueued, append(warnings, flushWarnings...)
+}
+
+// markProviderDirty records that a provider had new data ingested.
+func (s *Service) markProviderDirty(providerID string) {
+	if providerID == "" {
+		return
+	}
+	s.dirtyProvidersMu.Lock()
+	s.dirtyProviders[providerID] = true
+	s.dirtyProvidersMu.Unlock()
+}
+
+// drainDirtyProviders returns and clears the set of providers that had new data.
+func (s *Service) drainDirtyProviders() map[string]bool {
+	s.dirtyProvidersMu.Lock()
+	dirty := s.dirtyProviders
+	s.dirtyProviders = make(map[string]bool)
+	s.dirtyProvidersMu.Unlock()
+	return dirty
 }
 
 // --- HTTP server ---
