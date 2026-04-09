@@ -63,6 +63,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case detailWidgetSectionsPersistedMsg:
+		if msg.err != nil {
+			m.settings.status = "detail section save failed"
+		} else {
+			m.settings.status = "detail sections saved"
+		}
+		return m, nil
+
 	case dashboardHideSectionsWithNoDataPersistedMsg:
 		if msg.err != nil {
 			m.settings.status = "empty-state save failed"

@@ -118,6 +118,7 @@ type settingsState struct {
 	themeCursor       int
 	viewCursor        int
 	sectionRowCursor  int
+	sectionSubTab     int // 0=tile sections, 1=detail sections
 	previewOffset     int
 	status            string
 	integrationStatus []integrations.Status
@@ -133,6 +134,7 @@ type Services interface {
 	SaveDashboardProviders(providers []config.DashboardProviderConfig) error
 	SaveDashboardView(view string) error
 	SaveDashboardWidgetSections(sections []config.DashboardWidgetSection) error
+	SaveDetailWidgetSections(sections []config.DetailWidgetSection) error
 	SaveDashboardHideSectionsWithNoData(hide bool) error
 	SaveTimeWindow(window string) error
 	ValidateAPIKey(accountID, providerID, apiKey string) (bool, string)
@@ -189,6 +191,7 @@ type Model struct {
 
 	settings               settingsState
 	widgetSections         []config.DashboardWidgetSection
+	detailWidgetSections   []config.DetailWidgetSection
 	hideSectionsWithNoData bool
 
 	timeWindow            core.TimeWindow
@@ -259,6 +262,9 @@ type dashboardViewPersistedMsg struct {
 	err error
 }
 type dashboardWidgetSectionsPersistedMsg struct {
+	err error
+}
+type detailWidgetSectionsPersistedMsg struct {
 	err error
 }
 type dashboardHideSectionsWithNoDataPersistedMsg struct {
@@ -434,6 +440,7 @@ func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accoun
 
 	m.providerOrder = order
 	m.setWidgetSections(dashboardCfg.WidgetSections)
+	m.setDetailWidgetSections(dashboardCfg.DetailSections)
 	m.hideSectionsWithNoData = dashboardCfg.HideSectionsWithNoData
 }
 
@@ -573,6 +580,107 @@ func (m *Model) setWidgetSectionEntries(entries []config.DashboardWidgetSection)
 	m.widgetSections = normalized
 	m.applyWidgetSectionOverrides()
 	m.invalidateTileBodyCache()
+}
+
+func (m *Model) setDetailWidgetSections(entries []config.DetailWidgetSection) {
+	m.detailWidgetSections = normalizeDetailWidgetSectionEntries(entries)
+	m.applyDetailWidgetSectionOverrides()
+	m.invalidateDetailCache()
+}
+
+func normalizeDetailWidgetSectionEntries(entries []config.DetailWidgetSection) []config.DetailWidgetSection {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	out := make([]config.DetailWidgetSection, 0, len(entries))
+	seen := make(map[core.DetailStandardSection]bool, len(entries))
+	for _, entry := range entries {
+		sectionID := core.DetailStandardSection(strings.ToLower(strings.TrimSpace(string(entry.ID))))
+		if !core.IsKnownDetailStandardSection(sectionID) || seen[sectionID] {
+			continue
+		}
+		out = append(out, config.DetailWidgetSection{
+			ID:      sectionID,
+			Enabled: entry.Enabled,
+		})
+		seen[sectionID] = true
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (m *Model) applyDetailWidgetSectionOverrides() {
+	entries := m.resolvedDetailWidgetSectionEntries()
+	if len(entries) == 0 {
+		setDetailSectionOverrides(nil)
+		return
+	}
+	visible := make([]core.DetailStandardSection, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.Enabled {
+			continue
+		}
+		visible = append(visible, entry.ID)
+	}
+	setDetailSectionOverrides(visible)
+}
+
+func (m Model) defaultDetailWidgetSectionEntries() []config.DetailWidgetSection {
+	ordered := core.DefaultDetailSectionOrder()
+	entries := make([]config.DetailWidgetSection, 0, len(ordered))
+	for _, section := range ordered {
+		entries = append(entries, config.DetailWidgetSection{
+			ID:      section,
+			Enabled: true,
+		})
+	}
+	return entries
+}
+
+func (m Model) detailWidgetSectionEntries() []config.DetailWidgetSection {
+	return m.resolvedDetailWidgetSectionEntries()
+}
+
+func (m Model) resolvedDetailWidgetSectionEntries() []config.DetailWidgetSection {
+	if len(m.detailWidgetSections) == 0 {
+		return m.defaultDetailWidgetSectionEntries()
+	}
+
+	out := make([]config.DetailWidgetSection, len(m.detailWidgetSections))
+	copy(out, m.detailWidgetSections)
+
+	seen := make(map[core.DetailStandardSection]bool, len(out))
+	for _, entry := range out {
+		seen[entry.ID] = true
+	}
+	for _, entry := range m.defaultDetailWidgetSectionEntries() {
+		if seen[entry.ID] {
+			continue
+		}
+		out = append(out, entry)
+	}
+
+	return out
+}
+
+func (m *Model) setDetailWidgetSectionEntries(entries []config.DetailWidgetSection) {
+	normalized := normalizeDetailWidgetSectionEntries(entries)
+	m.detailWidgetSections = normalized
+	m.applyDetailWidgetSectionOverrides()
+	m.invalidateDetailCache()
+}
+
+func (m Model) detailWidgetSectionConfigEntries() []config.DetailWidgetSection {
+	if len(m.detailWidgetSections) == 0 {
+		return nil
+	}
+	out := make([]config.DetailWidgetSection, len(m.detailWidgetSections))
+	copy(out, m.detailWidgetSections)
+	return out
 }
 
 func (m Model) dashboardWidgetSectionConfigEntries() []config.DashboardWidgetSection {

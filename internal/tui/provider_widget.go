@@ -17,6 +17,10 @@ var (
 	providerWidgetOverridesMu    sync.RWMutex
 	providerSectionOrderOverride []core.DashboardStandardSection
 	providerSectionOverrideSet   bool
+
+	detailSectionOverridesMu   sync.RWMutex
+	detailSectionOrderOverride []core.DetailStandardSection
+	detailSectionOverrideSet   bool
 )
 
 func loadProviderSpecs() {
@@ -127,6 +131,41 @@ func setDashboardWidgetSectionOverrides(sections []core.DashboardStandardSection
 	}
 	providerSectionOrderOverride = append([]core.DashboardStandardSection(nil), filtered...)
 	providerSectionOverrideSet = true
+}
+
+func setDetailSectionOverrides(sections []core.DetailStandardSection) {
+	detailSectionOverridesMu.Lock()
+	defer detailSectionOverridesMu.Unlock()
+
+	if sections == nil {
+		detailSectionOrderOverride = nil
+		detailSectionOverrideSet = false
+		return
+	}
+
+	seen := make(map[core.DetailStandardSection]bool, len(sections))
+	filtered := make([]core.DetailStandardSection, 0, len(sections))
+	for _, section := range sections {
+		if !core.IsKnownDetailStandardSection(section) || seen[section] {
+			continue
+		}
+		filtered = append(filtered, section)
+		seen[section] = true
+	}
+	detailSectionOrderOverride = append([]core.DetailStandardSection(nil), filtered...)
+	detailSectionOverrideSet = true
+}
+
+func effectiveDetailSectionOrder() []core.DetailStandardSection {
+	detailSectionOverridesMu.RLock()
+	sections := detailSectionOrderOverride
+	set := detailSectionOverrideSet
+	detailSectionOverridesMu.RUnlock()
+
+	if !set || len(sections) == 0 {
+		return core.DefaultDetailSectionOrder()
+	}
+	return append([]core.DetailStandardSection(nil), sections...)
 }
 
 func applyDashboardSectionOverride(cfg core.DashboardWidget) core.DashboardWidget {
