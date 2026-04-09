@@ -21,6 +21,9 @@ type Provider struct {
 
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
+
+	telemetryCacheMu sync.Mutex
+	telemetryCache   map[string]*telemetryCacheEntry // keyed by file path
 }
 
 // jsonlCacheEntry caches parsed conversation records for a single JSONL file.
@@ -29,6 +32,16 @@ type jsonlCacheEntry struct {
 	modTime time.Time
 	size    int64
 	records []conversationRecord
+}
+
+// telemetryCacheEntry caches parsed telemetry events for a single JSONL file.
+// Supports incremental parsing: when a file grows (append-only), only new
+// lines are parsed and appended to the cached events.
+type telemetryCacheEntry struct {
+	modTime  time.Time
+	size     int64
+	byteSize int64 // file size at last parse (for incremental seek)
+	events   []shared.TelemetryEvent
 }
 
 func New() *Provider {

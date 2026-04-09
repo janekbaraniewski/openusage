@@ -32,16 +32,31 @@ func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	sessionsDir := shared.ExpandHome(opts.Path("sessions_dir", DefaultTelemetrySessionsDir()))
 	accountID := strings.TrimSpace(opts.Path("account_id", "codex-cli"))
-	files := shared.CollectFilesByExt([]string{sessionsDir}, map[string]bool{".jsonl": true})
-	if len(files) == 0 {
+
+	fileInfos := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	if len(fileInfos) == 0 {
 		return nil, nil
 	}
 
+	p.telemetryCacheMu.Lock()
+	defer p.telemetryCacheMu.Unlock()
+	if p.telemetryCache == nil {
+		p.telemetryCache = make(map[string]*telemetryCacheEntry)
+	}
+
 	var out []shared.TelemetryEvent
-	for _, path := range files {
+	for path, info := range fileInfos {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
+
+		if entry, ok := p.telemetryCache[path]; ok {
+			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
+				out = append(out, entry.events...)
+				continue
+			}
+		}
+
 		events, err := ParseTelemetrySessionFile(path)
 		if err != nil {
 			continue
@@ -50,6 +65,11 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 			for i := range events {
 				events[i].AccountID = accountID
 			}
+		}
+		p.telemetryCache[path] = &telemetryCacheEntry{
+			modTime: info.ModTime(),
+			size:    info.Size(),
+			events:  events,
 		}
 		out = append(out, events...)
 	}

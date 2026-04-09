@@ -10,25 +10,45 @@ import (
 )
 
 func (s *Service) runCollectLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.CollectInterval)
-	defer ticker.Stop()
+	interval := s.cfg.CollectInterval
+	maxInterval := 5 * time.Minute
+	consecutiveEmpty := 0
 
-	s.infof("collect_loop_start", "interval=%s", s.cfg.CollectInterval)
+	s.infof("collect_loop_start", "interval=%s", interval)
 	s.collectAndFlush(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			s.infof("collect_loop_stop", "reason=context_done")
 			return
-		case <-ticker.C:
-			s.collectAndFlush(ctx)
+		case <-time.After(interval):
+			collected := s.collectAndFlush(ctx)
+			if collected == 0 {
+				consecutiveEmpty++
+				if consecutiveEmpty >= 3 {
+					newInterval := interval * 2
+					if newInterval > maxInterval {
+						newInterval = maxInterval
+					}
+					if newInterval != interval {
+						interval = newInterval
+						s.infof("collect_backoff", "interval=%s empty_cycles=%d", interval, consecutiveEmpty)
+					}
+				}
+			} else {
+				if consecutiveEmpty > 0 && interval != s.cfg.CollectInterval {
+					s.infof("collect_reset", "interval=%s→%s collected=%d", interval, s.cfg.CollectInterval, collected)
+				}
+				consecutiveEmpty = 0
+				interval = s.cfg.CollectInterval
+			}
 		}
 	}
 }
 
-func (s *Service) collectAndFlush(ctx context.Context) {
+func (s *Service) collectAndFlush(ctx context.Context) int {
 	if s == nil {
-		return
+		return 0
 	}
 	started := time.Now()
 	const backlogFlushLimit = 2000
@@ -77,7 +97,7 @@ func (s *Service) collectAndFlush(ctx context.Context) {
 			s.warnf("collect_warning", "message=%q", warning)
 		}
 		s.pruneTelemetryOrphans(ctx)
-		return
+		return totalCollected
 	}
 
 	if durationMs >= 1500 && s.shouldLog("collect_slow", 30*time.Second) {
@@ -85,6 +105,7 @@ func (s *Service) collectAndFlush(ctx context.Context) {
 	}
 
 	s.pruneTelemetryOrphans(ctx)
+	return totalCollected
 }
 
 func (s *Service) pruneTelemetryOrphans(ctx context.Context) {

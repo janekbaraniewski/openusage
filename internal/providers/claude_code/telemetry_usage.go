@@ -1,6 +1,7 @@
 package claude_code
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,19 +31,58 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	projectsDir := shared.ExpandHome(opts.Path("projects_dir", defaultProjectsDir))
 	altProjectsDir := shared.ExpandHome(opts.Path("alt_projects_dir", defaultAltProjectsDir))
 
-	files := shared.CollectFilesByExt([]string{projectsDir, altProjectsDir}, map[string]bool{".jsonl": true})
-	if len(files) == 0 {
+	fileInfos := collectJSONLFilesWithStat(projectsDir)
+	if altProjectsDir != "" {
+		for k, v := range collectJSONLFilesWithStat(altProjectsDir) {
+			fileInfos[k] = v
+		}
+	}
+	if len(fileInfos) == 0 {
 		return nil, nil
 	}
 
+	p.telemetryCacheMu.Lock()
+	defer p.telemetryCacheMu.Unlock()
+	if p.telemetryCache == nil {
+		p.telemetryCache = make(map[string]*telemetryCacheEntry)
+	}
+
 	var out []shared.TelemetryEvent
-	for _, file := range files {
+	for path, info := range fileInfos {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
-		events, err := ParseTelemetryConversationFile(file)
+
+		// Check cache: skip unchanged files entirely.
+		if entry, ok := p.telemetryCache[path]; ok {
+			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
+				out = append(out, entry.events...)
+				continue
+			}
+			// File grew (append-only): parse only new lines.
+			if info.Size() > entry.byteSize && entry.byteSize > 0 {
+				newEvents, newSize, err := parseTelemetryConversationFileFrom(path, entry.byteSize)
+				if err == nil && newSize > entry.byteSize {
+					entry.events = append(entry.events, newEvents...)
+					entry.modTime = info.ModTime()
+					entry.size = info.Size()
+					entry.byteSize = newSize
+					out = append(out, entry.events...)
+					continue
+				}
+			}
+		}
+
+		// Full parse (cache miss or file shrunk).
+		events, err := ParseTelemetryConversationFile(path)
 		if err != nil {
 			continue
+		}
+		p.telemetryCache[path] = &telemetryCacheEntry{
+			modTime:  info.ModTime(),
+			size:     info.Size(),
+			byteSize: info.Size(),
+			events:   events,
 		}
 		out = append(out, events...)
 	}
@@ -60,6 +100,171 @@ func DefaultTelemetryProjectsDirs() (string, string) {
 		return "", ""
 	}
 	return filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".config", "claude", "projects")
+}
+
+// parseTelemetryConversationFileFrom parses only the NEW lines in a JSONL file
+// starting from byteOffset. Returns the new events and the final file position.
+// Used for incremental parsing of append-only conversation files.
+func parseTelemetryConversationFileFrom(path string, byteOffset int64) ([]shared.TelemetryEvent, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, byteOffset, err
+	}
+	defer f.Close()
+
+	if _, err := f.Seek(byteOffset, 0); err != nil {
+		return nil, byteOffset, err
+	}
+
+	seenUsage := make(map[string]bool)
+	seenTools := make(map[string]bool)
+	var out []shared.TelemetryEvent
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
+	lineNumber := 0 // approximate — we don't know exact line from offset
+
+	for scanner.Scan() {
+		lineNumber++
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var entry jsonlEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Type != "assistant" || entry.Message == nil {
+			continue
+		}
+		ts, ok := parseJSONLTimestamp(entry.Timestamp)
+		if !ok {
+			continue
+		}
+		record := conversationRecord{
+			lineNumber: lineNumber,
+			timestamp:  ts,
+			model:      entry.Message.Model,
+			usage:      entry.Message.Usage,
+			requestID:  entry.RequestID,
+			messageID:  entry.Message.ID,
+			sessionID:  entry.SessionID,
+			cwd:        entry.CWD,
+			sourcePath: path,
+			content:    entry.Message.Content,
+		}
+		if record.model == "" {
+			record.model = "unknown"
+		}
+		if record.usage == nil {
+			continue
+		}
+
+		usageKey := conversationUsageDedupKey(record)
+		if usageKey != "" && seenUsage[usageKey] {
+			continue
+		}
+		if usageKey != "" {
+			seenUsage[usageKey] = true
+		}
+
+		model := strings.TrimSpace(record.model)
+		if model == "" {
+			model = "unknown"
+		}
+		usage := record.usage
+		totalTokens := conversationTotalTokens(usage)
+		cost := estimateCost(model, usage)
+
+		turnID := core.FirstNonEmpty(record.requestID, record.messageID)
+		if turnID == "" {
+			turnID = fmt.Sprintf("%s:%d", strings.TrimSpace(record.sessionID), record.lineNumber)
+		}
+		messageID := strings.TrimSpace(record.messageID)
+		if messageID == "" {
+			messageID = turnID
+		}
+
+		out = append(out, shared.TelemetryEvent{
+			SchemaVersion: "claude_jsonl_v1",
+			Channel:       shared.TelemetryChannelJSONL,
+			OccurredAt:    ts,
+			AccountID:     "claude-code",
+			WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
+			SessionID:     strings.TrimSpace(record.sessionID),
+			TurnID:        turnID,
+			MessageID:     messageID,
+			ProviderID:    "anthropic",
+			AgentName:     "claude_code",
+			EventType:     shared.TelemetryEventTypeMessageUsage,
+			ModelRaw:      model,
+			TokenUsage: core.TokenUsage{
+				InputTokens:      core.Int64Ptr(int64(usage.InputTokens)),
+				OutputTokens:     core.Int64Ptr(int64(usage.OutputTokens)),
+				ReasoningTokens:  core.Int64Ptr(int64(usage.ReasoningTokens)),
+				CacheReadTokens:  core.Int64Ptr(int64(usage.CacheReadInputTokens)),
+				CacheWriteTokens: core.Int64Ptr(int64(usage.CacheCreationInputTokens)),
+				TotalTokens:      core.Int64Ptr(totalTokens),
+				CostUSD:          core.Float64Ptr(cost),
+			},
+			Status: shared.TelemetryStatusOK,
+			Payload: map[string]any{
+				"file": path,
+			},
+		})
+
+		for idx, part := range record.content {
+			if part.Type != "tool_use" {
+				continue
+			}
+			toolKey := conversationToolDedupKey(record, idx, part)
+			if toolKey != "" && seenTools[toolKey] {
+				continue
+			}
+			if toolKey != "" {
+				seenTools[toolKey] = true
+			}
+			toolName := strings.ToLower(strings.TrimSpace(part.Name))
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			toolFilePath := ""
+			if paths := shared.ExtractFilePathsFromPayload(part.Input); len(paths) > 0 {
+				toolFilePath = paths[0]
+			}
+			out = append(out, shared.TelemetryEvent{
+				SchemaVersion: "claude_jsonl_v1",
+				Channel:       shared.TelemetryChannelJSONL,
+				OccurredAt:    ts,
+				AccountID:     "claude-code",
+				WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
+				SessionID:     strings.TrimSpace(record.sessionID),
+				TurnID:        turnID,
+				MessageID:     messageID,
+				ToolCallID:    strings.TrimSpace(part.ID),
+				ProviderID:    "anthropic",
+				AgentName:     "claude_code",
+				EventType:     shared.TelemetryEventTypeToolUsage,
+				ModelRaw:      model,
+				TokenUsage: core.TokenUsage{
+					Requests: core.Int64Ptr(1),
+				},
+				ToolName: toolName,
+				Status:   shared.TelemetryStatusOK,
+				Payload: map[string]any{
+					"source_file": path,
+					"file":        toolFilePath,
+				},
+			})
+		}
+	}
+
+	// Calculate final position.
+	finalPos, _ := f.Seek(0, 1) // current position after scanning
+	if finalPos <= byteOffset {
+		finalPos = byteOffset
+	}
+	return out, finalPos, nil
 }
 
 // ParseTelemetryConversationFile parses a Claude Code conversation JSONL file

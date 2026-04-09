@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -31,6 +32,14 @@ var errLiveUsageAuth = errors.New("live usage auth failed")
 
 type Provider struct {
 	providerbase.Base
+	telemetryCacheMu sync.Mutex
+	telemetryCache   map[string]*telemetryCacheEntry
+}
+
+type telemetryCacheEntry struct {
+	modTime time.Time
+	size    int64
+	events  []shared.TelemetryEvent
 }
 
 func New() *Provider {
