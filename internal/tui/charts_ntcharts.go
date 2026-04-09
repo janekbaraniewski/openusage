@@ -9,8 +9,6 @@ import (
 
 	ntbarchart "github.com/NimbleMarkets/ntcharts/barchart"
 	"github.com/NimbleMarkets/ntcharts/canvas/runes"
-	ntheatmap "github.com/NimbleMarkets/ntcharts/heatmap"
-	ntlinechart "github.com/NimbleMarkets/ntcharts/linechart"
 	"github.com/NimbleMarkets/ntcharts/linechart/timeserieslinechart"
 	ntsparkline "github.com/NimbleMarkets/ntcharts/sparkline"
 	"github.com/charmbracelet/lipgloss"
@@ -390,28 +388,42 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 		return ""
 	}
 
-	gridW := len(cols)
-	gridH := len(spec.Rows)
-	lc := ntlinechart.New(
-		gridW,
-		gridH,
-		0,
-		float64(max(1, gridW-1)),
-		0,
-		float64(max(1, gridH-1)),
-		ntlinechart.WithXYSteps(0, 0),
-	)
-	hm := ntheatmap.New(
-		gridW,
-		gridH,
-		ntheatmap.WithStyle(lc),
-		ntheatmap.WithColorScale(ntHeatmapColorScale()),
-		ntheatmap.WithValueRange(0, 1),
-		ntheatmap.WithCellStyle(lipgloss.NewStyle()),
-	)
+	// Render as a custom text-based heatmap instead of using ntcharts heatmap
+	// (which sizes its grid in data-columns, not terminal chars). We render
+	// one character per data cell with colored block characters.
+	numCols := len(cols)
+	numRows := len(spec.Rows)
+	colorScale := ntHeatmapColorScale()
 
-	for r := range spec.Rows {
-		for c := range cols {
+	// Compute cell width: distribute available space evenly across columns.
+	gridAvail := w - rowLabelW - 6 // 6 = margins + padding
+	if gridAvail < numCols {
+		gridAvail = numCols
+	}
+	cellW := gridAvail / numCols
+	if cellW < 1 {
+		cellW = 1
+	}
+	if cellW > 4 {
+		cellW = 4 // cap for readability
+	}
+
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	sb.WriteString("  " + sectionStyle.Render(spec.Title) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+
+	// Render each row.
+	for r := 0; r < numRows; r++ {
+		labelColor := colorDim
+		if r < len(spec.RowColors) && spec.RowColors[r] != "" {
+			labelColor = spec.RowColors[r]
+		}
+		sb.WriteString("  ")
+		sb.WriteString(lipgloss.NewStyle().Foreground(labelColor).Render(padRight(truncStr(spec.Rows[r], rowLabelW), rowLabelW)))
+		sb.WriteString(" ")
+
+		for c := 0; c < numCols; c++ {
 			raw := 0.0
 			if r < len(values) && c < len(values[r]) {
 				raw = values[r][c]
@@ -424,37 +436,58 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 			if scale > 0 {
 				norm = raw / scale
 			}
-			hm.Push(ntheatmap.NewHeatPoint(float64(c), float64(gridH-1-r), norm))
+
+			// Map normalized value to color.
+			ci := int(norm * float64(len(colorScale)-1))
+			if ci < 0 {
+				ci = 0
+			}
+			if ci >= len(colorScale) {
+				ci = len(colorScale) - 1
+			}
+			color := colorScale[ci]
+			block := strings.Repeat("█", cellW)
+			sb.WriteString(lipgloss.NewStyle().Foreground(color).Render(block))
 		}
-	}
-	hm.Draw()
-
-	gridLines := strings.Split(strings.TrimRight(hm.View(), "\n"), "\n")
-	for len(gridLines) < len(spec.Rows) {
-		gridLines = append(gridLines, "")
-	}
-
-	var sb strings.Builder
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
-	sb.WriteString("  " + sectionStyle.Render(spec.Title) + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
-
-	for r := range spec.Rows {
-		labelColor := colorDim
-		if r < len(spec.RowColors) && spec.RowColors[r] != "" {
-			labelColor = spec.RowColors[r]
-		}
-		sb.WriteString("  ")
-		sb.WriteString(lipgloss.NewStyle().Foreground(labelColor).Render(padRight(truncStr(spec.Rows[r], rowLabelW), rowLabelW)))
-		sb.WriteString(" ")
-		sb.WriteString(gridLines[r])
 		sb.WriteString("\n")
 	}
 
-	labelLine := strings.Repeat(" ", rowLabelW+1) + renderNTDateLegend(cols, len(cols))
-	sb.WriteString("  " + labelLine + "\n")
+	// Column labels: show evenly spaced date markers.
+	totalGridW := numCols * cellW
+	numLabels := 5
+	if totalGridW < 40 {
+		numLabels = 3
+	}
+	if numLabels > numCols {
+		numLabels = numCols
+	}
+	dateLine := make([]byte, totalGridW)
+	for i := range dateLine {
+		dateLine[i] = ' '
+	}
+	for i := 0; i < numLabels; i++ {
+		ci := 0
+		if numLabels > 1 {
+			ci = i * (numCols - 1) / (numLabels - 1)
+		}
+		label := cols[ci]
+		x := ci * cellW
+		start := x
+		if start+len(label) > totalGridW {
+			start = totalGridW - len(label)
+		}
+		if start < 0 {
+			start = 0
+		}
+		for j := 0; j < len(label) && start+j < totalGridW; j++ {
+			dateLine[start+j] = label[j]
+		}
+	}
+	sb.WriteString("  " + strings.Repeat(" ", rowLabelW+1) + dimStyle.Render(string(dateLine)) + "\n")
+
+	// Legend.
 	sb.WriteString("  " + dimStyle.Render("      low "))
-	for _, color := range []lipgloss.Color{colorSurface1, colorGreen, colorYellow, colorPeach, colorRed} {
+	for _, color := range colorScale {
 		sb.WriteString(lipgloss.NewStyle().Background(color).Render("  "))
 	}
 	sb.WriteString(dimStyle.Render(" high\n"))

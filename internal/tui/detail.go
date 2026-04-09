@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -738,10 +737,12 @@ type detailTrendBreakdownChart struct {
 	hiddenLabel string
 }
 
-// buildDetailActivityHeatmap builds a day-of-week activity heatmap from DailySeries.
-// Shows usage intensity across weekdays, giving a quick visual of work patterns.
+// buildDetailActivityHeatmap builds a GitHub-contribution-graph style heatmap.
+// Rows = days of week (Mon-Sun), columns = weeks. Each cell shows usage intensity
+// for that specific day. Zero-activity days are visually distinct.
 func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
-	// Find the best series for the heatmap.
+	// Find the best series for the heatmap (prefer requests as it's most
+	// granular — every API call counts, vs cost which can be zero for cached).
 	candidates := []string{"analytics_requests", "requests", "analytics_cost", "cost"}
 	var pts []core.TimePoint
 	for _, key := range candidates {
@@ -754,76 +755,77 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		return nil
 	}
 
-	// Bucket by day of week.
-	dayNames := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-	// Aggregate into 4-week rolling buckets (rows=weekday, cols=week numbers).
-	type weekDay struct {
-		week int
-		dow  int // 0=Mon, 6=Sun
-	}
-
-	// Parse all dates and find week range.
-	var entries []struct {
-		date  time.Time
-		value float64
-	}
+	// Parse dates and build a date→value map.
+	byDate := make(map[string]float64, len(pts))
+	var minDate, maxDate time.Time
+	first := true
 	for _, p := range pts {
 		t, err := time.Parse("2006-01-02", p.Date)
 		if err != nil {
 			continue
 		}
-		if p.Value < 0 {
-			continue
+		val := p.Value
+		if val < 0 {
+			val = 0
 		}
-		entries = append(entries, struct {
-			date  time.Time
-			value float64
-		}{t, p.Value})
+		byDate[p.Date] = val
+		if first || t.Before(minDate) {
+			minDate = t
+		}
+		if first || t.After(maxDate) {
+			maxDate = t
+		}
+		first = false
 	}
-	if len(entries) < 7 {
+	if first {
 		return nil
 	}
 
-	// Group by ISO week and day-of-week.
-	type cellKey struct{ week, dow int }
-	cells := make(map[cellKey]float64)
-	weekSet := make(map[int]bool)
-	for _, e := range entries {
-		_, wk := e.date.ISOWeek()
-		dow := int(e.date.Weekday())
-		if dow == 0 {
-			dow = 6 // Sunday → 6
-		} else {
-			dow-- // Monday=0, Tuesday=1, ...
-		}
-		key := cellKey{wk, dow}
-		cells[key] += e.value
-		weekSet[wk] = true
+	// Align minDate to Monday (start of ISO week).
+	for minDate.Weekday() != time.Monday {
+		minDate = minDate.AddDate(0, 0, -1)
+	}
+	// Align maxDate to Sunday (end of ISO week).
+	for maxDate.Weekday() != time.Sunday {
+		maxDate = maxDate.AddDate(0, 0, 1)
 	}
 
-	// Sort weeks, keep last 8 for readability.
-	var weeks []int
-	for w := range weekSet {
-		weeks = append(weeks, w)
-	}
-	sort.Ints(weeks)
-	if len(weeks) > 8 {
-		weeks = weeks[len(weeks)-8:]
-	}
-	if len(weeks) < 2 {
+	totalDays := int(maxDate.Sub(minDate).Hours()/24) + 1
+	numWeeks := totalDays / 7
+	if numWeeks < 2 {
 		return nil
 	}
 
-	// Build heatmap grid: rows=days, cols=weeks.
-	cols := make([]string, len(weeks))
-	for i, w := range weeks {
-		cols[i] = fmt.Sprintf("W%d", w)
+	// Limit to most recent weeks that fit the width.
+	// Each week column needs ~3 chars minimum in the heatmap.
+	maxWeeks := (innerW - 10) / 3 // 10 chars for row labels + margin
+	if maxWeeks < 4 {
+		maxWeeks = 4
 	}
+	if numWeeks > maxWeeks {
+		minDate = maxDate.AddDate(0, 0, -(maxWeeks*7 - 1))
+		for minDate.Weekday() != time.Monday {
+			minDate = minDate.AddDate(0, 0, -1)
+		}
+		numWeeks = maxWeeks
+	}
+
+	// Build column labels: show "Mon DD" for first day of each week.
+	cols := make([]string, numWeeks)
+	for w := 0; w < numWeeks; w++ {
+		weekStart := minDate.AddDate(0, 0, w*7)
+		cols[w] = weekStart.Format("Jan 2")
+	}
+
+	// Build 7 rows (Mon-Sun) × numWeeks columns.
+	dayNames := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
 	values := make([][]float64, 7)
 	for dow := 0; dow < 7; dow++ {
-		values[dow] = make([]float64, len(weeks))
-		for ci, w := range weeks {
-			values[dow][ci] = cells[cellKey{w, dow}]
+		values[dow] = make([]float64, numWeeks)
+		for w := 0; w < numWeeks; w++ {
+			date := minDate.AddDate(0, 0, w*7+dow)
+			dateStr := date.Format("2006-01-02")
+			values[dow][w] = byDate[dateStr] // 0 if no data
 		}
 	}
 
@@ -832,7 +834,7 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		if i < 5 {
 			rowColors[i] = colorSubtext
 		} else {
-			rowColors[i] = colorDim // dim weekends
+			rowColors[i] = colorDim
 		}
 	}
 
@@ -841,11 +843,12 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		chartW = 30
 	}
 	out := RenderHeatmap(HeatmapSpec{
-		Title:     "Weekly Activity",
+		Title:     "Activity",
 		Rows:      dayNames,
 		Cols:      cols,
 		Values:    values,
 		RowColors: rowColors,
+		RowScale:  true, // normalize per-row for better contrast
 	}, chartW)
 	if strings.TrimSpace(out) == "" {
 		return nil
