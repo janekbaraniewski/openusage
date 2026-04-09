@@ -281,6 +281,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.mode == modeDetail {
+		// Ctrl+scroll = chart zoom, plain scroll = scroll content.
+		if msg.Ctrl {
+			if scroll < 0 && m.detailChartZoom < 5 {
+				m.detailChartZoom++
+				m.invalidateRenderCaches()
+			} else if scroll > 0 && m.detailChartZoom > 0 {
+				m.detailChartZoom--
+				m.invalidateRenderCaches()
+			}
+			return m, nil
+		}
 		m.detailOffset += scroll
 		if m.detailOffset < 0 {
 			m.detailOffset = 0
