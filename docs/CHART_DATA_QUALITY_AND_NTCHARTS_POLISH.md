@@ -1,7 +1,7 @@
 # Chart Data Quality & ntcharts Polish
 
 Date: 2026-04-09
-Status: Active
+Status: Complete
 Author: Claude (follow-up to `NTCHARTS_TUI_MIGRATION_DESIGN.md`)
 Depends on: ntcharts migration (Tasks 1-5, all completed)
 
@@ -266,14 +266,15 @@ if totalPoints > 14 {
 | 7 | Consistent chart heights across all detail sections | `detail.go` | Trivial |
 | 8 | Verify legend truncation at narrow widths | `charts.go` legend helpers | Small |
 
-### Phase 3: New Visualizations (future)
+### Phase 3: New Visualizations (DONE)
 
-| # | Feature | Effort | Prerequisite |
-|---|---------|--------|-------------|
-| 9 | Activity heatmap in detail view | Medium | Data available in DailySeries |
-| 10 | Chart zoom (+/- keys) | Large | Requires component-based charts |
-| 11 | Mouse interaction | Large | Requires BubbleZone integration |
-| 12 | Dual-axis chart (cost + requests overlay) | Medium | ntcharts supports multiple Y ranges |
+| # | Feature | Status |
+|---|---------|--------|
+| 9 | Activity heatmap in detail view | DONE — day-of-week heatmap from DailySeries |
+| 10 | Chart zoom (+/- keys, Ctrl+scroll) | DONE — 6 zoom levels, keyboard + mouse |
+| 11 | Mouse interaction (Ctrl+scroll zoom) | DONE — Ctrl+wheel zooms charts in detail |
+| 12 | Dual-axis chart (cost + requests overlay) | DONE — overlay chart in detail view |
+| 13 | Fill date gaps with zeros | DONE — inactive days show 0, not interpolated |
 
 ### Dependency Graph
 
