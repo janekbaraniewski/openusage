@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
@@ -260,13 +259,10 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 
 	if added > 0 || removed > 0 {
 		total := added + removed
-		addedW := int(math.Round(added / total * float64(barW)))
-		if addedW < 1 && added > 0 {
-			addedW = 1
-		}
-		removedW := barW - addedW
-		bar := lipgloss.NewStyle().Foreground(colorGreen).Render(strings.Repeat("█", addedW)) +
-			lipgloss.NewStyle().Foreground(colorRed).Render(strings.Repeat("█", removedW))
+		bar := renderNTStackedBar([]ntBarSegment{
+			{Value: added, Color: colorGreen},
+			{Value: removed, Color: colorRed},
+		}, total, barW)
 		lines = append(lines, "  "+bar)
 		lines = append(lines, renderDotLeaderRow(
 			fmt.Sprintf("%s +%s added", lipgloss.NewStyle().Foreground(colorGreen).Render("■"), shortCompact(added)),
@@ -285,16 +281,10 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 		lines = append(lines, renderDotLeaderRow("Commits", label, innerW))
 	}
 	if aiPct > 0 {
-		filled := int(math.Round(aiPct / 100 * float64(barW)))
-		if filled < 1 && aiPct > 0 {
-			filled = 1
-		}
-		empty := barW - filled
-		if empty < 0 {
-			empty = 0
-		}
-		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorBlue).Render(strings.Repeat("█", filled))+
-			lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", empty)))
+		lines = append(lines, "  "+renderNTStackedBar([]ntBarSegment{
+			{Value: aiPct, Color: colorBlue},
+			{Value: max(0, 100-aiPct), Color: colorSurface1},
+		}, 100, barW))
 	}
 	if prompts > 0 {
 		lines = append(lines, renderDotLeaderRow("Prompts", shortCompact(prompts)+" total", innerW))

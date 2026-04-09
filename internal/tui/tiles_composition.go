@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -327,12 +325,7 @@ func renderClientMixBar(top []clientMixEntry, total float64, barW int, colors ma
 		return ""
 	}
 
-	type seg struct {
-		val   float64
-		color lipgloss.Color
-	}
-
-	segs := make([]seg, 0, len(top)+1)
+	segs := make([]ntBarSegment, 0, len(top)+1)
 	sumTop := float64(0)
 	for _, client := range top {
 		value := clientDisplayValue(client, mode)
@@ -340,46 +333,12 @@ func renderClientMixBar(top []clientMixEntry, total float64, barW int, colors ma
 			continue
 		}
 		sumTop += value
-		segs = append(segs, seg{val: value, color: colorForClient(colors, client.name)})
+		segs = append(segs, ntBarSegment{Value: value, Color: colorForClient(colors, client.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, seg{val: total - sumTop, color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
 	}
-	if len(segs) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	remainingW := barW
-	remainingTotal := total
-	for i, s := range segs {
-		if remainingW <= 0 {
-			break
-		}
-		segW := remainingW
-		if i < len(segs)-1 {
-			segW = int(math.Round(s.val / remainingTotal * float64(remainingW)))
-			if segW < 1 && s.val > 0 {
-				segW = 1
-			}
-			if segW > remainingW {
-				segW = remainingW
-			}
-		}
-		if segW <= 0 {
-			continue
-		}
-		sb.WriteString(lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW)))
-		remainingW -= segW
-		remainingTotal -= s.val
-		if remainingTotal <= 0 {
-			remainingTotal = 1
-		}
-	}
-	if remainingW > 0 {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
-	}
-	return sb.String()
+	return renderNTStackedBar(segs, total, barW)
 }
 
 func renderModelMixBar(models []modelMixEntry, total float64, barW int, mode string, colors map[string]lipgloss.Color) string {
@@ -387,11 +346,7 @@ func renderModelMixBar(models []modelMixEntry, total float64, barW int, mode str
 		return ""
 	}
 
-	type seg struct {
-		val   float64
-		color lipgloss.Color
-	}
-	segs := make([]seg, 0, len(models)+1)
+	segs := make([]ntBarSegment, 0, len(models)+1)
 	sumTop := float64(0)
 	for _, model := range models {
 		value := modelMixValue(model, mode)
@@ -399,46 +354,12 @@ func renderModelMixBar(models []modelMixEntry, total float64, barW int, mode str
 			continue
 		}
 		sumTop += value
-		segs = append(segs, seg{val: value, color: colorForModel(colors, model.name)})
+		segs = append(segs, ntBarSegment{Value: value, Color: colorForModel(colors, model.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, seg{val: total - sumTop, color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
 	}
-	if len(segs) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	remainingW := barW
-	remainingTotal := total
-	for i, s := range segs {
-		if remainingW <= 0 {
-			break
-		}
-		segW := remainingW
-		if i < len(segs)-1 {
-			segW = int(math.Round(s.val / remainingTotal * float64(remainingW)))
-			if segW < 1 && s.val > 0 {
-				segW = 1
-			}
-			if segW > remainingW {
-				segW = remainingW
-			}
-		}
-		if segW <= 0 {
-			continue
-		}
-		sb.WriteString(lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW)))
-		remainingW -= segW
-		remainingTotal -= s.val
-		if remainingTotal <= 0 {
-			remainingTotal = 1
-		}
-	}
-	if remainingW > 0 {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
-	}
-	return sb.String()
+	return renderNTStackedBar(segs, total, barW)
 }
 
 func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[string]lipgloss.Color) string {
@@ -446,56 +367,17 @@ func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[st
 		return ""
 	}
 
-	type seg struct {
-		val   float64
-		color lipgloss.Color
-	}
-
-	segs := make([]seg, 0, len(top)+1)
+	segs := make([]ntBarSegment, 0, len(top)+1)
 	sumTop := float64(0)
 	for _, tool := range top {
 		if tool.count <= 0 {
 			continue
 		}
 		sumTop += tool.count
-		segs = append(segs, seg{val: tool.count, color: colorForTool(colors, tool.name)})
+		segs = append(segs, ntBarSegment{Value: tool.count, Color: colorForTool(colors, tool.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, seg{val: total - sumTop, color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
 	}
-	if len(segs) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	remainingW := barW
-	remainingTotal := total
-	for i, s := range segs {
-		if remainingW <= 0 {
-			break
-		}
-		segW := remainingW
-		if i < len(segs)-1 {
-			segW = int(math.Round(s.val / remainingTotal * float64(remainingW)))
-			if segW < 1 && s.val > 0 {
-				segW = 1
-			}
-			if segW > remainingW {
-				segW = remainingW
-			}
-		}
-		if segW <= 0 {
-			continue
-		}
-		sb.WriteString(lipgloss.NewStyle().Foreground(s.color).Render(strings.Repeat("█", segW)))
-		remainingW -= segW
-		remainingTotal -= s.val
-		if remainingTotal <= 0 {
-			remainingTotal = 1
-		}
-	}
-	if remainingW > 0 {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", remainingW)))
-	}
-	return sb.String()
+	return renderNTStackedBar(segs, total, barW)
 }
