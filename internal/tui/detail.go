@@ -299,14 +299,14 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 		sections = append(sections, detailSection{id: "Trends", title: "Trends", lines: trendLines, hasOwnHeader: true})
 	}
 
-	// 10b. Activity Heatmap — day-of-week intensity (detail-only).
-	if heatLines := buildDetailActivityHeatmap(snap, innerW); len(heatLines) > 0 {
-		sections = append(sections, detailSection{id: "Trends", title: "Activity", icon: "📅", color: colorGreen, lines: heatLines})
-	}
-
-	// 10c. Dual-axis cost + requests overlay (detail-only).
+	// 10b. Dual-axis cost + requests overlay (detail-only).
 	if dualLines := buildDetailDualAxisChart(snap, widget, innerW, chartZoom); len(dualLines) > 0 {
 		sections = append(sections, detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
+	}
+
+	// 10c. Activity Heatmap — embedded in trends, not a separate card.
+	if heatLines := buildDetailActivityHeatmap(snap, innerW); len(heatLines) > 0 {
+		sections = append(sections, detailSection{id: "Trends", title: "Activity", icon: "📅", color: colorGreen, lines: heatLines})
 	}
 
 	// 11. Upstream / Hosting Providers.

@@ -285,13 +285,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if msg.Ctrl {
 			if scroll < 0 && m.detailChartZoom < 5 {
 				m.detailChartZoom++
-				m.invalidateRenderCaches()
+				m.invalidateDetailCache()
 			} else if scroll > 0 && m.detailChartZoom > 0 {
 				m.detailChartZoom--
-				m.invalidateRenderCaches()
+				m.invalidateDetailCache()
 			}
 			return m, nil
 		}
+		// Plain scroll: just update offset, no cache invalidation needed.
 		m.detailOffset += scroll
 		if m.detailOffset < 0 {
 			m.detailOffset = 0
@@ -667,21 +668,18 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m = m.requestRefresh()
 	case "+", "=":
-		// Zoom in on charts (narrower time window).
 		if m.detailChartZoom < 5 {
 			m.detailChartZoom++
-			m.invalidateRenderCaches()
+			m.invalidateDetailCache()
 		}
 	case "-", "_":
-		// Zoom out on charts (wider time window).
 		if m.detailChartZoom > 0 {
 			m.detailChartZoom--
-			m.invalidateRenderCaches()
+			m.invalidateDetailCache()
 		}
 	case "0":
-		// Reset chart zoom to show all data.
 		m.detailChartZoom = 0
-		m.invalidateRenderCaches()
+		m.invalidateDetailCache()
 	}
 	return m, nil
 }
