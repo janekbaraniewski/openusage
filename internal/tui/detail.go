@@ -737,12 +737,9 @@ type detailTrendBreakdownChart struct {
 	hiddenLabel string
 }
 
-// buildDetailActivityHeatmap builds a GitHub-contribution-graph style heatmap.
-// Rows = days of week (Mon-Sun), columns = weeks. Each cell shows usage intensity
-// for that specific day. Zero-activity days are visually distinct.
+// buildDetailActivityHeatmap builds a compact GitHub-contribution-graph style heatmap.
+// Each cell is a single "▪" character. Rows = Mon-Sun, columns = weeks.
 func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
-	// Find the best series for the heatmap (prefer requests as it's most
-	// granular — every API call counts, vs cost which can be zero for cached).
 	candidates := []string{"analytics_requests", "requests", "analytics_cost", "cost"}
 	var pts []core.TimePoint
 	for _, key := range candidates {
@@ -755,7 +752,7 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		return nil
 	}
 
-	// Parse dates and build a date→value map.
+	// Build date→value map.
 	byDate := make(map[string]float64, len(pts))
 	var minDate, maxDate time.Time
 	first := true
@@ -781,11 +778,10 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		return nil
 	}
 
-	// Align minDate to Monday (start of ISO week).
+	// Align to week boundaries.
 	for minDate.Weekday() != time.Monday {
 		minDate = minDate.AddDate(0, 0, -1)
 	}
-	// Align maxDate to Sunday (end of ISO week).
 	for maxDate.Weekday() != time.Sunday {
 		maxDate = maxDate.AddDate(0, 0, 1)
 	}
@@ -796,9 +792,9 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		return nil
 	}
 
-	// Limit to most recent weeks that fit the width.
-	// Each week column needs ~3 chars minimum in the heatmap.
-	maxWeeks := (innerW - 10) / 3 // 10 chars for row labels + margin
+	// Each column = 2 chars (block + space). Row labels = 4 chars + space.
+	labelW := 5 // "Mon " + space
+	maxWeeks := (innerW - labelW - 2) / 2
 	if maxWeeks < 4 {
 		maxWeeks = 4
 	}
@@ -810,50 +806,89 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 		numWeeks = maxWeeks
 	}
 
-	// Build column labels: show "Mon DD" for first day of each week.
-	cols := make([]string, numWeeks)
-	for w := 0; w < numWeeks; w++ {
-		weekStart := minDate.AddDate(0, 0, w*7)
-		cols[w] = weekStart.Format("Jan 2")
-	}
-
-	// Build 7 rows (Mon-Sun) × numWeeks columns.
-	dayNames := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-	values := make([][]float64, 7)
+	// Find global max for color scaling.
+	globalMax := 0.0
+	grid := make([][]float64, 7) // [dow][week]
 	for dow := 0; dow < 7; dow++ {
-		values[dow] = make([]float64, numWeeks)
+		grid[dow] = make([]float64, numWeeks)
 		for w := 0; w < numWeeks; w++ {
 			date := minDate.AddDate(0, 0, w*7+dow)
-			dateStr := date.Format("2006-01-02")
-			values[dow][w] = byDate[dateStr] // 0 if no data
+			val := byDate[date.Format("2006-01-02")]
+			grid[dow][w] = val
+			if val > globalMax {
+				globalMax = val
+			}
 		}
 	}
-
-	rowColors := make([]lipgloss.Color, 7)
-	for i := range rowColors {
-		if i < 5 {
-			rowColors[i] = colorSubtext
-		} else {
-			rowColors[i] = colorDim
-		}
-	}
-
-	chartW := innerW - 4
-	if chartW < 30 {
-		chartW = 30
-	}
-	out := RenderHeatmap(HeatmapSpec{
-		Title:     "Activity",
-		Rows:      dayNames,
-		Cols:      cols,
-		Values:    values,
-		RowColors: rowColors,
-		RowScale:  true, // normalize per-row for better contrast
-	}, chartW)
-	if strings.TrimSpace(out) == "" {
+	if globalMax <= 0 {
 		return nil
 	}
-	return strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	// Color palette: 5 levels from empty to intense (GitHub-style).
+	palette := []lipgloss.Color{colorSurface0, colorGreen, colorTeal, colorYellow, colorPeach}
+
+	dayLabels := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	var lines []string
+
+	for dow := 0; dow < 7; dow++ {
+		var row strings.Builder
+		// Short label, only show Mon/Wed/Fri for compactness.
+		label := "   "
+		if dow == 0 || dow == 2 || dow == 4 {
+			label = dayLabels[dow]
+		}
+		labelColor := colorDim
+		if dow < 5 {
+			labelColor = colorSubtext
+		}
+		row.WriteString(lipgloss.NewStyle().Foreground(labelColor).Width(labelW).Render(label))
+
+		for w := 0; w < numWeeks; w++ {
+			val := grid[dow][w]
+			ci := 0
+			if val > 0 {
+				// Map to 1-4 (skip 0 which is "empty").
+				ci = 1 + int(val/globalMax*3.99)
+				if ci >= len(palette) {
+					ci = len(palette) - 1
+				}
+			}
+			row.WriteString(lipgloss.NewStyle().Foreground(palette[ci]).Render("■ "))
+		}
+		lines = append(lines, row.String())
+	}
+
+	// Date labels row.
+	gridW := numWeeks * 2
+	dateLine := make([]byte, gridW)
+	for i := range dateLine {
+		dateLine[i] = ' '
+	}
+	numLabels := 4
+	if numWeeks < 8 {
+		numLabels = 2
+	}
+	for i := 0; i < numLabels; i++ {
+		wi := 0
+		if numLabels > 1 {
+			wi = i * (numWeeks - 1) / (numLabels - 1)
+		}
+		weekStart := minDate.AddDate(0, 0, wi*7)
+		label := weekStart.Format("Jan 2")
+		x := wi * 2
+		if x+len(label) > gridW {
+			x = gridW - len(label)
+		}
+		if x < 0 {
+			x = 0
+		}
+		for j := 0; j < len(label) && x+j < gridW; j++ {
+			dateLine[x+j] = label[j]
+		}
+	}
+	lines = append(lines, strings.Repeat(" ", labelW)+dimStyle.Render(string(dateLine)))
+
+	return lines
 }
 
 // buildDetailDualAxisChart builds an overlay chart showing cost and requests
