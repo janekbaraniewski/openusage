@@ -186,6 +186,15 @@ func (m Model) renderFooterStatusLine(w int) string {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter.text)
 		}
 	default:
+		if m.mode == modeDetail && m.screen == screenDashboard {
+			zoomHint := "+/- chart zoom"
+			if m.detailChartZoom > 0 {
+				zoomLabels := []string{"", "90d", "30d", "14d", "7d", "3d"}
+				zoomHint = fmt.Sprintf("+/- zoom (%s)", zoomLabels[m.detailChartZoom])
+			}
+			hint := fmt.Sprintf("j/k scroll · PgUp/PgDn page · %s · 0 reset · r refresh · Esc back", zoomHint)
+			return " " + dimStyle.Render(hint)
+		}
 		if m.filter.active {
 			cursor := PulseChar("█", "▌", m.animFrame)
 			return " " + dimStyle.Render("search: ") + searchStyle.Render(m.filter.text+cursor)

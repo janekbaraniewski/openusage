@@ -612,8 +612,7 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = clamp(m.cursor-pageStep, 0, len(ids)-1)
 		}
 	case "enter", "right", "l":
-		m.mode = modeDetail
-		m.detailOffset = 0
+		m = m.enterDetailMode()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
@@ -628,7 +627,7 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc", "left", "h", "backspace":
-		m.mode = modeList
+		m = m.exitDetailMode()
 	case "up", "k":
 		if m.detailOffset > 0 {
 			m.detailOffset--
@@ -647,11 +646,41 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "]":
 		m.detailTab++
 		m.detailOffset = 0
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		m.detailTab = int(msg.String()[0] - '1')
-		m.detailOffset = 0
+	case "pgdown", "ctrl+d":
+		m.detailOffset += m.detailPageStep()
+	case "pgup", "ctrl+u":
+		m.detailOffset -= m.detailPageStep()
+		if m.detailOffset < 0 {
+			m.detailOffset = 0
+		}
+	case "r":
+		m = m.requestRefresh()
+	case "+", "=":
+		// Zoom in on charts (narrower time window).
+		if m.detailChartZoom < 5 {
+			m.detailChartZoom++
+			m.invalidateRenderCaches()
+		}
+	case "-", "_":
+		// Zoom out on charts (wider time window).
+		if m.detailChartZoom > 0 {
+			m.detailChartZoom--
+			m.invalidateRenderCaches()
+		}
+	case "0":
+		// Reset chart zoom to show all data.
+		m.detailChartZoom = 0
+		m.invalidateRenderCaches()
 	}
 	return m, nil
+}
+
+func (m Model) detailPageStep() int {
+	step := m.height / 2
+	if step < 3 {
+		step = 3
+	}
+	return step
 }
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -728,8 +757,7 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.tileOffset = 9999
 	case "enter":
-		m.mode = modeDetail
-		m.detailOffset = 0
+		m = m.enterDetailMode()
 	case "/":
 		m.filter.active = true
 		m.filter.text = ""
