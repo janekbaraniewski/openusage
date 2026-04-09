@@ -99,10 +99,12 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 
 	var items []chartItem
 	for _, l := range langs {
+		pct := l.Requests / total * 100
 		items = append(items, chartItem{
-			Label: l.Name,
-			Value: l.Requests,
-			Color: stableModelColor("lang:"+l.Name, "languages"),
+			Label:     l.Name,
+			Value:     l.Requests,
+			Color:     stableModelColor("lang:"+l.Name, "languages"),
+			ValueText: fmt.Sprintf("%4.1f%%  %s", pct, dimStyle.Render(formatNumber(l.Requests)+" req")),
 		})
 	}
 
@@ -118,28 +120,7 @@ func renderLanguagesSection(sb *strings.Builder, snap core.UsageSnapshot, w int)
 		barW = 30
 	}
 
-	for _, item := range items {
-		pct := item.Value / total * 100
-		label := item.Label
-		if len(label) > labelW {
-			label = label[:labelW-1] + "…"
-		}
-
-		barLen := int(item.Value / items[0].Value * float64(barW))
-		if barLen < 1 && item.Value > 0 {
-			barLen = 1
-		}
-		emptyLen := barW - barLen
-		bar := lipgloss.NewStyle().Foreground(item.Color).Render(strings.Repeat("█", barLen))
-		track := surface1Style.Render(strings.Repeat("░", emptyLen))
-
-		pctStr := lipgloss.NewStyle().Foreground(item.Color).Render(fmt.Sprintf("%4.1f%%", pct))
-		countStr := dimStyle.Render(formatNumber(item.Value) + " req")
-
-		sb.WriteString(fmt.Sprintf("  %s %s%s  %s  %s\n",
-			labelStyle.Width(labelW).Render(label),
-			bar, track, pctStr, countStr))
-	}
+	sb.WriteString(RenderHBarChart(items, barW, labelW) + "\n")
 
 	if len(langs) > maxShow {
 		remaining := len(langs) - maxShow
@@ -253,7 +234,7 @@ func renderTrendsSection(sb *strings.Builder, snap core.UsageSnapshot, widget co
 		return
 	}
 
-	primaryCandidates := []string{"cost", "tokens_total", "messages", "requests", "sessions"}
+	primaryCandidates := []string{"analytics_cost", "cost", "tokens_total", "analytics_tokens", "messages", "analytics_requests", "requests", "sessions"}
 	primaryKey := ""
 	for _, key := range primaryCandidates {
 		if pts, ok := snap.DailySeries[key]; ok && len(pts) >= 2 {
@@ -263,8 +244,9 @@ func renderTrendsSection(sb *strings.Builder, snap core.UsageSnapshot, widget co
 	}
 
 	if primaryKey == "" {
-		for key, pts := range snap.DailySeries {
-			if len(pts) >= 2 {
+		// Use sorted keys for deterministic selection (map iteration is random).
+		for _, key := range core.SortedStringKeys(snap.DailySeries) {
+			if pts := snap.DailySeries[key]; len(pts) >= 2 {
 				primaryKey = key
 				break
 			}
@@ -277,7 +259,7 @@ func renderTrendsSection(sb *strings.Builder, snap core.UsageSnapshot, widget co
 
 	pts := snap.DailySeries[primaryKey]
 	yFmt := formatChartValue
-	if primaryKey == "cost" {
+	if primaryKey == "cost" || primaryKey == "analytics_cost" {
 		yFmt = formatCostAxis
 	}
 

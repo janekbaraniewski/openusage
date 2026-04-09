@@ -81,7 +81,8 @@ func TestRenderMetricGroup_UnknownSectionFallsBackToList(t *testing.T) {
 	}
 }
 
-func TestDetailTabs_IncludesModelsWhenModelUsagePresent(t *testing.T) {
+func TestDetailTabs_SingleAllTab(t *testing.T) {
+	// Detail view uses a single scrollable dashboard — no individual tabs.
 	snap := core.UsageSnapshot{
 		ProviderID: "test",
 		AccountID:  "test",
@@ -90,83 +91,11 @@ func TestDetailTabs_IncludesModelsWhenModelUsagePresent(t *testing.T) {
 		ModelUsage: []core.ModelUsageRecord{
 			{RawModelID: "gpt-4", CostUSD: core.Float64Ptr(5.0)},
 		},
-	}
-	tabs := DetailTabs(snap)
-	found := false
-	for _, t := range tabs {
-		if t == "Models" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected Models tab, got tabs: %v", tabs)
-	}
-}
-
-func TestDetailTabs_IncludesTrendsWhenDailySeriesPresent(t *testing.T) {
-	snap := core.UsageSnapshot{
-		ProviderID: "test",
-		AccountID:  "test",
-		Timestamp:  time.Now(),
-		Metrics:    map[string]core.Metric{"rpm": {Used: core.Float64Ptr(10), Unit: "req"}},
-		DailySeries: map[string][]core.TimePoint{
-			"cost": {
-				{Date: "2026-02-20", Value: 5.0},
-				{Date: "2026-02-21", Value: 8.0},
-				{Date: "2026-02-22", Value: 3.0},
-			},
-		},
-	}
-	tabs := DetailTabs(snap)
-	found := false
-	for _, t := range tabs {
-		if t == "Trends" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected Trends tab, got tabs: %v", tabs)
-	}
-}
-
-func TestDetailTabs_NoModelTabWhenEmpty(t *testing.T) {
-	snap := core.UsageSnapshot{
-		ProviderID: "test",
-		AccountID:  "test",
-		Timestamp:  time.Now(),
-		Metrics:    map[string]core.Metric{"rpm": {Used: core.Float64Ptr(10), Unit: "req"}},
-	}
-	tabs := DetailTabs(snap)
-	for _, tab := range tabs {
-		if tab == "Models" {
-			t.Fatal("Models tab should not appear without model data")
-		}
-		if tab == "Trends" {
-			t.Fatal("Trends tab should not appear without daily series")
-		}
-	}
-}
-
-func TestDetailTabs_InfoTabWithAttributes(t *testing.T) {
-	snap := core.UsageSnapshot{
-		ProviderID: "test",
-		AccountID:  "test",
-		Timestamp:  time.Now(),
-		Metrics:    map[string]core.Metric{"rpm": {Used: core.Float64Ptr(10), Unit: "req"}},
 		Attributes: map[string]string{"plan": "pro"},
 	}
 	tabs := DetailTabs(snap)
-	found := false
-	for _, tab := range tabs {
-		if tab == "Info" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected Info tab with Attributes, got tabs: %v", tabs)
+	if len(tabs) != 1 || tabs[0] != "All" {
+		t.Fatalf("expected single All tab, got tabs: %v", tabs)
 	}
 }
 
@@ -260,6 +189,58 @@ func TestRenderTrendsSection_EmptyWithInsufficientData(t *testing.T) {
 
 	if len(out) > 0 {
 		t.Errorf("expected empty output for single data point, got: %s", out)
+	}
+}
+
+func TestBuildDetailTrendsSection_IncludesBreakdownCharts(t *testing.T) {
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		AccountID:  "test",
+		Timestamp:  time.Now(),
+		DailySeries: map[string][]core.TimePoint{
+			"cost": {
+				{Date: "2026-02-18", Value: 5},
+				{Date: "2026-02-19", Value: 8},
+				{Date: "2026-02-20", Value: 12},
+			},
+			"usage_model_claude-opus-4-1": {
+				{Date: "2026-02-18", Value: 3},
+				{Date: "2026-02-19", Value: 5},
+				{Date: "2026-02-20", Value: 7},
+			},
+			"usage_model_claude-haiku-4-5": {
+				{Date: "2026-02-18", Value: 2},
+				{Date: "2026-02-19", Value: 4},
+				{Date: "2026-02-20", Value: 6},
+			},
+			"tokens_client_webapp": {
+				{Date: "2026-02-18", Value: 1200},
+				{Date: "2026-02-19", Value: 1500},
+				{Date: "2026-02-20", Value: 1700},
+			},
+			"tokens_client_api_server": {
+				{Date: "2026-02-18", Value: 900},
+				{Date: "2026-02-19", Value: 1100},
+				{Date: "2026-02-20", Value: 1400},
+			},
+			"usage_project_openusage": {
+				{Date: "2026-02-18", Value: 6},
+				{Date: "2026-02-19", Value: 9},
+				{Date: "2026-02-20", Value: 11},
+			},
+		},
+	}
+
+	widget := core.DefaultDashboardWidget()
+	widget.ShowClientComposition = true
+
+	lines := buildDetailTrendsSection(snap, widget, 96, 0)
+	out := stripANSI(strings.Join(lines, "\n"))
+
+	for _, title := range []string{"Model Breakdown", "Client Breakdown", "Project Breakdown"} {
+		if !strings.Contains(out, title) {
+			t.Fatalf("expected %q chart in trends output, got:\n%s", title, out)
+		}
 	}
 }
 
