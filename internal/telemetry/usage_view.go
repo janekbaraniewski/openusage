@@ -255,10 +255,10 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, provid
 
 	if accountID != "" {
 		scoped, err := loadUsageViewForFilter(ctx, db, usageFilter{
-			ProviderIDs:     providerIDs,
-			AccountID:       accountID,
-			Since:      since,
-			TodaySince: todaySince,
+			ProviderIDs: providerIDs,
+			AccountID:   accountID,
+			Since:       since,
+			TodaySince:  todaySince,
 		})
 		if err != nil {
 			return nil, err
