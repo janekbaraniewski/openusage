@@ -11,122 +11,447 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// Analytics sub-tab definitions.
+const (
+	analyticsTabOverview = 0
+	analyticsTabModels   = 1
+	analyticsTabSpend    = 2
+	analyticsTabActivity = 3
+	analyticsTabCount    = 4
+)
+
+var analyticsTabLabels = []string{"Overview", "Models", "Spend", "Activity"}
+
+// renderAnalyticsContent is the main entry point for the analytics screen.
 func (m Model) renderAnalyticsContent(w, h int) string {
-	var statusBuf strings.Builder
-	renderStatusBar(&statusBuf, m.analyticsSortBy, m.analyticsFilter.text, w)
-	statusStr := statusBuf.String()
+	tabBar := m.renderAnalyticsTabBar(w)
+	tabBarH := strings.Count(tabBar, "\n") + 1
+
+	contentH := h - tabBarH
+	if contentH < 3 {
+		contentH = 3
+	}
 
 	content, hasData := m.cachedAnalyticsPageContent(w)
 	if !hasData {
 		empty := "\n" + dimStyle.Render("  No cost or usage data available.")
 		empty += "\n" + dimStyle.Render("  Analytics requires providers that report spend, tokens, or budgets.")
-		return statusStr + empty
+		return tabBar + "\n" + empty
 	}
 
-	lines := strings.Split(statusStr+content, "\n")
-	for len(lines) < h {
+	lines := strings.Split(content, "\n")
+
+	// Apply scroll offset for content
+	if m.analyticsScrollY > 0 && m.analyticsScrollY < len(lines) {
+		lines = lines[m.analyticsScrollY:]
+	}
+
+	for len(lines) < contentH {
 		lines = append(lines, "")
 	}
-	if len(lines) > h {
-		lines = lines[:h]
+	if len(lines) > contentH {
+		lines = lines[:contentH]
 	}
-	return strings.Join(lines, "\n")
+
+	return tabBar + "\n" + strings.Join(lines, "\n")
 }
 
-func renderStatusBar(sb *strings.Builder, sortBy int, filter string, w int) {
-	parts := []string{
-		analyticsSortLabelStyle.Render("↕ " + sortByLabels[sortBy]),
+// renderAnalyticsTabBar renders the sub-tab bar for the analytics screen.
+func (m Model) renderAnalyticsTabBar(w int) string {
+	var parts []string
+	for i, label := range analyticsTabLabels {
+		tabStr := fmt.Sprintf(" %s ", label)
+		if i == m.analyticsTab {
+			parts = append(parts, tabActiveStyle.Render(tabStr))
+		} else {
+			parts = append(parts, tabInactiveStyle.Render(tabStr))
+		}
 	}
-	if filter != "" {
-		parts = append(parts,
-			sapphireStyle.Render("/ "+filter))
-	}
-	left := "  " + strings.Join(parts, "  "+dimStyle.Render("|")+"  ")
-	hints := dimStyle.Render("s:sort  /:filter  ?:help")
-	gap := w - lipgloss.Width(left) - lipgloss.Width(hints) - 2
+	tabs := "  " + strings.Join(parts, " ")
+
+	// Right side: sort + filter hints
+	hints := dimStyle.Render("[ ] tabs  s:sort  /:filter")
+	gap := w - lipgloss.Width(tabs) - lipgloss.Width(hints) - 2
 	if gap < 1 {
 		gap = 1
 	}
-	sb.WriteString(left + strings.Repeat(" ", gap) + hints + "\n")
+	return tabs + strings.Repeat(" ", gap) + hints
 }
 
-func renderAnalyticsSinglePage(data costData, summary analyticsSummary, w int) string {
+// renderAnalyticsTabContent dispatches to the active sub-tab renderer.
+func (m Model) renderAnalyticsTabContent(data costData, summary analyticsSummary, w int) string {
+	switch m.analyticsTab {
+	case analyticsTabOverview:
+		return renderAnalyticsOverview(data, summary, w)
+	case analyticsTabModels:
+		return m.renderAnalyticsModels(data, w)
+	case analyticsTabSpend:
+		return renderAnalyticsSpend(data, summary, w)
+	case analyticsTabActivity:
+		return renderAnalyticsActivity(data, w)
+	default:
+		return renderAnalyticsOverview(data, summary, w)
+	}
+}
+
+// ─── Overview Tab ─────────────────────────────────────────────
+
+func renderAnalyticsOverview(data costData, summary analyticsSummary, w int) string {
 	var sb strings.Builder
 
+	// KPI header
 	if kpis := renderAnalyticsKPIHeader(data, summary, w); kpis != "" {
 		sb.WriteString(kpis)
-		sb.WriteString("\n")
+		sb.WriteString("\n\n")
 	}
 
+	// Total cost trend
 	if totalCost := renderTotalCostTrend(data, summary, w, 9); totalCost != "" {
 		sb.WriteString(totalCost)
 		sb.WriteString("\n")
 	}
 
-	if stacked := renderProviderCostStackedChart(data, w, 8); stacked != "" {
-		sb.WriteString(stacked)
-		sb.WriteString("\n")
-	}
+	// Two-column layout: top providers + top models
+	if w >= 80 {
+		gap := 2
+		colW := (w - 4 - gap) / 2
+		if colW < 36 {
+			colW = 36
+		}
+		left := renderTopProvidersBars(data, colW, 8)
+		right := renderTopModelsBars(data.models, colW, 8)
 
-	if tokenDist := renderDailyTokenDistributionChart(data, w, 12); tokenDist != "" {
-		sb.WriteString(tokenDist)
-		sb.WriteString("\n")
-	}
-
-	if bottom := renderAnalyticsBottomGrid(data, w); bottom != "" {
-		sb.WriteString(bottom)
+		if left != "" || right != "" {
+			if left == "" {
+				left = strings.Repeat(" ", colW)
+			}
+			if right == "" {
+				right = strings.Repeat(" ", colW)
+			}
+			sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+				left, strings.Repeat(" ", gap), right))
+			sb.WriteString("\n")
+		}
+	} else {
+		if bars := renderTopProvidersBars(data, w, 6); bars != "" {
+			sb.WriteString(bars)
+			sb.WriteString("\n")
+		}
+		if bars := renderTopModelsBars(data.models, w, 6); bars != "" {
+			sb.WriteString(bars)
+			sb.WriteString("\n")
+		}
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func renderAnalyticsBottomGrid(data costData, w int) string {
-	if w < 80 {
-		var sb strings.Builder
-		if heat := renderProviderModelDailyUsage(data, w, 12); heat != "" {
-			sb.WriteString(heat)
-			sb.WriteString("\n")
+func renderTopProvidersBars(data costData, w int, limit int) string {
+	providers := make([]providerCostEntry, len(data.providers))
+	copy(providers, data.providers)
+	sort.Slice(providers, func(i, j int) bool { return providers[i].cost > providers[j].cost })
+
+	var items []chartItem
+	for _, p := range providers {
+		if p.cost <= 0 {
+			continue
 		}
-		if table := renderTopModelsSummary(data.models, w, 10); table != "" {
-			sb.WriteString(table)
-			sb.WriteString("\n")
+		items = append(items, chartItem{
+			Label:     truncStr(p.name, 18),
+			Value:     p.cost,
+			Color:     p.color,
+			ValueText: formatUSD(p.cost),
+		})
+		if len(items) >= limit {
+			break
 		}
-		if costs := renderCostTable(data, w); costs != "" {
-			sb.WriteString(costs)
-		}
-		return strings.TrimRight(sb.String(), "\n")
+	}
+	if len(items) == 0 {
+		return ""
 	}
 
-	gap := 2
-	colW := (w - 4 - gap) / 2
-	if colW < 36 {
-		colW = 36
-	}
-	left := strings.TrimRight(renderProviderModelDailyUsage(data, colW, 12), "\n")
-	right := strings.TrimRight(renderTopModelsCompact(data.models, colW, 10), "\n")
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPeach)
+	sb.WriteString("  " + sectionStyle.Render("TOP PROVIDERS BY SPEND") + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
-	row1 := ""
-	switch {
-	case left != "" && right != "":
-		row1 = lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right)
-	case left != "":
-		row1 = left
-	case right != "":
-		row1 = right
+	labelW := 20
+	if w < 55 {
+		labelW = 14
 	}
-
-	row2 := strings.TrimRight(renderCostTableCompact(data, w, 8), "\n")
-
-	if row1 == "" {
-		return row2
+	barW := w - labelW - 20
+	if barW < 8 {
+		barW = 8
 	}
-	if row2 == "" {
-		return row1
+	if barW > 30 {
+		barW = 30
 	}
-	return row1 + "\n\n" + row2
+	sb.WriteString(RenderHBarChart(items, barW, labelW))
+	return sb.String()
 }
 
-func renderCostTable(data costData, w int) string {
+func renderTopModelsBars(models []modelCostEntry, w int, limit int) string {
+	all := filterTokenModels(models)
+	if len(all) == 0 {
+		return ""
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].cost > all[j].cost })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+
+	var items []chartItem
+	for _, m := range all {
+		if m.cost <= 0 {
+			continue
+		}
+		sub := ""
+		if len(m.providers) > 1 {
+			sub = fmt.Sprintf("%d providers", len(m.providers))
+		} else if len(m.providers) == 1 {
+			sub = m.providers[0].provider
+		}
+		items = append(items, chartItem{
+			Label:     truncStr(m.name, 18),
+			Value:     m.cost,
+			Color:     m.color,
+			ValueText: formatUSD(m.cost),
+			SubLabel:  sub,
+		})
+	}
+	if len(items) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorTeal)
+	sb.WriteString("  " + sectionStyle.Render("TOP MODELS BY SPEND") + "\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
+
+	labelW := 20
+	if w < 55 {
+		labelW = 14
+	}
+	barW := w - labelW - 20
+	if barW < 8 {
+		barW = 8
+	}
+	if barW > 30 {
+		barW = 30
+	}
+	sb.WriteString(RenderHBarChart(items, barW, labelW))
+	return sb.String()
+}
+
+// ─── Models Tab ───────────────────────────────────────────────
+
+func (m Model) renderAnalyticsModels(data costData, w int) string {
+	models := filterTokenModels(data.models)
+	if len(models) == 0 {
+		return "\n" + dimStyle.Render("  No model usage data available.")
+	}
+	sortModels(models, m.analyticsSortBy)
+
+	var sb strings.Builder
+
+	// Summary line
+	totalModels := len(models)
+	totalProviders := data.providerCount
+	sb.WriteString("  " + dimStyle.Render(fmt.Sprintf("%d models across %d providers", totalModels, totalProviders)))
+	if m.analyticsFilter.text != "" {
+		sb.WriteString(dimStyle.Render(fmt.Sprintf(" · filtered: %q", m.analyticsFilter.text)))
+	}
+	sb.WriteString("\n")
+	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
+
+	for i, model := range models {
+		isSelected := i == m.analyticsModelCursor
+		isExpanded := m.analyticsModelExpand[model.name]
+
+		sb.WriteString(renderModelRow(model, isSelected, isExpanded, w))
+
+		if isExpanded && len(model.providers) > 0 {
+			sb.WriteString(renderModelProviderBreakdown(model, w))
+		}
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderModelRow(model modelCostEntry, selected, expanded bool, w int) string {
+	var sb strings.Builder
+
+	// Cursor indicator
+	cursor := "  "
+	if selected {
+		cursor = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("▸ ")
+	}
+
+	// Expand/collapse indicator
+	expandIcon := " "
+	if len(model.providers) > 1 {
+		if expanded {
+			expandIcon = dimStyle.Render("▾")
+		} else {
+			expandIcon = dimStyle.Render("▸")
+		}
+	}
+
+	// Model name with color
+	nameW := clamp(w/3, 16, 30)
+	nameStyle := lipgloss.NewStyle().Foreground(model.color)
+	if selected {
+		nameStyle = nameStyle.Bold(true)
+	}
+	name := nameStyle.Render(truncStr(model.name, nameW))
+
+	// Cost
+	costStr := tealBoldStyle.Render(formatUSD(model.cost))
+
+	// Tokens
+	tokens := model.inputTokens + model.outputTokens
+	tokenStr := sapphireStyle.Render(formatTokens(tokens))
+
+	// Provider count
+	provCount := ""
+	if len(model.providers) > 1 {
+		provCount = dimStyle.Render(fmt.Sprintf("%d providers", len(model.providers)))
+	} else if len(model.providers) == 1 {
+		provCount = dimStyle.Render(model.providers[0].provider)
+	}
+
+	// Efficiency
+	effStr := ""
+	if model.cost > 0 && tokens > 0 {
+		eff := model.cost / tokens * 1000
+		effStr = yellowStyle.Render(fmt.Sprintf("$%.3f/1K", eff))
+	}
+
+	// Compose the row
+	sb.WriteString(cursor + expandIcon + " ")
+	sb.WriteString(padRight(name, nameW) + "  ")
+	sb.WriteString(padLeft(costStr, 10) + "  ")
+	sb.WriteString(padLeft(tokenStr, 10) + "  ")
+	sb.WriteString(padLeft(effStr, 10) + "  ")
+	sb.WriteString(provCount)
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func renderModelProviderBreakdown(model modelCostEntry, w int) string {
+	var sb strings.Builder
+
+	totalCost := model.cost
+	totalTokens := model.inputTokens + model.outputTokens
+
+	for i, split := range model.providers {
+		// Tree connector
+		connector := "├─"
+		if i == len(model.providers)-1 {
+			connector = "└─"
+		}
+		prefix := "     " + dimStyle.Render(connector) + " "
+
+		// Provider name
+		provNameW := clamp(w/4, 12, 20)
+		provName := dimStyle.Copy().Bold(true).Render(truncStr(split.provider, provNameW))
+
+		// Cost + percentage
+		costStr := tealStyle.Render(formatUSD(split.cost))
+		pctCost := ""
+		if totalCost > 0 {
+			pct := split.cost / totalCost * 100
+			pctCost = dimStyle.Render(fmt.Sprintf("%.0f%%", pct))
+		}
+
+		// Mini gauge showing cost proportion
+		gaugeW := clamp(w/5, 8, 16)
+		gauge := ""
+		if totalCost > 0 {
+			pct := split.cost / totalCost * 100
+			gauge = RenderInlineGauge(pct, gaugeW)
+		}
+
+		// Tokens
+		splitTokens := split.inputTokens + split.outputTokens
+		tokenStr := sapphireStyle.Render(formatTokens(splitTokens))
+
+		// Efficiency
+		effStr := ""
+		if split.cost > 0 && splitTokens > 0 {
+			eff := split.cost / splitTokens * 1000
+			effStr = yellowStyle.Render(fmt.Sprintf("$%.3f/1K", eff))
+		}
+
+		_ = totalTokens
+
+		sb.WriteString(prefix)
+		sb.WriteString(padRight(provName, provNameW) + "  ")
+		sb.WriteString(padLeft(costStr, 9) + " ")
+		sb.WriteString(padLeft(pctCost, 4) + "  ")
+		sb.WriteString(gauge + "  ")
+		sb.WriteString(padLeft(tokenStr, 10) + "  ")
+		sb.WriteString(padLeft(effStr, 10))
+		sb.WriteString("\n")
+	}
+
+	// Token detail row for expanded model
+	if model.inputTokens > 0 || model.outputTokens > 0 {
+		sb.WriteString("     " + dimStyle.Render("   "))
+		parts := []string{}
+		if model.inputTokens > 0 {
+			parts = append(parts, dimStyle.Render("in:")+sapphireStyle.Render(formatTokens(model.inputTokens)))
+		}
+		if model.outputTokens > 0 {
+			parts = append(parts, dimStyle.Render("out:")+sapphireStyle.Render(formatTokens(model.outputTokens)))
+		}
+		sb.WriteString(strings.Join(parts, "  "))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// ─── Spend Tab ────────────────────────────────────────────────
+
+func renderAnalyticsSpend(data costData, summary analyticsSummary, w int) string {
+	var sb strings.Builder
+
+	// KPI row for spend context
+	if w >= 60 {
+		kpis := []string{
+			renderKPIBlock("Total", formatUSD(data.totalCost), fmt.Sprintf("%d providers", data.providerCount), colorTeal),
+			renderKPIBlock("Trend", renderTrendPercent(summary.recentCostAvg, summary.previousCostAvg), "7d vs prior", colorYellow),
+		}
+		if summary.peakCost > 0 {
+			kpis = append(kpis, renderKPIBlock("Peak Day", formatUSD(summary.peakCost), summary.peakCostDate, colorPeach))
+		}
+		sb.WriteString("  " + strings.Join(kpis, "  ") + "\n\n")
+	}
+
+	// Daily cost by provider stacked chart
+	if stacked := renderProviderCostStackedChart(data, w, 9); stacked != "" {
+		sb.WriteString(stacked)
+		sb.WriteString("\n")
+	}
+
+	// Provider cost table
+	if costs := renderCostTableFull(data, w); costs != "" {
+		sb.WriteString(costs)
+		sb.WriteString("\n")
+	}
+
+	// Cost efficiency table
+	if eff := renderCostEfficiencyTable(data.models, w, 12); eff != "" {
+		sb.WriteString(eff)
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderCostTableFull(data costData, w int) string {
 	if len(data.providers) == 0 {
 		return ""
 	}
@@ -138,32 +463,25 @@ func renderCostTable(data costData, w int) string {
 			break
 		}
 	}
-
-	hasBudget := len(data.budgets) > 0
-
-	if !hasCost && !hasBudget {
+	if !hasCost && len(data.budgets) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
 
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater)
-	sb.WriteString("  " + sectionStyle.Render("COST & SPEND") + "\n")
+	sb.WriteString("  " + sectionStyle.Render("PROVIDER SPEND") + "\n")
 	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
-	provW := 20
-	colW := 12
-	budgetW := w - provW - colW*3 - 10
-	if budgetW < 20 {
-		budgetW = 20
-	}
+	provW := clamp(w/4, 14, 22)
+	colW := clamp((w-provW-8)/4, 8, 12)
 
-	headerStyle := dimStyle.Copy().Bold(true)
-	sb.WriteString("  " + padRight(headerStyle.Render("Provider"), provW) + " " +
-		padLeft(headerStyle.Render("Today"), colW) + " " +
-		padLeft(headerStyle.Render("7 Day"), colW) + " " +
-		padLeft(headerStyle.Render("All-Time"), colW) + "  " +
-		padRight(headerStyle.Render("Budget"), budgetW) + "\n")
+	head := dimStyle.Copy().Bold(true)
+	sb.WriteString("  " + padRight(head.Render("Provider"), provW) + " " +
+		padLeft(head.Render("Today"), colW) + " " +
+		padLeft(head.Render("7 Day"), colW) + " " +
+		padLeft(head.Render("All-Time"), colW) + " " +
+		padLeft(head.Render("Budget"), colW+6) + "\n")
 
 	budgetMap := make(map[string]budgetEntry)
 	for _, b := range data.budgets {
@@ -173,7 +491,11 @@ func renderCostTable(data costData, w int) string {
 		}
 	}
 
-	for _, p := range data.providers {
+	providers := make([]providerCostEntry, len(data.providers))
+	copy(providers, data.providers)
+	sort.Slice(providers, func(i, j int) bool { return providers[i].cost > providers[j].cost })
+
+	for _, p := range providers {
 		provColor := p.color
 		switch p.status {
 		case core.StatusLimited:
@@ -207,207 +529,196 @@ func renderCostTable(data costData, w int) string {
 		budgetStr := dimStyle.Render("—")
 		if b, ok := budgetMap[p.name]; ok && b.limit > 0 {
 			pct := b.used / b.limit * 100
-			gauge := RenderInlineGauge(pct, 10)
-			budgetStr = gauge + " " +
-				dimStyle.Render(fmt.Sprintf("%s/%s %.0f%%", formatUSD(b.used), formatUSD(b.limit), pct))
+			gauge := RenderInlineGauge(pct, 8)
+			budgetStr = gauge + " " + dimStyle.Render(fmt.Sprintf("%.0f%%", pct))
 		}
 
 		sb.WriteString("  " + padRight(provName, provW) + " " +
 			padLeft(todayStr, colW) + " " +
 			padLeft(weekStr, colW) + " " +
-			padLeft(allTimeStr, colW) + "  " +
-			padRight(budgetStr, budgetW) + "\n")
+			padLeft(allTimeStr, colW) + " " +
+			padLeft(budgetStr, colW+6) + "\n")
 	}
 
 	return sb.String()
 }
 
-func hasNonZeroData(pts []core.TimePoint) bool {
-	for _, p := range pts {
-		if p.Value > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func renderTopModelsSummary(models []modelCostEntry, w int, limit int) string {
+func renderCostEfficiencyTable(models []modelCostEntry, w int, limit int) string {
 	all := filterTokenModels(models)
 	if len(all) == 0 {
 		return ""
 	}
-	sort.Slice(all, func(i, j int) bool {
-		li := all[i].inputTokens + all[i].outputTokens
-		lj := all[j].inputTokens + all[j].outputTokens
-		if li == lj {
-			return all[i].cost > all[j].cost
+
+	// Only show models with cost data
+	var withCost []modelCostEntry
+	for _, m := range all {
+		if m.cost > 0 {
+			withCost = append(withCost, m)
 		}
-		return li > lj
+	}
+	if len(withCost) == 0 {
+		return ""
+	}
+
+	sort.Slice(withCost, func(i, j int) bool {
+		tokI := withCost[i].inputTokens + withCost[i].outputTokens
+		tokJ := withCost[j].inputTokens + withCost[j].outputTokens
+		if tokI <= 0 || tokJ <= 0 {
+			return withCost[i].cost > withCost[j].cost
+		}
+		effI := withCost[i].cost / tokI
+		effJ := withCost[j].cost / tokJ
+		return effI < effJ // cheapest first
 	})
-	if limit > 0 && len(all) > limit {
-		all = all[:limit]
+	if len(withCost) > limit {
+		withCost = withCost[:limit]
 	}
 
 	var sb strings.Builder
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorTeal)
-	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (Daily volume & efficiency)") + "\n")
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorYellow)
+	sb.WriteString("  " + sectionStyle.Render("COST EFFICIENCY (cheapest first)") + "\n")
 	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
-	nameW := clamp(w/3, 20, 34)
-	provW := clamp(w/5, 14, 22)
-	tokW := 12
-	costW := 10
-	effW := 10
+	nameW := clamp(w/3, 16, 28)
+	provW := clamp(w/5, 10, 18)
 
 	head := dimStyle.Copy().Bold(true)
 	sb.WriteString("  " + padRight(head.Render("Model"), nameW) + " " +
 		padRight(head.Render("Provider"), provW) + " " +
-		padLeft(head.Render("Tokens"), tokW) + " " +
-		padLeft(head.Render("Cost"), costW) + " " +
-		padLeft(head.Render("$/1K"), effW) + "\n")
+		padLeft(head.Render("$/1K tok"), 10) + " " +
+		padLeft(head.Render("Cost"), 10) + " " +
+		padLeft(head.Render("Tokens"), 10) + "\n")
 
-	for _, m := range all {
+	for _, m := range withCost {
 		tokens := m.inputTokens + m.outputTokens
-		if tokens <= 0 {
-			continue
-		}
 		eff := "—"
-		if m.cost > 0 {
+		if tokens > 0 {
 			eff = fmt.Sprintf("$%.4f", m.cost/tokens*1000)
 		}
+		prov := primaryProvider(m)
+
 		sb.WriteString("  " +
 			padRight(lipgloss.NewStyle().Foreground(m.color).Render(truncStr(m.name, nameW)), nameW) + " " +
-			padRight(dimStyle.Render(truncStr(primaryProvider(m), provW)), provW) + " " +
-			padLeft(sapphireStyle.Render(formatTokens(tokens)), tokW) + " " +
-			padLeft(tealStyle.Render(formatUSD(m.cost)), costW) + " " +
-			padLeft(yellowStyle.Render(eff), effW) + "\n")
+			padRight(dimStyle.Render(truncStr(prov, provW)), provW) + " " +
+			padLeft(yellowStyle.Render(eff), 10) + " " +
+			padLeft(tealStyle.Render(formatUSD(m.cost)), 10) + " " +
+			padLeft(sapphireStyle.Render(formatTokens(tokens)), 10) + "\n")
 	}
 	return sb.String()
 }
 
-func renderTopModelsCompact(models []modelCostEntry, w int, limit int) string {
-	all := filterTokenModels(models)
-	if len(all) == 0 {
-		return ""
+// ─── Activity Tab ─────────────────────────────────────────────
+
+func renderAnalyticsActivity(data costData, w int) string {
+	var sb strings.Builder
+
+	// Token distribution chart
+	if tokenDist := renderDailyTokenDistributionChart(data, w, 12); tokenDist != "" {
+		sb.WriteString(tokenDist)
+		sb.WriteString("\n")
 	}
-	sort.Slice(all, func(i, j int) bool {
-		li := all[i].inputTokens + all[i].outputTokens
-		lj := all[j].inputTokens + all[j].outputTokens
-		if li == lj {
-			return all[i].cost > all[j].cost
+
+	// Two-column: heatmap + token/usage info
+	if w >= 80 {
+		gap := 2
+		colW := (w - 4 - gap) / 2
+		if colW < 36 {
+			colW = 36
 		}
-		return li > lj
-	})
-	if limit > 0 && len(all) > limit {
-		all = all[:limit]
+		left := strings.TrimRight(renderProviderModelDailyUsage(data, colW, 12), "\n")
+		right := strings.TrimRight(renderActivitySummary(data, colW), "\n")
+
+		if left != "" || right != "" {
+			if left != "" && right != "" {
+				sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right))
+			} else if left != "" {
+				sb.WriteString(left)
+			} else {
+				sb.WriteString(right)
+			}
+			sb.WriteString("\n")
+		}
+	} else {
+		if heat := renderProviderModelDailyUsage(data, w, 10); heat != "" {
+			sb.WriteString(heat)
+			sb.WriteString("\n")
+		}
+		if activity := renderActivitySummary(data, w); activity != "" {
+			sb.WriteString(activity)
+			sb.WriteString("\n")
+		}
+	}
+
+	// Usage gauges
+	if gauges := renderUsageGaugesSection(data, w); gauges != "" {
+		sb.WriteString(gauges)
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderActivitySummary(data costData, w int) string {
+	if len(data.tokenActivity) == 0 {
+		return ""
 	}
 
 	var sb strings.Builder
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorTeal)
-	sb.WriteString("  " + sectionStyle.Render("TOP MODELS (compact)") + "\n")
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorSapphire)
+	sb.WriteString("  " + sectionStyle.Render("TOKEN ACTIVITY") + "\n")
 	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
-	nameW := clamp(w/2, 16, 26)
-	provW := clamp(w/4, 10, 16)
-	tokW := 9
-	effW := 9
+	nameW := clamp(w/3, 14, 24)
+	for _, entry := range data.tokenActivity {
+		label := truncStr(entry.provider+" · "+entry.name, nameW)
+		provStyle := lipgloss.NewStyle().Foreground(entry.color)
 
-	head := dimStyle.Copy().Bold(true)
-	sb.WriteString("  " + padRight(head.Render("Model"), nameW) + " " +
-		padRight(head.Render("Provider"), provW) + " " +
-		padLeft(head.Render("Tokens"), tokW) + " " +
-		padLeft(head.Render("$/1K"), effW) + "\n")
+		value := ""
+		if entry.input > 0 || entry.output > 0 {
+			parts := []string{}
+			if entry.input > 0 {
+				parts = append(parts, "in:"+formatTokens(entry.input))
+			}
+			if entry.output > 0 {
+				parts = append(parts, "out:"+formatTokens(entry.output))
+			}
+			if entry.cached > 0 {
+				parts = append(parts, "cache:"+formatTokens(entry.cached))
+			}
+			value = sapphireStyle.Render(strings.Join(parts, " "))
+		} else if entry.total > 0 {
+			value = sapphireStyle.Render(formatTokens(entry.total))
+		}
 
-	for _, m := range all {
-		tokens := m.inputTokens + m.outputTokens
-		if tokens <= 0 {
-			continue
-		}
-		eff := "—"
-		if m.cost > 0 {
-			eff = fmt.Sprintf("$%.4f", m.cost/tokens*1000)
-		}
-		sb.WriteString("  " +
-			padRight(lipgloss.NewStyle().Foreground(m.color).Render(truncStr(m.name, nameW)), nameW) + " " +
-			padRight(dimStyle.Render(truncStr(primaryProvider(m), provW)), provW) + " " +
-			padLeft(sapphireStyle.Render(formatTokens(tokens)), tokW) + " " +
-			padLeft(yellowStyle.Render(eff), effW) + "\n")
+		sb.WriteString("  " + padRight(provStyle.Render(label), nameW) + "  " + value + "\n")
 	}
 	return sb.String()
 }
 
-func primaryProvider(m modelCostEntry) string {
-	if len(m.providers) > 0 {
-		return m.providers[0].provider
-	}
-	if m.provider != "" {
-		return m.provider
-	}
-	return "—"
-}
-
-func renderCostTableCompact(data costData, w int, limit int) string {
-	if len(data.providers) == 0 {
+func renderUsageGaugesSection(data costData, w int) string {
+	if len(data.usageGauges) == 0 {
 		return ""
-	}
-	providers := make([]providerCostEntry, len(data.providers))
-	copy(providers, data.providers)
-	sort.Slice(providers, func(i, j int) bool {
-		li := providers[i].weekCost
-		lj := providers[j].weekCost
-		if li == 0 && providers[i].todayCost > 0 {
-			li = providers[i].todayCost
-		}
-		if lj == 0 && providers[j].todayCost > 0 {
-			lj = providers[j].todayCost
-		}
-		if li == lj {
-			return providers[i].name < providers[j].name
-		}
-		return li > lj
-	})
-	if limit > 0 && len(providers) > limit {
-		providers = providers[:limit]
 	}
 
 	var sb strings.Builder
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorRosewater)
-	sb.WriteString("  " + sectionStyle.Render("COST & SPEND (compact)") + "\n")
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorYellow)
+	sb.WriteString("  " + sectionStyle.Render("RATE LIMITS & QUOTAS") + "\n")
 	sb.WriteString("  " + surface1Style.Render(strings.Repeat("─", w-4)) + "\n")
 
-	provW := clamp(w/3, 14, 24)
-	colW := clamp((w-provW-8)/3, 8, 12)
-	head := dimStyle.Copy().Bold(true)
-	sb.WriteString("  " + padRight(head.Render("Provider"), provW) + " " +
-		padLeft(head.Render("Today"), colW) + " " +
-		padLeft(head.Render("7d"), colW) + " " +
-		padLeft(head.Render("All"), colW) + "\n")
+	nameW := clamp(w/3, 14, 28)
+	gaugeW := clamp(w/4, 10, 20)
 
-	for _, p := range providers {
-		provColor := p.color
-		if p.status == core.StatusLimited || p.status == core.StatusError || p.status == core.StatusAuth {
-			provColor = colorRed
-		}
-		name := lipgloss.NewStyle().Foreground(provColor).Bold(true).Render(truncStr(p.name, provW))
-		todayStr := dimStyle.Render("—")
-		if p.todayCost > 0 {
-			todayStr = tealStyle.Render(formatUSD(p.todayCost))
-		}
-		weekStr := dimStyle.Render("—")
-		if p.weekCost > 0 {
-			weekStr = tealStyle.Render(formatUSD(p.weekCost))
-		}
-		allStr := dimStyle.Render("—")
-		if p.cost > 0 {
-			allStr = tealBoldStyle.Render(formatUSD(p.cost))
-		}
-		sb.WriteString("  " + padRight(name, provW) + " " +
-			padLeft(todayStr, colW) + " " +
-			padLeft(weekStr, colW) + " " +
-			padLeft(allStr, colW) + "\n")
+	for _, g := range data.usageGauges {
+		label := truncStr(g.provider+" · "+g.name, nameW)
+		provStyle := lipgloss.NewStyle().Foreground(g.color)
+		gauge := RenderInlineGauge(g.pctUsed, gaugeW)
+		pctStr := dimStyle.Render(fmt.Sprintf("%.0f%% %s", g.pctUsed, g.window))
+
+		sb.WriteString("  " + padRight(provStyle.Render(label), nameW) + "  " + gauge + " " + pctStr + "\n")
 	}
 	return sb.String()
 }
+
+// ─── Chart helpers (shared) ───────────────────────────────────
 
 func renderAnalyticsKPIHeader(data costData, summary analyticsSummary, w int) string {
 	if w < 40 {
@@ -460,7 +771,7 @@ func renderProviderCostStackedChart(data costData, w, h int) string {
 		YFmt:       formatCostAxis,
 	}, w)
 	if estimatedCount > 0 {
-		chart += "  " + dimStyle.Render(fmt.Sprintf("Observed daily cost: %d provider(s). Estimated from activity shape: %d provider(s).", observedCount, estimatedCount)) + "\n"
+		chart += "  " + dimStyle.Render(fmt.Sprintf("Observed: %d provider(s). Estimated from activity: %d provider(s).", observedCount, estimatedCount)) + "\n"
 	}
 	return chart
 }
@@ -494,6 +805,24 @@ func renderProviderModelDailyUsage(data costData, w, maxRows int) string {
 	}
 	return RenderHeatmap(spec, w)
 }
+
+func renderDailyTokenDistributionChart(data costData, w int, limit int) string {
+	series := buildProviderModelTokenDistributionSeries(data, limit)
+	if len(series) == 0 {
+		return ""
+	}
+	return RenderTimeChart(TimeChartSpec{
+		Title:      "DAILY TOKEN DISTRIBUTION (Model · Provider)",
+		Mode:       TimeChartStacked,
+		Series:     series,
+		Height:     9,
+		MaxSeries:  limit,
+		WindowDays: 30,
+		YFmt:       formatChartValue,
+	}, w)
+}
+
+// ─── Series builders ──────────────────────────────────────────
 
 func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 	groupByProvider := make(map[string]timeSeriesGroup, len(data.timeSeries))
@@ -622,22 +951,6 @@ func aggregateSeriesByDate(series []BrailleSeries) []core.TimePoint {
 	return out
 }
 
-func renderDailyTokenDistributionChart(data costData, w int, limit int) string {
-	series := buildProviderModelTokenDistributionSeries(data, limit)
-	if len(series) == 0 {
-		return ""
-	}
-	return RenderTimeChart(TimeChartSpec{
-		Title:      "DAILY TOKEN DISTRIBUTION (Model · Provider)",
-		Mode:       TimeChartStacked,
-		Series:     series,
-		Height:     9,
-		MaxSeries:  limit,
-		WindowDays: 30,
-		YFmt:       formatChartValue,
-	}, w)
-}
-
 func buildProviderModelTokenDistributionSeries(data costData, limit int) []BrailleSeries {
 	type candidate struct {
 		series BrailleSeries
@@ -757,6 +1070,17 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	}, true
 }
 
+// ─── Utility functions ────────────────────────────────────────
+
+func hasNonZeroData(pts []core.TimePoint) bool {
+	for _, p := range pts {
+		if p.Value > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func clipDatesToRecent(dates []string, days int) []string {
 	if len(dates) == 0 || days <= 0 {
 		return dates
@@ -815,8 +1139,6 @@ func clipSeriesPointsByRecentDates(points []core.TimePoint, days int) []core.Tim
 	}
 	return out
 }
-
-// coarse bucket to avoid float noise.
 
 func computeAnalyticsSummary(data costData) analyticsSummary {
 	var s analyticsSummary
@@ -1018,6 +1340,16 @@ func filterTokenModels(models []modelCostEntry) []modelCostEntry {
 		}
 	}
 	return out
+}
+
+func primaryProvider(m modelCostEntry) string {
+	if len(m.providers) > 0 {
+		return m.providers[0].provider
+	}
+	if m.provider != "" {
+		return m.provider
+	}
+	return "—"
 }
 
 func truncStr(s string, maxLen int) string {

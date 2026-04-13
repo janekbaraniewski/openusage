@@ -170,8 +170,12 @@ type Model struct {
 
 	dashboardView dashboardViewMode
 
-	analyticsFilter filterState
-	analyticsSortBy int // 0=cost↓, 1=name↑, 2=tokens↓
+	analyticsFilter      filterState
+	analyticsSortBy      int             // 0=cost↓, 1=name↑, 2=tokens↓
+	analyticsTab         int             // 0=overview, 1=models, 2=spend, 3=activity
+	analyticsModelCursor int             // selected model index in the Models tab
+	analyticsModelExpand map[string]bool // expanded models in the Models tab
+	analyticsScrollY     int             // vertical scroll offset for analytics content
 
 	animFrame  int // monotonically increasing frame counter
 	refreshing bool
@@ -220,6 +224,7 @@ func NewModel(
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
 		tileBodyCache:         make(map[string][]string),
+		analyticsModelExpand:  make(map[string]bool),
 		analyticsCache:        analyticsRenderCacheEntry{},
 		detailCache:           detailRenderCacheEntry{},
 		daemon:                daemonState{status: DaemonConnecting},
