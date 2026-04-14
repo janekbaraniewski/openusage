@@ -208,9 +208,17 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		return true, nil
 	}
 	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
+	sessionFiles := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	for _, info := range sessionFiles {
+		if info != nil && info.ModTime().After(since) {
+			return true, nil
+		}
+	}
+
 	return shared.AnyPathModifiedAfter([]string{
-		sessionsDir,
 		filepath.Join(configDir, "version.json"),
+		filepath.Join(configDir, "auth.json"),
+		filepath.Join(configDir, "config.toml"),
 	}, since), nil
 }
 

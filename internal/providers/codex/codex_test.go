@@ -273,6 +273,41 @@ func TestFetchNoSessions(t *testing.T) {
 	}
 }
 
+func TestHasChangedDetectsNestedSessionFileUpdates(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "04", "14")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(sessionsDir, "rollout-test.jsonl")
+	if err := os.WriteFile(sessionFile, []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	since := time.Now()
+	future := since.Add(2 * time.Second)
+	if err := os.Chtimes(sessionFile, future, future); err != nil {
+		t.Fatalf("chtimes session file: %v", err)
+	}
+
+	p := New()
+	changed, err := p.HasChanged(core.AccountConfig{
+		ID:       "codex-test",
+		Provider: "codex",
+		RuntimeHints: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": filepath.Join(tmpDir, "sessions"),
+		},
+	}, since)
+	if err != nil {
+		t.Fatalf("HasChanged() error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected HasChanged to detect newer nested session file")
+	}
+}
+
 func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
