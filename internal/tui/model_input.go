@@ -289,18 +289,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.mode == modeDetail {
-		// Ctrl+scroll = chart zoom, plain scroll = scroll content.
-		if msg.Ctrl {
-			if scroll < 0 && m.detailChartZoom < 5 {
-				m.detailChartZoom++
-				m.invalidateDetailCache()
-			} else if scroll > 0 && m.detailChartZoom > 0 {
-				m.detailChartZoom--
-				m.invalidateDetailCache()
-			}
-			return m, nil
-		}
-		// Plain scroll: just update offset, no cache invalidation needed.
+		// Detail view uses plain content scrolling only.
 		m.detailOffset += scroll
 		if m.detailOffset < 0 {
 			m.detailOffset = 0
@@ -473,6 +462,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if !m.filter.active && !m.analyticsFilter.active {
+		if m.screen == screenDashboard && m.mode == modeDetail {
+			switch msg.String() {
+			case "tab", "shift+tab", "left", "h", "right", "l":
+				return m.handleDetailKey(msg)
+			}
+		}
 		switch msg.String() {
 		case ",", "S":
 			m.openSettingsModal()
@@ -757,8 +752,12 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "esc", "left", "h", "backspace":
+	case "esc", "backspace":
 		m = m.exitDetailMode()
+	case "shift+tab", "left", "h":
+		m = m.navigateDetailSection(-1)
+	case "tab", "right", "l":
+		m = m.navigateDetailSection(1)
 	case "up", "k":
 		if m.detailOffset > 0 {
 			m.detailOffset--
@@ -786,21 +785,70 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		m = m.requestRefresh()
-	case "+", "=":
-		if m.detailChartZoom < 5 {
-			m.detailChartZoom++
-			m.invalidateDetailCache()
-		}
-	case "-", "_":
-		if m.detailChartZoom > 0 {
-			m.detailChartZoom--
-			m.invalidateDetailCache()
-		}
-	case "0":
-		m.detailChartZoom = 0
-		m.invalidateDetailCache()
 	}
 	return m, nil
+}
+
+func (m Model) navigateDetailSection(step int) Model {
+	starts := m.detailSectionStarts()
+	if len(starts) == 0 {
+		return m
+	}
+
+	current := max(0, m.detailOffset)
+	if step > 0 {
+		for _, start := range starts {
+			if start > current {
+				m.detailOffset = start
+				return m
+			}
+		}
+		m.detailOffset = starts[len(starts)-1]
+		return m
+	}
+
+	prev := 0
+	for _, start := range starts {
+		if start >= current {
+			break
+		}
+		prev = start
+	}
+	m.detailOffset = prev
+	return m
+}
+
+func (m Model) detailSectionStarts() []int {
+	ids := m.filteredIDs()
+	if len(ids) == 0 || m.cursor < 0 || m.cursor >= len(ids) {
+		return nil
+	}
+
+	snap, ok := m.snapshots[ids[m.cursor]]
+	if !ok {
+		return nil
+	}
+
+	width := m.width - 2
+	if width < 30 {
+		width = 30
+	}
+	sections := buildDetailSections(snap, dashboardWidget(snap.ProviderID), width, m.warnThreshold, m.critThreshold, m.timeWindow)
+	if len(sections) == 0 {
+		return nil
+	}
+
+	line := 3 // compact detail header lines
+	starts := make([]int, 0, len(sections))
+	for _, sec := range sections {
+		if len(sec.lines) == 0 {
+			continue
+		}
+		line++ // blank line before each card
+		starts = append(starts, line)
+		line += len(sec.lines) + 2 // top border + body + bottom border
+	}
+	return starts
 }
 
 func (m Model) detailPageStep() int {

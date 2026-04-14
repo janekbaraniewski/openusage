@@ -261,42 +261,48 @@ func cropSeriesToRecentDays(series []BrailleSeries, days int) []BrailleSeries {
 	if days <= 0 || len(series) == 0 {
 		return series
 	}
-	var maxDate time.Time
-	found := false
-	for _, s := range series {
-		for _, p := range s.Points {
-			t, err := time.Parse("2006-01-02", p.Date)
-			if err != nil {
-				continue
-			}
-			if !found || t.After(maxDate) {
-				maxDate = t
-				found = true
-			}
-		}
-	}
-	if !found {
-		return series
-	}
-	cutoff := maxDate.AddDate(0, 0, -(days - 1))
 	out := make([]BrailleSeries, 0, len(series))
 	for _, s := range series {
-		pts := make([]core.TimePoint, 0, len(s.Points))
-		for _, p := range s.Points {
-			t, err := time.Parse("2006-01-02", p.Date)
-			if err != nil {
-				continue
-			}
-			if t.Before(cutoff) || t.After(maxDate) {
-				continue
-			}
-			pts = append(pts, p)
-		}
+		pts := clipAndPadPointsByRecentDays(s.Points, days, time.Now().UTC())
 		if len(pts) == 0 {
 			continue
 		}
 		s.Points = pts
 		out = append(out, s)
+	}
+	return out
+}
+
+func clipAndPadPointsByRecentDays(points []core.TimePoint, days int, reference time.Time) []core.TimePoint {
+	if len(points) == 0 || days <= 0 {
+		return points
+	}
+	if reference.IsZero() {
+		reference = time.Now().UTC()
+	}
+	end := reference.UTC()
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	start := end.AddDate(0, 0, -(days - 1))
+
+	byDate := make(map[string]float64, len(points))
+	for _, p := range points {
+		t, err := time.Parse("2006-01-02", p.Date)
+		if err != nil {
+			continue
+		}
+		if t.Before(start) || t.After(end) {
+			continue
+		}
+		byDate[p.Date] += p.Value
+	}
+	if len(byDate) == 0 {
+		return nil
+	}
+
+	out := make([]core.TimePoint, 0, days)
+	for day := 0; day < days; day++ {
+		date := start.AddDate(0, 0, day).Format("2006-01-02")
+		out = append(out, core.TimePoint{Date: date, Value: byDate[date]})
 	}
 	return out
 }

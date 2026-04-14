@@ -195,13 +195,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		return " " + dimStyle.Render("j/k scroll · [ ] tabs · 1-4 jump · s sort · / filter · r refresh")
 	default:
 		if m.mode == modeDetail && m.screen == screenDashboard {
-			zoomHint := "+/- zoom"
-			if m.detailChartZoom > 0 {
-				zoomLabels := []string{"", "90d", "30d", "14d", "7d", "3d"}
-				zoomHint = fmt.Sprintf("+/- zoom (%s)", zoomLabels[m.detailChartZoom])
-			}
-			hint := fmt.Sprintf("j/k scroll · PgUp/PgDn page · %s · Ctrl+wheel zoom · 0 reset · r refresh · Esc back", zoomHint)
-			return " " + dimStyle.Render(hint)
+			return " " + dimStyle.Render("Tab/Shift+Tab sections · ←/→ sections · j/k scroll · PgUp/PgDn page · r refresh · Esc back")
 		}
 		if m.filter.active {
 			cursor := PulseChar("█", "▌", m.animFrame)

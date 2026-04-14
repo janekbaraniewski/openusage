@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -258,6 +259,24 @@ func TestFillSeriesDateGaps_NoGaps(t *testing.T) {
 	filled := fillSeriesDateGaps(pts)
 	if len(filled) != 3 {
 		t.Fatalf("no gaps, expected 3 points, got %d", len(filled))
+	}
+}
+
+func TestClipAndPadPointsByRecentDays_FillsRequestedWindow(t *testing.T) {
+	pts := []core.TimePoint{
+		{Date: "2026-04-01", Value: 100},
+		{Date: "2026-04-03", Value: 200},
+	}
+
+	got := clipAndPadPointsByRecentDays(pts, 5, time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC))
+	if len(got) != 5 {
+		t.Fatalf("expected 5 points, got %d", len(got))
+	}
+	if got[0].Date != "2026-04-01" || got[4].Date != "2026-04-05" {
+		t.Fatalf("unexpected padded range: %s..%s", got[0].Date, got[4].Date)
+	}
+	if got[1].Value != 0 || got[3].Value != 0 || got[4].Value != 0 {
+		t.Fatalf("expected zero padding on missing days, got %+v", got)
 	}
 }
 

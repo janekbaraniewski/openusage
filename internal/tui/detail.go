@@ -32,14 +32,9 @@ func DetailTabs(snap core.UsageSnapshot) []string {
 	return []string{"All"}
 }
 
-func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh float64, activeTab int, chartZoom ...int) string {
+func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh float64, activeTab int, timeWindow core.TimeWindow) string {
 	var sb strings.Builder
 	widget := dashboardWidget(snap.ProviderID)
-
-	zoom := 0
-	if len(chartZoom) > 0 {
-		zoom = chartZoom[0]
-	}
 
 	// ── Compact top bar ──
 	renderDetailCompactHeader(&sb, snap, w)
@@ -54,7 +49,7 @@ func RenderDetailContent(snap core.UsageSnapshot, w int, warnThresh, critThresh 
 	}
 
 	// Build and render all sections as bordered cards.
-	sections := buildDetailSections(snap, widget, w, warnThresh, critThresh, zoom)
+	sections := buildDetailSections(snap, widget, w, warnThresh, critThresh, timeWindow)
 	for _, sec := range sections {
 		renderDetailCard(&sb, sec, w)
 	}
@@ -221,7 +216,7 @@ func renderDetailCard(sb *strings.Builder, sec detailSection, w int) {
 
 // buildDetailSections constructs all dashboard-style sections for the detail view.
 // Sections are filtered and ordered according to effectiveDetailSectionOrder().
-func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w int, warnThresh, critThresh float64, chartZoom int) []detailSection {
+func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w int, warnThresh, critThresh float64, timeWindow core.TimeWindow) []detailSection {
 	innerW := w - 8 // card borders + margins + padding
 	if innerW < 30 {
 		innerW = 30
@@ -306,13 +301,13 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	}
 
 	// 10. Daily Usage & Trends (with zoom support).
-	if trendLines := buildDetailTrendsSection(snap, widget, innerW, chartZoom); len(trendLines) > 0 {
+	if trendLines := buildDetailTrendsSection(snap, widget, innerW, timeWindow); len(trendLines) > 0 {
 		candidates[core.DetailSectionTrends] = append(candidates[core.DetailSectionTrends],
 			detailSection{id: "Trends", title: "Trends", lines: trendLines, hasOwnHeader: true})
 	}
 
 	// 10b. Dual-axis cost + requests overlay (detail-only).
-	if dualLines := buildDetailDualAxisChart(snap, widget, innerW, chartZoom); len(dualLines) > 0 {
+	if dualLines := buildDetailDualAxisChart(snap, widget, innerW, timeWindow); len(dualLines) > 0 {
 		candidates[core.DetailSectionCostRequests] = append(candidates[core.DetailSectionCostRequests],
 			detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
 	}
@@ -644,34 +639,19 @@ func buildDetailLanguageLines(snap core.UsageSnapshot, innerW int) []string {
 	return strings.Split(strings.TrimRight(out, "\n"), "\n")
 }
 
-// chartZoomDays maps zoom levels to the number of recent days to show.
-// 0 = all data (no crop).
-var chartZoomDays = []int{0, 90, 30, 14, 7, 3}
-
-// cropSeriesToZoom crops series points to the given zoom level.
-func cropSeriesToZoom(pts []core.TimePoint, zoom int) []core.TimePoint {
-	if zoom <= 0 || zoom >= len(chartZoomDays) {
-		return pts
-	}
-	days := chartZoomDays[zoom]
+// cropSeriesToWindow normalizes chart series to the selected detail window.
+func cropSeriesToWindow(pts []core.TimePoint, window core.TimeWindow) []core.TimePoint {
+	days := window.Days()
 	if days <= 0 || len(pts) == 0 {
 		return pts
 	}
-	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
-	start := 0
-	for start < len(pts) && pts[start].Date < cutoff {
-		start++
-	}
-	if start >= len(pts) {
-		return pts // zoom too narrow, show all
-	}
-	return pts[start:]
+	return clipAndPadPointsByRecentDays(pts, days, time.Now().UTC())
 }
 
 // buildDetailTrendsSection builds the daily trends + charts section.
 // Unlike the tile view which shows one chart + sparklines, the detail view
 // renders a full Braille chart for EACH available data series.
-func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, chartZoom int) []string {
+func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, timeWindow core.TimeWindow) []string {
 	var lines []string
 
 	// Daily usage sparkline summary (compact overview).
@@ -716,7 +696,7 @@ func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidg
 		}
 
 		// Apply zoom.
-		pts = cropSeriesToZoom(pts, chartZoom)
+		pts = cropSeriesToWindow(pts, timeWindow)
 		if len(pts) < 2 {
 			continue
 		}
@@ -739,7 +719,7 @@ func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidg
 	for _, breakdown := range buildDetailBreakdownTrendCharts(snap, widget) {
 		// Apply zoom to breakdown series.
 		for i := range breakdown.series {
-			breakdown.series[i].Points = cropSeriesToZoom(breakdown.series[i].Points, chartZoom)
+			breakdown.series[i].Points = cropSeriesToWindow(breakdown.series[i].Points, timeWindow)
 		}
 		chart := RenderBrailleChart(breakdown.title, breakdown.series, chartW, chartH, breakdown.yFmt)
 		if chart == "" {
@@ -959,7 +939,7 @@ func buildDetailActivityHeatmap(snap core.UsageSnapshot, innerW int) []string {
 
 // buildDetailDualAxisChart builds an overlay chart showing cost and requests
 // together on a single chart. Uses left Y-axis for cost and colors to distinguish.
-func buildDetailDualAxisChart(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, chartZoom int) []string {
+func buildDetailDualAxisChart(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, timeWindow core.TimeWindow) []string {
 	var costPts, reqPts []core.TimePoint
 	for _, key := range []string{"analytics_cost", "cost"} {
 		if p, ok := snap.DailySeries[key]; ok && len(p) >= 2 {
@@ -978,8 +958,8 @@ func buildDetailDualAxisChart(snap core.UsageSnapshot, widget core.DashboardWidg
 		return nil
 	}
 
-	costPts = cropSeriesToZoom(costPts, chartZoom)
-	reqPts = cropSeriesToZoom(reqPts, chartZoom)
+	costPts = cropSeriesToWindow(costPts, timeWindow)
+	reqPts = cropSeriesToWindow(reqPts, timeWindow)
 	if len(costPts) < 2 || len(reqPts) < 2 {
 		return nil
 	}

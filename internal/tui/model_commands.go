@@ -164,25 +164,16 @@ func (m Model) requestRefresh() Model {
 	return m
 }
 
-// enterDetailMode switches to detail view and requests all-time data for charts.
+// enterDetailMode switches to detail view while preserving the selected time window.
 func (m Model) enterDetailMode() Model {
 	m.mode = modeDetail
 	m.detailOffset = 0
-	m.detailPreviousWindow = m.timeWindow
-	// Request all-time data so charts show full history.
-	if m.timeWindow != core.TimeWindowAll {
-		m = m.beginTimeWindowRefresh(core.TimeWindowAll)
-	}
 	return m
 }
 
-// exitDetailMode returns to list view and restores the previous time window.
+// exitDetailMode returns to list view.
 func (m Model) exitDetailMode() Model {
 	m.mode = modeList
-	if m.detailPreviousWindow != "" && m.detailPreviousWindow != m.timeWindow {
-		m = m.beginTimeWindowRefresh(m.detailPreviousWindow)
-	}
-	m.detailPreviousWindow = ""
 	return m
 }
 

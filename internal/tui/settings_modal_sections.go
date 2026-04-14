@@ -254,7 +254,7 @@ func (m Model) renderSettingsDetailSectionsPreview(w, h int) string {
 		"",
 	}
 	snap := settingsWidgetSectionsPreviewSnapshot()
-	all := append(lines, strings.Split(RenderDetailContent(snap, max(40, w-2), 0.20, 0.05, 0), "\n")...)
+	all := append(lines, strings.Split(RenderDetailContent(snap, max(40, w-2), 0.20, 0.05, 0, core.TimeWindow30d), "\n")...)
 	maxOffset := max(0, len(all)-h)
 	offset := clamp(m.settings.previewOffset, 0, maxOffset)
 	visible := all

@@ -1001,6 +1001,55 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 	}
 }
 
+func TestApplyCanonicalUsageView_UsesClientDimensionForSourceDailySeries(t *testing.T) {
+	dbPath, store := openUsageViewTestStore(t)
+
+	now := time.Now().UTC()
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    now,
+		ProviderID:    "codex",
+		AccountID:     "codex-cli",
+		WorkspaceID:   "openusage",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-source-daily-1",
+		MessageID:     "msg-source-daily-1",
+		ModelRaw:      "gpt-5-codex",
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(10),
+			OutputTokens: int64Ptr(5),
+			TotalTokens:  int64Ptr(15),
+			Requests:     int64Ptr(1),
+		},
+		Payload: map[string]any{
+			"client": "Desktop App",
+		},
+	}); err != nil {
+		t.Fatalf("ingest message event: %v", err)
+	}
+
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, map[string]core.UsageSnapshot{
+		"codex-cli": {
+			ProviderID: "codex",
+			AccountID:  "codex-cli",
+			Metrics:    map[string]core.Metric{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+
+	snap := merged["codex-cli"]
+	if got := seriesValueByDate(snap.DailySeries["usage_source_desktop_app"], now.Format("2006-01-02")); got != 1 {
+		t.Fatalf("usage_source_desktop_app = %v, want 1", got)
+	}
+	if _, ok := snap.DailySeries["usage_source_openusage"]; ok {
+		t.Fatalf("unexpected workspace-derived source daily series usage_source_openusage present")
+	}
+}
+
 func metricUsed(m core.Metric) float64 {
 	if m.Used == nil {
 		return 0

@@ -456,14 +456,14 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 	case "source":
 		query = usageCTE + fmt.Sprintf(`
 			SELECT date(occurred_at) AS day,
-			       COALESCE(NULLIF(TRIM(workspace_id), ''), COALESCE(NULLIF(TRIM(source_system), ''), 'unknown')) AS dim_key,
+			       %s AS dim_key,
 			       SUM(COALESCE(requests, 1)) AS value
 			FROM deduped_usage
 			WHERE 1=1
 			  AND event_type = 'message_usage'
 			  AND status != 'error'%s
 			GROUP BY day, dim_key
-		`, dailyTimeFilter)
+		`, clientDimensionExpr(), dailyTimeFilter)
 	case "project":
 		query = usageCTE + fmt.Sprintf(`
 			SELECT date(occurred_at) AS day,

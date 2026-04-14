@@ -153,11 +153,9 @@ type Model struct {
 	width     int
 	height    int
 
-	detailOffset          int             // vertical scroll offset for the detail panel
-	detailTab             int             // active tab index in the detail panel (0=All)
-	detailPreviousWindow  core.TimeWindow // time window before entering detail mode (restored on exit)
-	detailChartZoom       int             // chart zoom level: 0=all, 1=90d, 2=30d, 3=14d, 4=7d, 5=3d
-	tileOffset            int             // vertical scroll offset for selected dashboard tile row
+	detailOffset          int // vertical scroll offset for the detail panel
+	detailTab             int // active tab index in the detail panel (0=All)
+	tileOffset            int // vertical scroll offset for selected dashboard tile row
 	expandedModelMixTiles map[string]bool
 	tileBodyCache         map[string][]string
 	analyticsCache        analyticsRenderCacheEntry

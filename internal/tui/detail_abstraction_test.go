@@ -248,7 +248,7 @@ func TestBuildDetailTrendsSection_IncludesBreakdownCharts(t *testing.T) {
 	widget := core.DefaultDashboardWidget()
 	widget.ShowClientComposition = true
 
-	lines := buildDetailTrendsSection(snap, widget, 96, 0)
+	lines := buildDetailTrendsSection(snap, widget, 96, core.TimeWindowAll)
 	out := stripANSI(strings.Join(lines, "\n"))
 
 	for _, title := range []string{"Model Breakdown", "Client Breakdown", "Project Breakdown", "MCP Usage"} {
@@ -368,7 +368,7 @@ func TestRenderDetailContent_AtVariousWidths(t *testing.T) {
 	widths := []int{40, 60, 80, 120}
 	for _, w := range widths {
 		// Should not panic at any width.
-		out := RenderDetailContent(snap, w, 0.3, 0.1, 0)
+		out := RenderDetailContent(snap, w, 0.3, 0.1, 0, core.TimeWindowAll)
 		if len(out) == 0 {
 			t.Errorf("empty output at width %d", w)
 		}

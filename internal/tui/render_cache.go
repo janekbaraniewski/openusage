@@ -43,13 +43,12 @@ func (m *Model) cachedDetailContent(id string, snap core.UsageSnapshot, w int, a
 		string(m.timeWindow),
 		strconv.FormatFloat(m.warnThreshold, 'f', 4, 64),
 		strconv.FormatFloat(m.critThreshold, 'f', 4, 64),
-		strconv.Itoa(m.detailChartZoom),
 	}, "|")
 	if m.detailCache.key == key {
 		return m.detailCache.content
 	}
 
-	content := RenderDetailContent(snap, w, m.warnThreshold, m.critThreshold, activeTab, m.detailChartZoom)
+	content := RenderDetailContent(snap, w, m.warnThreshold, m.critThreshold, activeTab, m.timeWindow)
 	m.detailCache = detailRenderCacheEntry{
 		key:     key,
 		content: content,
