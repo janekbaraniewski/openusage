@@ -579,6 +579,55 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 	return out, nil
 }
 
+func queryDailyMCP(ctx context.Context, db *sql.DB, filter usageFilter) (map[string][]core.TimePoint, error) {
+	usageCTE, whereArgs := dedupedUsageCTE(filter)
+	query := usageCTE + `
+		SELECT
+			date(occurred_at) AS day,
+			COALESCE(NULLIF(TRIM(LOWER(tool_name)), ''), 'unknown') AS tool_name,
+			SUM(COALESCE(requests, 1)) AS calls
+		FROM deduped_usage
+		WHERE 1=1
+		  AND event_type = 'tool_usage'
+		GROUP BY day, tool_name
+	`
+	rows, err := db.QueryContext(ctx, query, whereArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("canonical usage daily mcp query: %w", err)
+	}
+	defer rows.Close()
+
+	byServer := make(map[string]map[string]float64)
+	for rows.Next() {
+		var day, toolName string
+		var value float64
+		if err := rows.Scan(&day, &toolName, &value); err != nil {
+			continue
+		}
+		server, _, ok := parseMCPToolName(toolName)
+		if !ok || strings.TrimSpace(server) == "" {
+			continue
+		}
+		server = sanitizeMetricID(server)
+		if server == "" {
+			server = "unknown"
+		}
+		if byServer[server] == nil {
+			byServer[server] = make(map[string]float64)
+		}
+		byServer[server][day] += value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
+
+	out := make(map[string][]core.TimePoint, len(byServer))
+	for key, dayMap := range byServer {
+		out[key] = core.SortedTimePoints(dayMap)
+	}
+	return out, nil
+}
+
 func dedupedUsageCTE(filter usageFilter) (string, []any) {
 	if filter.materializedTbl != "" {
 		if err := validateMaterializedTable(filter.materializedTbl); err != nil {

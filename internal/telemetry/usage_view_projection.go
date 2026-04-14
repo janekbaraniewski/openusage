@@ -59,6 +59,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		if strings.HasPrefix(key, "usage_model_") ||
 			strings.HasPrefix(key, "usage_source_") ||
 			strings.HasPrefix(key, "usage_project_") ||
+			strings.HasPrefix(key, "usage_mcp_") ||
 			strings.HasPrefix(key, "usage_client_") ||
 			strings.HasPrefix(key, "tokens_client_") ||
 			key == "analytics_cost" ||
@@ -245,6 +246,9 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 	for project, series := range agg.ProjectDaily {
 		snap.DailySeries["usage_project_"+sanitizeMetricID(project)] = series
+	}
+	for server, series := range agg.MCPDaily {
+		snap.DailySeries["usage_mcp_"+sanitizeMetricID(server)] = series
 	}
 	for client, series := range agg.ClientDaily {
 		snap.DailySeries["usage_client_"+sanitizeMetricID(client)] = series

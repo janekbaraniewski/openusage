@@ -1021,6 +1021,9 @@ func buildDetailBreakdownTrendCharts(snap core.UsageSnapshot, widget core.Dashbo
 	if chart, ok := buildProjectBreakdownTrendChart(snap, maxSeries); ok {
 		charts = append(charts, chart)
 	}
+	if chart, ok := buildMCPBreakdownTrendChart(snap, maxSeries); ok {
+		charts = append(charts, chart)
+	}
 
 	return charts
 }
@@ -1120,6 +1123,41 @@ func buildProjectBreakdownTrendChart(snap core.UsageSnapshot, maxSeries int) (de
 		yFmt:        formatChartValue,
 		hiddenCount: hidden,
 		hiddenLabel: "projects",
+	}, true
+}
+
+func buildMCPBreakdownTrendChart(snap core.UsageSnapshot, maxSeries int) (detailTrendBreakdownChart, bool) {
+	servers, _ := core.ExtractMCPBreakdown(snap)
+	if len(servers) == 0 {
+		return detailTrendBreakdownChart{}, false
+	}
+
+	colorEntries := make([]toolMixEntry, 0, len(servers))
+	for _, server := range servers {
+		colorEntries = append(colorEntries, toolMixEntry{name: server.RawName, count: server.Calls})
+	}
+	colors := buildToolColorMap(colorEntries, snap.AccountID)
+	series, hidden := collectDetailTrendSeries(maxSeries, len(servers), func(idx int) (BrailleSeries, bool) {
+		server := servers[idx]
+		if len(server.Series) < 2 {
+			return BrailleSeries{}, false
+		}
+		return BrailleSeries{
+			Label:  prettifyMCPServerName(server.RawName),
+			Color:  colorForTool(colors, server.RawName),
+			Points: server.Series,
+		}, true
+	})
+	if len(series) == 0 {
+		return detailTrendBreakdownChart{}, false
+	}
+
+	return detailTrendBreakdownChart{
+		title:       "MCP Usage",
+		series:      series,
+		yFmt:        formatChartValue,
+		hiddenCount: hidden,
+		hiddenLabel: "servers",
 	}, true
 }
 

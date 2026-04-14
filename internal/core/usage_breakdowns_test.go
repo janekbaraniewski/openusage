@@ -41,6 +41,12 @@ func TestExtractMCPUsage(t *testing.T) {
 			"mcp_slack_post_message":       {Used: Float64Ptr(2)},
 			"mcp_slack_post_message_today": {Used: Float64Ptr(1)},
 		},
+		DailySeries: map[string][]TimePoint{
+			"usage_mcp_github": {
+				{Date: "2026-03-08", Value: 1},
+				{Date: "2026-03-09", Value: 2},
+			},
+		},
 	}
 
 	got, used := ExtractMCPUsage(snap)
@@ -64,6 +70,14 @@ func TestExtractMCPUsage(t *testing.T) {
 	}
 	if !used["mcp_calls_total"] {
 		t.Fatalf("aggregate MCP key should still be marked used")
+	}
+
+	breakdown, _ := ExtractMCPBreakdown(snap)
+	if len(breakdown) != 2 {
+		t.Fatalf("len(breakdown) = %d, want 2", len(breakdown))
+	}
+	if got := len(breakdown[0].Series); got != 2 {
+		t.Fatalf("len(breakdown[0].Series) = %d, want 2", got)
 	}
 }
 

@@ -197,6 +197,10 @@ func TestBuildDetailTrendsSection_IncludesBreakdownCharts(t *testing.T) {
 		ProviderID: "claude_code",
 		AccountID:  "test",
 		Timestamp:  time.Now(),
+		Metrics: map[string]core.Metric{
+			"mcp_github_total": {Used: core.Float64Ptr(18)},
+			"mcp_gopls_total":  {Used: core.Float64Ptr(10)},
+		},
 		DailySeries: map[string][]core.TimePoint{
 			"cost": {
 				{Date: "2026-02-18", Value: 5},
@@ -228,6 +232,16 @@ func TestBuildDetailTrendsSection_IncludesBreakdownCharts(t *testing.T) {
 				{Date: "2026-02-19", Value: 9},
 				{Date: "2026-02-20", Value: 11},
 			},
+			"usage_mcp_github": {
+				{Date: "2026-02-18", Value: 4},
+				{Date: "2026-02-19", Value: 6},
+				{Date: "2026-02-20", Value: 8},
+			},
+			"usage_mcp_gopls": {
+				{Date: "2026-02-18", Value: 2},
+				{Date: "2026-02-19", Value: 3},
+				{Date: "2026-02-20", Value: 5},
+			},
 		},
 	}
 
@@ -237,7 +251,7 @@ func TestBuildDetailTrendsSection_IncludesBreakdownCharts(t *testing.T) {
 	lines := buildDetailTrendsSection(snap, widget, 96, 0)
 	out := stripANSI(strings.Join(lines, "\n"))
 
-	for _, title := range []string{"Model Breakdown", "Client Breakdown", "Project Breakdown"} {
+	for _, title := range []string{"Model Breakdown", "Client Breakdown", "Project Breakdown", "MCP Usage"} {
 		if !strings.Contains(out, title) {
 			t.Fatalf("expected %q chart in trends output, got:\n%s", title, out)
 		}

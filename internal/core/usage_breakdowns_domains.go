@@ -28,6 +28,52 @@ func IncludeDetailMetricKey(key string) bool {
 	return !strings.HasPrefix(strings.TrimSpace(key), "mcp_")
 }
 
+func ExtractMCPBreakdown(s UsageSnapshot) ([]MCPServerUsageEntry, map[string]bool) {
+	servers, usedKeys := ExtractMCPUsage(s)
+	if len(servers) == 0 {
+		return nil, usedKeys
+	}
+
+	byServer := make(map[string]*MCPServerUsageEntry, len(servers))
+	for i := range servers {
+		server := servers[i]
+		byServer[server.RawName] = &server
+	}
+
+	for key, points := range s.DailySeries {
+		if !strings.HasPrefix(key, "usage_mcp_") || len(points) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(key, "usage_mcp_"))
+		if name == "" {
+			continue
+		}
+		server, ok := byServer[name]
+		if !ok {
+			continue
+		}
+		server.Series = points
+		if server.Calls <= 0 {
+			server.Calls = sumBreakdownSeries(points)
+		}
+	}
+
+	out := make([]MCPServerUsageEntry, 0, len(byServer))
+	for _, server := range byServer {
+		if server.Calls <= 0 && len(server.Series) == 0 {
+			continue
+		}
+		out = append(out, *server)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Calls != out[j].Calls {
+			return out[i].Calls > out[j].Calls
+		}
+		return out[i].RawName < out[j].RawName
+	})
+	return out, usedKeys
+}
+
 func ExtractProjectUsage(s UsageSnapshot) ([]ProjectUsageEntry, map[string]bool) {
 	byProject := make(map[string]*ProjectUsageEntry)
 	usedKeys := make(map[string]bool)

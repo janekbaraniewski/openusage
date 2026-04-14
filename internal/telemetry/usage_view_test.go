@@ -674,6 +674,9 @@ func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *test
 	if got := metricUsed(snap.Metrics["mcp_gopls_total"]); got != 1 {
 		t.Fatalf("mcp_gopls_total = %v, want 1", got)
 	}
+	if pts := snap.DailySeries["usage_mcp_gopls"]; len(pts) != 1 || pts[0].Value != 1 {
+		t.Fatalf("usage_mcp_gopls = %+v, want single point with value 1", pts)
+	}
 }
 
 func TestParseMCPToolName_CopilotLegacyWrapper(t *testing.T) {
