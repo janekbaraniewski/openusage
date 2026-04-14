@@ -136,12 +136,13 @@ func renderNTBrailleChart(title string, series []BrailleSeries, w, h int, yFmt f
 		return ""
 	}
 
-	// Sanitize: clamp negatives, dedup, fill date gaps with zeros, trim edges.
+	// Sanitize: clamp negatives, dedup, and fill date gaps with zeros.
+	// Do not trim leading/trailing zeros here; callers may have intentionally
+	// padded the series to match the selected time window.
 	for i := range filtered {
-		filtered[i].Points = trimLeadingTrailingZeros(
-			fillSeriesDateGaps(
-				dedupeSeriesPoints(
-					sanitizeSeriesPoints(filtered[i].Points))))
+		filtered[i].Points = fillSeriesDateGaps(
+			dedupeSeriesPoints(
+				sanitizeSeriesPoints(filtered[i].Points)))
 	}
 	filtered = filterChartSeries(filtered) // re-filter after sanitization
 
