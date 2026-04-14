@@ -41,6 +41,7 @@ func newTelemetryUsageAgg() *telemetryUsageAgg {
 		ModelDaily:   make(map[string][]core.TimePoint),
 		SourceDaily:  make(map[string][]core.TimePoint),
 		ProjectDaily: make(map[string][]core.TimePoint),
+		MCPDaily:     make(map[string][]core.TimePoint),
 		ClientDaily:  make(map[string][]core.TimePoint),
 		ClientTokens: make(map[string][]core.TimePoint),
 	}

@@ -86,6 +86,12 @@ func loadMaterializedUsageAgg(ctx context.Context, db *sql.DB, filter usageFilte
 	if err != nil {
 		return err
 	}
+	done = trace("queryDailyMCP")
+	mcpDaily, err := queryDailyMCP(ctx, db, filter)
+	done()
+	if err != nil {
+		return err
+	}
 	done = trace("queryDailyByDimension(client)")
 	clientDaily, err := queryDailyByDimension(ctx, db, filter, "client")
 	done()
@@ -112,6 +118,7 @@ func loadMaterializedUsageAgg(ctx context.Context, db *sql.DB, filter usageFilte
 	agg.ModelDaily = modelDaily
 	agg.SourceDaily = sourceDaily
 	agg.ProjectDaily = projectDaily
+	agg.MCPDaily = mcpDaily
 	agg.ClientDaily = clientDaily
 	agg.ClientTokens = clientTokens
 	return nil

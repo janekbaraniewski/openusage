@@ -123,6 +123,7 @@ type telemetryUsageAgg struct {
 	ModelDaily   map[string][]core.TimePoint
 	SourceDaily  map[string][]core.TimePoint
 	ProjectDaily map[string][]core.TimePoint
+	MCPDaily     map[string][]core.TimePoint
 	ClientDaily  map[string][]core.TimePoint
 	ClientTokens map[string][]core.TimePoint
 }

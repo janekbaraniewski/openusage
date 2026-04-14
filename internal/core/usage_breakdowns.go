@@ -20,6 +20,7 @@ type MCPServerUsageEntry struct {
 	RawName   string
 	Calls     float64
 	Functions []MCPFunctionUsageEntry
+	Series    []TimePoint
 }
 
 type ProjectUsageEntry struct {
