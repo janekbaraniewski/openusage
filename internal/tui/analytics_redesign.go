@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -66,12 +67,28 @@ func renderAnalyticsOverviewRedesign(data costData, summary analyticsSummary, w 
 		sections = append(sections, trend)
 	}
 
-	panels := []string{
-		renderAnalyticsProviderLeaderboardPanel(data, w, 6),
-		renderAnalyticsModelLeaderboardPanel(data, w, 6),
-		renderAnalyticsInsightPanel(data, summary, w),
+	switch {
+	case w >= 132:
+		colW := analyticsColumnWidth(w, 3, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderLeaderboardPanel(data, colW, 6),
+			renderAnalyticsModelLeaderboardPanel(data, colW, 6),
+			renderAnalyticsInsightPanel(data, summary, colW),
+		))
+	case w >= 92:
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderLeaderboardPanel(data, colW, 6),
+			renderAnalyticsModelLeaderboardPanel(data, colW, 6),
+		))
+		sections = append(sections, renderAnalyticsInsightPanel(data, summary, w))
+	default:
+		sections = append(sections,
+			renderAnalyticsProviderLeaderboardPanel(data, w, 6),
+			renderAnalyticsModelLeaderboardPanel(data, w, 6),
+			renderAnalyticsInsightPanel(data, summary, w),
+		)
 	}
-	sections = append(sections, renderAnalyticsResponsivePanelGrid(panels, w))
 
 	return strings.TrimRight(strings.Join(filterNonEmptyStrings(sections), "\n\n"), "\n")
 }
@@ -119,10 +136,13 @@ func (m Model) renderAnalyticsModelsRedesign(data costData, w int) string {
 		gap := 2
 		leftW := (w - gap) * 3 / 5
 		rightW := w - gap - leftW
-		left := listPanel
-		rightBlocks := filterNonEmptyStrings([]string{detailPanel, trend})
+		left := renderAnalyticsModelListPanel(models, m.analyticsModelCursor, m.analyticsSortBy, data.totalCost, leftW)
+		rightBlocks := filterNonEmptyStrings([]string{
+			renderAnalyticsSelectedModelPanel(selected, m.analyticsModelExpand[selected.name], data, rightW),
+			renderAnalyticsSelectedModelTrend(selected, data, rightW),
+		})
 		right := strings.Join(rightBlocks, "\n\n")
-		return header + "\n\n  " + lipgloss.JoinHorizontal(lipgloss.Top, padRight(left, leftW), strings.Repeat(" ", gap), padRight(right, rightW))
+		return header + "\n\n" + analyticsJoinColumnsWithGap(gap, left, right)
 	}
 
 	sections := []string{header, listPanel, detailPanel}
@@ -167,11 +187,18 @@ func renderAnalyticsSpendRedesign(data costData, summary analyticsSummary, w int
 		sections = append(sections, stacked)
 	}
 
-	panels := []string{
-		renderAnalyticsProviderSpendPanel(data, summary, w),
-		renderAnalyticsBudgetPressurePanel(data, w),
+	if w >= 96 {
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderSpendPanel(data, summary, colW),
+			renderAnalyticsBudgetPressurePanel(data, colW),
+		))
+	} else {
+		sections = append(sections,
+			renderAnalyticsProviderSpendPanel(data, summary, w),
+			renderAnalyticsBudgetPressurePanel(data, w),
+		)
 	}
-	sections = append(sections, renderAnalyticsResponsivePanelGrid(panels, w))
 
 	if eff := renderAnalyticsCostEfficiencyPanel(data, w, 10); eff != "" {
 		sections = append(sections, eff)
@@ -218,12 +245,28 @@ func renderAnalyticsActivityRedesign(data costData, summary analyticsSummary, w 
 		sections = append(sections, tokenDist)
 	}
 
-	panels := []string{
-		renderAnalyticsClientPanel(data, w, 6),
-		renderAnalyticsProjectPanel(data, w, 6),
-		renderAnalyticsMCPPanel(data, w, 6),
+	switch {
+	case w >= 132:
+		colW := analyticsColumnWidth(w, 3, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsClientPanel(data, colW, 6),
+			renderAnalyticsProjectPanel(data, colW, 6),
+			renderAnalyticsMCPPanel(data, colW, 6),
+		))
+	case w >= 92:
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsClientPanel(data, colW, 6),
+			renderAnalyticsProjectPanel(data, colW, 6),
+		))
+		sections = append(sections, renderAnalyticsMCPPanel(data, w, 6))
+	default:
+		sections = append(sections,
+			renderAnalyticsClientPanel(data, w, 6),
+			renderAnalyticsProjectPanel(data, w, 6),
+			renderAnalyticsMCPPanel(data, w, 6),
+		)
 	}
-	sections = append(sections, renderAnalyticsResponsivePanelGrid(panels, w))
 
 	if heat := renderAnalyticsActivityHeatmap(data, w); heat != "" {
 		sections = append(sections, heat)
@@ -233,7 +276,7 @@ func renderAnalyticsActivityRedesign(data costData, summary analyticsSummary, w 
 		sections = append(sections, renderAnalyticsPanel(
 			"Peak Activity",
 			colorLavender,
-			w-2,
+			w,
 			strings.Join([]string{
 				renderDotLeaderRow("Peak token day", fmt.Sprintf("%s · %s", summary.peakTokenDate, formatTokens(summary.peakTokens)), w-8),
 				renderDotLeaderRow("Token trend", renderTrendPercent(summary.recentTokensAvg, summary.previousTokensAvg), w-8),
@@ -282,41 +325,6 @@ func renderAnalyticsMetricStrip(metrics []analyticsMetric, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderAnalyticsResponsivePanelGrid(panels []string, w int) string {
-	panels = filterNonEmptyStrings(panels)
-	if len(panels) == 0 {
-		return ""
-	}
-	if len(panels) == 1 || w < 92 {
-		return strings.Join(panels, "\n\n")
-	}
-	if len(panels) == 2 || w < 138 {
-		gap := 2
-		colW := (w - gap) / 2
-		return "  " + lipgloss.JoinHorizontal(lipgloss.Top,
-			padRight(panels[0], colW),
-			strings.Repeat(" ", gap),
-			padRight(panels[1], colW),
-		)
-	}
-
-	gap := 2
-	colW := (w - 2*gap) / 3
-	row := []string{}
-	for i := 0; i < len(panels); i += 3 {
-		chunk := panels[i:min(i+3, len(panels))]
-		parts := make([]string, 0, len(chunk)*2-1)
-		for idx, panel := range chunk {
-			if idx > 0 {
-				parts = append(parts, strings.Repeat(" ", gap))
-			}
-			parts = append(parts, padRight(panel, colW))
-		}
-		row = append(row, "  "+lipgloss.JoinHorizontal(lipgloss.Top, parts...))
-	}
-	return strings.Join(row, "\n\n")
-}
-
 func renderAnalyticsProviderLeaderboardPanel(data costData, width, limit int) string {
 	providers := append([]providerCostEntry(nil), data.providers...)
 	sort.Slice(providers, func(i, j int) bool { return providers[i].cost > providers[j].cost })
@@ -335,7 +343,7 @@ func renderAnalyticsProviderLeaderboardPanel(data costData, width, limit int) st
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("Provider Leaders", colorRosewater, rows, analyticsPanelWidth(width), "Where spend concentrated across providers")
+	return renderAnalyticsRankPanel("Provider Leaders", colorRosewater, rows, width, "Where spend concentrated across providers")
 }
 
 func renderAnalyticsModelLeaderboardPanel(data costData, width, limit int) string {
@@ -356,7 +364,7 @@ func renderAnalyticsModelLeaderboardPanel(data costData, width, limit int) strin
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("Model Leaders", colorTeal, rows, analyticsPanelWidth(width), "The models driving most spend in the selected window")
+	return renderAnalyticsRankPanel("Model Leaders", colorTeal, rows, width, "The models driving most spend in the selected window")
 }
 
 func renderAnalyticsInsightPanel(data costData, summary analyticsSummary, width int) string {
@@ -366,30 +374,30 @@ func renderAnalyticsInsightPanel(data costData, summary analyticsSummary, width 
 	topMCP, mcpValue := analyticsTopMCP(data)
 
 	lines := []string{
-		renderDotLeaderRow("Window", data.timeWindow.Label(), analyticsPanelWidth(width)-4),
-		renderDotLeaderRow("Spend trend", renderTrendPercent(summary.recentCostAvg, summary.previousCostAvg), analyticsPanelWidth(width)-4),
+		renderDotLeaderRow("Window", data.timeWindow.Label(), width-4),
+		renderDotLeaderRow("Spend trend", renderTrendPercent(summary.recentCostAvg, summary.previousCostAvg), width-4),
 	}
 	if summary.peakCost > 0 {
-		lines = append(lines, renderDotLeaderRow("Peak spend day", fmt.Sprintf("%s · %s", summary.peakCostDate, formatUSD(summary.peakCost)), analyticsPanelWidth(width)-4))
+		lines = append(lines, renderDotLeaderRow("Peak spend day", fmt.Sprintf("%s · %s", summary.peakCostDate, formatUSD(summary.peakCost)), width-4))
 	}
 	if topProvider != "" {
-		lines = append(lines, renderDotLeaderRow("Top provider", fmt.Sprintf("%s · %s", topProvider, analyticsShareLabel(topProviderCost, data.totalCost)), analyticsPanelWidth(width)-4))
+		lines = append(lines, renderDotLeaderRow("Top provider", fmt.Sprintf("%s · %s", topProvider, analyticsShareLabel(topProviderCost, data.totalCost)), width-4))
 	}
 	if topClient != "" {
-		lines = append(lines, renderDotLeaderRow("Top client", fmt.Sprintf("%s · %s", topClient, analyticsHotspotValueLabel(clientValue, "tok")), analyticsPanelWidth(width)-4))
+		lines = append(lines, renderDotLeaderRow("Top client", fmt.Sprintf("%s · %s", topClient, analyticsHotspotValueLabel(clientValue, "tok")), width-4))
 	}
 	if topProject != "" {
-		lines = append(lines, renderDotLeaderRow("Top project", fmt.Sprintf("%s · %s", topProject, analyticsHotspotValueLabel(projectValue, "req")), analyticsPanelWidth(width)-4))
+		lines = append(lines, renderDotLeaderRow("Top project", fmt.Sprintf("%s · %s", topProject, analyticsHotspotValueLabel(projectValue, "req")), width-4))
 	}
 	if topMCP != "" {
-		lines = append(lines, renderDotLeaderRow("Top MCP", fmt.Sprintf("%s · %s", topMCP, analyticsHotspotValueLabel(mcpValue, "calls")), analyticsPanelWidth(width)-4))
+		lines = append(lines, renderDotLeaderRow("Top MCP", fmt.Sprintf("%s · %s", topMCP, analyticsHotspotValueLabel(mcpValue, "calls")), width-4))
 	}
 
-	return renderAnalyticsPanel("What Changed", colorLavender, analyticsPanelWidth(width), strings.Join(lines, "\n"))
+	return renderAnalyticsPanel("What Changed", colorLavender, width, strings.Join(lines, "\n"))
 }
 
 func renderAnalyticsModelListPanel(models []modelCostEntry, cursor int, sortMode int, totalCost float64, width int) string {
-	innerW := analyticsPanelWidth(width) - 4
+	innerW := width - 4
 	nameW := clamp(innerW/2, 18, 34)
 	var lines []string
 	lines = append(lines, dimStyle.Render(fmt.Sprintf("Sort: %s · j/k move · Enter expands provider splits", sortByLabels[sortMode])))
@@ -417,11 +425,11 @@ func renderAnalyticsModelListPanel(models []modelCostEntry, cursor int, sortMode
 		)
 		lines = append(lines, line)
 	}
-	return renderAnalyticsPanel("Model Leaderboard", colorTeal, analyticsPanelWidth(width), strings.Join(lines, "\n"))
+	return renderAnalyticsPanel("Model Leaderboard", colorTeal, width, strings.Join(lines, "\n"))
 }
 
 func renderAnalyticsSelectedModelPanel(model modelCostEntry, expanded bool, data costData, width int) string {
-	panelW := analyticsPanelWidth(width)
+	panelW := width
 	innerW := panelW - 4
 	lines := []string{
 		lipgloss.NewStyle().Foreground(model.color).Bold(true).Render(prettifyModelName(model.name)),
@@ -469,13 +477,13 @@ func renderAnalyticsSelectedModelTrend(model modelCostEntry, data costData, widt
 		ReferenceTime:     data.referenceTime,
 		PreserveEmptySpan: true,
 		YFmt:              formatChartValue,
-	}, analyticsPanelWidth(width))
+	}, width)
 }
 
 func renderAnalyticsProviderSpendPanel(data costData, summary analyticsSummary, width int) string {
 	providers := append([]providerCostEntry(nil), data.providers...)
 	sort.Slice(providers, func(i, j int) bool { return providers[i].cost > providers[j].cost })
-	innerW := analyticsPanelWidth(width) - 4
+	innerW := width - 4
 	lines := []string{
 		dimStyle.Render("Spend, share of window, and normalized burn by provider"),
 		surface1Style.Render(strings.Repeat("─", innerW)),
@@ -487,11 +495,11 @@ func renderAnalyticsProviderSpendPanel(data costData, summary analyticsSummary, 
 		lines = append(lines, renderDotLeaderRow(provider.name, fmt.Sprintf("%s · %s", formatUSD(provider.cost), analyticsShareText(provider.cost, data.totalCost)), innerW))
 		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("avg/day %s · today %s", formatUSD(analyticsPerActiveDay(provider.cost, summary.activeDays)), formatUSD(provider.todayCost))))
 	}
-	return renderAnalyticsPanel("Provider Spend", colorRosewater, analyticsPanelWidth(width), strings.Join(lines, "\n"))
+	return renderAnalyticsPanel("Provider Spend", colorRosewater, width, strings.Join(lines, "\n"))
 }
 
 func renderAnalyticsBudgetPressurePanel(data costData, width int) string {
-	panelW := analyticsPanelWidth(width)
+	panelW := width
 	innerW := panelW - 4
 	var lines []string
 
@@ -574,7 +582,7 @@ func renderAnalyticsCostEfficiencyPanel(data costData, width, limit int) string 
 		lines = append(lines, renderDotLeaderRow(prettifyModelName(model.name), analyticsModelEfficiencyLabel(model), innerW))
 		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("%s · %s", primaryProvider(model), formatUSD(model.cost))))
 	}
-	return renderAnalyticsPanel("Efficiency", colorGreen, width-2, strings.Join(lines, "\n"))
+	return renderAnalyticsPanel("Efficiency", colorGreen, width, strings.Join(lines, "\n"))
 }
 
 func renderAnalyticsClientPanel(data costData, width, limit int) string {
@@ -604,7 +612,7 @@ func renderAnalyticsClientPanel(data costData, width, limit int) string {
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("Client Hotspots", colorTeal, rows, analyticsPanelWidth(width), "Where requests and token volume originated")
+	return renderAnalyticsRankPanel("Client Hotspots", colorTeal, rows, width, "Where requests and token volume originated")
 }
 
 func renderAnalyticsProjectPanel(data costData, width, limit int) string {
@@ -624,7 +632,7 @@ func renderAnalyticsProjectPanel(data costData, width, limit int) string {
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("Project Hotspots", colorPeach, rows, analyticsPanelWidth(width), "Which projects generated the most usage")
+	return renderAnalyticsRankPanel("Project Hotspots", colorPeach, rows, width, "Which projects generated the most usage")
 }
 
 func renderAnalyticsMCPPanel(data costData, width, limit int) string {
@@ -644,7 +652,7 @@ func renderAnalyticsMCPPanel(data costData, width, limit int) string {
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("MCP Hotspots", colorYellow, rows, analyticsPanelWidth(width), "Server activity distribution across the selected window")
+	return renderAnalyticsRankPanel("MCP Hotspots", colorYellow, rows, width, "Server activity distribution across the selected window")
 }
 
 func renderAnalyticsActivityHeatmap(data costData, width int) string {
@@ -691,8 +699,9 @@ func renderAnalyticsPanel(title string, accent lipgloss.Color, width int, body s
 		width = 28
 	}
 	innerW := width - 4
-	titleText := lipgloss.NewStyle().Bold(true).Foreground(accent).Render(" " + title + " ")
-	titleW := lipgloss.Width(titleText)
+	titleText := " " + truncateToWidth(title, max(4, width-6)) + " "
+	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(accent).Render(titleText)
+	titleW := lipgloss.Width(titleRendered)
 	rightBorderLen := width - 2 - 1 - titleW
 	if rightBorderLen < 1 {
 		rightBorderLen = 1
@@ -701,13 +710,13 @@ func renderAnalyticsPanel(title string, accent lipgloss.Color, width int, body s
 	var sb strings.Builder
 	sb.WriteString(
 		lipgloss.NewStyle().Foreground(accent).Render("╭"+strings.Repeat("─", 1)) +
-			titleText +
+			titleRendered +
 			lipgloss.NewStyle().Foreground(accent).Render(strings.Repeat("─", rightBorderLen)+"╮"),
 	)
 	sb.WriteString("\n")
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render("│ "))
-		sb.WriteString(padRight(truncStr(line, innerW), innerW))
+		sb.WriteString(analyticsPadLine(line, innerW))
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(" │"))
 		sb.WriteString("\n")
 	}
@@ -871,10 +880,6 @@ func analyticsHotspotValueLabel(value float64, unit string) string {
 	return shortCompact(value) + " " + unit
 }
 
-func analyticsPanelWidth(width int) int {
-	return max(28, width-2)
-}
-
 func filterNonEmptyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -884,4 +889,38 @@ func filterNonEmptyStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func analyticsColumnWidth(totalWidth, cols, gap int) int {
+	if cols <= 1 {
+		return max(28, totalWidth)
+	}
+	return max(28, (totalWidth-(cols-1)*gap)/cols)
+}
+
+func analyticsJoinColumns(blocks ...string) string {
+	return analyticsJoinColumnsWithGap(2, blocks...)
+}
+
+func analyticsJoinColumnsWithGap(gap int, blocks ...string) string {
+	blocks = filterNonEmptyStrings(blocks)
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0]
+	}
+	gapStr := strings.Repeat(" ", gap)
+	return lipgloss.JoinHorizontal(lipgloss.Top, intersperse(blocks, gapStr)...)
+}
+
+func analyticsPadLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	cut := ansi.Cut(line, 0, width)
+	if pad := width - lipgloss.Width(cut); pad > 0 {
+		cut += strings.Repeat(" ", pad)
+	}
+	return cut
 }

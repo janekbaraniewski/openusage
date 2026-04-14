@@ -52,8 +52,11 @@ func (m Model) renderAnalyticsContent(w, h int) string {
 	if len(lines) > contentH {
 		lines = lines[:contentH]
 	}
+	for i := range lines {
+		lines[i] = analyticsPadLine(lines[i], w)
+	}
 
-	return tabBar + "\n" + strings.Join(lines, "\n")
+	return analyticsPadLine(tabBar, w) + "\n" + strings.Join(lines, "\n")
 }
 
 // renderAnalyticsTabBar renders the sub-tab bar for the analytics screen.

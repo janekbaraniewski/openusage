@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -99,5 +100,30 @@ func TestRenderTimeChartPreservesExplicitWindowSpan(t *testing.T) {
 
 	if !strings.Contains(out, "Apr 5") {
 		t.Fatalf("expected preserved window end label Apr 5, got:\n%s", out)
+	}
+}
+
+func TestAnalyticsPadLinePreservesVisibleWidthWithANSI(t *testing.T) {
+	line := lipgloss.NewStyle().Foreground(colorTeal).Render("Provider Spend")
+	got := analyticsPadLine(line, 24)
+	if width := lipgloss.Width(got); width != 24 {
+		t.Fatalf("visible width = %d, want 24", width)
+	}
+	if !strings.Contains(got, "Provider Spend") {
+		t.Fatalf("expected content to survive ANSI-safe padding, got %q", got)
+	}
+}
+
+func TestRenderAnalyticsPanelKeepsLineWidthsBounded(t *testing.T) {
+	panel := renderAnalyticsPanel(
+		"Provider Leaders",
+		colorRosewater,
+		40,
+		lipgloss.NewStyle().Foreground(colorTeal).Render("openai/gpt-oss-120b")+" "+strings.Repeat("x", 80),
+	)
+	for _, line := range strings.Split(strings.TrimRight(panel, "\n"), "\n") {
+		if width := lipgloss.Width(line); width > 40 {
+			t.Fatalf("line width = %d, want <= 40\nline: %q", width, line)
+		}
 	}
 }
