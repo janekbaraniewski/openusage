@@ -280,6 +280,23 @@ func TestClipAndPadPointsByRecentDays_FillsRequestedWindow(t *testing.T) {
 	}
 }
 
+func TestBrailleChartPreprocessing_PreservesPaddedWindowEdges(t *testing.T) {
+	pts := []core.TimePoint{
+		{Date: "2026-04-01", Value: 0},
+		{Date: "2026-04-02", Value: 0},
+		{Date: "2026-04-03", Value: 5},
+		{Date: "2026-04-04", Value: 0},
+		{Date: "2026-04-05", Value: 0},
+	}
+	got := fillSeriesDateGaps(dedupeSeriesPoints(sanitizeSeriesPoints(pts)))
+	if len(got) != 5 {
+		t.Fatalf("expected 5 points, got %d", len(got))
+	}
+	if got[0].Date != "2026-04-01" || got[4].Date != "2026-04-05" {
+		t.Fatalf("unexpected processed range: %s..%s", got[0].Date, got[4].Date)
+	}
+}
+
 func TestRenderNTStackedBarUsesRequestedWidth(t *testing.T) {
 	out := renderNTStackedBar([]ntBarSegment{
 		{Value: 6, Color: colorTeal},
