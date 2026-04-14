@@ -36,7 +36,7 @@ func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
 		return m.analyticsCache.content, m.analyticsCache.hasData
 	}
 
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text)
+	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text, m.timeWindow)
 	sortProviders(data.providers, m.analyticsSortBy)
 	sortModels(data.models, m.analyticsSortBy)
 	summary := computeAnalyticsSummary(data)

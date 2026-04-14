@@ -636,7 +636,7 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) clampAnalyticsModelCursor() {
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text)
+	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text, m.timeWindow)
 	models := filterTokenModels(data.models)
 	max := len(models) - 1
 	if max < 0 {
@@ -648,7 +648,7 @@ func (m *Model) clampAnalyticsModelCursor() {
 }
 
 func (m *Model) toggleAnalyticsModelExpand() {
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text)
+	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text, m.timeWindow)
 	sortModels(data.models, m.analyticsSortBy)
 	models := filterTokenModels(data.models)
 	if m.analyticsModelCursor >= 0 && m.analyticsModelCursor < len(models) {

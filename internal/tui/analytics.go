@@ -62,15 +62,15 @@ func (m Model) renderAnalyticsTabBar(w int) string {
 	for i, label := range analyticsTabLabels {
 		tabStr := fmt.Sprintf(" %s ", label)
 		if i == m.analyticsTab {
-			parts = append(parts, tabActiveStyle.Render(tabStr))
+			parts = append(parts, analyticsSubTabActiveStyle.Render(tabStr))
 		} else {
-			parts = append(parts, tabInactiveStyle.Render(tabStr))
+			parts = append(parts, analyticsSubTabInactiveStyle.Render(tabStr))
 		}
 	}
 	tabs := "  " + strings.Join(parts, " ")
 
 	// Right side: sort + filter hints
-	hints := dimStyle.Render("[ ] tabs  s:sort  /:filter")
+	hints := dimStyle.Render("[ ] tabs  s:sort  /:filter  w:window")
 	gap := w - lipgloss.Width(tabs) - lipgloss.Width(hints) - 2
 	if gap < 1 {
 		gap = 1
@@ -82,15 +82,15 @@ func (m Model) renderAnalyticsTabBar(w int) string {
 func (m Model) renderAnalyticsTabContent(data costData, summary analyticsSummary, w int) string {
 	switch m.analyticsTab {
 	case analyticsTabOverview:
-		return renderAnalyticsOverview(data, summary, w)
+		return renderAnalyticsOverviewRedesign(data, summary, w)
 	case analyticsTabModels:
-		return m.renderAnalyticsModels(data, w)
+		return m.renderAnalyticsModelsRedesign(data, w)
 	case analyticsTabSpend:
-		return renderAnalyticsSpend(data, summary, w)
+		return renderAnalyticsSpendRedesign(data, summary, w)
 	case analyticsTabActivity:
-		return renderAnalyticsActivity(data, w)
+		return renderAnalyticsActivityRedesign(data, summary, w)
 	default:
-		return renderAnalyticsOverview(data, summary, w)
+		return renderAnalyticsOverviewRedesign(data, summary, w)
 	}
 }
 
@@ -762,13 +762,15 @@ func renderProviderCostStackedChart(data costData, w, h int) string {
 	}
 
 	chart := RenderTimeChart(TimeChartSpec{
-		Title:      "DAILY COST BY PROVIDER",
-		Mode:       TimeChartStacked,
-		Series:     series,
-		Height:     h,
-		MaxSeries:  8,
-		WindowDays: 30,
-		YFmt:       formatCostAxis,
+		Title:             "DAILY COST BY PROVIDER",
+		Mode:              TimeChartStacked,
+		Series:            series,
+		Height:            h,
+		MaxSeries:         8,
+		WindowDays:        analyticsWindowDays(data.timeWindow),
+		ReferenceTime:     data.referenceTime,
+		PreserveEmptySpan: true,
+		YFmt:              formatCostAxis,
 	}, w)
 	if estimatedCount > 0 {
 		chart += "  " + dimStyle.Render(fmt.Sprintf("Observed: %d provider(s). Estimated from activity: %d provider(s).", observedCount, estimatedCount)) + "\n"
@@ -789,12 +791,14 @@ func renderTotalCostTrend(data costData, summary analyticsSummary, w, h int) str
 		{Label: "daily cost", Color: colorTeal, Points: daily},
 	}
 	return RenderTimeChart(TimeChartSpec{
-		Title:      "TOTAL COST OVER TIME",
-		Mode:       TimeChartBars,
-		Series:     series,
-		Height:     h,
-		WindowDays: 30,
-		YFmt:       formatCostAxis,
+		Title:             "TOTAL COST OVER TIME",
+		Mode:              TimeChartBars,
+		Series:            series,
+		Height:            h,
+		WindowDays:        analyticsWindowDays(data.timeWindow),
+		ReferenceTime:     data.referenceTime,
+		PreserveEmptySpan: true,
+		YFmt:              formatCostAxis,
 	}, w)
 }
 
@@ -812,13 +816,15 @@ func renderDailyTokenDistributionChart(data costData, w int, limit int) string {
 		return ""
 	}
 	return RenderTimeChart(TimeChartSpec{
-		Title:      "DAILY TOKEN DISTRIBUTION (Model · Provider)",
-		Mode:       TimeChartStacked,
-		Series:     series,
-		Height:     9,
-		MaxSeries:  limit,
-		WindowDays: 30,
-		YFmt:       formatChartValue,
+		Title:             "DAILY TOKEN DISTRIBUTION (Model · Provider)",
+		Mode:              TimeChartStacked,
+		Series:            series,
+		Height:            9,
+		MaxSeries:         limit,
+		WindowDays:        analyticsWindowDays(data.timeWindow),
+		ReferenceTime:     data.referenceTime,
+		PreserveEmptySpan: true,
+		YFmt:              formatChartValue,
 	}, w)
 }
 
@@ -845,7 +851,10 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 		if !hasNonZeroData(pts) {
 			continue
 		}
-		pts = clipSeriesPointsByRecentDates(pts, 30)
+		pts = analyticsCropSeries(pts, data.timeWindow, data.referenceTime)
+		if len(pts) == 0 {
+			continue
+		}
 		if observed {
 			observedCount++
 		} else if estimated {
@@ -875,7 +884,7 @@ func buildProviderDailyCostSeries(data costData) ([]BrailleSeries, int, int) {
 			out = append(out, BrailleSeries{
 				Label:  truncStr(g.providerName, 20),
 				Color:  g.color,
-				Points: clipSeriesPointsByRecentDates(pts, 30),
+				Points: analyticsCropSeries(pts, data.timeWindow, data.referenceTime),
 			})
 		}
 	}
@@ -960,7 +969,7 @@ func buildProviderModelTokenDistributionSeries(data costData, limit int) []Brail
 
 	for _, g := range data.timeSeries {
 		for _, named := range core.ExtractAnalyticsModelSeries(g.series) {
-			pts := clipSeriesPointsByRecentDates(named.Points, 30)
+			pts := analyticsCropSeries(named.Points, data.timeWindow, data.referenceTime)
 			if !hasNonZeroData(pts) {
 				continue
 			}
@@ -1045,7 +1054,11 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	}
 
 	dates := core.SortedStringKeys(dateSet)
-	dates = clipDatesToRecent(dates, lastDays)
+	if windowDays := analyticsWindowDays(data.timeWindow); windowDays > 0 {
+		dates = clipDatesToRecent(dates, windowDays)
+	} else if lastDays > 0 {
+		dates = clipDatesToRecent(dates, lastDays)
+	}
 
 	labels := make([]string, len(rows))
 	rowColors := make([]lipgloss.Color, len(rows))
@@ -1184,8 +1197,9 @@ func computeAnalyticsSummary(data costData) analyticsSummary {
 	s.peakCostDate, s.peakCost = maxPoint(s.dailyCost)
 	s.peakTokenDate, s.peakTokens = maxPoint(s.dailyTokens)
 
-	s.recentCostAvg, s.previousCostAvg = splitWindowAverages(s.dailyCost, 7)
-	s.recentTokensAvg, s.previousTokensAvg = splitWindowAverages(s.dailyTokens, 7)
+	compareDays := analyticsComparisonWindowDays(data.timeWindow)
+	s.recentCostAvg, s.previousCostAvg = splitWindowAverages(s.dailyCost, compareDays)
+	s.recentTokensAvg, s.previousTokensAvg = splitWindowAverages(s.dailyTokens, compareDays)
 	s.costVolatility = coefficientOfVariation(s.dailyCost)
 	s.tokenVolatility = coefficientOfVariation(s.dailyTokens)
 	s.concentrationTop3 = providerConcentration(data.providers, 3)

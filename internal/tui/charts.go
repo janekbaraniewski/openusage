@@ -222,13 +222,15 @@ const (
 )
 
 type TimeChartSpec struct {
-	Title      string
-	Mode       TimeChartMode
-	Series     []BrailleSeries
-	Height     int
-	MaxSeries  int
-	WindowDays int
-	YFmt       func(float64) string
+	Title             string
+	Mode              TimeChartMode
+	Series            []BrailleSeries
+	Height            int
+	MaxSeries         int
+	WindowDays        int
+	ReferenceTime     time.Time
+	PreserveEmptySpan bool
+	YFmt              func(float64) string
 }
 
 type HeatmapSpec struct {
@@ -257,13 +259,13 @@ func seriesVolume(s BrailleSeries) float64 {
 	return total
 }
 
-func cropSeriesToRecentDays(series []BrailleSeries, days int) []BrailleSeries {
+func cropSeriesToRecentDays(series []BrailleSeries, days int, reference time.Time) []BrailleSeries {
 	if days <= 0 || len(series) == 0 {
 		return series
 	}
 	out := make([]BrailleSeries, 0, len(series))
 	for _, s := range series {
-		pts := clipAndPadPointsByRecentDays(s.Points, days, time.Now().UTC())
+		pts := clipAndPadPointsByRecentDays(s.Points, days, reference)
 		if len(pts) == 0 {
 			continue
 		}

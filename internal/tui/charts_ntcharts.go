@@ -221,7 +221,7 @@ func renderNTTimeChart(spec TimeChartSpec, w int) string {
 	series := make([]BrailleSeries, len(spec.Series))
 	copy(series, spec.Series)
 	if spec.WindowDays > 0 {
-		series = cropSeriesToRecentDays(series, spec.WindowDays)
+		series = cropSeriesToRecentDays(series, spec.WindowDays, spec.ReferenceTime)
 	}
 	if spec.MaxSeries > 0 && len(series) > spec.MaxSeries {
 		sort.Slice(series, func(i, j int) bool {
@@ -237,15 +237,15 @@ func renderNTTimeChart(spec TimeChartSpec, w int) string {
 
 	switch spec.Mode {
 	case TimeChartStacked:
-		return renderNTTimeBars(spec.Title, series, w, h, yFmt, true)
+		return renderNTTimeBars(spec.Title, series, w, h, yFmt, true, spec.PreserveEmptySpan || spec.WindowDays > 0)
 	case TimeChartBars:
-		return renderNTTimeBars(spec.Title, series[:1], w, h, yFmt, false)
+		return renderNTTimeBars(spec.Title, series[:1], w, h, yFmt, false, spec.PreserveEmptySpan || spec.WindowDays > 0)
 	default:
 		return renderNTBrailleChart(spec.Title, series, w, h, yFmt)
 	}
 }
 
-func renderNTTimeBars(title string, series []BrailleSeries, w, h int, yFmt func(float64) string, stacked bool) string {
+func renderNTTimeBars(title string, series []BrailleSeries, w, h int, yFmt func(float64) string, stacked bool, preserveEmptySpan bool) string {
 	if len(series) == 0 {
 		return ""
 	}
@@ -263,9 +263,11 @@ func renderNTTimeBars(title string, series []BrailleSeries, w, h int, yFmt func(
 		return ""
 	}
 
-	dates, values = trimAlignedDateSpan(dates, values, 1)
-	if len(dates) == 0 || len(values) == 0 {
-		return ""
+	if !preserveEmptySpan {
+		dates, values = trimAlignedDateSpan(dates, values, 1)
+		if len(dates) == 0 || len(values) == 0 {
+			return ""
+		}
 	}
 
 	chartW := max(20, w-4)

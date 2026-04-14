@@ -19,6 +19,7 @@ const (
 var sortByLabels = []string{"Cost \u2193", "Name \u2191", "Tokens \u2193"}
 
 type costData struct {
+	timeWindow    core.TimeWindow
 	totalCost     float64
 	totalInput    float64
 	totalOutput   float64
@@ -30,6 +31,9 @@ type costData struct {
 	budgets       []budgetEntry
 	usageGauges   []usageGaugeEntry
 	tokenActivity []tokenActivityEntry
+	clients       []clientAnalyticsEntry
+	projects      []projectAnalyticsEntry
+	mcpServers    []mcpAnalyticsEntry
 	timeSeries    []timeSeriesGroup
 	snapshots     map[string]core.UsageSnapshot
 }
@@ -97,6 +101,30 @@ type tokenActivityEntry struct {
 	color    lipgloss.Color
 }
 
+type clientAnalyticsEntry struct {
+	name       string
+	total      float64
+	requests   float64
+	sessions   float64
+	seriesKind string
+	series     []core.TimePoint
+	color      lipgloss.Color
+}
+
+type projectAnalyticsEntry struct {
+	name     string
+	requests float64
+	series   []core.TimePoint
+	color    lipgloss.Color
+}
+
+type mcpAnalyticsEntry struct {
+	name   string
+	calls  float64
+	series []core.TimePoint
+	color  lipgloss.Color
+}
+
 type collapsedGaugeGroup struct {
 	provider string
 	name     string
@@ -140,10 +168,14 @@ type analyticsScatterPoint struct {
 	color lipgloss.Color
 }
 
-func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) costData {
+func extractCostData(snapshots map[string]core.UsageSnapshot, filter string, timeWindow core.TimeWindow) costData {
 	var data costData
+	data.timeWindow = timeWindow
 	data.snapshots = snapshots
 	lowerFilter := strings.ToLower(filter)
+	clientAgg := make(map[string]clientAnalyticsEntry)
+	projectAgg := make(map[string]projectAnalyticsEntry)
+	mcpAgg := make(map[string]mcpAnalyticsEntry)
 
 	keys := core.SortedStringKeys(snapshots)
 
@@ -188,6 +220,9 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 		data.budgets = append(data.budgets, extractBudgets(snap, provColor)...)
 		data.usageGauges = append(data.usageGauges, extractUsageGauges(snap, provColor)...)
 		data.tokenActivity = append(data.tokenActivity, extractTokenActivity(snap, provColor)...)
+		mergeClientAnalytics(clientAgg, extractClientAnalytics(snap, provColor))
+		mergeProjectAnalytics(projectAgg, extractProjectAnalytics(snap, provColor))
+		mergeMCPAnalytics(mcpAgg, extractMCPAnalytics(snap, provColor))
 
 		if len(snap.DailySeries) > 0 {
 			data.timeSeries = append(data.timeSeries, timeSeriesGroup{
@@ -203,6 +238,12 @@ func extractCostData(snapshots map[string]core.UsageSnapshot, filter string) cos
 	if data.referenceTime.IsZero() {
 		data.referenceTime = time.Now()
 	}
+	data.clients = collectClientAnalytics(clientAgg)
+	data.projects = collectProjectAnalytics(projectAgg)
+	data.mcpServers = collectMCPAnalytics(mcpAgg)
+	sortClientAnalytics(data.clients)
+	sortProjectAnalytics(data.projects)
+	sortMCPAnalytics(data.mcpServers)
 
 	return data
 }
@@ -482,6 +523,150 @@ func extractTokenActivity(snap core.UsageSnapshot, color lipgloss.Color) []token
 	return result
 }
 
+func extractClientAnalytics(snap core.UsageSnapshot, color lipgloss.Color) []clientAnalyticsEntry {
+	clients, _ := core.ExtractClientBreakdown(snap)
+	result := make([]clientAnalyticsEntry, 0, len(clients))
+	for _, client := range clients {
+		total := client.Total
+		if total <= 0 {
+			total = client.Input + client.Output + client.Cached + client.Reasoning
+		}
+		result = append(result, clientAnalyticsEntry{
+			name:       prettifyClientName(client.Name),
+			total:      total,
+			requests:   client.Requests,
+			sessions:   client.Sessions,
+			seriesKind: client.SeriesKind,
+			series:     client.Series,
+			color:      color,
+		})
+	}
+	return result
+}
+
+func extractProjectAnalytics(snap core.UsageSnapshot, color lipgloss.Color) []projectAnalyticsEntry {
+	projects, _ := core.ExtractProjectUsage(snap)
+	result := make([]projectAnalyticsEntry, 0, len(projects))
+	for _, project := range projects {
+		result = append(result, projectAnalyticsEntry{
+			name:     prettifyProjectName(project.Name),
+			requests: project.Requests,
+			series:   project.Series,
+			color:    color,
+		})
+	}
+	return result
+}
+
+func prettifyProjectName(name string) string {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		return "Unscoped"
+	}
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	return titleCase(s)
+}
+
+func extractMCPAnalytics(snap core.UsageSnapshot, color lipgloss.Color) []mcpAnalyticsEntry {
+	servers, _ := core.ExtractMCPBreakdown(snap)
+	result := make([]mcpAnalyticsEntry, 0, len(servers))
+	for _, server := range servers {
+		result = append(result, mcpAnalyticsEntry{
+			name:   prettifyMCPServerName(server.RawName),
+			calls:  server.Calls,
+			series: server.Series,
+			color:  color,
+		})
+	}
+	return result
+}
+
+func mergeClientAnalytics(dst map[string]clientAnalyticsEntry, entries []clientAnalyticsEntry) {
+	for _, entry := range entries {
+		merged := dst[entry.name]
+		merged.name = entry.name
+		merged.total += entry.total
+		merged.requests += entry.requests
+		merged.sessions += entry.sessions
+		if merged.seriesKind == "" {
+			merged.seriesKind = entry.seriesKind
+		}
+		merged.series = mergeAnalyticsSeries(merged.series, entry.series)
+		if merged.color == "" {
+			merged.color = colorForClient(nil, entry.name)
+		}
+		dst[entry.name] = merged
+	}
+}
+
+func mergeProjectAnalytics(dst map[string]projectAnalyticsEntry, entries []projectAnalyticsEntry) {
+	for _, entry := range entries {
+		merged := dst[entry.name]
+		merged.name = entry.name
+		merged.requests += entry.requests
+		merged.series = mergeAnalyticsSeries(merged.series, entry.series)
+		if merged.color == "" {
+			merged.color = colorForProject(nil, entry.name)
+		}
+		dst[entry.name] = merged
+	}
+}
+
+func mergeMCPAnalytics(dst map[string]mcpAnalyticsEntry, entries []mcpAnalyticsEntry) {
+	for _, entry := range entries {
+		merged := dst[entry.name]
+		merged.name = entry.name
+		merged.calls += entry.calls
+		merged.series = mergeAnalyticsSeries(merged.series, entry.series)
+		if merged.color == "" {
+			merged.color = colorForTool(nil, entry.name)
+		}
+		dst[entry.name] = merged
+	}
+}
+
+func collectClientAnalytics(entries map[string]clientAnalyticsEntry) []clientAnalyticsEntry {
+	out := make([]clientAnalyticsEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func collectProjectAnalytics(entries map[string]projectAnalyticsEntry) []projectAnalyticsEntry {
+	out := make([]projectAnalyticsEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func collectMCPAnalytics(entries map[string]mcpAnalyticsEntry) []mcpAnalyticsEntry {
+	out := make([]mcpAnalyticsEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func mergeAnalyticsSeries(left, right []core.TimePoint) []core.TimePoint {
+	if len(left) == 0 {
+		return append([]core.TimePoint(nil), right...)
+	}
+	if len(right) == 0 {
+		return append([]core.TimePoint(nil), left...)
+	}
+	byDate := make(map[string]float64, len(left)+len(right))
+	for _, point := range left {
+		byDate[point.Date] += point.Value
+	}
+	for _, point := range right {
+		byDate[point.Date] += point.Value
+	}
+	return core.SortedTimePoints(byDate)
+}
+
 func sortProviders(providers []providerCostEntry, mode int) {
 	switch mode {
 	case analyticsSortCostDesc:
@@ -514,4 +699,39 @@ func sortModels(models []modelCostEntry, mode int) {
 			return (models[i].inputTokens + models[i].outputTokens) > (models[j].inputTokens + models[j].outputTokens)
 		})
 	}
+}
+
+func sortClientAnalytics(clients []clientAnalyticsEntry) {
+	sort.Slice(clients, func(i, j int) bool {
+		left := clients[i].total
+		if left <= 0 {
+			left = clients[i].requests
+		}
+		right := clients[j].total
+		if right <= 0 {
+			right = clients[j].requests
+		}
+		if left == right {
+			return clients[i].name < clients[j].name
+		}
+		return left > right
+	})
+}
+
+func sortProjectAnalytics(projects []projectAnalyticsEntry) {
+	sort.Slice(projects, func(i, j int) bool {
+		if projects[i].requests == projects[j].requests {
+			return projects[i].name < projects[j].name
+		}
+		return projects[i].requests > projects[j].requests
+	})
+}
+
+func sortMCPAnalytics(servers []mcpAnalyticsEntry) {
+	sort.Slice(servers, func(i, j int) bool {
+		if servers[i].calls == servers[j].calls {
+			return servers[i].name < servers[j].name
+		}
+		return servers[i].calls > servers[j].calls
+	})
 }
