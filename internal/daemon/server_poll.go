@@ -193,6 +193,12 @@ func (s *Service) skipUnchangedProvider(provider core.UsageProvider, acct core.A
 		return nil // no previous fetch, must run
 	}
 
+	now := time.Now()
+	if snapshotResetPassed(state.lastSnap, state.lastFetchAt, now) {
+		core.Tracef("[poll] %s/%s: forcing refresh because a reset boundary passed after %s", acct.Provider, acct.ID, state.lastFetchAt.Format(time.RFC3339))
+		return nil
+	}
+
 	changed, err := detector.HasChanged(acct, state.lastFetchAt)
 	if err != nil || changed {
 		return nil // error or changed — run Fetch()
@@ -201,4 +207,19 @@ func (s *Service) skipUnchangedProvider(provider core.UsageProvider, acct core.A
 	core.Tracef("[poll] %s/%s: skipped (no change since %s)", acct.Provider, acct.ID, state.lastFetchAt.Format(time.RFC3339))
 	snap := state.lastSnap
 	return &snap
+}
+
+func snapshotResetPassed(snap core.UsageSnapshot, since, now time.Time) bool {
+	if since.IsZero() || len(snap.Resets) == 0 {
+		return false
+	}
+	for _, resetAt := range snap.Resets {
+		if resetAt.IsZero() {
+			continue
+		}
+		if resetAt.After(since) && !resetAt.After(now) {
+			return true
+		}
+	}
+	return false
 }

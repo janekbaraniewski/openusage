@@ -112,3 +112,32 @@ func TestChangeDetectorReturnsFalse_WhenNoFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotResetPassed_ReturnsTrueWhenResetBoundaryCrossed(t *testing.T) {
+	since := time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC)
+	now := since.Add(5 * time.Minute)
+	snap := core.UsageSnapshot{
+		Resets: map[string]time.Time{
+			"usage_five_hour": since.Add(2 * time.Minute),
+		},
+	}
+
+	if !snapshotResetPassed(snap, since, now) {
+		t.Fatal("expected reset boundary to force refresh")
+	}
+}
+
+func TestSnapshotResetPassed_IgnoresFutureAndHistoricalResets(t *testing.T) {
+	since := time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC)
+	now := since.Add(5 * time.Minute)
+	snap := core.UsageSnapshot{
+		Resets: map[string]time.Time{
+			"old":    since.Add(-time.Minute),
+			"future": since.Add(20 * time.Minute),
+		},
+	}
+
+	if snapshotResetPassed(snap, since, now) {
+		t.Fatal("expected no refresh when resets are outside the interval")
+	}
+}
