@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -9,28 +11,67 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-const demoRefreshInterval = 5 * time.Second
+const defaultDemoRefreshInterval = 5 * time.Second
 
 var demoPhaseShares = []float64{0.24, 0.36, 0.49, 0.63, 0.76, 0.87, 0.95, 1.0}
 
-type demoScenario struct {
-	mu     sync.RWMutex
-	phase  int
-	frames []map[string]core.UsageSnapshot
+type demoConfig struct {
+	interval time.Duration
+	loop     bool
 }
 
-func newDemoScenario(startedAt time.Time) *demoScenario {
+func defaultDemoConfig() demoConfig {
+	return demoConfig{
+		interval: defaultDemoRefreshInterval,
+	}
+}
+
+func parseDemoConfig(args []string) (demoConfig, error) {
+	cfg := defaultDemoConfig()
+	fs := flag.NewFlagSet("demo", flag.ContinueOnError)
+	fs.SetOutput(ioDiscard{})
+	fs.DurationVar(&cfg.interval, "interval", cfg.interval, "how often demo playback advances to the next frame")
+	fs.BoolVar(&cfg.loop, "loop", cfg.loop, "restart playback from the first frame after the final frame")
+	if err := fs.Parse(args); err != nil {
+		return demoConfig{}, err
+	}
+	if cfg.interval <= 0 {
+		return demoConfig{}, fmt.Errorf("interval must be greater than zero")
+	}
+	return cfg, nil
+}
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+type demoScenario struct {
+	mu       sync.RWMutex
+	anchor   time.Time
+	interval time.Duration
+	loop     bool
+	phase    int
+	frames   []map[string]core.UsageSnapshot
+}
+
+func newDemoScenario(startedAt time.Time, cfg demoConfig) *demoScenario {
 	anchor := startedAt.UTC().Truncate(time.Second)
 	if anchor.IsZero() {
 		anchor = time.Now().UTC().Truncate(time.Second)
 	}
-
-	frames := make([]map[string]core.UsageSnapshot, len(demoPhaseShares))
-	for phase := range demoPhaseShares {
-		frames[phase] = buildDemoSnapshotsForPhase(anchor, phase)
+	if cfg.interval <= 0 {
+		cfg.interval = defaultDemoRefreshInterval
 	}
 
-	return &demoScenario{frames: frames}
+	scenario := &demoScenario{
+		anchor:   anchor,
+		interval: cfg.interval,
+		loop:     cfg.loop,
+	}
+	scenario.rebuildFramesLocked()
+	return scenario
 }
 
 func (s *demoScenario) CurrentPhase() int {
@@ -45,6 +86,12 @@ func (s *demoScenario) Advance() bool {
 
 	last := len(s.frames) - 1
 	if s.phase >= last {
+		if s.loop {
+			s.phase = 0
+			s.anchor = s.anchor.Add(time.Duration(len(demoPhaseShares)) * s.interval)
+			s.rebuildFramesLocked()
+			return true
+		}
 		return false
 	}
 	s.phase++
@@ -74,9 +121,16 @@ func (s *demoScenario) Snapshot(accountID, providerID string) (core.UsageSnapsho
 }
 
 func buildDemoSnapshotsForPhase(anchor time.Time, phase int) map[string]core.UsageSnapshot {
+	return buildDemoSnapshotsForPhaseWithInterval(anchor, defaultDemoRefreshInterval, phase)
+}
+
+func buildDemoSnapshotsForPhaseWithInterval(anchor time.Time, interval time.Duration, phase int) map[string]core.UsageSnapshot {
 	phase = clampDemoPhase(phase)
 	share := demoPhaseShares[phase]
-	phaseTime := anchor.Add(time.Duration(phase) * demoRefreshInterval)
+	if interval <= 0 {
+		interval = defaultDemoRefreshInterval
+	}
+	phaseTime := anchor.Add(time.Duration(phase) * interval)
 	base := buildDemoSnapshotsAt(anchor)
 
 	for accountID, snap := range base {
@@ -96,6 +150,13 @@ func buildDemoSnapshotsForPhase(anchor time.Time, phase int) map[string]core.Usa
 	}
 
 	return base
+}
+
+func (s *demoScenario) rebuildFramesLocked() {
+	s.frames = make([]map[string]core.UsageSnapshot, len(demoPhaseShares))
+	for phase := range demoPhaseShares {
+		s.frames[phase] = buildDemoSnapshotsForPhaseWithInterval(s.anchor, s.interval, phase)
+	}
 }
 
 func clampDemoPhase(phase int) int {

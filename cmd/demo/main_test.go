@@ -112,7 +112,7 @@ func TestBuildDemoAccounts_IncludesAllDemoProviders(t *testing.T) {
 }
 
 func TestBuildDemoProviders_FetchesMockedSnapshots(t *testing.T) {
-	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC))
+	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), defaultDemoConfig())
 	wrapped := buildDemoProviders(providers.AllProviders(), scenario)
 	if len(wrapped) == 0 {
 		t.Fatal("buildDemoProviders returned no providers")
@@ -205,7 +205,7 @@ func TestBuildDemoSnapshotsForPhase_ProgressesDeterministically(t *testing.T) {
 }
 
 func TestDemoScenario_StopsAtFinalFrame(t *testing.T) {
-	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC))
+	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), defaultDemoConfig())
 	last := len(demoPhaseShares) - 1
 
 	for range len(demoPhaseShares) + 3 {
@@ -234,6 +234,61 @@ func TestDemoScenario_StopsAtFinalFrame(t *testing.T) {
 
 	if snap.Timestamp != nextSnap.Timestamp {
 		t.Fatalf("final frame changed after extra advance: %s != %s", snap.Timestamp, nextSnap.Timestamp)
+	}
+}
+
+func TestDemoScenario_LoopsWhenEnabled(t *testing.T) {
+	cfg := defaultDemoConfig()
+	cfg.interval = 2 * time.Second
+	cfg.loop = true
+	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), cfg)
+	account := core.AccountConfig{ID: "codex-cli", Provider: "codex"}
+
+	for range len(demoPhaseShares) - 1 {
+		if !scenario.Advance() {
+			t.Fatal("expected advance through pre-loop frames to succeed")
+		}
+	}
+
+	lastSnap, ok := scenario.Snapshot(account.ID, account.Provider)
+	if !ok {
+		t.Fatal("missing final-frame codex snapshot")
+	}
+
+	if !scenario.Advance() {
+		t.Fatal("expected loop-enabled scenario to wrap")
+	}
+
+	if scenario.CurrentPhase() != 0 {
+		t.Fatalf("expected loop-enabled scenario to wrap to phase 0, got %d", scenario.CurrentPhase())
+	}
+
+	loopedSnap, ok := scenario.Snapshot(account.ID, account.Provider)
+	if !ok {
+		t.Fatal("missing wrapped codex snapshot")
+	}
+
+	if !loopedSnap.Timestamp.After(lastSnap.Timestamp) {
+		t.Fatalf("expected wrapped snapshot timestamp to move forward: %s <= %s", loopedSnap.Timestamp, lastSnap.Timestamp)
+	}
+}
+
+func TestParseDemoConfig(t *testing.T) {
+	cfg, err := parseDemoConfig([]string{"-interval", "750ms", "-loop"})
+	if err != nil {
+		t.Fatalf("parseDemoConfig returned error: %v", err)
+	}
+	if cfg.interval != 750*time.Millisecond {
+		t.Fatalf("unexpected interval: got %s want %s", cfg.interval, 750*time.Millisecond)
+	}
+	if !cfg.loop {
+		t.Fatal("expected loop flag to be true")
+	}
+}
+
+func TestParseDemoConfig_RejectsZeroInterval(t *testing.T) {
+	if _, err := parseDemoConfig([]string{"-interval", "0s"}); err == nil {
+		t.Fatal("expected zero interval to be rejected")
 	}
 }
 

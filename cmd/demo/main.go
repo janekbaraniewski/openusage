@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -19,9 +20,19 @@ import (
 func main() {
 	log.SetOutput(io.Discard)
 
-	interval := demoRefreshInterval
+	cfg, err := parseDemoConfig(os.Args[1:])
+	if err != nil {
+		if err == flag.ErrHelp {
+			fmt.Fprintf(os.Stderr, "Usage: %s [-interval 5s] [-loop]\n", os.Args[0])
+			os.Exit(0)
+		}
+		fmt.Fprintf(os.Stderr, "demo config error: %v\n", err)
+		os.Exit(2)
+	}
+
+	interval := cfg.interval
 	accounts := buildDemoAccounts()
-	scenario := newDemoScenario(time.Now())
+	scenario := newDemoScenario(time.Now(), cfg)
 	demoProviders := buildDemoProviders(providers.AllProviders(), scenario)
 
 	providersByID := make(map[string]core.UsageProvider, len(demoProviders))
