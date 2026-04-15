@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 
@@ -18,7 +19,10 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		return nil, nil
 	}
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat opencode sqlite db: %w", err)
 	}
 
 	db, err := sql.Open("sqlite3", dbPath)
@@ -27,14 +31,24 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 	}
 	defer db.Close()
 
-	if !sqliteTableExists(ctx, db, "message") {
+	hasMessageTable, err := sqliteTableExists(ctx, db, "message")
+	if err != nil {
+		return nil, err
+	}
+	if !hasMessageTable {
 		return nil, nil
 	}
 
 	partSummaryByMessage := make(map[string]partSummary)
-	hasPartTable := sqliteTableExists(ctx, db, "part")
+	hasPartTable, err := sqliteTableExists(ctx, db, "part")
+	if err != nil {
+		return nil, err
+	}
 	if hasPartTable {
-		partSummaryByMessage, _ = collectPartSummary(ctx, db)
+		partSummaryByMessage, err = collectPartSummary(ctx, db)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	out, seenMessages, err := collectSQLiteMessageEvents(ctx, db, dbPath, partSummaryByMessage, hasPartTable)
@@ -87,7 +101,7 @@ func appendSQLiteStepFinishEvents(
 		ORDER BY p.time_updated ASC
 	`)
 	if err != nil {
-		return nil
+		return fmt.Errorf("query opencode sqlite step-finish rows: %w", err)
 	}
 	defer rows.Close()
 
@@ -107,7 +121,7 @@ func appendSQLiteStepFinishEvents(
 			sessionDir  string
 		)
 		if err := rows.Scan(&partID, &messageIDDB, &sessionIDDB, &timeCreated, &timeUpdated, &partJSON, &messageJSON, &sessionDir); err != nil {
-			continue
+			return fmt.Errorf("scan opencode sqlite step-finish row: %w", err)
 		}
 
 		partPayload := decodeJSONMap([]byte(partJSON))
@@ -136,6 +150,9 @@ func appendSQLiteStepFinishEvents(
 			u,
 		))
 		seenMessages[messageID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate opencode sqlite step-finish rows: %w", err)
 	}
 	return nil
 }
@@ -226,7 +243,7 @@ func appendSQLiteMessageTableEvents(
 		ORDER BY m.time_updated ASC
 	`)
 	if err != nil {
-		return nil
+		return fmt.Errorf("query opencode sqlite message rows: %w", err)
 	}
 	defer rows.Close()
 
@@ -244,7 +261,7 @@ func appendSQLiteMessageTableEvents(
 			sessionDir   string
 		)
 		if err := rows.Scan(&messageIDRaw, &sessionIDRaw, &timeCreated, &timeUpdated, &messageJSON, &sessionDir); err != nil {
-			continue
+			return fmt.Errorf("scan opencode sqlite message row: %w", err)
 		}
 
 		payload := decodeJSONMap([]byte(messageJSON))
@@ -277,6 +294,9 @@ func appendSQLiteMessageTableEvents(
 			u,
 		))
 		seenMessages[messageID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate opencode sqlite message rows: %w", err)
 	}
 	return nil
 }
@@ -395,7 +415,7 @@ func collectSQLiteToolEvents(
 		ORDER BY p.time_updated ASC
 	`)
 	if err != nil {
-		return out, nil
+		return out, fmt.Errorf("query opencode sqlite tool rows: %w", err)
 	}
 	defer rows.Close()
 
@@ -416,7 +436,7 @@ func collectSQLiteToolEvents(
 			sessionDir  string
 		)
 		if err := rows.Scan(&partID, &messageIDDB, &sessionIDDB, &timeCreated, &timeUpdated, &partJSON, &messageJSON, &sessionDir); err != nil {
-			continue
+			return out, fmt.Errorf("scan opencode sqlite tool row: %w", err)
 		}
 
 		partPayload := decodeJSONMap([]byte(partJSON))
@@ -449,6 +469,9 @@ func collectSQLiteToolEvents(
 		))
 	}
 
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("iterate opencode sqlite tool rows: %w", err)
+	}
 	return out, nil
 }
 
@@ -569,7 +592,7 @@ func collectPartSummary(ctx context.Context, db *sql.DB) (map[string]partSummary
 			count     int64
 		)
 		if err := rows.Scan(&messageID, &partType, &count); err != nil {
-			continue
+			return out, fmt.Errorf("scan opencode sqlite part summary row: %w", err)
 		}
 		messageID = strings.TrimSpace(messageID)
 		if messageID == "" {
@@ -588,13 +611,19 @@ func collectPartSummary(ctx context.Context, db *sql.DB) (map[string]partSummary
 		out[messageID] = s
 	}
 	if err := rows.Err(); err != nil {
-		return out, err
+		return out, fmt.Errorf("iterate opencode sqlite part summary rows: %w", err)
 	}
 	return out, nil
 }
 
-func sqliteTableExists(ctx context.Context, db *sql.DB, table string) bool {
+func sqliteTableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	var exists int
 	err := db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`, strings.TrimSpace(table)).Scan(&exists)
-	return err == nil && exists == 1
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query opencode sqlite table %q: %w", strings.TrimSpace(table), err)
+	}
+	return exists == 1, nil
 }

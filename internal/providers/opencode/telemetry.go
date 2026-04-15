@@ -141,9 +141,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 
 	if strings.TrimSpace(dbPath) != "" {
 		events, err := CollectTelemetryFromSQLite(ctx, dbPath)
-		if err == nil {
-			appendDedupTelemetryEvents(&out, events, seenMessage, seenTools, accountID)
+		if err != nil {
+			return out, fmt.Errorf("collect opencode sqlite telemetry: %w", err)
 		}
+		appendDedupTelemetryEvents(&out, events, seenMessage, seenTools, accountID)
 	}
 
 	roots := append([]string{}, eventsDirs...)

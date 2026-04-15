@@ -3,7 +3,6 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -137,18 +136,18 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 	commits := 0
 	completedWithoutCallID := 0
 
-	walkErr := filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-
+	sessionFiles, err := shared.CollectFilesByExt([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	if err != nil {
+		return fmt.Errorf("collect codex session files: %w", err)
+	}
+	for _, path := range sessionFiles {
 		defaultDay := dayFromSessionPath(path, sessionsDir)
 		sessionClient := "Other"
 		currentModel := "unknown"
 		var previous tokenUsage
 		var hasPrevious bool
 		var countedSession bool
-		return walkSessionFile(path, func(record sessionLine) error {
+		if err := walkSessionFile(path, func(record sessionLine) error {
 			switch {
 			case record.SessionMeta != nil:
 				sessionClient = classifyClient(record.SessionMeta.Source, record.SessionMeta.Originator)
@@ -239,10 +238,9 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 			}
 
 			return nil
-		})
-	})
-	if walkErr != nil {
-		return fmt.Errorf("walking session files: %w", walkErr)
+		}); err != nil {
+			return fmt.Errorf("read codex session file %s: %w", path, err)
+		}
 	}
 
 	emitBreakdownMetrics("model", modelTotals, modelDaily, snap)
@@ -941,19 +939,13 @@ func dayFromSessionPath(path, sessionsDir string) string {
 }
 
 func findLatestSessionFile(sessionsDir string) (string, error) {
-	var files []string
-
-	err := filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			files = append(files, path)
-		}
-		return nil
-	})
+	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
 	if err != nil {
-		return "", fmt.Errorf("walking sessions dir: %w", err)
+		return "", fmt.Errorf("collect codex latest session files: %w", err)
+	}
+	files := make([]string, 0, len(fileInfos))
+	for path := range fileInfos {
+		files = append(files, path)
 	}
 
 	if len(files) == 0 {
@@ -961,8 +953,8 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 	}
 
 	sort.Slice(files, func(i, j int) bool {
-		si, _ := os.Stat(files[i])
-		sj, _ := os.Stat(files[j])
+		si := fileInfos[files[i]]
+		sj := fileInfos[files[j]]
 		if si == nil || sj == nil {
 			return false
 		}
@@ -987,16 +979,17 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 	return lastPayload, nil
 }
 
-func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) {
+func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) error {
 	dayCounts := make(map[string]int)
 
-	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
+	files, err := shared.CollectFilesByExt([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	if err != nil {
+		return fmt.Errorf("collect codex daily session files: %w", err)
+	}
+	for _, path := range files {
 		rel, relErr := filepath.Rel(sessionsDir, path)
 		if relErr != nil {
-			return nil
+			continue
 		}
 		parts := strings.Split(filepath.ToSlash(rel), "/")
 		if len(parts) >= 3 {
@@ -1005,11 +998,10 @@ func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSn
 				dayCounts[dateStr]++
 			}
 		}
-		return nil
-	})
+	}
 
 	if len(dayCounts) == 0 {
-		return
+		return nil
 	}
 
 	dates := core.SortedStringKeys(dayCounts)
@@ -1020,6 +1012,7 @@ func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSn
 			Value: float64(dayCounts[d]),
 		})
 	}
+	return nil
 }
 
 func formatWindow(minutes int) string {

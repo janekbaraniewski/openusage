@@ -13,11 +13,9 @@ import (
 
 func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
 	// Collect files with stat info for cache-aware parsing.
-	fileInfos := collectJSONLFilesWithStat(projectsDir)
-	if altProjectsDir != "" {
-		for k, v := range collectJSONLFilesWithStat(altProjectsDir) {
-			fileInfos[k] = v
-		}
+	fileInfos, err := collectJSONLFilesWithStatAcross(projectsDir, altProjectsDir)
+	if err != nil {
+		return err
 	}
 
 	jsonlFiles := make([]string, 0, len(fileInfos))

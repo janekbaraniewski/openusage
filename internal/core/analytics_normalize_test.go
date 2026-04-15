@@ -75,7 +75,7 @@ func TestNormalizeUsageSnapshotWithConfig_SynthesizesProviderSelfMetrics(t *test
 		ProviderID: "codex",
 		AccountID:  "codex-cli",
 		Metrics: map[string]Metric{
-			"model_gpt_5_codex_input_tokens": {Used: Float64Ptr(1200), Unit: "tokens", Window: "all-time"},
+			"model_gpt_5_codex_input_tokens":  {Used: Float64Ptr(1200), Unit: "tokens", Window: "all-time"},
 			"model_gpt_5_codex_output_tokens": {Used: Float64Ptr(300), Unit: "tokens", Window: "all-time"},
 			"model_gpt_5_codex_requests":      {Used: Float64Ptr(12), Unit: "requests", Window: "all-time"},
 		},

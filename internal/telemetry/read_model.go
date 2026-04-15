@@ -306,7 +306,7 @@ func annotateUnmappedTelemetryProviders(
 	for rows.Next() {
 		var providerID string
 		if err := rows.Scan(&providerID); err != nil {
-			continue
+			return snaps, fmt.Errorf("scan telemetry provider mapping row: %w", err)
 		}
 		providerID = strings.ToLower(strings.TrimSpace(providerID))
 		if providerID == "" {

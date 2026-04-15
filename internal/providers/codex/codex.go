@@ -265,7 +265,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		hasLocalData = true
 	}
 
-	p.readDailySessionCounts(sessionsDir, &snap)
+	if err := p.readDailySessionCounts(sessionsDir, &snap); err != nil {
+		snap.Raw["session_counts_error"] = err.Error()
+	}
 	if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
 		snap.Raw["split_error"] = err.Error()
 	}

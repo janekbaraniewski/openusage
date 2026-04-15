@@ -2,6 +2,7 @@ package claude_code
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -389,23 +390,53 @@ func summarizeTotalsMap(values map[string]*modelUsageTotals, preferCost bool, li
 
 // collectJSONLFilesWithStat walks the directory like collectJSONLFiles but also returns
 // the os.FileInfo for each file, enabling cache invalidation by mtime+size.
-func collectJSONLFilesWithStat(dir string) map[string]os.FileInfo {
+func collectJSONLFilesWithStat(dir string) (map[string]os.FileInfo, error) {
 	result := make(map[string]os.FileInfo)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return result
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return result, nil
+		}
+		return nil, fmt.Errorf("stat claude jsonl dir %s: %w", dir, err)
 	}
 
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d == nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info != nil {
 			result[path] = info
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("walk claude jsonl dir %s: %w", dir, err)
+	}
 
-	return result
+	return result, nil
+}
+
+func collectJSONLFilesWithStatAcross(primaryDir, altDir string) (map[string]os.FileInfo, error) {
+	result, err := collectJSONLFilesWithStat(primaryDir)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(altDir) == "" {
+		return result, nil
+	}
+	alt, err := collectJSONLFilesWithStat(altDir)
+	if err != nil {
+		return nil, err
+	}
+	for path, info := range alt {
+		result[path] = info
+	}
+	return result, nil
 }
 
 func sanitizeModelName(model string) string {

@@ -31,11 +31,9 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	projectsDir := shared.ExpandHome(opts.Path("projects_dir", defaultProjectsDir))
 	altProjectsDir := shared.ExpandHome(opts.Path("alt_projects_dir", defaultAltProjectsDir))
 
-	fileInfos := collectJSONLFilesWithStat(projectsDir)
-	if altProjectsDir != "" {
-		for k, v := range collectJSONLFilesWithStat(altProjectsDir) {
-			fileInfos[k] = v
-		}
+	fileInfos, err := collectJSONLFilesWithStatAcross(projectsDir, altProjectsDir)
+	if err != nil {
+		return nil, err
 	}
 	if len(fileInfos) == 0 {
 		return nil, nil

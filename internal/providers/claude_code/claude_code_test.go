@@ -191,14 +191,20 @@ func TestCollectJSONLFilesWithStat(t *testing.T) {
 
 	os.WriteFile(filepath.Join(projectDir, "notes.txt"), []byte("hello"), 0644)
 
-	files := collectJSONLFilesWithStat(filepath.Join(tmpDir, "projects"))
+	files, err := collectJSONLFilesWithStat(filepath.Join(tmpDir, "projects"))
+	if err != nil {
+		t.Fatalf("collectJSONLFilesWithStat failed: %v", err)
+	}
 	if len(files) != 2 {
 		t.Errorf("Expected 2 JSONL files, got %d", len(files))
 	}
 }
 
 func TestCollectJSONLFilesWithStat_NonexistentDir(t *testing.T) {
-	files := collectJSONLFilesWithStat("/nonexistent/path")
+	files, err := collectJSONLFilesWithStat("/nonexistent/path")
+	if err != nil {
+		t.Fatalf("collectJSONLFilesWithStat failed: %v", err)
+	}
 	if len(files) != 0 {
 		t.Errorf("Expected 0 files for nonexistent dir, got %d", len(files))
 	}
