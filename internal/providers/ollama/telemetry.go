@@ -38,7 +38,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		return nil, nil
 	}
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ollama: stat desktop db for telemetry: %w", err)
 	}
 
 	accountID := strings.TrimSpace(opts.Path("account_id", ""))
@@ -83,7 +86,10 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 	}
 	fi, err := os.Stat(dbPath)
 	if err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ollama: stat desktop db for telemetry: %w", err)
 	}
 	dbMtime := fi.ModTime().UTC()
 
