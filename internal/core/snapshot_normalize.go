@@ -27,6 +27,7 @@ func NormalizeUsageSnapshotWithConfig(s UsageSnapshot, modelCfg ModelNormalizati
 		}
 		s.ModelUsage = normalizeModelUsageRecords(s, modelCfg)
 	}
+	normalizeAnalyticsMetrics(&s)
 	normalizeAnalyticsDailySeries(&s)
 
 	return s

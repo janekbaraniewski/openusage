@@ -106,22 +106,17 @@ func ExtractAnalyticsModelUsage(s UsageSnapshot) []AnalyticsModelUsageEntry {
 }
 
 func ExtractAnalyticsModelSeries(series map[string][]TimePoint) []NamedSeries {
-	hasTokenSeries := hasAnalyticsTokenSeries(series)
-	keys := lo.Filter(SortedStringKeys(series), func(key string, _ int) bool {
-		switch {
-		case strings.HasPrefix(key, "tokens_"):
-			return true
-		case strings.HasPrefix(key, "usage_model_"):
-			return !hasTokenSeries
-		default:
-			return false
-		}
-	})
+	keys := analyticsModelSeriesKeys(series)
 
 	out := make([]NamedSeries, 0, len(keys))
 	for _, key := range keys {
-		name := strings.TrimPrefix(key, "tokens_")
-		name = strings.TrimPrefix(name, "usage_model_")
+		name := strings.TrimPrefix(key, "tokens_model_")
+		if name == key {
+			name = strings.TrimPrefix(key, "usage_model_")
+		}
+		if name == key {
+			name = strings.TrimPrefix(key, "tokens_")
+		}
 		if name == "" || len(series[key]) == 0 {
 			continue
 		}
@@ -162,11 +157,39 @@ func SelectAnalyticsWeightSeries(series map[string][]TimePoint) []TimePoint {
 
 func hasAnalyticsTokenSeries(series map[string][]TimePoint) bool {
 	for key, points := range series {
-		if strings.HasPrefix(key, "tokens_") && len(points) > 0 {
+		if strings.HasPrefix(key, "tokens_model_") && len(points) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func analyticsModelSeriesKeys(series map[string][]TimePoint) []string {
+	hasCanonicalTokenSeries := hasAnalyticsTokenSeries(series)
+	hasUsageSeries := false
+	for key, points := range series {
+		if strings.HasPrefix(key, "usage_model_") && len(points) > 0 {
+			hasUsageSeries = true
+			break
+		}
+	}
+
+	keys := lo.Filter(SortedStringKeys(series), func(key string, _ int) bool {
+		switch {
+		case strings.HasPrefix(key, "tokens_model_"):
+			return true
+		case strings.HasPrefix(key, "usage_model_"):
+			return !hasCanonicalTokenSeries
+		case strings.HasPrefix(key, "tokens_"):
+			if hasCanonicalTokenSeries || hasUsageSeries {
+				return false
+			}
+			return key != "tokens_total" && !strings.HasPrefix(key, "tokens_client_")
+		default:
+			return false
+		}
+	})
+	return keys
 }
 
 func analyticsModelDisplayName(rec ModelUsageRecord) string {

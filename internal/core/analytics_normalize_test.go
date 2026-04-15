@@ -33,8 +33,14 @@ func TestNormalizeAnalyticsDailySeries_AliasesAndModelSeries(t *testing.T) {
 	if len(got.DailySeries["tokens_gpt5"]) == 0 {
 		t.Fatal("expected tokens_gpt5 from usage_model alias")
 	}
+	if len(got.DailySeries["tokens_model_gpt5"]) == 0 {
+		t.Fatal("expected canonical tokens_model_gpt5 from usage_model alias")
+	}
 	if len(got.DailySeries["tokens_gpt_5"]) == 0 {
 		t.Fatal("expected normalized model series from ModelUsage")
+	}
+	if len(got.DailySeries["tokens_model_gpt_5"]) == 0 {
+		t.Fatal("expected canonical normalized model series from ModelUsage")
 	}
 }
 
@@ -61,5 +67,37 @@ func TestNormalizeAnalyticsDailySeries_DoesNotInventDailyFromWindowTotals(t *tes
 	}
 	if len(got.DailySeries["requests"]) != 0 {
 		t.Fatalf("expected no synthesized request points from window totals, got %d", len(got.DailySeries["requests"]))
+	}
+}
+
+func TestNormalizeUsageSnapshotWithConfig_SynthesizesProviderSelfMetrics(t *testing.T) {
+	snap := UsageSnapshot{
+		ProviderID: "codex",
+		AccountID:  "codex-cli",
+		Metrics: map[string]Metric{
+			"model_gpt_5_codex_input_tokens": {Used: Float64Ptr(1200), Unit: "tokens", Window: "all-time"},
+			"model_gpt_5_codex_output_tokens": {Used: Float64Ptr(300), Unit: "tokens", Window: "all-time"},
+			"model_gpt_5_codex_requests":      {Used: Float64Ptr(12), Unit: "requests", Window: "all-time"},
+		},
+		ModelUsage: []ModelUsageRecord{
+			{
+				RawModelID:   "gpt-5-codex",
+				InputTokens:  Float64Ptr(1200),
+				OutputTokens: Float64Ptr(300),
+				Requests:     Float64Ptr(12),
+			},
+		},
+	}
+
+	got := NormalizeUsageSnapshotWithConfig(snap, DefaultModelNormalizationConfig())
+
+	if metric, ok := got.Metrics["provider_codex_input_tokens"]; !ok || metric.Used == nil || *metric.Used != 1200 {
+		t.Fatalf("provider_codex_input_tokens = %+v", metric)
+	}
+	if metric, ok := got.Metrics["provider_codex_output_tokens"]; !ok || metric.Used == nil || *metric.Used != 300 {
+		t.Fatalf("provider_codex_output_tokens = %+v", metric)
+	}
+	if metric, ok := got.Metrics["provider_codex_requests"]; !ok || metric.Used == nil || *metric.Used != 12 {
+		t.Fatalf("provider_codex_requests = %+v", metric)
 	}
 }

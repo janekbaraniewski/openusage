@@ -8,20 +8,27 @@ type AnalyticsCostSummary struct {
 }
 
 func ExtractAnalyticsCostSummary(s UsageSnapshot) AnalyticsCostSummary {
+	metricTotal := firstPositiveMetricUsed(s,
+		0,
+		"window_cost",
+		"total_cost_usd",
+		"all_time_api_cost",
+		"billing_total_cost",
+		"composer_cost",
+		"total_cost",
+		"cli_cost",
+		"plan_total_spend_usd",
+		"individual_spend",
+		"monthly_cost",
+	)
+	modelTotal := sumAnalyticsModelCost(s)
+	total := metricTotal
+	if modelTotal > total {
+		total = modelTotal
+	}
+
 	return AnalyticsCostSummary{
-		TotalCostUSD: firstPositiveMetricUsed(s,
-			sumAnalyticsModelCost(s),
-			"total_cost_usd",
-			"plan_total_spend_usd",
-			"all_time_api_cost",
-			"jsonl_total_cost_usd",
-			"today_api_cost",
-			"daily_cost_usd",
-			"5h_block_cost",
-			"block_cost_usd",
-			"individual_spend",
-			"credits",
-		),
+		TotalCostUSD: total,
 		TodayCostUSD: firstPositiveMetricUsed(s,
 			0,
 			"today_api_cost",
@@ -32,6 +39,7 @@ func ExtractAnalyticsCostSummary(s UsageSnapshot) AnalyticsCostSummary {
 		WeekCostUSD: firstPositiveMetricUsed(s,
 			0,
 			"7d_api_cost",
+			"7d_cost",
 			"usage_weekly",
 		),
 		BurnRateUSD: firstPositiveMetricUsed(s,
