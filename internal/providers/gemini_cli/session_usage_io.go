@@ -3,13 +3,12 @@ package gemini_cli
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/samber/lo"
 )
 
 func findGeminiSessionFiles(tmpDir string) ([]string, error) {
@@ -29,13 +28,20 @@ func findGeminiSessionFiles(tmpDir string) ([]string, error) {
 	}
 	var files []item
 
-	walkErr := filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || info.IsDir() {
+	walkErr := filepath.WalkDir(tmpDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil || d.IsDir() {
 			return nil
 		}
-		name := info.Name()
+		name := d.Name()
 		if !strings.HasPrefix(name, "session-") || !strings.HasSuffix(name, ".json") {
 			return nil
+		}
+		info, statErr := d.Info()
+		if statErr != nil {
+			return statErr
 		}
 		files = append(files, item{path: path, modTime: info.ModTime()})
 		return nil
@@ -54,7 +60,11 @@ func findGeminiSessionFiles(tmpDir string) ([]string, error) {
 		return files[i].modTime.After(files[j].modTime)
 	})
 
-	return lo.Map(files, func(f item, _ int) string { return f.path }), nil
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.path)
+	}
+	return paths, nil
 }
 
 func readGeminiChatFile(path string) (*geminiChatFile, error) {
