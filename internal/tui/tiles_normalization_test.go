@@ -795,3 +795,29 @@ func TestCollectActiveResetEntries_UsesStablePriorityOrder(t *testing.T) {
 		t.Fatalf("entries[2].key = %q, want gh_graphql_rpm", entries[2].key)
 	}
 }
+
+func TestCollectActiveResetEntries_PrefersRateLimitWindowLabels(t *testing.T) {
+	now := time.Now()
+	snap := core.UsageSnapshot{
+		ProviderID: "codex",
+		Metrics: map[string]core.Metric{
+			"rate_limit_primary":   {Used: float64Ptr(100), Limit: float64Ptr(100), Unit: "%", Window: "5h"},
+			"rate_limit_secondary": {Used: float64Ptr(31), Limit: float64Ptr(100), Unit: "%", Window: "7d"},
+		},
+		Resets: map[string]time.Time{
+			"rate_limit_primary":   now.Add(2 * time.Hour),
+			"rate_limit_secondary": now.Add(48 * time.Hour),
+		},
+	}
+
+	entries := collectActiveResetEntries(snap, core.DefaultDashboardWidget())
+	if len(entries) < 2 {
+		t.Fatalf("entries len = %d, want >= 2", len(entries))
+	}
+	if entries[0].label != "Usage 5h" {
+		t.Fatalf("entries[0].label = %q, want Usage 5h", entries[0].label)
+	}
+	if entries[1].label != "Usage 7d" {
+		t.Fatalf("entries[1].label = %q, want Usage 7d", entries[1].label)
+	}
+}

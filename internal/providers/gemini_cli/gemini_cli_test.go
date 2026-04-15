@@ -675,6 +675,42 @@ func TestApplyQuotaBuckets(t *testing.T) {
 	}
 }
 
+func TestApplyQuotaBuckets_IgnoresExpiredBuckets(t *testing.T) {
+	now := time.Now().UTC()
+	snap := core.UsageSnapshot{
+		Metrics: make(map[string]core.Metric),
+		Resets:  make(map[string]time.Time),
+		Raw:     make(map[string]string),
+	}
+
+	result := applyQuotaBuckets(&snap, []bucketInfo{
+		{ModelID: "gemini-3-pro-preview", TokenType: "REQUESTS", RemainingFraction: float64Ptr(0), ResetTime: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+		{ModelID: "gemini-3-flash-preview", TokenType: "REQUESTS", RemainingFraction: float64Ptr(0.98), ResetTime: now.Add(2 * time.Hour).Format(time.RFC3339)},
+	})
+
+	if result.modelCount != 1 {
+		t.Fatalf("modelCount = %d, want 1 active model", result.modelCount)
+	}
+	if result.worstFraction != 0.98 {
+		t.Fatalf("worstFraction = %.2f, want 0.98", result.worstFraction)
+	}
+
+	quota, ok := snap.Metrics["quota"]
+	if !ok || quota.Used == nil {
+		t.Fatalf("missing quota metric: %+v", quota)
+	}
+	if *quota.Used != 2 {
+		t.Fatalf("quota used = %.1f, want 2", *quota.Used)
+	}
+
+	if _, ok := snap.Metrics["quota_model_gemini_3_pro_preview_requests"]; ok {
+		t.Fatal("expired bucket should not produce a quota metric")
+	}
+	if got := snap.Raw["quota_expired_buckets_ignored"]; got != "1" {
+		t.Fatalf("quota_expired_buckets_ignored = %q, want 1", got)
+	}
+}
+
 func TestFormatWindow(t *testing.T) {
 	tests := []struct {
 		name string

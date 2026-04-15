@@ -306,6 +306,8 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 	}
 
 	aggregates := make(map[string]quotaAggregate)
+	expiredCount := 0
+	now := time.Now()
 	for _, bucket := range buckets {
 		fraction, ok := bucketRemainingFraction(bucket)
 		if !ok {
@@ -330,6 +332,10 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 			if parsed, err := time.Parse(time.RFC3339, bucket.ResetTime); err == nil {
 				resetAt = parsed
 				hasReset = true
+				if !resetAt.After(now) {
+					expiredCount++
+					continue
+				}
 			}
 		}
 
@@ -353,6 +359,9 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 	}
 
 	if len(aggregates) == 0 {
+		if expiredCount > 0 {
+			snap.Raw["quota_expired_buckets_ignored"] = fmt.Sprintf("%d", expiredCount)
+		}
 		return result
 	}
 
@@ -465,6 +474,9 @@ func applyQuotaBuckets(snap *core.UsageSnapshot, buckets []bucketInfo) quotaAggr
 	modelCount := len(modelWorst)
 	result.modelCount = modelCount
 	snap.Raw["quota_models_tracked"] = fmt.Sprintf("%d", modelCount)
+	if expiredCount > 0 {
+		snap.Raw["quota_expired_buckets_ignored"] = fmt.Sprintf("%d", expiredCount)
+	}
 
 	modelCountF := float64(modelCount)
 	lowCountF := float64(lowCount)

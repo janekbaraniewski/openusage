@@ -20,9 +20,20 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 
 	savedAPIModelCosts := make(map[string]core.Metric)
+	savedRootModelMetrics := make(map[string]core.Metric)
+	savedRootModelSeries := make(map[string][]core.TimePoint)
+	savedRootModelUsage := append([]core.ModelUsageRecord(nil), snap.ModelUsage...)
 	for key, metric := range snap.Metrics {
-		if strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost") && metric.Window == "billing-cycle" {
-			savedAPIModelCosts[key] = metric
+		if strings.HasPrefix(key, "model_") {
+			savedRootModelMetrics[key] = metric
+			if strings.HasSuffix(key, "_cost") || strings.HasSuffix(key, "_cost_usd") {
+				savedAPIModelCosts[key] = metric
+			}
+		}
+	}
+	for key, series := range snap.DailySeries {
+		if strings.HasPrefix(key, "usage_model_") {
+			savedRootModelSeries[key] = append([]core.TimePoint(nil), series...)
 		}
 	}
 
@@ -94,13 +105,30 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			Requests:        core.Float64Ptr(model.Requests),
 		})
 	}
-	telemetryCostInsufficient := authoritativeCost > 0 && modelCostTotal < authoritativeCost*0.1
-	if telemetryCostInsufficient && len(savedAPIModelCosts) > 0 {
-		for key, metric := range savedAPIModelCosts {
+	if shouldRestoreRootModelBreakdown(agg, len(agg.Models)) {
+		for key, metric := range savedRootModelMetrics {
 			snap.Metrics[key] = metric
 		}
-		core.Tracef("[usage_view] %s: restored %d API model cost metrics (telemetry cost %.2f << authoritative %.2f)",
-			snap.ProviderID, len(savedAPIModelCosts), modelCostTotal, authoritativeCost)
+		for key, series := range savedRootModelSeries {
+			snap.DailySeries[key] = append([]core.TimePoint(nil), series...)
+		}
+		snap.ModelUsage = append([]core.ModelUsageRecord(nil), savedRootModelUsage...)
+		snap.SetDiagnostic("telemetry_model_breakdown_fallback", "provider_root")
+	}
+	telemetryCostInsufficient := authoritativeCost > 0 && modelCostTotal < authoritativeCost*0.1
+	if telemetryCostInsufficient && len(savedAPIModelCosts) > 0 {
+		restored := 0
+		for key, metric := range savedAPIModelCosts {
+			if _, ok := snap.Metrics[key]; !ok {
+				continue
+			}
+			snap.Metrics[key] = metric
+			restored++
+		}
+		if restored > 0 {
+			core.Tracef("[usage_view] %s: restored %d API model cost metrics (telemetry cost %.2f << authoritative %.2f)",
+				snap.ProviderID, restored, modelCostTotal, authoritativeCost)
+		}
 	} else if len(agg.Models) > 0 {
 		if delta := authoritativeCost - modelCostTotal; authoritativeCost > 0 && delta > 0.000001 {
 			snap.Metrics["model_unattributed_cost_usd"] = core.Metric{Used: core.Float64Ptr(delta), Unit: "USD", Window: windowLabel}
@@ -267,6 +295,17 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.SetAttribute("telemetry_scope_account_id", agg.AccountID)
 	}
 	snap.SetDiagnostic("telemetry_event_count", fmt.Sprintf("%d", agg.EventCount))
+}
+
+func shouldRestoreRootModelBreakdown(agg *telemetryUsageAgg, modelCount int) bool {
+	if agg == nil || modelCount > 0 || agg.EventCount <= 0 {
+		return false
+	}
+	return agg.Activity.Messages > 0 ||
+		agg.Activity.InputTokens > 0 ||
+		agg.Activity.OutputTokens > 0 ||
+		agg.Activity.TotalTokens > 0 ||
+		agg.Activity.TotalCost > 0
 }
 
 func pointsFromDaily(in []telemetryDayPoint, pick func(telemetryDayPoint) float64) []core.TimePoint {

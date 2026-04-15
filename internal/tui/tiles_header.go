@@ -238,6 +238,15 @@ func resetSortPriority(key string) int {
 }
 
 func resetLabelForKey(snap core.UsageSnapshot, widget core.DashboardWidget, key string) string {
+	if strings.HasPrefix(key, "rate_limit_") {
+		if met, ok := snap.Metrics[key]; ok && strings.TrimSpace(met.Window) != "" {
+			return gaugeLabel(widget, key, met.Window)
+		}
+		trimmed := strings.TrimSuffix(key, "_reset")
+		if met, ok := snap.Metrics[trimmed]; ok && strings.TrimSpace(met.Window) != "" {
+			return gaugeLabel(widget, trimmed, met.Window)
+		}
+	}
 	if widget.ResetStyle == core.DashboardResetStyleCompactModelResets {
 		if label := compactModelResetLabel(strings.TrimSuffix(key, "_reset")); label != "" {
 			return label
