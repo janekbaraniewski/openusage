@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -191,28 +190,4 @@ func metricUsedPercent(key string, met core.Metric) float64 {
 
 func metricHasGauge(key string, met core.Metric) bool {
 	return metricUsedPercent(key, met) >= 0
-}
-
-func parseTileNumeric(raw string) (float64, bool) {
-	s := strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
-	if s == "" {
-		return 0, false
-	}
-	s = strings.TrimPrefix(s, "$")
-	s = strings.TrimSuffix(s, "%")
-	if idx := strings.IndexByte(s, ' '); idx > 0 {
-		s = s[:idx]
-	}
-	if idx := strings.IndexByte(s, '/'); idx > 0 {
-		s = s[:idx]
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
 }

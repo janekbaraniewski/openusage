@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -451,23 +450,6 @@ func StatusBadge(s core.Status) string {
 	return style.Render(text)
 }
 
-func StatusPill(s core.Status) string {
-	switch s {
-	case core.StatusOK:
-		return statusPillOKStyle.Render(" OK ")
-	case core.StatusNearLimit:
-		return statusPillWarnStyle.Render(" WARN ")
-	case core.StatusLimited:
-		return statusPillCritStyle.Render(" LIMIT ")
-	case core.StatusAuth:
-		return statusPillAuthStyle.Render(" AUTH ")
-	case core.StatusError:
-		return statusPillCritStyle.Render(" ERR ")
-	default:
-		return statusPillDimStyle.Render(fmt.Sprintf(" %s ", string(s)))
-	}
-}
-
 func StatusBorderColor(s core.Status) lipgloss.Color {
 	switch s {
 	case core.StatusOK:
@@ -481,29 +463,4 @@ func StatusBorderColor(s core.Status) lipgloss.Color {
 	default:
 		return colorSurface1
 	}
-}
-
-func CategoryTag(emoji, label string) string {
-	if emoji == "" || label == "" {
-		return ""
-	}
-	c := tagColor(label)
-	return categoryTagStyle.
-		Foreground(c).
-		Background(colorSurface0).
-		Render(emoji + " " + label)
-}
-
-func MetaTag(icon, text string) string {
-	if text == "" {
-		return ""
-	}
-	return metaTagStyle.Render(icon + " " + text)
-}
-
-func MetaTagHighlight(icon, text string) string {
-	if text == "" {
-		return ""
-	}
-	return metaTagHighlightStyle.Render(icon + " " + text)
 }

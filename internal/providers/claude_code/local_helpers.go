@@ -1,8 +1,6 @@
 package claude_code
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -389,25 +387,6 @@ func summarizeTotalsMap(values map[string]*modelUsageTotals, preferCost bool, li
 	return strings.Join(parts, ", ")
 }
 
-func collectJSONLFiles(dir string) []string {
-	var files []string
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return files
-	}
-
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			files = append(files, path)
-		}
-		return nil
-	})
-
-	return files
-}
-
 // collectJSONLFilesWithStat walks the directory like collectJSONLFiles but also returns
 // the os.FileInfo for each file, enabling cache invalidation by mtime+size.
 func collectJSONLFilesWithStat(dir string) map[string]os.FileInfo {
@@ -427,33 +406,6 @@ func collectJSONLFilesWithStat(dir string) map[string]os.FileInfo {
 	})
 
 	return result
-}
-
-func parseJSONLFile(path string) []jsonlEntry {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var entries []jsonlEntry
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 256*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var entry jsonlEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		entries = append(entries, entry)
-	}
-
-	return entries
 }
 
 func sanitizeModelName(model string) string {

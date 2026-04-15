@@ -180,45 +180,7 @@ func TestFindPricing_Fallback(t *testing.T) {
 	}
 }
 
-func TestParseJSONLFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	fpath := filepath.Join(tmpDir, "session.jsonl")
-
-	now := time.Now()
-
-	lines := []string{
-		fmt.Sprintf(`{"type":"human","sessionId":"abc123","timestamp":"%s","message":{"role":"user"}}`,
-			now.Add(-10*time.Minute).Format(time.RFC3339)),
-		fmt.Sprintf(`{"type":"assistant","sessionId":"abc123","timestamp":"%s","message":{"model":"claude-opus-4-6","role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":200,"cache_read_input_tokens":300,"service_tier":"standard"}}}`,
-			now.Add(-5*time.Minute).Format(time.RFC3339)),
-		`{broken json`,
-		fmt.Sprintf(`{"type":"assistant","sessionId":"abc123","timestamp":"%s","message":{"model":"claude-opus-4-6","role":"assistant","usage":{"input_tokens":50,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
-			now.Add(-1*time.Minute).Format(time.RFC3339)),
-	}
-
-	content := ""
-	for _, l := range lines {
-		content += l + "\n"
-	}
-	os.WriteFile(fpath, []byte(content), 0644)
-
-	entries := parseJSONLFile(fpath)
-	if len(entries) != 3 { // 2 valid + 1 user = 3, the broken line is skipped
-		t.Errorf("Expected 3 parsed entries, got %d", len(entries))
-	}
-
-	assistantCount := 0
-	for _, e := range entries {
-		if e.Type == "assistant" && e.Message != nil && e.Message.Usage != nil {
-			assistantCount++
-		}
-	}
-	if assistantCount != 2 {
-		t.Errorf("Expected 2 assistant entries with usage, got %d", assistantCount)
-	}
-}
-
-func TestCollectJSONLFiles(t *testing.T) {
+func TestCollectJSONLFilesWithStat(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	projectDir := filepath.Join(tmpDir, "projects", "test-project-abc")
@@ -229,14 +191,14 @@ func TestCollectJSONLFiles(t *testing.T) {
 
 	os.WriteFile(filepath.Join(projectDir, "notes.txt"), []byte("hello"), 0644)
 
-	files := collectJSONLFiles(filepath.Join(tmpDir, "projects"))
+	files := collectJSONLFilesWithStat(filepath.Join(tmpDir, "projects"))
 	if len(files) != 2 {
 		t.Errorf("Expected 2 JSONL files, got %d", len(files))
 	}
 }
 
-func TestCollectJSONLFiles_NonexistentDir(t *testing.T) {
-	files := collectJSONLFiles("/nonexistent/path")
+func TestCollectJSONLFilesWithStat_NonexistentDir(t *testing.T) {
+	files := collectJSONLFilesWithStat("/nonexistent/path")
 	if len(files) != 0 {
 		t.Errorf("Expected 0 files for nonexistent dir, got %d", len(files))
 	}

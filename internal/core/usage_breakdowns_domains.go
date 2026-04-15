@@ -15,15 +15,6 @@ func HasMCPUsage(s UsageSnapshot) bool {
 	return len(servers) > 0
 }
 
-func HasModelCostUsage(s UsageSnapshot) bool {
-	for key := range s.Metrics {
-		if IsModelCostMetricKey(key) {
-			return true
-		}
-	}
-	return false
-}
-
 func IncludeDetailMetricKey(key string) bool {
 	return !strings.HasPrefix(strings.TrimSpace(key), "mcp_")
 }

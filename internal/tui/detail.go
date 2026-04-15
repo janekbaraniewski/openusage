@@ -126,13 +126,6 @@ func renderDetailCompactHeader(sb *strings.Builder, snap core.UsageSnapshot, w i
 	sb.WriteString(" " + lipgloss.NewStyle().Foreground(sepColor).Render(strings.Repeat("━", sepLen)) + "\n")
 }
 
-// renderDetailFusedTabBar kept for backward compatibility — no-op when only one tab.
-func renderDetailFusedTabBar(sb *strings.Builder, tabs []string, active int, w int) {
-	if len(tabs) <= 1 {
-		return
-	}
-}
-
 // ── Bordered Card Sections ─────────────────────────────────────────────────
 // Each section is rendered inside a bordered card with a title in the top border.
 
@@ -1231,46 +1224,6 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 	return lines
 }
 
-// ── Data presence checks ───────────────────────────────────────────────────
-
-func hasDetailUsageData(snap core.UsageSnapshot, widget core.DashboardWidget) bool {
-	for _, key := range core.SortedStringKeys(snap.Metrics) {
-		if metricUsedPercent(key, snap.Metrics[key]) >= 0 {
-			return true
-		}
-	}
-	return len(widget.CompactRows) > 0 && len(snap.Metrics) > 0
-}
-
-func hasDetailCostData(snap core.UsageSnapshot) bool {
-	costKeys := []string{"today_api_cost", "today_cost", "5h_block_cost", "7d_api_cost",
-		"all_time_api_cost", "total_cost_usd", "window_cost", "monthly_spend",
-		"credit_balance", "spend_limit", "plan_spend", "plan_total_spend_usd"}
-	for _, k := range costKeys {
-		if met, ok := snap.Metrics[k]; ok && (met.Used != nil || met.Remaining != nil || met.Limit != nil) {
-			return true
-		}
-	}
-	return len(core.ExtractAnalyticsModelUsage(snap)) > 0
-}
-
-func hasDetailProjectData(snap core.UsageSnapshot) bool {
-	lines, _ := buildProviderProjectBreakdownLines(snap, 80, false)
-	return len(lines) > 0
-}
-
-func hasDetailToolData(snap core.UsageSnapshot, widget core.DashboardWidget) bool {
-	actualLines, _ := buildActualToolUsageLines(snap, 80, false)
-	if len(actualLines) > 0 {
-		return true
-	}
-	if widget.ShowToolComposition {
-		toolLines, _ := buildProviderToolCompositionLines(snap, 80, false, widget)
-		return len(toolLines) > 0
-	}
-	return false
-}
-
 func filterOutSectionHeader(lines []string) []string {
 	var result []string
 	for _, line := range lines {
@@ -1284,15 +1237,4 @@ func filterOutSectionHeader(lines []string) []string {
 		result = append(result, line)
 	}
 	return result
-}
-
-// ── Legacy compatibility ───────────────────────────────────────────────────
-// These are kept for backward compatibility with code that references them.
-
-func renderTabBar(sb *strings.Builder, tabs []string, active int, w int) {
-	renderDetailFusedTabBar(sb, tabs, active, w)
-}
-
-func renderDetailHeader(sb *strings.Builder, snap core.UsageSnapshot, w int) {
-	renderDetailCompactHeader(sb, snap, w)
 }

@@ -223,15 +223,6 @@ func (s *Service) markProviderDirty(providerID string) {
 	s.dirtyProvidersMu.Unlock()
 }
 
-// drainDirtyProviders returns and clears the set of providers that had new data.
-func (s *Service) drainDirtyProviders() map[string]bool {
-	s.dirtyProvidersMu.Lock()
-	dirty := s.dirtyProviders
-	s.dirtyProviders = make(map[string]bool)
-	s.dirtyProvidersMu.Unlock()
-	return dirty
-}
-
 // --- HTTP server ---
 
 func (s *Service) startSocketServer(ctx context.Context) error {

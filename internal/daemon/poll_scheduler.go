@@ -112,18 +112,6 @@ func (ps *PollScheduler) SnapshotChanged(accountID string, snap core.UsageSnapsh
 	return false
 }
 
-// EffectiveInterval returns the current backoff interval for an account.
-func (ps *PollScheduler) EffectiveInterval(accountID string) time.Duration {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-
-	state, ok := ps.states[accountID]
-	if !ok {
-		return ps.baseInterval
-	}
-	return ps.effectiveIntervalLocked(state)
-}
-
 func (ps *PollScheduler) effectiveIntervalLocked(state *pollBackoffState) time.Duration {
 	multiplier := 1
 	for _, tier := range backoffTiers {

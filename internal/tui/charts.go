@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -16,36 +15,6 @@ type chartItem struct {
 	Color     lipgloss.Color
 	ValueText string
 	SubLabel  string
-}
-
-func RenderInlineGauge(pct float64, w int) string {
-	if w < 4 {
-		w = 4
-	}
-	if pct > 100 {
-		pct = 100
-	}
-	if pct < 0 {
-		pct = 0
-	}
-
-	filled := int(pct / 100 * float64(w))
-	if filled < 1 && pct > 0 {
-		filled = 1
-	}
-	empty := w - filled
-
-	barColor := colorGreen
-	if pct >= 80 {
-		barColor = colorRed
-	} else if pct >= 50 {
-		barColor = colorYellow
-	}
-
-	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled))
-	track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", empty))
-
-	return bar + track
 }
 
 func RenderSparkline(values []float64, w int, color lipgloss.Color) string {
@@ -234,14 +203,14 @@ type TimeChartSpec struct {
 }
 
 type HeatmapSpec struct {
-	Title     string
-	Rows      []string
+	Title      string
+	Rows       []string
 	RowSummary []string
-	Cols      []string
-	Values    [][]float64 // [row][col]
-	MaxCols   int
-	RowColors []lipgloss.Color
-	RowScale  bool
+	Cols       []string
+	Values     [][]float64 // [row][col]
+	MaxCols    int
+	RowColors  []lipgloss.Color
+	RowScale   bool
 }
 
 func RenderBrailleChart(title string, series []BrailleSeries, w, h int, yFmt func(float64) string) string {
@@ -500,51 +469,6 @@ func binSeriesValues(dates []string, values [][]float64, targetCols int) ([]stri
 	}
 
 	return labels, binned
-}
-
-func layoutColumns(plotW, cols int) ([]int, []int) {
-	if plotW <= 0 || cols <= 0 {
-		return nil, nil
-	}
-	starts := make([]int, cols)
-	ends := make([]int, cols)
-
-	// For sparse timelines, keep narrow bars to avoid giant stretched blocks.
-	if cols < plotW/2 {
-		prev := -1
-		for i := 0; i < cols; i++ {
-			x := 0
-			if cols == 1 {
-				x = plotW / 2
-			} else {
-				x = int(math.Round(float64(i) / float64(cols-1) * float64(plotW-1)))
-			}
-			if x <= prev {
-				x = prev + 1
-			}
-			if x >= plotW {
-				x = plotW - 1
-			}
-			starts[i] = x
-			ends[i] = x + 1
-			prev = x
-		}
-		return starts, ends
-	}
-
-	for i := 0; i < cols; i++ {
-		s := int(math.Floor(float64(i) * float64(plotW) / float64(cols)))
-		e := int(math.Floor(float64(i+1) * float64(plotW) / float64(cols)))
-		if e <= s {
-			e = s + 1
-		}
-		if e > plotW {
-			e = plotW
-		}
-		starts[i] = s
-		ends[i] = e
-	}
-	return starts, ends
 }
 
 func RenderHeatmap(spec HeatmapSpec, w int) string {

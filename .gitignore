@@ -30,3 +30,18 @@ Thumbs.db
 # Debug / temp
 *.har
 *.prof
+.aider/
+.claude/worktrees/
+.tmp/
+.continuerules
+.windsurfrules
+/cursor-probe
+/demo
+/tmp_*
+.playwright-mcp/
+website-*.png
+website-*.md
+website/.vite/
+website/dist/
+website/node_modules/
+website/*.tsbuildinfo

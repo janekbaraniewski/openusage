@@ -566,28 +566,6 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) clampAnalyticsModelCursor() {
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text, m.timeWindow)
-	models := filterTokenModels(data.models)
-	max := len(models) - 1
-	if max < 0 {
-		max = 0
-	}
-	if m.analyticsModelCursor > max {
-		m.analyticsModelCursor = max
-	}
-}
-
-func (m *Model) toggleAnalyticsModelExpand() {
-	data := extractCostData(m.visibleSnapshots(), m.analyticsFilter.text, m.timeWindow)
-	sortModels(data.models, m.analyticsSortBy)
-	models := filterTokenModels(data.models)
-	if m.analyticsModelCursor >= 0 && m.analyticsModelCursor < len(models) {
-		name := models[m.analyticsModelCursor].name
-		m.analyticsModelExpand[name] = !m.analyticsModelExpand[name]
-	}
-}
-
 func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":

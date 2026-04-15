@@ -755,16 +755,6 @@ func renderNTDateLegend(labels []string, width int) string {
 	return "  " + dimStyle.Render(string(line)) + "\n"
 }
 
-func ntHeatmapColorScale() []lipgloss.Color {
-	return []lipgloss.Color{
-		colorSurface1,
-		colorGreen,
-		colorYellow,
-		colorPeach,
-		colorRed,
-	}
-}
-
 // fillSeriesDateGaps inserts zero-value entries for any calendar days missing between
 // the first and last date in a sorted series. Without this, chart libraries draw a
 // straight line between e.g. Apr 3 and Apr 7, making it look like usage continued
@@ -809,29 +799,4 @@ func sanitizeSeriesPoints(pts []core.TimePoint) []core.TimePoint {
 		}
 	}
 	return out
-}
-
-// trimLeadingTrailingZeros removes zero-value points from the start and end of a
-// sorted series. Keeps one zero on each side for visual context. Interior zeros
-// (legitimate zero-usage days) are preserved.
-func trimLeadingTrailingZeros(pts []core.TimePoint) []core.TimePoint {
-	if len(pts) <= 2 {
-		return pts
-	}
-	start := 0
-	for start < len(pts)-1 && pts[start].Value == 0 {
-		start++
-	}
-	end := len(pts) - 1
-	for end > start && pts[end].Value == 0 {
-		end--
-	}
-	// Keep one zero on each side for visual context.
-	if start > 0 {
-		start--
-	}
-	if end < len(pts)-1 {
-		end++
-	}
-	return pts[start : end+1]
 }

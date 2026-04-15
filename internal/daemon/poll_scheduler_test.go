@@ -48,9 +48,8 @@ func TestPollScheduler_BackoffTiers(t *testing.T) {
 	for _, tt := range tests {
 		ps.mu.Lock()
 		ps.states["acct1"].consecutiveNoChange = tt.noChangeCount
+		got := ps.effectiveIntervalLocked(ps.states["acct1"])
 		ps.mu.Unlock()
-
-		got := ps.EffectiveInterval("acct1")
 		if got != tt.wantInterval {
 			t.Errorf("noChange=%d: got %s, want %s", tt.noChangeCount, got, tt.wantInterval)
 		}
@@ -76,9 +75,8 @@ func TestPollScheduler_BackoffTiers_LocalProvider(t *testing.T) {
 	for _, tt := range tests {
 		ps.mu.Lock()
 		ps.states["acct1"].consecutiveNoChange = tt.noChangeCount
+		got := ps.effectiveIntervalLocked(ps.states["acct1"])
 		ps.mu.Unlock()
-
-		got := ps.EffectiveInterval("acct1")
 		if got != tt.wantInterval {
 			t.Errorf("noChange=%d: got %s, want %s", tt.noChangeCount, got, tt.wantInterval)
 		}
@@ -147,7 +145,13 @@ func TestPollScheduler_SnapshotChanged(t *testing.T) {
 
 func TestPollScheduler_UnknownAccount(t *testing.T) {
 	ps := newPollScheduler(30 * time.Second)
-	if got := ps.EffectiveInterval("nonexistent"); got != 30*time.Second {
+	ps.mu.Lock()
+	got := ps.baseInterval
+	if state := ps.states["nonexistent"]; state != nil {
+		got = ps.effectiveIntervalLocked(state)
+	}
+	ps.mu.Unlock()
+	if got != 30*time.Second {
 		t.Errorf("unknown account should return base interval, got %s", got)
 	}
 }

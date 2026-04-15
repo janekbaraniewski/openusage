@@ -391,15 +391,6 @@ func (m *Model) resetSettingsCursorForTab() {
 	}
 }
 
-func (m Model) currentTimeWindowIndex() int {
-	for i, tw := range core.ValidTimeWindows {
-		if tw == m.timeWindow {
-			return i
-		}
-	}
-	return 0
-}
-
 func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":

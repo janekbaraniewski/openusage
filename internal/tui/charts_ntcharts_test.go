@@ -139,39 +139,6 @@ func TestSanitizeSeriesPoints_PreservesPositives(t *testing.T) {
 	}
 }
 
-func TestTrimLeadingTrailingZeros(t *testing.T) {
-	pts := []core.TimePoint{
-		{Date: "2026-01-01", Value: 0},
-		{Date: "2026-01-02", Value: 0},
-		{Date: "2026-01-03", Value: 100},
-		{Date: "2026-01-04", Value: 200},
-		{Date: "2026-01-05", Value: 0},
-		{Date: "2026-01-06", Value: 0},
-	}
-	trimmed := trimLeadingTrailingZeros(pts)
-	// Should keep one zero on each side: [Jan 02, Jan 03, Jan 04, Jan 05]
-	if len(trimmed) != 4 {
-		t.Fatalf("expected 4 points, got %d", len(trimmed))
-	}
-	if trimmed[0].Date != "2026-01-02" {
-		t.Errorf("expected start at Jan 02, got %s", trimmed[0].Date)
-	}
-	if trimmed[3].Date != "2026-01-05" {
-		t.Errorf("expected end at Jan 05, got %s", trimmed[3].Date)
-	}
-}
-
-func TestTrimLeadingTrailingZeros_AllNonZero(t *testing.T) {
-	pts := []core.TimePoint{
-		{Date: "2026-01-01", Value: 10},
-		{Date: "2026-01-02", Value: 20},
-	}
-	trimmed := trimLeadingTrailingZeros(pts)
-	if len(trimmed) != 2 {
-		t.Fatalf("expected 2 points unchanged, got %d", len(trimmed))
-	}
-}
-
 func TestChartSeriesBounds_FloorsAtZero(t *testing.T) {
 	series := []BrailleSeries{{
 		Label: "test",

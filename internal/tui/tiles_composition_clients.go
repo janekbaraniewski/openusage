@@ -324,20 +324,6 @@ func sumSeriesValues(points []core.TimePoint) float64 {
 	return total
 }
 
-func mergeSeriesByDay(seriesByClient map[string]map[string]float64, client string, points []core.TimePoint) {
-	if client == "" || len(points) == 0 {
-		return
-	}
-	if seriesByClient[client] == nil {
-		seriesByClient[client] = make(map[string]float64)
-	}
-	for _, point := range points {
-		if point.Date != "" {
-			seriesByClient[client][point.Date] += point.Value
-		}
-	}
-}
-
 func limitClientMix(clients []clientMixEntry, expanded bool, maxVisible int) ([]clientMixEntry, int) {
 	if expanded || maxVisible <= 0 || len(clients) <= maxVisible {
 		return clients, 0

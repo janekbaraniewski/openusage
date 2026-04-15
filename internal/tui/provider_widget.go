@@ -11,7 +11,6 @@ var (
 	providerSpecsOnce sync.Once
 	providerSpecs     map[string]core.ProviderSpec
 	providerWidgets   map[string]core.DashboardWidget
-	providerDetails   map[string]core.DetailWidget
 	providerOrder     []string
 
 	providerWidgetOverridesMu    sync.RWMutex
@@ -27,7 +26,6 @@ func loadProviderSpecs() {
 	providerSpecsOnce.Do(func() {
 		providerSpecs = make(map[string]core.ProviderSpec)
 		providerWidgets = make(map[string]core.DashboardWidget)
-		providerDetails = make(map[string]core.DetailWidget)
 		for _, p := range providers.AllProviders() {
 			spec := p.Spec()
 			id := spec.ID
@@ -36,7 +34,6 @@ func loadProviderSpecs() {
 			}
 			providerSpecs[id] = spec
 			providerWidgets[id] = p.DashboardWidget()
-			providerDetails[id] = p.DetailWidget()
 			providerOrder = append(providerOrder, id)
 		}
 	})
@@ -49,15 +46,6 @@ func dashboardWidget(providerID string) core.DashboardWidget {
 		return applyDashboardSectionOverride(cfg)
 	}
 	return applyDashboardSectionOverride(core.DefaultDashboardWidget())
-}
-
-func detailWidget(providerID string) core.DetailWidget {
-	loadProviderSpecs()
-
-	if cfg, ok := providerDetails[providerID]; ok {
-		return cfg
-	}
-	return core.DefaultDetailWidget()
 }
 
 type apiKeyProviderEntry struct {

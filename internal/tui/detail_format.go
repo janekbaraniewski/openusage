@@ -10,34 +10,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-func wrapTags(tags []string, maxWidth int) []string {
-	if len(tags) == 0 {
-		return nil
-	}
-	var rows []string
-	currentRow := ""
-	currentW := 0
-	for _, tag := range tags {
-		tagW := lipgloss.Width(tag)
-		if currentW > 0 && currentW+1+tagW > maxWidth {
-			rows = append(rows, currentRow)
-			currentRow = tag
-			currentW = tagW
-			continue
-		}
-		if currentW > 0 {
-			currentRow += " "
-			currentW++
-		}
-		currentRow += tag
-		currentW += tagW
-	}
-	if currentRow != "" {
-		rows = append(rows, currentRow)
-	}
-	return rows
-}
-
 func titleCase(s string) string {
 	if len(s) <= 1 {
 		return s
@@ -113,37 +85,6 @@ func sectionColor(title string) lipgloss.Color {
 	default:
 		return colorBlue
 	}
-}
-
-func formatUsageDetail(m core.Metric) string {
-	var parts []string
-	if m.Remaining != nil {
-		parts = append(parts, fmt.Sprintf("%.0f%% remaining", *m.Remaining))
-	} else if m.Used != nil && m.Limit != nil {
-		parts = append(parts, fmt.Sprintf("%.0f%% remaining", *m.Limit-*m.Used))
-	}
-	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
-		parts = append(parts, "["+m.Window+"]")
-	}
-	return strings.Join(parts, " ")
-}
-
-func formatMetricDetail(m core.Metric) string {
-	var parts []string
-	switch {
-	case m.Used != nil && m.Limit != nil:
-		parts = append(parts, fmt.Sprintf("%s / %s %s", formatNumber(*m.Used), formatNumber(*m.Limit), m.Unit))
-	case m.Remaining != nil && m.Limit != nil:
-		parts = append(parts, fmt.Sprintf("%s / %s %s remaining", formatNumber(*m.Remaining), formatNumber(*m.Limit), m.Unit))
-	case m.Used != nil:
-		parts = append(parts, fmt.Sprintf("%s %s", formatNumber(*m.Used), m.Unit))
-	case m.Remaining != nil:
-		parts = append(parts, fmt.Sprintf("%s %s remaining", formatNumber(*m.Remaining), m.Unit))
-	}
-	if m.Window != "" && m.Window != "all_time" && m.Window != "current_period" {
-		parts = append(parts, "["+m.Window+"]")
-	}
-	return strings.Join(parts, " ")
 }
 
 func formatNumber(n float64) string {
