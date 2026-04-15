@@ -173,11 +173,11 @@ func buildGeminiCLIDemoSnapshot(now time.Time) core.UsageSnapshot {
 			},
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"tokens_client_cli": demoSeries(now, 17100, 18300, 19800, 21200, 22600, 24300, 25100),
-			"tool_calls":        demoSeries(now, 17, 19, 24, 22, 28, 32, 36),
-			"tokens_total":      demoSeries(now, 17100, 18300, 19800, 21200, 22600, 24300, 25100),
-			"requests":          demoSeries(now, 29, 31, 36, 34, 40, 42, 45),
-			"analytics_tokens":  demoSeries(now, 4.8e6, 5.0e6, 5.1e6, 5.3e6, 5.4e6, 5.5e6, 5.7e6),
+			"tokens_client_cli": demoPatternSeries(now, 25100, demoPatternCompact...),
+			"tool_calls":        demoPatternSeries(now, 36, demoPatternCompact...),
+			"tokens_total":      demoPatternSeries(now, 25100, demoPatternCompact...),
+			"requests":          demoPatternSeries(now, 45, demoPatternCompact...),
+			"analytics_tokens":  demoPatternSeries(now, 5700000, demoPatternCompact...),
 		},
 		Message: "",
 	}

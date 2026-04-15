@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -198,7 +199,8 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 		"claude_code": {
 			metrics: []string{
 				"tool_bash",
-				"client_webapp_total_tokens",
+				"client_api_server_total_tokens",
+				"project_platform_core_requests",
 				"lang_go",
 				"composer_lines_added",
 				"total_prompts",
@@ -207,19 +209,28 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 				"block_start",
 				"block_end",
 				"language_usage",
+				"project_usage",
 			},
 			series: []string{
-				"tokens_client_webapp",
-				"usage_model_claude-sonnet-4-6",
+				"analytics_tokens",
+				"tokens_client_api_server",
+				"usage_model_synthetic",
+				"usage_project_platform_core",
 			},
 		},
 		"codex": {
 			metrics: []string{
-				"model_gpt_5_1_codex_max_input_tokens",
-				"client_ide_total_tokens",
+				"model_gpt_5_4_input_tokens",
+				"client_cli_total_tokens",
+				"project_dashboard_shell_requests",
+			},
+			raw: []string{
+				"project_usage",
 			},
 			series: []string{
-				"tokens_client_ide",
+				"analytics_tokens",
+				"tokens_client_cli",
+				"usage_project_dashboard_shell",
 			},
 		},
 		"openrouter": {
@@ -293,6 +304,39 @@ func TestBuildDemoSnapshots_RichProviderDetails(t *testing.T) {
 	}
 }
 
+func TestBuildDemoSnapshots_UsesNonLinearDailyPatterns(t *testing.T) {
+	snaps := buildDemoSnapshots()
+
+	cases := []struct {
+		providerID  string
+		key         string
+		minPoints   int
+		minSpanDays int
+	}{
+		{providerID: "claude_code", key: "analytics_requests", minPoints: 10, minSpanDays: 14},
+		{providerID: "codex", key: "analytics_requests", minPoints: 3, minSpanDays: 6},
+		{providerID: "cursor", key: "analytics_tokens", minPoints: 5, minSpanDays: 7},
+		{providerID: "openrouter", key: "analytics_tokens", minPoints: 8, minSpanDays: 16},
+	}
+
+	for _, tc := range cases {
+		snap, ok := snapshotByProvider(snaps, tc.providerID)
+		if !ok {
+			t.Fatalf("missing snapshot for provider %q", tc.providerID)
+		}
+		pts := snap.DailySeries[tc.key]
+		if len(pts) < tc.minPoints {
+			t.Fatalf("provider %q series %q too short: got %d want >= %d", tc.providerID, tc.key, len(pts), tc.minPoints)
+		}
+		if span := seriesSpanDays(t, pts); span < tc.minSpanDays {
+			t.Fatalf("provider %q series %q spans only %d days; want >= %d", tc.providerID, tc.key, span, tc.minSpanDays)
+		}
+		if isStrictlyIncreasing(pts) {
+			t.Fatalf("provider %q series %q is still a straight ramp", tc.providerID, tc.key)
+		}
+	}
+}
+
 func snapshotByProvider(snaps map[string]core.UsageSnapshot, providerID string) (core.UsageSnapshot, bool) {
 	for _, snap := range snaps {
 		if snap.ProviderID == providerID {
@@ -327,4 +371,32 @@ func hasClientMixMetrics(snap core.UsageSnapshot) bool {
 		}
 	}
 	return false
+}
+
+func seriesSpanDays(t *testing.T, pts []core.TimePoint) int {
+	t.Helper()
+	if len(pts) < 2 {
+		return 0
+	}
+	first, err := time.Parse("2006-01-02", pts[0].Date)
+	if err != nil {
+		t.Fatalf("parse first date %q: %v", pts[0].Date, err)
+	}
+	last, err := time.Parse("2006-01-02", pts[len(pts)-1].Date)
+	if err != nil {
+		t.Fatalf("parse last date %q: %v", pts[len(pts)-1].Date, err)
+	}
+	return int(last.Sub(first).Hours() / 24)
+}
+
+func isStrictlyIncreasing(pts []core.TimePoint) bool {
+	if len(pts) < 2 {
+		return false
+	}
+	for i := 1; i < len(pts); i++ {
+		if pts[i].Value <= pts[i-1].Value {
+			return false
+		}
+	}
+	return true
 }

@@ -229,11 +229,11 @@ func buildCopilotDemoSnapshot(now time.Time) core.UsageSnapshot {
 			},
 		},
 		DailySeries: map[string][]core.TimePoint{
-			"tokens_client_vscode":    demoSeries(now, 8300, 9200, 11100, 12400, 13800, 15700, 17700),
-			"tokens_client_cli":       demoSeries(now, 2100, 2400, 2900, 3300, 3800, 4100, 4600),
-			"tokens_client_jetbrains": demoSeries(now, 900, 1200, 1400, 1700, 1800, 2200, 2500),
-			"analytics_tokens":        demoSeries(now, 11500, 12800, 15400, 17400, 19400, 22100, 24800),
-			"analytics_requests":      demoSeries(now, 29, 31, 36, 34, 40, 42, 45),
+			"tokens_client_vscode":    demoPatternSeries(now, 17700, demoPatternCompact...),
+			"tokens_client_cli":       demoPatternSeries(now, 4600, demoPatternCompact...),
+			"tokens_client_jetbrains": demoPatternSeries(now, 2500, demoPatternCompact...),
+			"analytics_tokens":        demoPatternSeries(now, 24800, demoPatternCompact...),
+			"analytics_requests":      demoPatternSeries(now, 45, demoPatternCompact...),
 		},
 		Message: "",
 	}
