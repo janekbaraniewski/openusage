@@ -19,9 +19,10 @@ import (
 func main() {
 	log.SetOutput(io.Discard)
 
-	interval := 5 * time.Second
+	interval := demoRefreshInterval
 	accounts := buildDemoAccounts()
-	demoProviders := buildDemoProviders(providers.AllProviders())
+	scenario := newDemoScenario(time.Now())
+	demoProviders := buildDemoProviders(providers.AllProviders(), scenario)
 
 	providersByID := make(map[string]core.UsageProvider, len(demoProviders))
 	for _, p := range demoProviders {
@@ -79,6 +80,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				scenario.Advance()
 				refreshAll()
 			}
 		}

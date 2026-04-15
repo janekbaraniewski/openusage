@@ -19,13 +19,14 @@ var demoProviderIDs = map[string]bool{
 }
 
 type demoProvider struct {
-	base core.UsageProvider
+	base     core.UsageProvider
+	scenario *demoScenario
 }
 
-func buildDemoProviders(realProviders []core.UsageProvider) []core.UsageProvider {
+func buildDemoProviders(realProviders []core.UsageProvider, scenario *demoScenario) []core.UsageProvider {
 	out := make([]core.UsageProvider, 0, len(realProviders))
 	for _, provider := range realProviders {
-		out = append(out, &demoProvider{base: provider})
+		out = append(out, &demoProvider{base: provider, scenario: scenario})
 	}
 	return out
 }
@@ -82,6 +83,12 @@ func (p *demoProvider) DetailWidget() core.DetailWidget {
 }
 
 func (p *demoProvider) Fetch(_ context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
+	if p.scenario != nil {
+		if snap, ok := p.scenario.Snapshot(acct.ID, p.base.ID()); ok {
+			return forceAccountAndProvider(snap, acct.ID, p.base.ID()), nil
+		}
+	}
+
 	snaps := buildDemoSnapshots()
 	if snap, ok := snaps[acct.ID]; ok && snap.ProviderID == p.base.ID() {
 		return forceAccountAndProvider(snap, acct.ID, p.base.ID()), nil

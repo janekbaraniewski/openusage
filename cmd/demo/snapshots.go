@@ -1,16 +1,16 @@
 package main
 
 import (
-	"math/rand"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func buildDemoSnapshots() map[string]core.UsageSnapshot {
-	now := time.Now()
-	rng := rand.New(rand.NewSource(now.UnixNano()))
+	return buildDemoSnapshotsAt(time.Now())
+}
 
+func buildDemoSnapshotsAt(now time.Time) map[string]core.UsageSnapshot {
 	snaps := map[string]core.UsageSnapshot{
 		"gemini-cli":  buildGeminiCLIDemoSnapshot(now),
 		"copilot":     buildCopilotDemoSnapshot(now),
@@ -20,8 +20,6 @@ func buildDemoSnapshots() map[string]core.UsageSnapshot {
 		"openrouter":  buildOpenRouterDemoSnapshot(now),
 		"ollama":      buildOllamaDemoSnapshot(now),
 	}
-
-	randomizeDemoSnapshots(snaps, now, rng)
 
 	return snaps
 }

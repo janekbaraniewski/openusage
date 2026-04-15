@@ -112,7 +112,8 @@ func TestBuildDemoAccounts_IncludesAllDemoProviders(t *testing.T) {
 }
 
 func TestBuildDemoProviders_FetchesMockedSnapshots(t *testing.T) {
-	wrapped := buildDemoProviders(providers.AllProviders())
+	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC))
+	wrapped := buildDemoProviders(providers.AllProviders(), scenario)
 	if len(wrapped) == 0 {
 		t.Fatal("buildDemoProviders returned no providers")
 	}
@@ -144,6 +145,95 @@ func TestBuildDemoProviders_FetchesMockedSnapshots(t *testing.T) {
 		if snap.Metrics == nil {
 			t.Fatalf("nil metrics for provider %q", account.Provider)
 		}
+	}
+}
+
+func TestBuildDemoSnapshotsForPhase_ProgressesDeterministically(t *testing.T) {
+	anchor := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
+	early := buildDemoSnapshotsForPhase(anchor, 0)
+	mid := buildDemoSnapshotsForPhase(anchor, 3)
+	late := buildDemoSnapshotsForPhase(anchor, len(demoPhaseShares)-1)
+
+	checks := []struct {
+		providerID string
+		metricKey  string
+	}{
+		{providerID: "claude_code", metricKey: "5h_block_cost"},
+		{providerID: "gemini_cli", metricKey: "quota"},
+		{providerID: "openrouter", metricKey: "usage_monthly"},
+	}
+
+	for _, tc := range checks {
+		earlySnap, ok := snapshotByProvider(early, tc.providerID)
+		if !ok {
+			t.Fatalf("missing early snapshot for provider %q", tc.providerID)
+		}
+		midSnap, ok := snapshotByProvider(mid, tc.providerID)
+		if !ok {
+			t.Fatalf("missing mid snapshot for provider %q", tc.providerID)
+		}
+		lateSnap, ok := snapshotByProvider(late, tc.providerID)
+		if !ok {
+			t.Fatalf("missing late snapshot for provider %q", tc.providerID)
+		}
+
+		earlyValue, ok := metricUsed(earlySnap.Metrics, tc.metricKey)
+		if !ok {
+			t.Fatalf("provider %q missing early metric %q", tc.providerID, tc.metricKey)
+		}
+		midValue, ok := metricUsed(midSnap.Metrics, tc.metricKey)
+		if !ok {
+			t.Fatalf("provider %q missing mid metric %q", tc.providerID, tc.metricKey)
+		}
+		lateValue, ok := metricUsed(lateSnap.Metrics, tc.metricKey)
+		if !ok {
+			t.Fatalf("provider %q missing late metric %q", tc.providerID, tc.metricKey)
+		}
+
+		if !(earlyValue < midValue && midValue < lateValue) {
+			t.Fatalf("provider %q metric %q is not monotonic across phases: early=%.2f mid=%.2f late=%.2f", tc.providerID, tc.metricKey, earlyValue, midValue, lateValue)
+		}
+	}
+
+	earlyOpenRouter, _ := snapshotByProvider(early, "openrouter")
+	lateOpenRouter, _ := snapshotByProvider(late, "openrouter")
+	earlyLast := earlyOpenRouter.DailySeries["analytics_tokens"][len(earlyOpenRouter.DailySeries["analytics_tokens"])-1].Value
+	lateLast := lateOpenRouter.DailySeries["analytics_tokens"][len(lateOpenRouter.DailySeries["analytics_tokens"])-1].Value
+	if earlyLast >= lateLast {
+		t.Fatalf("expected latest demo series point to grow across phases: early=%.2f late=%.2f", earlyLast, lateLast)
+	}
+}
+
+func TestDemoScenario_StopsAtFinalFrame(t *testing.T) {
+	scenario := newDemoScenario(time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC))
+	last := len(demoPhaseShares) - 1
+
+	for range len(demoPhaseShares) + 3 {
+		scenario.Advance()
+	}
+
+	if scenario.CurrentPhase() != last {
+		t.Fatalf("expected scenario to stop at phase %d, got %d", last, scenario.CurrentPhase())
+	}
+
+	account := core.AccountConfig{ID: "codex-cli", Provider: "codex"}
+	snap, ok := scenario.Snapshot(account.ID, account.Provider)
+	if !ok {
+		t.Fatal("missing codex snapshot at final phase")
+	}
+
+	extraAdvanced := scenario.Advance()
+	if extraAdvanced {
+		t.Fatal("expected scenario advance to stop once the final frame is reached")
+	}
+
+	nextSnap, ok := scenario.Snapshot(account.ID, account.Provider)
+	if !ok {
+		t.Fatal("missing codex snapshot after extra advance")
+	}
+
+	if snap.Timestamp != nextSnap.Timestamp {
+		t.Fatalf("final frame changed after extra advance: %s != %s", snap.Timestamp, nextSnap.Timestamp)
 	}
 }
 
