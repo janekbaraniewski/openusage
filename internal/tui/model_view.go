@@ -87,11 +87,7 @@ func (m Model) renderHeader(w int) string {
 	} else {
 		switch m.screen {
 		case screenAnalytics:
-			tabLabel := "analytics"
-			if m.analyticsTab >= 0 && m.analyticsTab < len(analyticsTabLabels) {
-				tabLabel = strings.ToLower(analyticsTabLabels[m.analyticsTab])
-			}
-			info = dimStyle.Render(tabLabel)
+			info = dimStyle.Render("analytics")
 			if m.analyticsFilter.text != "" {
 				info += " (filtered)"
 			}
@@ -189,10 +185,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		if m.analyticsFilter.text != "" {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter.text)
 		}
-		if m.analyticsTab == analyticsTabModels {
-			return " " + dimStyle.Render("j/k navigate · Enter expand/collapse · [ ] tabs · s sort · / filter · r refresh")
-		}
-		return " " + dimStyle.Render("j/k scroll · [ ] tabs · 1-4 jump · s sort · / filter · r refresh")
+		return " " + dimStyle.Render("j/k scroll · PgUp/PgDn page · Home/End jump · s sort · / filter · r refresh")
 	default:
 		if m.mode == modeDetail && m.screen == screenDashboard {
 			return " " + dimStyle.Render("Tab/Shift+Tab sections · ←/→ sections · j/k scroll · PgUp/PgDn page · r refresh · Esc back")

@@ -396,10 +396,14 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 	// one character per data cell with colored block characters.
 	numCols := len(cols)
 	numRows := len(spec.Rows)
-	colorScale := ntHeatmapColorScale()
+	intensityGlyphs := []string{"·", "░", "▒", "▓", "█"}
 
 	// Compute cell width: distribute available space evenly across columns.
-	gridAvail := w - rowLabelW - 6 // 6 = margins + padding
+	summaryW := 0
+	if len(spec.RowSummary) > 0 {
+		summaryW = 10
+	}
+	gridAvail := w - rowLabelW - summaryW - 8 // margins + padding
 	if gridAvail < numCols {
 		gridAvail = numCols
 	}
@@ -407,8 +411,8 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 	if cellW < 1 {
 		cellW = 1
 	}
-	if cellW > 4 {
-		cellW = 4 // cap for readability
+	if cellW > 2 {
+		cellW = 2
 	}
 
 	var sb strings.Builder
@@ -440,17 +444,23 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 				norm = raw / scale
 			}
 
-			// Map normalized value to color.
-			ci := int(norm * float64(len(colorScale)-1))
+			ci := int(math.Round(norm * float64(len(intensityGlyphs)-1)))
 			if ci < 0 {
 				ci = 0
 			}
-			if ci >= len(colorScale) {
-				ci = len(colorScale) - 1
+			if ci >= len(intensityGlyphs) {
+				ci = len(intensityGlyphs) - 1
 			}
-			color := colorScale[ci]
-			block := strings.Repeat("█", cellW)
-			sb.WriteString(lipgloss.NewStyle().Foreground(color).Render(block))
+			glyph := strings.Repeat(intensityGlyphs[ci], cellW)
+			style := lipgloss.NewStyle().Foreground(labelColor)
+			if ci == 0 {
+				style = lipgloss.NewStyle().Foreground(colorDim)
+			}
+			sb.WriteString(style.Render(glyph))
+		}
+		if summaryW > 0 && r < len(spec.RowSummary) {
+			sb.WriteString(" ")
+			sb.WriteString(dimStyle.Render(padLeft(truncStr(spec.RowSummary[r], summaryW), summaryW)))
 		}
 		sb.WriteString("\n")
 	}
@@ -473,7 +483,7 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 		if numLabels > 1 {
 			ci = i * (numCols - 1) / (numLabels - 1)
 		}
-		label := cols[ci]
+		label := formatDateLabel(cols[ci])
 		x := ci * cellW
 		start := x
 		if start+len(label) > totalGridW {
@@ -490,10 +500,14 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 
 	// Legend.
 	sb.WriteString("  " + dimStyle.Render("      low "))
-	for _, color := range colorScale {
-		sb.WriteString(lipgloss.NewStyle().Background(color).Render("  "))
+	for i, glyph := range intensityGlyphs {
+		style := lipgloss.NewStyle().Foreground(colorDim)
+		if i > 0 {
+			style = lipgloss.NewStyle().Foreground(colorYellow)
+		}
+		sb.WriteString(style.Render(glyph + " "))
 	}
-	sb.WriteString(dimStyle.Render(" high\n"))
+	sb.WriteString(dimStyle.Render("high\n"))
 	return sb.String()
 }
 

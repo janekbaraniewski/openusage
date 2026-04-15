@@ -127,3 +127,49 @@ func TestRenderAnalyticsPanelKeepsLineWidthsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAnalyticsUnifiedRedesign_IncludesMajorSections(t *testing.T) {
+	data := costData{
+		timeWindow:    core.TimeWindowAll,
+		totalCost:     42,
+		totalInput:    1000,
+		totalOutput:   400,
+		providerCount: 2,
+		activeCount:   2,
+		referenceTime: time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC),
+		providers: []providerCostEntry{
+			{name: "claude-code", cost: 40, color: colorRosewater},
+			{name: "codex-cli", models: []modelCostEntry{{name: "gpt-5-codex", inputTokens: 500, outputTokens: 120}}, color: colorTeal},
+		},
+		models: []modelCostEntry{
+			{name: "claude-opus-4.6", cost: 40, inputTokens: 800, outputTokens: 300, color: colorRosewater},
+			{name: "gpt-5-codex", inputTokens: 500, outputTokens: 120, color: colorTeal},
+		},
+	}
+	summary := analyticsSummary{activeDays: 3}
+
+	got := renderAnalyticsUnifiedRedesign(data, summary, 110)
+	for _, want := range []string{"Provider Leaders", "Model Leaders", "Budget & Quota Pressure"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in unified analytics page:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAnalyticsProviderLeaderboardPanel_ShowsActivityOnlyProviders(t *testing.T) {
+	data := costData{
+		totalCost: 10,
+		providers: []providerCostEntry{
+			{name: "claude-code", cost: 10, color: colorRosewater},
+			{name: "codex-cli", models: []modelCostEntry{{name: "gpt-5-codex", inputTokens: 800, outputTokens: 200}}, color: colorTeal},
+		},
+	}
+
+	got := renderAnalyticsProviderLeaderboardPanel(data, 72, 4)
+	if !strings.Contains(got, "codex-cli") {
+		t.Fatalf("expected activity-only provider to appear, got:\n%s", got)
+	}
+	if !strings.Contains(got, "activity only") {
+		t.Fatalf("expected activity fallback detail, got:\n%s", got)
+	}
+}

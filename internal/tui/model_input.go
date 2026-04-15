@@ -544,93 +544,24 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		m = m.requestRefresh()
-
-	// Sub-tab navigation
-	case "[":
-		if m.analyticsTab > 0 {
-			m.analyticsTab--
-			m.analyticsScrollY = 0
-			m.invalidateAnalyticsCache()
-		}
-	case "]":
-		if m.analyticsTab < analyticsTabCount-1 {
-			m.analyticsTab++
-			m.analyticsScrollY = 0
-			m.invalidateAnalyticsCache()
-		}
-	case "1":
-		m.analyticsTab = analyticsTabOverview
-		m.analyticsScrollY = 0
-		m.invalidateAnalyticsCache()
-	case "2":
-		m.analyticsTab = analyticsTabModels
-		m.analyticsScrollY = 0
-		m.invalidateAnalyticsCache()
-	case "3":
-		m.analyticsTab = analyticsTabSpend
-		m.analyticsScrollY = 0
-		m.invalidateAnalyticsCache()
-	case "4":
-		m.analyticsTab = analyticsTabActivity
-		m.analyticsScrollY = 0
-		m.invalidateAnalyticsCache()
-
-	// Model cursor navigation (Models tab)
 	case "j", "down":
-		if m.analyticsTab == analyticsTabModels {
-			m.analyticsModelCursor++
-			m.clampAnalyticsModelCursor()
-			m.invalidateAnalyticsCache()
-		} else {
-			m.analyticsScrollY++
-		}
+		m.analyticsScrollY++
 	case "k", "up":
-		if m.analyticsTab == analyticsTabModels {
-			if m.analyticsModelCursor > 0 {
-				m.analyticsModelCursor--
-				m.invalidateAnalyticsCache()
-			}
-		} else if m.analyticsScrollY > 0 {
+		if m.analyticsScrollY > 0 {
 			m.analyticsScrollY--
 		}
-	case "enter", " ":
-		if m.analyticsTab == analyticsTabModels {
-			m.toggleAnalyticsModelExpand()
-			m.invalidateAnalyticsCache()
-		}
 	case "pgdown":
-		if m.analyticsTab == analyticsTabModels {
-			m.analyticsModelCursor += 5
-			m.clampAnalyticsModelCursor()
-			m.invalidateAnalyticsCache()
-		} else {
-			m.analyticsScrollY += 10
-		}
+		m.analyticsScrollY += 10
 	case "pgup":
-		if m.analyticsTab == analyticsTabModels {
-			m.analyticsModelCursor -= 5
-			if m.analyticsModelCursor < 0 {
-				m.analyticsModelCursor = 0
-			}
-			m.invalidateAnalyticsCache()
-		} else if m.analyticsScrollY > 10 {
+		if m.analyticsScrollY > 10 {
 			m.analyticsScrollY -= 10
 		} else {
 			m.analyticsScrollY = 0
 		}
 	case "home", "g":
-		if m.analyticsTab == analyticsTabModels {
-			m.analyticsModelCursor = 0
-			m.invalidateAnalyticsCache()
-		} else {
-			m.analyticsScrollY = 0
-		}
+		m.analyticsScrollY = 0
 	case "end", "G":
-		if m.analyticsTab == analyticsTabModels {
-			m.analyticsModelCursor = 9999 // will be clamped
-			m.clampAnalyticsModelCursor()
-			m.invalidateAnalyticsCache()
-		}
+		m.analyticsScrollY = 9999
 	}
 	return m, nil
 }
