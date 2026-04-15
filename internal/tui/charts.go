@@ -236,6 +236,7 @@ type TimeChartSpec struct {
 type HeatmapSpec struct {
 	Title     string
 	Rows      []string
+	RowSummary []string
 	Cols      []string
 	Values    [][]float64 // [row][col]
 	MaxCols   int

@@ -11,23 +11,12 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-// Analytics sub-tab definitions.
-const (
-	analyticsTabOverview = 0
-	analyticsTabModels   = 1
-	analyticsTabSpend    = 2
-	analyticsTabActivity = 3
-	analyticsTabCount    = 4
-)
-
-var analyticsTabLabels = []string{"Overview", "Models", "Spend", "Activity"}
-
 // renderAnalyticsContent is the main entry point for the analytics screen.
 func (m Model) renderAnalyticsContent(w, h int) string {
-	tabBar := m.renderAnalyticsTabBar(w)
-	tabBarH := strings.Count(tabBar, "\n") + 1
+	header := m.renderAnalyticsHeader(w)
+	headerH := strings.Count(header, "\n") + 1
 
-	contentH := h - tabBarH
+	contentH := h - headerH
 	if contentH < 3 {
 		contentH = 3
 	}
@@ -36,14 +25,21 @@ func (m Model) renderAnalyticsContent(w, h int) string {
 	if !hasData {
 		empty := "\n" + dimStyle.Render("  No cost or usage data available.")
 		empty += "\n" + dimStyle.Render("  Analytics requires providers that report spend, tokens, or budgets.")
-		return tabBar + "\n" + empty
+		return header + "\n" + empty
 	}
 
 	lines := strings.Split(content, "\n")
 
-	// Apply scroll offset for content
-	if m.analyticsScrollY > 0 && m.analyticsScrollY < len(lines) {
-		lines = lines[m.analyticsScrollY:]
+	// Apply scroll offset for content.
+	if maxScroll := len(lines) - contentH; maxScroll > 0 {
+		start := m.analyticsScrollY
+		if start < 0 {
+			start = 0
+		}
+		if start > maxScroll {
+			start = maxScroll
+		}
+		lines = lines[start:]
 	}
 
 	for len(lines) < contentH {
@@ -56,45 +52,21 @@ func (m Model) renderAnalyticsContent(w, h int) string {
 		lines[i] = analyticsPadLine(lines[i], w)
 	}
 
-	return analyticsPadLine(tabBar, w) + "\n" + strings.Join(lines, "\n")
+	return analyticsPadLine(header, w) + "\n" + strings.Join(lines, "\n")
 }
 
-// renderAnalyticsTabBar renders the sub-tab bar for the analytics screen.
-func (m Model) renderAnalyticsTabBar(w int) string {
-	var parts []string
-	for i, label := range analyticsTabLabels {
-		tabStr := fmt.Sprintf(" %s ", label)
-		if i == m.analyticsTab {
-			parts = append(parts, analyticsSubTabActiveStyle.Render(tabStr))
-		} else {
-			parts = append(parts, analyticsSubTabInactiveStyle.Render(tabStr))
-		}
-	}
-	tabs := "  " + strings.Join(parts, " ")
-
-	// Right side: sort + filter hints
-	hints := dimStyle.Render("[ ] tabs  s:sort  /:filter  w:window")
-	gap := w - lipgloss.Width(tabs) - lipgloss.Width(hints) - 2
+func (m Model) renderAnalyticsHeader(w int) string {
+	label := analyticsSubTabActiveStyle.Render(" Analytics ")
+	hints := dimStyle.Render("j/k scroll  s:sort  /:filter  w:window  r:refresh")
+	gap := w - lipgloss.Width("  "+label) - lipgloss.Width(hints) - 2
 	if gap < 1 {
 		gap = 1
 	}
-	return tabs + strings.Repeat(" ", gap) + hints
+	return "  " + label + strings.Repeat(" ", gap) + hints
 }
 
-// renderAnalyticsTabContent dispatches to the active sub-tab renderer.
-func (m Model) renderAnalyticsTabContent(data costData, summary analyticsSummary, w int) string {
-	switch m.analyticsTab {
-	case analyticsTabOverview:
-		return renderAnalyticsOverviewRedesign(data, summary, w)
-	case analyticsTabModels:
-		return m.renderAnalyticsModelsRedesign(data, w)
-	case analyticsTabSpend:
-		return renderAnalyticsSpendRedesign(data, summary, w)
-	case analyticsTabActivity:
-		return renderAnalyticsActivityRedesign(data, summary, w)
-	default:
-		return renderAnalyticsOverviewRedesign(data, summary, w)
-	}
+func (m Model) renderAnalyticsPageContent(data costData, summary analyticsSummary, w int) string {
+	return renderAnalyticsUnifiedRedesign(data, summary, w)
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────
@@ -818,12 +790,15 @@ func renderDailyTokenDistributionChart(data costData, w int, limit int) string {
 	if len(series) == 0 {
 		return ""
 	}
+	total := aggregateSeriesByDate(series)
+	if !hasNonZeroData(total) {
+		return ""
+	}
 	return RenderTimeChart(TimeChartSpec{
-		Title:             "DAILY TOKEN DISTRIBUTION (Model · Provider)",
-		Mode:              TimeChartStacked,
-		Series:            series,
+		Title:             "DAILY TOKEN VOLUME",
+		Mode:              TimeChartBars,
+		Series:            []BrailleSeries{{Label: "daily tokens", Color: colorSapphire, Points: total}},
 		Height:            9,
-		MaxSeries:         limit,
 		WindowDays:        analyticsWindowDays(data.timeWindow),
 		ReferenceTime:     data.referenceTime,
 		PreserveEmptySpan: true,
@@ -1017,6 +992,7 @@ func selectBestProviderCostWeightSeries(series map[string][]core.TimePoint) []co
 func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (HeatmapSpec, bool) {
 	type row struct {
 		label string
+		summary string
 		color lipgloss.Color
 		vals  map[string]float64
 		total float64
@@ -1040,7 +1016,8 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 			}
 			model := prettifyModelName(named.Name)
 			rows = append(rows, row{
-				label: truncStr(g.providerName+" · "+model, 42),
+				label: truncStr(g.providerName+" · "+model, 34),
+				summary: shortCompact(total) + " tok",
 				color: stableModelColor(named.Name, g.providerID),
 				vals:  vals,
 				total: total,
@@ -1064,10 +1041,12 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	}
 
 	labels := make([]string, len(rows))
+	summaries := make([]string, len(rows))
 	rowColors := make([]lipgloss.Color, len(rows))
 	values := make([][]float64, len(rows))
 	for i, r := range rows {
 		labels[i] = r.label
+		summaries[i] = r.summary
 		rowColors[i] = r.color
 		line := make([]float64, len(dates))
 		for j, d := range dates {
@@ -1078,6 +1057,7 @@ func buildProviderModelHeatmapSpec(data costData, maxRows int, lastDays int) (He
 	return HeatmapSpec{
 		Title:     "DAILY USAGE HEATMAP (Provider · Model)",
 		Rows:      labels,
+		RowSummary: summaries,
 		Cols:      dates,
 		Values:    values,
 		RowColors: rowColors,

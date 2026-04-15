@@ -16,21 +16,11 @@ func (m *Model) invalidateAnalyticsCache() {
 }
 
 func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
-	// Build a cache key from all state that affects rendering
-	expandKey := ""
-	for k, v := range m.analyticsModelExpand {
-		if v {
-			expandKey += k + ","
-		}
-	}
 	key := strings.Join([]string{
 		strconv.Itoa(w),
 		strconv.Itoa(m.analyticsSortBy),
-		strconv.Itoa(m.analyticsTab),
-		strconv.Itoa(m.analyticsModelCursor),
 		m.analyticsFilter.text,
 		string(m.timeWindow),
-		expandKey,
 	}, "|")
 	if m.analyticsCache.key == key {
 		return m.analyticsCache.content, m.analyticsCache.hasData
@@ -45,7 +35,7 @@ func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
 
 	content := ""
 	if hasData {
-		content = m.renderAnalyticsTabContent(data, summary, w)
+		content = m.renderAnalyticsPageContent(data, summary, w)
 	}
 
 	m.analyticsCache = analyticsRenderCacheEntry{

@@ -93,6 +93,129 @@ func renderAnalyticsOverviewRedesign(data costData, summary analyticsSummary, w 
 	return strings.TrimRight(strings.Join(filterNonEmptyStrings(sections), "\n\n"), "\n")
 }
 
+func renderAnalyticsUnifiedRedesign(data costData, summary analyticsSummary, w int) string {
+	sections := []string{
+		renderAnalyticsContextLine(data, summary),
+		renderAnalyticsMetricStrip([]analyticsMetric{
+			{
+				label:  "Window Spend",
+				value:  formatUSD(data.totalCost),
+				detail: analyticsWindowSubtitle(data),
+				color:  colorTeal,
+			},
+			{
+				label:  "Token Volume",
+				value:  formatTokens(data.totalInput + data.totalOutput),
+				detail: analyticsTokenMixSubtitle(data),
+				color:  colorSapphire,
+			},
+			{
+				label:  "Spend / Active Day",
+				value:  formatUSD(analyticsPerActiveDay(data.totalCost, summary.activeDays)),
+				detail: fmt.Sprintf("%d active days", summary.activeDays),
+				color:  colorYellow,
+			},
+			{
+				label:  "Spend Trend",
+				value:  renderTrendPercent(summary.recentCostAvg, summary.previousCostAvg),
+				detail: analyticsComparisonLabel(data.timeWindow),
+				color:  colorPeach,
+			},
+		}, w),
+	}
+
+	if trend := renderTotalCostTrend(data, summary, w, 10); trend != "" {
+		sections = append(sections, trend)
+	}
+
+	switch {
+	case w >= 132:
+		colW := analyticsColumnWidth(w, 3, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderLeaderboardPanel(data, colW, 6),
+			renderAnalyticsModelLeaderboardPanel(data, colW, 6),
+			renderAnalyticsInsightPanel(data, summary, colW),
+		))
+	case w >= 92:
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderLeaderboardPanel(data, colW, 6),
+			renderAnalyticsModelLeaderboardPanel(data, colW, 6),
+		))
+		sections = append(sections, renderAnalyticsInsightPanel(data, summary, w))
+	default:
+		sections = append(sections,
+			renderAnalyticsProviderLeaderboardPanel(data, w, 6),
+			renderAnalyticsModelLeaderboardPanel(data, w, 6),
+			renderAnalyticsInsightPanel(data, summary, w),
+		)
+	}
+
+	if w >= 96 {
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsProviderSpendPanel(data, summary, colW),
+			renderAnalyticsBudgetPressurePanel(data, colW),
+		))
+	} else {
+		sections = append(sections,
+			renderAnalyticsProviderSpendPanel(data, summary, w),
+			renderAnalyticsBudgetPressurePanel(data, w),
+		)
+	}
+
+	if eff := renderAnalyticsCostEfficiencyPanel(data, w, 10); eff != "" {
+		sections = append(sections, eff)
+	}
+
+	if tokenDist := renderDailyTokenDistributionChart(data, w, 10); tokenDist != "" {
+		sections = append(sections, tokenDist)
+	}
+
+	switch {
+	case w >= 132:
+		colW := analyticsColumnWidth(w, 3, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsClientPanel(data, colW, 6),
+			renderAnalyticsProjectPanel(data, colW, 6),
+			renderAnalyticsMCPPanel(data, colW, 6),
+		))
+	case w >= 92:
+		colW := analyticsColumnWidth(w, 2, 2)
+		sections = append(sections, analyticsJoinColumns(
+			renderAnalyticsClientPanel(data, colW, 6),
+			renderAnalyticsProjectPanel(data, colW, 6),
+		))
+		if mcp := renderAnalyticsMCPPanel(data, w, 6); mcp != "" {
+			sections = append(sections, mcp)
+		}
+	default:
+		sections = append(sections,
+			renderAnalyticsClientPanel(data, w, 6),
+			renderAnalyticsProjectPanel(data, w, 6),
+			renderAnalyticsMCPPanel(data, w, 6),
+		)
+	}
+
+	if heat := renderAnalyticsActivityHeatmap(data, w); heat != "" {
+		sections = append(sections, heat)
+	}
+
+	if summary.peakTokens > 0 {
+		sections = append(sections, renderAnalyticsPanel(
+			"Peak Activity",
+			colorLavender,
+			w,
+			strings.Join([]string{
+				renderDotLeaderRow("Peak token day", fmt.Sprintf("%s · %s", summary.peakTokenDate, formatTokens(summary.peakTokens)), w-8),
+				renderDotLeaderRow("Token trend", renderTrendPercent(summary.recentTokensAvg, summary.previousTokensAvg), w-8),
+			}, "\n"),
+		))
+	}
+
+	return strings.TrimRight(strings.Join(filterNonEmptyStrings(sections), "\n\n"), "\n")
+}
+
 func (m Model) renderAnalyticsModelsRedesign(data costData, w int) string {
 	models := filterTokenModels(data.models)
 	if len(models) == 0 {
@@ -327,23 +450,31 @@ func renderAnalyticsMetricStrip(metrics []analyticsMetric, w int) string {
 
 func renderAnalyticsProviderLeaderboardPanel(data costData, width, limit int) string {
 	providers := append([]providerCostEntry(nil), data.providers...)
-	sort.Slice(providers, func(i, j int) bool { return providers[i].cost > providers[j].cost })
+	sort.Slice(providers, func(i, j int) bool {
+		left := providerAnalyticsRankValue(providers[i])
+		right := providerAnalyticsRankValue(providers[j])
+		if left == right {
+			return providers[i].name < providers[j].name
+		}
+		return left > right
+	})
 	rows := make([]analyticsRankRow, 0, min(limit, len(providers)))
 	for _, provider := range providers {
-		if provider.cost <= 0 {
+		valueText, detail := analyticsProviderRankLabel(provider, data.totalCost)
+		if valueText == "" {
 			continue
 		}
 		rows = append(rows, analyticsRankRow{
 			name:   provider.name,
-			value:  formatUSD(provider.cost),
-			detail: analyticsShareLabel(provider.cost, data.totalCost),
+			value:  valueText,
+			detail: detail,
 			color:  provider.color,
 		})
 		if len(rows) >= limit {
 			break
 		}
 	}
-	return renderAnalyticsRankPanel("Provider Leaders", colorRosewater, rows, width, "Where spend concentrated across providers")
+	return renderAnalyticsRankPanel("Provider Leaders", colorRosewater, rows, width, "Spend when present, otherwise token volume")
 }
 
 func renderAnalyticsModelLeaderboardPanel(data costData, width, limit int) string {
@@ -836,8 +967,8 @@ func analyticsSelectedModelSeries(data costData, modelName string) []core.TimePo
 
 func analyticsTopProvider(data costData) (string, float64) {
 	for _, provider := range data.providers {
-		if provider.cost > 0 {
-			return provider.name, provider.cost
+		if score := providerAnalyticsRankValue(provider); score > 0 {
+			return provider.name, score
 		}
 	}
 	return "—", 0
@@ -878,6 +1009,28 @@ func analyticsHotspotValueLabel(value float64, unit string) string {
 		return "no data"
 	}
 	return shortCompact(value) + " " + unit
+}
+
+func providerAnalyticsRankValue(provider providerCostEntry) float64 {
+	if provider.cost > 0 {
+		return provider.cost
+	}
+	total := 0.0
+	for _, model := range provider.models {
+		total += model.inputTokens + model.outputTokens
+	}
+	return total
+}
+
+func analyticsProviderRankLabel(provider providerCostEntry, totalCost float64) (string, string) {
+	if provider.cost > 0 {
+		return formatUSD(provider.cost), analyticsShareLabel(provider.cost, totalCost)
+	}
+	totalTokens := providerAnalyticsRankValue(provider)
+	if totalTokens > 0 {
+		return shortCompact(totalTokens) + " tok", "activity only · no direct spend signal"
+	}
+	return "", ""
 }
 
 func filterNonEmptyStrings(values []string) []string {
