@@ -47,8 +47,14 @@ func loadTrackingRecordsIncremental(ctx context.Context, db *sql.DB, clock core.
 	if clock == nil {
 		clock = core.SystemClock{}
 	}
-	columns := cursorTableColumns(ctx, db, "ai_code_hashes")
-	timeExpr := chooseTrackingTimeExpr(ctx, db)
+	columns, err := cursorTableColumns(ctx, db, "ai_code_hashes")
+	if err != nil {
+		return nil, err
+	}
+	timeExpr, err := chooseTrackingTimeExpr(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 
 	var whereClause string
 	var args []interface{}
@@ -103,7 +109,7 @@ func loadTrackingRecordsIncremental(ctx context.Context, db *sql.DB, clock core.
 			&timestamp,
 			&record.RowID,
 		); err != nil {
-			continue
+			return records, fmt.Errorf("cursor: scan ai_code_hashes row: %w", err)
 		}
 
 		record.OccurredAt = clock.Now().UTC()
@@ -114,7 +120,10 @@ func loadTrackingRecordsIncremental(ctx context.Context, db *sql.DB, clock core.
 		records = append(records, record)
 	}
 
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return records, fmt.Errorf("cursor: iterate ai_code_hashes rows: %w", err)
+	}
+	return records, nil
 }
 
 func cursorTrackingTextColumnExpr(columns map[string]bool, name string) string {
@@ -124,10 +133,10 @@ func cursorTrackingTextColumnExpr(columns map[string]bool, name string) string {
 	return "''"
 }
 
-func cursorTableColumns(ctx context.Context, db *sql.DB, table string) map[string]bool {
+func cursorTableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, strings.TrimSpace(table)))
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("cursor: query table info for %s: %w", strings.TrimSpace(table), err)
 	}
 	defer rows.Close()
 
@@ -141,12 +150,15 @@ func cursorTableColumns(ctx context.Context, db *sql.DB, table string) map[strin
 			dfltValue sql.NullString
 			pk        int
 		)
-		if rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk) != nil {
-			continue
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk); err != nil {
+			return nil, fmt.Errorf("cursor: scan table info for %s: %w", strings.TrimSpace(table), err)
 		}
 		columns[strings.ToLower(strings.TrimSpace(name))] = true
 	}
-	return columns
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor: iterate table info for %s: %w", strings.TrimSpace(table), err)
+	}
+	return columns, nil
 }
 
 func loadDailyStatsRecords(ctx context.Context, db *sql.DB) ([]cursorDailyStatsRecord, error) {
@@ -169,7 +181,7 @@ func loadDailyStatsRecords(ctx context.Context, db *sql.DB) ([]cursorDailyStatsR
 		var key string
 		var rawJSON string
 		if err := rows.Scan(&key, &rawJSON); err != nil {
-			continue
+			return records, fmt.Errorf("cursor: scan dailyStats row: %w", err)
 		}
 
 		dateStr := strings.TrimPrefix(key, prefix)
@@ -192,5 +204,8 @@ func loadDailyStatsRecords(ctx context.Context, db *sql.DB) ([]cursorDailyStatsR
 		})
 	}
 
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return records, fmt.Errorf("cursor: iterate dailyStats rows: %w", err)
+	}
+	return records, nil
 }

@@ -151,7 +151,10 @@ func applyCanonicalUsageViewWithDB(
 	cache := make(map[string]*telemetryUsageAgg)
 
 	activeStart := time.Now()
-	telemetryActiveProviders := queryTelemetryActiveProviders(ctx, db)
+	telemetryActiveProviders, err := queryTelemetryActiveProviders(ctx, db)
+	if err != nil {
+		return snaps, err
+	}
 	core.Tracef("[usage_view_perf] queryTelemetryActiveProviders: %dms", time.Since(activeStart).Milliseconds())
 
 	for accountID, snap := range snaps {
@@ -220,7 +223,7 @@ func applyCanonicalUsageViewWithDB(
 // one telemetry event in the database, regardless of time window. This is used to
 // distinguish providers that have a telemetry adapter (but may have no events in the
 // current time window) from providers that have no telemetry at all.
-func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]bool {
+func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 	out := make(map[string]bool)
 	// Use raw provider_id (no LOWER/TRIM in SQL) so SQLite can resolve
 	// the DISTINCT directly from idx_usage_events_type_provider index
@@ -232,19 +235,23 @@ func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) map[string]b
 		  AND provider_id IS NOT NULL AND provider_id != ''
 	`)
 	if err != nil {
-		return out
+		return out, fmt.Errorf("query active telemetry providers: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var pid string
-		if rows.Scan(&pid) == nil {
-			pid = strings.ToLower(strings.TrimSpace(pid))
-			if pid != "" {
-				out[pid] = true
-			}
+		if err := rows.Scan(&pid); err != nil {
+			return out, fmt.Errorf("scan active telemetry provider row: %w", err)
+		}
+		pid = strings.ToLower(strings.TrimSpace(pid))
+		if pid != "" {
+			out[pid] = true
 		}
 	}
-	return out
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("iterate active telemetry provider rows: %w", err)
+	}
+	return out, nil
 }
 
 func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, providerIDs []string, accountID string, since time.Time, todaySince time.Time) (*telemetryUsageAgg, error) {
