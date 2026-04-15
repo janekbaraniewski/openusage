@@ -1050,6 +1050,76 @@ func TestApplyCanonicalUsageView_UsesClientDimensionForSourceDailySeries(t *test
 	}
 }
 
+func TestApplyUsageViewToSnapshot_RestoresRootModelBreakdownWhenTelemetryModelAggMissing(t *testing.T) {
+	rootCost := 12.5
+	rootInput := 420.0
+	rootOutput := 84.0
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		AccountID:  "claude-code",
+		Metrics: map[string]core.Metric{
+			"model_claude_opus_4_6_cost_usd":      {Used: &rootCost, Unit: "USD", Window: "all-time estimate"},
+			"model_claude_opus_4_6_input_tokens":  {Used: &rootInput, Unit: "tokens", Window: "all-time estimate"},
+			"model_claude_opus_4_6_output_tokens": {Used: &rootOutput, Unit: "tokens", Window: "all-time estimate"},
+		},
+		DailySeries: map[string][]core.TimePoint{
+			"usage_model_claude_opus_4_6": {{Date: "2026-02-23", Value: 3}},
+		},
+		ModelUsage: []core.ModelUsageRecord{{
+			RawModelID:   "claude-opus-4-6",
+			Window:       "all-time estimate",
+			InputTokens:  float64Ptr(rootInput),
+			OutputTokens: float64Ptr(rootOutput),
+			CostUSD:      float64Ptr(rootCost),
+		}},
+	}
+
+	agg := &telemetryUsageAgg{
+		EventCount: 7,
+		Activity: telemetryActivityAgg{
+			Messages:     4,
+			InputTokens:  100,
+			OutputTokens: 20,
+			TotalTokens:  120,
+		},
+	}
+
+	applyUsageViewToSnapshot(&snap, agg, core.TimeWindow1d)
+
+	if got := metricUsed(snap.Metrics["model_claude_opus_4_6_cost_usd"]); got != rootCost {
+		t.Fatalf("model_claude_opus_4_6_cost_usd = %v, want %v fallback", got, rootCost)
+	}
+	if got := metricUsed(snap.Metrics["model_claude_opus_4_6_input_tokens"]); got != rootInput {
+		t.Fatalf("model_claude_opus_4_6_input_tokens = %v, want %v fallback", got, rootInput)
+	}
+	if len(snap.ModelUsage) != 1 {
+		t.Fatalf("ModelUsage len = %d, want 1 fallback record", len(snap.ModelUsage))
+	}
+	if got := seriesValueByDate(snap.DailySeries["usage_model_claude_opus_4_6"], "2026-02-23"); got != 3 {
+		t.Fatalf("usage_model_claude_opus_4_6 = %v, want restored fallback series", got)
+	}
+	if got := snap.Diagnostics["telemetry_model_breakdown_fallback"]; got != "provider_root" {
+		t.Fatalf("telemetry_model_breakdown_fallback = %q, want provider_root", got)
+	}
+}
+
+func TestApplyUsageViewToSnapshot_DoesNotRestoreRootModelBreakdownForEmptyWindow(t *testing.T) {
+	rootCost := 12.5
+	snap := core.UsageSnapshot{
+		ProviderID: "claude_code",
+		AccountID:  "claude-code",
+		Metrics: map[string]core.Metric{
+			"model_claude_opus_4_6_cost_usd": {Used: &rootCost, Unit: "USD", Window: "all-time estimate"},
+		},
+	}
+
+	applyUsageViewToSnapshot(&snap, &telemetryUsageAgg{}, core.TimeWindow1d)
+
+	if _, ok := snap.Metrics["model_claude_opus_4_6_cost_usd"]; ok {
+		t.Fatal("root model metric should be cleared when there is no telemetry activity in the window")
+	}
+}
+
 func metricUsed(m core.Metric) float64 {
 	if m.Used == nil {
 		return 0
