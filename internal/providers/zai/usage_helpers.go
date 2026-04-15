@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/samber/lo"
 )
 
@@ -480,69 +481,11 @@ func sortedUsageRollupKeys(values map[string]*usageRollup) []string {
 }
 
 func summarizeShareUsage(values map[string]float64, maxItems int) string {
-	type item struct {
-		name  string
-		value float64
-	}
-	var (
-		list  []item
-		total float64
-	)
-	for name, value := range values {
-		if value <= 0 {
-			continue
-		}
-		list = append(list, item{name: name, value: value})
-		total += value
-	}
-	if len(list) == 0 || total <= 0 {
-		return ""
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].value != list[j].value {
-			return list[i].value > list[j].value
-		}
-		return list[i].name < list[j].name
-	})
-	if maxItems > 0 && len(list) > maxItems {
-		list = list[:maxItems]
-	}
-	parts := make([]string, 0, len(list))
-	for _, entry := range list {
-		parts = append(parts, fmt.Sprintf("%s: %.0f%%", normalizeUsageLabel(entry.name), entry.value/total*100))
-	}
-	return strings.Join(parts, ", ")
+	return shared.SummarizeShareUsage(values, maxItems, normalizeUsageLabel)
 }
 
 func summarizeCountUsage(values map[string]float64, unit string, maxItems int) string {
-	type item struct {
-		name  string
-		value float64
-	}
-	var list []item
-	for name, value := range values {
-		if value <= 0 {
-			continue
-		}
-		list = append(list, item{name: name, value: value})
-	}
-	if len(list) == 0 {
-		return ""
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].value != list[j].value {
-			return list[i].value > list[j].value
-		}
-		return list[i].name < list[j].name
-	})
-	if maxItems > 0 && len(list) > maxItems {
-		list = list[:maxItems]
-	}
-	parts := make([]string, 0, len(list))
-	for _, entry := range list {
-		parts = append(parts, fmt.Sprintf("%s: %.0f %s", normalizeUsageLabel(entry.name), entry.value, unit))
-	}
-	return strings.Join(parts, ", ")
+	return shared.SummarizeCountUsage(values, unit, maxItems, normalizeUsageLabel)
 }
 
 func normalizeUsageLabel(value string) string {

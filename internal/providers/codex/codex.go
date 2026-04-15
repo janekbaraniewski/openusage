@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -208,7 +209,10 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		return true, nil
 	}
 	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
-	sessionFiles := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	sessionFiles, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	if err != nil {
+		return false, fmt.Errorf("collect codex session files: %w", err)
+	}
 	for _, info := range sessionFiles {
 		if info != nil && info.ModTime().After(since) {
 			return true, nil

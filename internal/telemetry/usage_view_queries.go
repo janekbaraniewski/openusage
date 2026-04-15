@@ -78,7 +78,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 			&row.Requests,
 			&row.Requests1d,
 		); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage model row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -134,7 +134,7 @@ func querySourceAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tele
 			&row.Reasoning,
 			&row.Sessions,
 		); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage source row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -170,7 +170,7 @@ func queryProjectAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]tel
 	for rows.Next() {
 		var row telemetryProjectAgg
 		if err := rows.Scan(&row.Project, &row.Requests, &row.Requests1d); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage project row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -221,7 +221,7 @@ func queryToolAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]teleme
 			&row.CallsAborted,
 			&row.CallsAborted1d,
 		); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage tool row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -260,7 +260,7 @@ func queryLanguageAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 		var filePath string
 		var requests float64
 		if err := rows.Scan(&filePath, &requests); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage language row: %w", err)
 		}
 		lang := inferLanguageFromFilePath(filePath)
 		if lang != "" {
@@ -319,7 +319,7 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 	for rows.Next() {
 		var row telemetryProviderAgg
 		if err := rows.Scan(&row.Provider, &row.CostUSD, &row.Requests, &row.Input, &row.Output); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage provider row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -426,7 +426,7 @@ func queryDailyTotals(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 	for rows.Next() {
 		var row telemetryDayPoint
 		if err := rows.Scan(&row.Day, &row.CostUSD, &row.Requests, &row.Tokens); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage daily row: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -502,7 +502,7 @@ func queryDailyByDimension(ctx context.Context, db *sql.DB, filter usageFilter, 
 		var day, key string
 		var value float64
 		if err := rows.Scan(&day, &key, &value); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage daily %s row: %w", dimension, err)
 		}
 		key = sanitizeMetricID(key)
 		if key == "" {
@@ -557,7 +557,7 @@ func queryDailyClientTokens(ctx context.Context, db *sql.DB, filter usageFilter)
 		var day, client string
 		var value float64
 		if err := rows.Scan(&day, &client, &value); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage daily client token row: %w", err)
 		}
 		client = sanitizeMetricID(client)
 		if client == "" {
@@ -602,7 +602,7 @@ func queryDailyMCP(ctx context.Context, db *sql.DB, filter usageFilter) (map[str
 		var day, toolName string
 		var value float64
 		if err := rows.Scan(&day, &toolName, &value); err != nil {
-			continue
+			return nil, fmt.Errorf("scan canonical usage daily mcp row: %w", err)
 		}
 		server, _, ok := parseMCPToolName(toolName)
 		if !ok || strings.TrimSpace(server) == "" {

@@ -3,6 +3,8 @@ package shared
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -179,7 +181,7 @@ func ExpandHome(path string) string {
 	return path
 }
 
-func CollectFilesByExt(roots []string, exts map[string]bool) []string {
+func CollectFilesByExt(roots []string, exts map[string]bool) ([]string, error) {
 	var files []string
 	for _, root := range roots {
 		root = ExpandHome(root)
@@ -187,7 +189,13 @@ func CollectFilesByExt(roots []string, exts map[string]bool) []string {
 			continue
 		}
 		info, err := os.Stat(root)
-		if err != nil || info == nil {
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("stat %s: %w", root, err)
+		}
+		if info == nil {
 			continue
 		}
 		if !info.IsDir() {
@@ -197,8 +205,11 @@ func CollectFilesByExt(roots []string, exts map[string]bool) []string {
 			}
 			continue
 		}
-		_ = filepath.Walk(root, func(path string, fi os.FileInfo, walkErr error) error {
-			if walkErr != nil || fi == nil || fi.IsDir() {
+		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d == nil || d.IsDir() {
 				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(path))
@@ -206,14 +217,16 @@ func CollectFilesByExt(roots []string, exts map[string]bool) []string {
 				files = append(files, path)
 			}
 			return nil
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("walk %s: %w", root, err)
+		}
 	}
-	return uniqueStrings(files)
+	return uniqueStrings(files), nil
 }
 
 // CollectFilesWithStat is like CollectFilesByExt but returns os.FileInfo
 // for each file, enabling mtime+size cache invalidation.
-func CollectFilesWithStat(roots []string, exts map[string]bool) map[string]os.FileInfo {
+func CollectFilesWithStat(roots []string, exts map[string]bool) (map[string]os.FileInfo, error) {
 	result := make(map[string]os.FileInfo)
 	for _, root := range roots {
 		root = ExpandHome(root)
@@ -221,7 +234,13 @@ func CollectFilesWithStat(roots []string, exts map[string]bool) map[string]os.Fi
 			continue
 		}
 		info, err := os.Stat(root)
-		if err != nil || info == nil {
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("stat %s: %w", root, err)
+		}
+		if info == nil {
 			continue
 		}
 		if !info.IsDir() {
@@ -231,18 +250,30 @@ func CollectFilesWithStat(roots []string, exts map[string]bool) map[string]os.Fi
 			}
 			continue
 		}
-		_ = filepath.Walk(root, func(path string, fi os.FileInfo, walkErr error) error {
-			if walkErr != nil || fi == nil || fi.IsDir() {
+		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d == nil || d.IsDir() {
 				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(path))
-			if exts[ext] {
+			if !exts[ext] {
+				return nil
+			}
+			fi, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if fi != nil {
 				result[path] = fi
 			}
 			return nil
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("walk %s: %w", root, err)
+		}
 	}
-	return result
+	return result, nil
 }
 
 func uniqueStrings(in []string) []string {

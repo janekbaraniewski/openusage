@@ -33,7 +33,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	sessionsDir := shared.ExpandHome(opts.Path("sessions_dir", DefaultTelemetrySessionsDir()))
 	accountID := strings.TrimSpace(opts.Path("account_id", "codex-cli"))
 
-	fileInfos := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	if err != nil {
+		return nil, fmt.Errorf("collect codex telemetry files: %w", err)
+	}
 	if len(fileInfos) == 0 {
 		return nil, nil
 	}

@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +150,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	if strings.TrimSpace(eventsFile) != "" {
 		roots = append(roots, eventsFile)
 	}
-	files := shared.CollectFilesByExt(roots, map[string]bool{".jsonl": true, ".ndjson": true})
+	files, err := shared.CollectFilesByExt(roots, map[string]bool{".jsonl": true, ".ndjson": true})
+	if err != nil {
+		return out, fmt.Errorf("collect opencode telemetry files: %w", err)
+	}
 	for _, file := range files {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
