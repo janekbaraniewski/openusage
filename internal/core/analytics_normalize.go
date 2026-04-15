@@ -5,6 +5,208 @@ import (
 	"time"
 )
 
+func normalizeAnalyticsMetrics(s *UsageSnapshot) {
+	if s == nil {
+		return
+	}
+	s.EnsureMaps()
+	normalizeAnalyticsCostMetrics(s)
+	normalizeAnalyticsBreakdownMetrics(s)
+}
+
+func normalizeAnalyticsCostMetrics(s *UsageSnapshot) {
+	aliasMetricInto(s, "today_api_cost", "today_cost", "daily_cost_usd", "usage_daily")
+	aliasMetricInto(s, "7d_api_cost", "7d_cost", "usage_weekly")
+	aliasMetricInto(s, "30d_api_cost", "monthly_cost")
+	aliasMetricInto(s, "all_time_api_cost", "total_cost_usd", "billing_total_cost", "composer_cost", "cli_cost", "total_cost")
+
+	if _, ok := s.Metrics["window_cost"]; !ok {
+		if metric, ok := bestWindowCostMetric(s); ok {
+			s.Metrics["window_cost"] = metric
+		}
+	}
+	if _, ok := s.Metrics["window_tokens"]; !ok {
+		if total := sumAnalyticsModelTokens(*s); total > 0 {
+			s.Metrics["window_tokens"] = Metric{Used: Float64Ptr(total), Unit: "tokens", Window: inferredAnalyticsWindow(*s)}
+		}
+	}
+	if _, ok := s.Metrics["window_requests"]; !ok {
+		if total := sumAnalyticsModelRequests(*s); total > 0 {
+			s.Metrics["window_requests"] = Metric{Used: Float64Ptr(total), Unit: "requests", Window: inferredAnalyticsWindow(*s)}
+		}
+	}
+}
+
+func normalizeAnalyticsBreakdownMetrics(s *UsageSnapshot) {
+	for key, metric := range s.Metrics {
+		switch {
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost"):
+			aliasMetricKey(s, key, strings.TrimSuffix(key, "_cost")+"_cost_usd", metric)
+		case strings.HasPrefix(key, "provider_") && strings.HasSuffix(key, "_cost") && !strings.HasSuffix(key, "_byok_cost"):
+			aliasMetricKey(s, key, strings.TrimSuffix(key, "_cost")+"_cost_usd", metric)
+		case strings.HasPrefix(key, "provider_") && strings.HasSuffix(key, "_prompt_tokens"):
+			aliasMetricKey(s, key, strings.TrimSuffix(key, "_prompt_tokens")+"_input_tokens", metric)
+		case strings.HasPrefix(key, "provider_") && strings.HasSuffix(key, "_completion_tokens"):
+			aliasMetricKey(s, key, strings.TrimSuffix(key, "_completion_tokens")+"_output_tokens", metric)
+		}
+	}
+
+	synthesizeSelfProviderBreakdown(s)
+}
+
+func aliasMetricInto(s *UsageSnapshot, canonical string, aliases ...string) {
+	if s == nil || canonical == "" {
+		return
+	}
+	if _, exists := s.Metrics[canonical]; exists {
+		return
+	}
+	for _, alias := range aliases {
+		if metric, ok := s.Metrics[alias]; ok {
+			s.Metrics[canonical] = metric
+			return
+		}
+	}
+}
+
+func aliasMetricKey(s *UsageSnapshot, source, target string, metric Metric) {
+	if s == nil || source == "" || target == "" {
+		return
+	}
+	if _, exists := s.Metrics[target]; exists {
+		return
+	}
+	s.Metrics[target] = metric
+}
+
+func bestWindowCostMetric(s *UsageSnapshot) (Metric, bool) {
+	if s == nil {
+		return Metric{}, false
+	}
+	for _, key := range []string{
+		"window_cost",
+		"today_api_cost",
+		"7d_api_cost",
+		"30d_api_cost",
+		"all_time_api_cost",
+		"billing_total_cost",
+		"composer_cost",
+		"total_cost_usd",
+		"total_cost",
+		"cli_cost",
+		"plan_total_spend_usd",
+		"individual_spend",
+	} {
+		if metric, ok := s.Metrics[key]; ok && metric.Used != nil && *metric.Used > 0 {
+			return metric, true
+		}
+	}
+	modelCost := sumAnalyticsModelCost(*s)
+	if modelCost > 0 {
+		return Metric{Used: Float64Ptr(modelCost), Unit: "USD", Window: inferredAnalyticsWindow(*s)}, true
+	}
+	return Metric{}, false
+}
+
+func synthesizeSelfProviderBreakdown(s *UsageSnapshot) {
+	if s == nil {
+		return
+	}
+	if hasAnalyticsProviderMetrics(*s) {
+		return
+	}
+
+	cost := sumAnalyticsModelCost(*s)
+	input := 0.0
+	output := 0.0
+	requests := 0.0
+	for _, rec := range ExtractAnalyticsModelUsage(*s) {
+		input += rec.InputTokens
+		output += rec.OutputTokens
+	}
+	for _, rec := range s.ModelUsage {
+		if rec.Requests != nil {
+			requests += *rec.Requests
+		}
+	}
+	if requests <= 0 {
+		if metric, ok := s.Metrics["window_requests"]; ok && metric.Used != nil {
+			requests = *metric.Used
+		}
+	}
+	if cost <= 0 && input <= 0 && output <= 0 && requests <= 0 {
+		return
+	}
+
+	providerKey := sanitizeAnalyticsMetricID(s.ProviderID)
+	if providerKey == "" {
+		providerKey = "unknown"
+	}
+	window := inferredAnalyticsWindow(*s)
+	if cost > 0 {
+		s.Metrics["provider_"+providerKey+"_cost_usd"] = Metric{Used: Float64Ptr(cost), Unit: "USD", Window: window}
+	}
+	if input > 0 {
+		s.Metrics["provider_"+providerKey+"_input_tokens"] = Metric{Used: Float64Ptr(input), Unit: "tokens", Window: window}
+	}
+	if output > 0 {
+		s.Metrics["provider_"+providerKey+"_output_tokens"] = Metric{Used: Float64Ptr(output), Unit: "tokens", Window: window}
+	}
+	if requests > 0 {
+		s.Metrics["provider_"+providerKey+"_requests"] = Metric{Used: Float64Ptr(requests), Unit: "requests", Window: window}
+	}
+}
+
+func hasAnalyticsProviderMetrics(s UsageSnapshot) bool {
+	for key := range s.Metrics {
+		if strings.HasPrefix(key, "provider_") {
+			return true
+		}
+	}
+	return false
+}
+
+func inferredAnalyticsWindow(s UsageSnapshot) string {
+	for _, key := range []string{"window_cost", "window_tokens", "window_requests", "today_api_cost", "7d_api_cost", "30d_api_cost", "all_time_api_cost"} {
+		if metric, ok := s.Metrics[key]; ok && strings.TrimSpace(metric.Window) != "" {
+			return metric.Window
+		}
+	}
+	return "all-time"
+}
+
+func sumAnalyticsModelTokens(s UsageSnapshot) float64 {
+	total := 0.0
+	for _, model := range ExtractAnalyticsModelUsage(s) {
+		total += model.InputTokens + model.OutputTokens
+	}
+	return total
+}
+
+func sumAnalyticsModelRequests(s UsageSnapshot) float64 {
+	total := 0.0
+	for _, rec := range s.ModelUsage {
+		if rec.Requests != nil {
+			total += *rec.Requests
+		}
+	}
+	return total
+}
+
+func sanitizeAnalyticsMetricID(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	replacer := strings.NewReplacer("/", "_", "-", "_", " ", "_", ".", "_", ":", "_")
+	value = replacer.Replace(value)
+	for strings.Contains(value, "__") {
+		value = strings.ReplaceAll(value, "__", "_")
+	}
+	value = strings.Trim(value, "_")
+	if value == "" {
+		return ""
+	}
+	return value
+}
+
 func normalizeAnalyticsDailySeries(s *UsageSnapshot) {
 	if s == nil {
 		return
@@ -32,9 +234,11 @@ func normalizeExistingSeriesAliases(s *UsageSnapshot) {
 		switch {
 		case strings.HasPrefix(key, "tokens_model_"):
 			model := strings.TrimPrefix(key, "tokens_model_")
+			mergeSeries(s, "tokens_model_"+model, points)
 			mergeSeries(s, "tokens_"+model, points)
 		case strings.HasPrefix(key, "usage_model_"):
 			model := strings.TrimPrefix(key, "usage_model_")
+			mergeSeries(s, "tokens_model_"+model, points)
 			mergeSeries(s, "tokens_"+model, points)
 		}
 	}
@@ -120,11 +324,14 @@ func synthesizeModelSeriesFromRecords(s *UsageSnapshot) {
 	}
 
 	for model, total := range perModel {
-		key := "tokens_" + model
-		if len(s.DailySeries[key]) > 0 {
-			continue
+		legacyKey := "tokens_" + model
+		canonicalKey := "tokens_model_" + model
+		if len(s.DailySeries[canonicalKey]) == 0 {
+			s.DailySeries[canonicalKey] = []TimePoint{{Date: date, Value: total}}
 		}
-		s.DailySeries[key] = []TimePoint{{Date: date, Value: total}}
+		if len(s.DailySeries[legacyKey]) == 0 {
+			s.DailySeries[legacyKey] = []TimePoint{{Date: date, Value: total}}
+		}
 	}
 }
 
