@@ -71,7 +71,10 @@ func (p *Provider) loadScoredCommitsCached(ctx context.Context, db *sql.DB) (*sc
 	defer p.trackingCacheMu.Unlock()
 
 	var totalCommits int
-	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scored_commits WHERE linesAdded IS NOT NULL AND linesAdded > 0`).Scan(&totalCommits) != nil || totalCommits == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scored_commits WHERE linesAdded IS NOT NULL AND linesAdded > 0`).Scan(&totalCommits); err != nil {
+		return nil, fmt.Errorf("cursor: count scored_commits rows: %w", err)
+	}
+	if totalCommits == 0 {
 		return nil, nil
 	}
 
@@ -250,19 +253,22 @@ func (p *Provider) loadTrackingRecordsCached(ctx context.Context, db *sql.DB) ([
 	return p.trackingRecords, nil
 }
 
-func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) string {
-	columns := cursorTableColumns(ctx, db, "ai_code_hashes")
+func chooseTrackingTimeExpr(ctx context.Context, db *sql.DB) (string, error) {
+	columns, err := cursorTableColumns(ctx, db, "ai_code_hashes")
+	if err != nil {
+		return "", err
+	}
 	hasCreatedAt := columns["createdat"]
 	hasTimestamp := columns["timestamp"]
 	switch {
 	case hasCreatedAt && hasTimestamp:
-		return "COALESCE(createdAt, timestamp)"
+		return "COALESCE(createdAt, timestamp)", nil
 	case hasCreatedAt:
-		return "createdAt"
+		return "createdAt", nil
 	case hasTimestamp:
-		return "timestamp"
+		return "timestamp", nil
 	default:
-		return "0"
+		return "0", nil
 	}
 }
 

@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read copilot session directory: %w", err)
 	}
 
 	var out []shared.TelemetryEvent
@@ -100,7 +104,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		eventsPath := filepath.Join(sessionDir, entry.Name(), "events.jsonl")
 		events, err := parseCopilotTelemetrySessionFile(eventsPath, entry.Name())
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("parse copilot session telemetry %s: %w", eventsPath, err)
 		}
 		out = append(out, events...)
 	}
@@ -108,9 +112,10 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	// Fallback to durable session-store metadata for sessions that no longer have
 	// events.jsonl state (Copilot rotates session-state aggressively).
 	storeEvents, err := parseCopilotTelemetrySessionStore(ctx, storeDB, seenSessions)
-	if err == nil {
-		out = append(out, storeEvents...)
+	if err != nil {
+		return nil, fmt.Errorf("parse copilot session store telemetry: %w", err)
 	}
+	out = append(out, storeEvents...)
 
 	// Enrich synthetic message_usage events with estimated token counts from
 	// CompactionProcessor log entries.

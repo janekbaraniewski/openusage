@@ -46,18 +46,20 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	// Collect from the tracking DB (ai_code_hashes + scored_commits).
 	if trackingDBPath != "" {
 		events, commitEvents, err := collectTrackingDBEvents(ctx, trackingDBPath)
-		if err == nil {
-			appendCursorDedupEvents(&out, events, seenMessages, seenTools)
-			appendCursorDedupEvents(&out, commitEvents, seenMessages, seenTools)
+		if err != nil {
+			return nil, fmt.Errorf("collect cursor tracking telemetry: %w", err)
 		}
+		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
+		appendCursorDedupEvents(&out, commitEvents, seenMessages, seenTools)
 	}
 
 	// Collect from the state DB (composerData + bubbleId entries).
 	if stateDBPath != "" {
 		events, err := collectStateDBEvents(ctx, stateDBPath)
-		if err == nil {
-			appendCursorDedupEvents(&out, events, seenMessages, seenTools)
+		if err != nil {
+			return nil, fmt.Errorf("collect cursor state telemetry: %w", err)
 		}
+		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
 	}
 
 	return out, nil
@@ -118,7 +120,10 @@ func collectTrackingDBEvents(ctx context.Context, dbPath string) ([]shared.Telem
 	// Collect scored commits from the same DB connection.
 	var commitEvents []shared.TelemetryEvent
 	if cursorTableExists(ctx, db, "scored_commits") {
-		commitEvents, _ = queryScoredCommits(ctx, db, dbPath, core.SystemClock{})
+		commitEvents, err = queryScoredCommits(ctx, db, dbPath, core.SystemClock{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("query cursor scored commits telemetry: %w", err)
+		}
 	}
 
 	if !cursorTableExists(ctx, db, "ai_code_hashes") {
@@ -188,7 +193,10 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	}
 	fi, err := os.Stat(dbPath)
 	if err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat cursor state db: %w", err)
 	}
 	dbMtime := fi.ModTime().UTC()
 
@@ -205,11 +213,11 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	var out []shared.TelemetryEvent
 	composerRecords, err := loadComposerSessionRecords(ctx, db)
 	if err != nil {
-		composerRecords = nil
+		return nil, fmt.Errorf("load cursor composer session records: %w", err)
 	}
 	bubbleRecords, err := loadBubbleRecords(ctx, db)
 	if err != nil {
-		bubbleRecords = nil
+		return nil, fmt.Errorf("load cursor bubble records: %w", err)
 	}
 	sessionTimestamps := composerSessionTimestampMap(composerRecords)
 
@@ -231,9 +239,10 @@ func collectStateDBEvents(ctx context.Context, dbPath string) ([]shared.Telemetr
 	// Collect daily stats (tab/composer suggested/accepted lines).
 	if cursorTableExists(ctx, db, "ItemTable") {
 		dailyEvents, err := collectDailyStatsEvents(ctx, db, dbPath)
-		if err == nil {
-			out = append(out, dailyEvents...)
+		if err != nil {
+			return nil, fmt.Errorf("collect cursor daily stats telemetry: %w", err)
 		}
+		out = append(out, dailyEvents...)
 	}
 
 	return out, nil

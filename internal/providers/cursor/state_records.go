@@ -61,11 +61,15 @@ func loadComposerSessionKeys(ctx context.Context, db *sql.DB) ([]string, error) 
 	var keys []string
 	for rows.Next() {
 		var key string
-		if rows.Scan(&key) == nil {
-			keys = append(keys, key)
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("cursor: scan composerData key row: %w", err)
 		}
+		keys = append(keys, key)
 	}
-	return keys, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor: iterate composerData key rows: %w", err)
+	}
+	return keys, nil
 }
 
 // loadComposerSessionRecordsByKeys loads composer session records for the given keys only.
@@ -169,7 +173,7 @@ func scanComposerSessionRows(rows *sql.Rows) ([]cursorComposerSessionRecord, err
 		if err := rows.Scan(&key, &usageJSON, &createdAt, &mode, &forceMode, &isAgentic,
 			&linesAdded, &linesRemoved, &modelConfigName, &newlyCreated, &addedFiles, &removedFiles,
 			&ctxTokensUsed, &ctxTokenLimit, &filesChangedCnt, &subagentType, &status); err != nil {
-			continue
+			return nil, fmt.Errorf("cursor: scan composerData row: %w", err)
 		}
 		if !usageJSON.Valid || usageJSON.String == "" || usageJSON.String == "{}" {
 			continue
@@ -209,7 +213,10 @@ func scanComposerSessionRows(rows *sql.Rows) ([]cursorComposerSessionRecord, err
 		records = append(records, record)
 	}
 
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor: iterate composerData rows: %w", err)
+	}
+	return records, nil
 }
 
 // loadBubbleKeys returns just the keys for bubbleId entries with type=2.
@@ -228,11 +235,15 @@ func loadBubbleKeys(ctx context.Context, db *sql.DB) ([]string, error) {
 	var keys []string
 	for rows.Next() {
 		var key string
-		if rows.Scan(&key) == nil {
-			keys = append(keys, key)
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("cursor: scan bubbleId key row: %w", err)
 		}
+		keys = append(keys, key)
 	}
-	return keys, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor: iterate bubbleId key rows: %w", err)
+	}
+	return keys, nil
 }
 
 // loadBubbleRecordsByKeys loads bubble records for the given keys only.
@@ -301,7 +312,7 @@ func scanBubbleRows(rows *sql.Rows) ([]cursorBubbleRecord, error) {
 			model          sql.NullString
 		)
 		if err := rows.Scan(&key, &toolName, &toolStatus, &conversationID, &inputTokens, &outputTokens, &model); err != nil {
-			continue
+			return nil, fmt.Errorf("cursor: scan bubbleId row: %w", err)
 		}
 
 		records = append(records, cursorBubbleRecord{
@@ -316,7 +327,10 @@ func scanBubbleRows(rows *sql.Rows) ([]cursorBubbleRecord, error) {
 		})
 	}
 
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor: iterate bubbleId rows: %w", err)
+	}
+	return records, nil
 }
 
 func composerSessionTimestampMap(records []cursorComposerSessionRecord) map[string]time.Time {

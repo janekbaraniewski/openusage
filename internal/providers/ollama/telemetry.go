@@ -143,7 +143,7 @@ func collectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 			createdAt sql.NullString
 		)
 		if err := rows.Scan(&msgID, &chatID, &role, &modelName, &content, &thinking, &createdAt); err != nil {
-			continue
+			return out, fmt.Errorf("ollama: scan telemetry message row: %w", err)
 		}
 
 		if chatID != currentChat {

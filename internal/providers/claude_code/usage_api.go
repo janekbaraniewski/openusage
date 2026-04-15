@@ -102,13 +102,16 @@ func getClaudeSessionCookies() (map[string]string, error) {
 		var name string
 		var encValue []byte
 		if err := rows.Scan(&name, &encValue); err != nil {
-			continue
+			return nil, fmt.Errorf("scan cookie row: %w", err)
 		}
 		decrypted, err := decryptChromiumCookie(encValue, encKey)
 		if err != nil {
 			continue // skip cookies we can't decrypt
 		}
 		cookies[name] = decrypted
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cookie rows: %w", err)
 	}
 
 	if _, ok := cookies["sessionKey"]; !ok {
