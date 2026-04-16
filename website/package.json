@@ -1,0 +1,23 @@
+{
+  "name": "openusage-website",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/prerender.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lobehub/icons-static-svg": "^1.86.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "puppeteer": "^24.41.0",
+    "serve-handler": "^6.1.7",
+    "vite": "^6.4.1",
+    "vite-plugin-css-injected-by-js": "^5.0.0"
+  }
+}

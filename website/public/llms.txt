@@ -1,0 +1,21 @@
+# OpenUsage
+
+> Free, open-source terminal dashboard for monitoring AI coding tool usage and spend.
+
+OpenUsage auto-detects 17 AI coding tools installed on your machine and displays live spend, quotas, model burn rates, and telemetry in a keyboard-driven terminal interface.
+
+## Supported Providers
+
+- Coding Agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode
+- API Platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Gemini API, Alibaba Cloud, Z.AI
+- Local Runtimes: Ollama
+
+## Key Facts
+
+- Written in Go, uses Bubble Tea for the TUI
+- All data stays local (no external servers)
+- 17 built-in color themes
+- Background daemon stores telemetry in local SQLite
+- Install: brew install janekbaraniewski/tap/openusage
+- Source: https://github.com/janekbaraniewski/openusage
+- License: Open source
