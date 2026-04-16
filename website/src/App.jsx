@@ -328,6 +328,12 @@ export default function App() {
       <section className="features-section" id="features">
         <div className="w">
           <R><h2 className="features-title">What it shows</h2></R>
+          <R delay={0.05}>
+            <p className="features-lede">
+              The useful stuff: spend, quotas, model activity, session history, and tool telemetry.
+              No vanity counters. No decorative dashboard filler.
+            </p>
+          </R>
           <div className="features-grid">
             <R><div className="feature-item">
               <h3>Spend, credits, and quotas</h3>
