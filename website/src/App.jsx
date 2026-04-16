@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  acceptAnalytics,
+  analyticsConfigured,
+  declineAnalytics,
+  hasConsentChoice,
+  track,
+} from "./analytics";
 
 const base = import.meta.env.BASE_URL;
 
@@ -153,6 +160,7 @@ const installData = [
 export default function App() {
   const [copied, setCopied] = useState("");
   const [scrolled, setScrolled] = useState(false);
+  const [showConsentBanner, setShowConsentBanner] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 100);
@@ -162,14 +170,40 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setShowConsentBanner(analyticsConfigured() && !hasConsentChoice());
+  }, []);
+
+  useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(""), 1500);
     return () => clearTimeout(t);
   }, [copied]);
 
   async function copy(cmd) {
-    try { await navigator.clipboard.writeText(cmd); setCopied(cmd); }
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(cmd);
+      track("install command copied", { command: cmd });
+    }
     catch { setCopied(""); }
+  }
+
+  function trackCTA(location, target) {
+    track("cta clicked", { location, target });
+  }
+
+  function trackOutbound(target, location) {
+    track("outbound link clicked", { location, target });
+  }
+
+  function acceptTracking() {
+    acceptAnalytics();
+    setShowConsentBanner(false);
+  }
+
+  function declineTracking() {
+    declineAnalytics();
+    setShowConsentBanner(false);
   }
 
   return (
@@ -179,8 +213,8 @@ export default function App() {
         <NavLogo />
         <div className="nav__right">
           <a className="nav__link" href="#providers">Providers</a>
-          <a className="nav__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank">GitHub</a>
-          <a className="nav__cta" href="#install">Install</a>
+          <a className="nav__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "nav")}>GitHub</a>
+          <a className="nav__cta" href="#install" onClick={() => trackCTA("nav", "install")}>Install</a>
         </div>
       </nav>
 
@@ -191,19 +225,20 @@ export default function App() {
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
             <h1 className="hero__title">
-              Know what your AI agents cost.
+              Track AI coding usage, spend, and quotas from your terminal.
             </h1>
           </R>
           <R delay={0.25}>
             <p className="hero__sub">
-              LLM cost tracking and token usage dashboard for your terminal.
-              Auto-detects 17 providers. Zero config.
+              OpenUsage auto-detects supported tools and common API key env vars,
+              then shows spend, quotas, rate limits, model usage, and session telemetry
+              in one keyboard-first dashboard.
             </p>
           </R>
           <R delay={0.35}>
             <div className="hero__actions">
-              <a className="btn btn--fill" href="#install">Get started</a>
-              <a className="btn btn--ghost" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank">GitHub →</a>
+              <a className="btn btn--fill" href="#install" onClick={() => trackCTA("hero", "install")}>Get started</a>
+              <a className="btn btn--ghost" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "hero")}>GitHub →</a>
             </div>
           </R>
         </div>
@@ -213,16 +248,16 @@ export default function App() {
       <section className="pitch">
         <div className="w">
           <R as="p" className="pitch__line">
-            <em>Auto-detects</em> your AI coding agents and API keys.
+            <em>Auto-detects</em> your coding tools and common API key env vars.
           </R>
           <R className="pitch__line" delay={0.12}>
             <p className="pitch__line" style={{margin:0}}>
-              Tracks <em>agent costs, token usage,</em> and <em>LLM spend</em> at a glance.
+              Shows <em>spend, quotas,</em> and <em>model usage</em> in one place.
             </p>
           </R>
           <R className="pitch__line" delay={0.24}>
             <p className="pitch__line" style={{margin:0}}>
-              Zero config required — just run <code>openusage</code>.
+              Runs locally. Install it, then run <code>openusage</code>.
             </p>
           </R>
         </div>
@@ -239,7 +274,7 @@ export default function App() {
               ]} />
             </div>
           </R>
-          <R><p className="demo__caption">dashboard · detail · compare · analytics</p></R>
+          <R><p className="demo__caption">dashboard · detail · compare · analytics views</p></R>
         </div>
       </section>
 
@@ -248,7 +283,7 @@ export default function App() {
         <div className="w">
           <R>
             <p className="demo__caption" style={{ textAlign: 'left', marginBottom: 16, fontSize: '1rem', color: 'var(--text-2)' }}>
-              Run it side-by-side with your coding agent
+              Keep it open beside the agent you are using.
             </p>
           </R>
           <R>
@@ -271,7 +306,7 @@ export default function App() {
         <div className="w">
           <R>
             <p className="demo__caption" style={{ textAlign: 'left', marginBottom: 16, fontSize: '1rem', color: 'var(--text-2)' }}>
-              Configurable tile sections. Customizable detail graphs. Customizable dashboards. Time windows. Thresholds. 17 built-in themes.
+              Rearrange dashboard sections. Tune detail graphs. Switch time windows. Set thresholds.
             </p>
           </R>
           <R>
@@ -285,38 +320,38 @@ export default function App() {
               />
             </div>
           </R>
-          <R><p className="demo__caption">Settings modal — tile sections, detail graphs, themes, and live preview</p></R>
+          <R><p className="demo__caption">Settings modal — layout, graphs, thresholds, and live preview</p></R>
         </div>
       </section>
 
       {/* ── Features (keyword-rich, 2-col grid) ─────────── */}
       <section className="features-section" id="features">
         <div className="w">
-          <R><h2 className="features-title">What it tracks</h2></R>
+          <R><h2 className="features-title">What it shows</h2></R>
           <div className="features-grid">
             <R><div className="feature-item">
-              <h3>Agent cost tracking</h3>
-              <p>Real-time spend monitoring across Claude Code, Cursor, Copilot, Codex, and every other provider. See daily cost trends and burn rates at a glance.</p>
+              <h3>Spend, credits, and quotas</h3>
+              <p>See daily spend, remaining credits, plan usage, resets, and burn rate wherever the provider exposes them.</p>
             </div></R>
             <R delay={0.06}><div className="feature-item">
-              <h3>Token usage &amp; consumption</h3>
-              <p>Per-model token distribution, input vs output breakdown, cost per token. Track token consumption across sessions and time windows.</p>
+              <h3>Token and model breakdowns</h3>
+              <p>Compare input, output, cached, and reasoning tokens with per-model usage where provider or local telemetry supports it.</p>
             </div></R>
             <R delay={0.12}><div className="feature-item">
-              <h3>Model usage monitoring</h3>
-              <p>See which models you're burning through — GPT-4o, Claude Sonnet, Gemini Pro, DeepSeek, and more. Compare model usage patterns across providers.</p>
+              <h3>Session and client activity</h3>
+              <p>Inspect sessions, projects, clients, and daily trends from supported local telemetry and provider APIs.</p>
             </div></R>
             <R delay={0.18}><div className="feature-item">
-              <h3>MCP &amp; tool call tracking</h3>
-              <p>Track MCP tool usage, tool call frequency, and which tools each agent session invokes. Full session-level visibility.</p>
+              <h3>MCP and tool usage</h3>
+              <p>See which MCP servers and tools were used, how often they ran, and which sessions they appeared in for supported integrations.</p>
             </div></R>
             <R delay={0.24}><div className="feature-item">
-              <h3>Quotas &amp; rate limits</h3>
-              <p>Live quota monitoring and rate limit tracking. See remaining requests, token limits, plan usage percentages, and threshold alerts.</p>
+              <h3>Daemon-backed history</h3>
+              <p>Keep collecting data in the background and analyze time windows from the local SQLite telemetry store.</p>
             </div></R>
             <R delay={0.30}><div className="feature-item">
               <h3>Code statistics</h3>
-              <p>Lines added and removed, languages used, files touched per session. Track code generation output across providers.</p>
+              <p>Track lines added, files touched, and language mix from supported coding-tool telemetry.</p>
             </div></R>
           </div>
         </div>
@@ -329,7 +364,7 @@ export default function App() {
             <div className="prov-header">
               <h2 className="prov-header__title">17 providers</h2>
               <p className="prov-header__sub">
-                Track costs across coding agents, API platforms, and local LLMs.<br />One dashboard.
+                Coding agents, API platforms, and local runtimes.<br />One place to watch them all.
               </p>
             </div>
           </R>
@@ -369,8 +404,8 @@ export default function App() {
             <div className="install-header">
               <h2 className="install-title">Get started</h2>
               <p className="install-desc">
-                One command. Auto-detects every provider and API key on first run.
-                Start tracking agent costs immediately — no config file needed.
+                Install it, run <code>openusage</code>, and let auto-detection pick up supported
+                tools and common API key env vars. Add manual accounts later only if you need to.
               </p>
             </div>
           </R>
@@ -404,11 +439,26 @@ export default function App() {
         <div className="w" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
           <span>OpenUsage · open source</span>
           <div className="footer__links">
-            <a className="footer__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank">GitHub</a>
-            <a className="footer__link" href="https://github.com/janekbaraniewski/openusage/releases" rel="noreferrer" target="_blank">Releases</a>
+            <a className="footer__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "footer")}>GitHub</a>
+            <a className="footer__link" href="https://github.com/janekbaraniewski/openusage/releases" rel="noreferrer" target="_blank" onClick={() => trackOutbound("releases", "footer")}>Releases</a>
           </div>
         </div>
       </footer>
+      {showConsentBanner ? (
+        <div className="consent-banner" role="dialog" aria-live="polite" aria-label="Analytics preference">
+          <p className="consent-banner__text">
+            Allow privacy-respecting analytics so we can see pageviews, GitHub clicks, and install intent.
+          </p>
+          <div className="consent-banner__actions">
+            <button className="consent-banner__button consent-banner__button--primary" type="button" onClick={acceptTracking}>
+              Allow
+            </button>
+            <button className="consent-banner__button" type="button" onClick={declineTracking}>
+              Decline
+            </button>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

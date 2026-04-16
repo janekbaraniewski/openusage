@@ -526,6 +526,50 @@ button { font: inherit; cursor: pointer; }
 .footer__link { color: var(--text-2); transition: color 0.2s; }
 .footer__link:hover { color: var(--text); }
 
+/* ── Consent ───────────────────────────────────────────────── */
+
+.consent-banner {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 120;
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px;
+  background: rgba(21,21,21,0.96);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+}
+
+.consent-banner__text {
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.consent-banner__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.consent-banner__button {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.consent-banner__button--primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--bg);
+}
+
 /* ── Responsive ────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
@@ -539,4 +583,13 @@ button { font: inherit; cursor: pointer; }
   .install-label { display: none; }
   .prov-detect { display: none; }
   .nav__link { display: none; }
+  .consent-banner {
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+  .consent-banner__actions {
+    justify-content: stretch;
+    flex-direction: column;
+  }
 }

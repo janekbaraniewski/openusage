@@ -19,6 +19,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
+      VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
     defaults:
       run:
         working-directory: website
