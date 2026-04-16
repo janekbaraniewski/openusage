@@ -191,13 +191,13 @@ export default function App() {
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
             <h1 className="hero__title">
-              Know what your AI tools cost.
+              Know what your AI agents cost.
             </h1>
           </R>
           <R delay={0.25}>
             <p className="hero__sub">
-              The coding agent usage dashboard you've been looking for.
-              Auto-detects 17 providers. Zero config. Your terminal.
+              LLM cost tracking and token usage dashboard for your terminal.
+              Auto-detects 17 providers. Zero config.
             </p>
           </R>
           <R delay={0.35}>
@@ -213,11 +213,11 @@ export default function App() {
       <section className="pitch">
         <div className="w">
           <R as="p" className="pitch__line">
-            <em>Auto-detects</em> your AI coding tools and API keys.
+            <em>Auto-detects</em> your AI coding agents and API keys.
           </R>
           <R className="pitch__line" delay={0.12}>
             <p className="pitch__line" style={{margin:0}}>
-              Shows <em>live spend, quotas,</em> and <em>per-model usage</em> at a glance.
+              Tracks <em>agent costs, token usage,</em> and <em>LLM spend</em> at a glance.
             </p>
           </R>
           <R className="pitch__line" delay={0.24}>
@@ -289,6 +289,39 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── Features (keyword-rich, 2-col grid) ─────────── */}
+      <section className="features-section" id="features">
+        <div className="w">
+          <R><h2 className="features-title">What it tracks</h2></R>
+          <div className="features-grid">
+            <R><div className="feature-item">
+              <h3>Agent cost tracking</h3>
+              <p>Real-time spend monitoring across Claude Code, Cursor, Copilot, Codex, and every other provider. See daily cost trends and burn rates at a glance.</p>
+            </div></R>
+            <R delay={0.06}><div className="feature-item">
+              <h3>Token usage &amp; consumption</h3>
+              <p>Per-model token distribution, input vs output breakdown, cost per token. Track token consumption across sessions and time windows.</p>
+            </div></R>
+            <R delay={0.12}><div className="feature-item">
+              <h3>Model usage monitoring</h3>
+              <p>See which models you're burning through — GPT-4o, Claude Sonnet, Gemini Pro, DeepSeek, and more. Compare model usage patterns across providers.</p>
+            </div></R>
+            <R delay={0.18}><div className="feature-item">
+              <h3>MCP &amp; tool call tracking</h3>
+              <p>Track MCP tool usage, tool call frequency, and which tools each agent session invokes. Full session-level visibility.</p>
+            </div></R>
+            <R delay={0.24}><div className="feature-item">
+              <h3>Quotas &amp; rate limits</h3>
+              <p>Live quota monitoring and rate limit tracking. See remaining requests, token limits, plan usage percentages, and threshold alerts.</p>
+            </div></R>
+            <R delay={0.30}><div className="feature-item">
+              <h3>Code statistics</h3>
+              <p>Lines added and removed, languages used, files touched per session. Track code generation output across providers.</p>
+            </div></R>
+          </div>
+        </div>
+      </section>
+
       {/* ── Providers (asymmetric: title left, grid below) ── */}
       <section className="prov-section" id="providers">
         <div className="w">
@@ -296,7 +329,7 @@ export default function App() {
             <div className="prov-header">
               <h2 className="prov-header__title">17 providers</h2>
               <p className="prov-header__sub">
-                Coding agents, API platforms, and local tools.<br />One surface.
+                Track costs across coding agents, API platforms, and local LLMs.<br />One dashboard.
               </p>
             </div>
           </R>
@@ -337,7 +370,7 @@ export default function App() {
               <h2 className="install-title">Get started</h2>
               <p className="install-desc">
                 One command. Auto-detects every provider and API key on first run.
-                No config file needed.
+                Start tracking agent costs immediately — no config file needed.
               </p>
             </div>
           </R>
