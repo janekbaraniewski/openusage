@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/janekbaraniewski/openusage/internal/core"
+import (
+	"time"
+
+	"github.com/janekbaraniewski/openusage/internal/core"
+)
 
 func settingsWidgetSectionsPreviewSnapshot() core.UsageSnapshot {
 	usedMetric := func(used float64, unit, window string) core.Metric {
@@ -20,10 +24,26 @@ func settingsWidgetSectionsPreviewSnapshot() core.UsageSnapshot {
 			Window:    window,
 		}
 	}
+	recentSeries := func(end time.Time, values ...float64) []core.TimePoint {
+		if len(values) == 0 {
+			return nil
+		}
+		points := make([]core.TimePoint, 0, len(values))
+		start := end.UTC().AddDate(0, 0, -(len(values) - 1))
+		for i, value := range values {
+			day := start.AddDate(0, 0, i)
+			points = append(points, core.TimePoint{
+				Date:  day.Format("2006-01-02"),
+				Value: value,
+			})
+		}
+		return points
+	}
 
 	snap := core.NewUsageSnapshot(settingsWidgetPreviewProviderID, "claude-preview")
 	snap.Status = core.StatusOK
 	snap.Message = "Settings preview"
+	seriesEnd := time.Now().UTC().Truncate(24 * time.Hour)
 	snap.Attributes = map[string]string{
 		"telemetry_view": "canonical",
 	}
@@ -87,62 +107,14 @@ func settingsWidgetSectionsPreviewSnapshot() core.UsageSnapshot {
 		"upstream_anthropic_cost_usd":           usedMetric(14.00, "USD", "7d"),
 	}
 	snap.DailySeries = map[string][]core.TimePoint{
-		"analytics_cost": {
-			{Date: "2026-03-01", Value: 2.8},
-			{Date: "2026-03-02", Value: 3.2},
-			{Date: "2026-03-03", Value: 4.1},
-			{Date: "2026-03-04", Value: 3.7},
-			{Date: "2026-03-05", Value: 5.2},
-		},
-		"analytics_requests": {
-			{Date: "2026-03-01", Value: 210},
-			{Date: "2026-03-02", Value: 238},
-			{Date: "2026-03-03", Value: 290},
-			{Date: "2026-03-04", Value: 256},
-			{Date: "2026-03-05", Value: 311},
-		},
-		"usage_model_claude_sonnet_4_5": {
-			{Date: "2026-03-01", Value: 154},
-			{Date: "2026-03-02", Value: 183},
-			{Date: "2026-03-03", Value: 201},
-			{Date: "2026-03-04", Value: 176},
-			{Date: "2026-03-05", Value: 218},
-		},
-		"usage_model_claude_haiku_3_5": {
-			{Date: "2026-03-01", Value: 91},
-			{Date: "2026-03-02", Value: 88},
-			{Date: "2026-03-03", Value: 103},
-			{Date: "2026-03-04", Value: 97},
-			{Date: "2026-03-05", Value: 111},
-		},
-		"usage_client_claude_code": {
-			{Date: "2026-03-01", Value: 160},
-			{Date: "2026-03-02", Value: 182},
-			{Date: "2026-03-03", Value: 211},
-			{Date: "2026-03-04", Value: 189},
-			{Date: "2026-03-05", Value: 229},
-		},
-		"usage_client_ide": {
-			{Date: "2026-03-01", Value: 63},
-			{Date: "2026-03-02", Value: 71},
-			{Date: "2026-03-03", Value: 79},
-			{Date: "2026-03-04", Value: 67},
-			{Date: "2026-03-05", Value: 82},
-		},
-		"usage_source_bedrock": {
-			{Date: "2026-03-01", Value: 108},
-			{Date: "2026-03-02", Value: 114},
-			{Date: "2026-03-03", Value: 128},
-			{Date: "2026-03-04", Value: 121},
-			{Date: "2026-03-05", Value: 133},
-		},
-		"usage_source_claude": {
-			{Date: "2026-03-01", Value: 102},
-			{Date: "2026-03-02", Value: 124},
-			{Date: "2026-03-03", Value: 146},
-			{Date: "2026-03-04", Value: 135},
-			{Date: "2026-03-05", Value: 152},
-		},
+		"analytics_cost":                recentSeries(seriesEnd, 2.8, 3.2, 4.1, 3.7, 5.2),
+		"analytics_requests":            recentSeries(seriesEnd, 210, 238, 290, 256, 311),
+		"usage_model_claude_sonnet_4_5": recentSeries(seriesEnd, 154, 183, 201, 176, 218),
+		"usage_model_claude_haiku_3_5":  recentSeries(seriesEnd, 91, 88, 103, 97, 111),
+		"usage_client_claude_code":      recentSeries(seriesEnd, 160, 182, 211, 189, 229),
+		"usage_client_ide":              recentSeries(seriesEnd, 63, 71, 79, 67, 82),
+		"usage_source_bedrock":          recentSeries(seriesEnd, 108, 114, 128, 121, 133),
+		"usage_source_claude":           recentSeries(seriesEnd, 102, 124, 146, 135, 152),
 	}
 	return snap
 }

@@ -302,3 +302,27 @@ func TestSettingsWidgetPreviewBodyHeight_SideBySideShrinksToContent(t *testing.T
 		t.Fatalf("expected side-by-side preview height to shrink below viewport max for short content, got=%d max=%d", got, maxViewport)
 	}
 }
+
+func TestRenderSettingsDetailSectionsPreview_ShowsTrendCharts(t *testing.T) {
+	t.Cleanup(func() { setDetailSectionOverrides(nil) })
+
+	m := NewModel(
+		0.2,
+		0.05,
+		false,
+		config.DashboardConfig{},
+		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
+		core.TimeWindow30d,
+	)
+	m.setDetailWidgetSectionEntries([]config.DetailWidgetSection{
+		{ID: core.DetailSectionTrends, Enabled: true},
+	})
+
+	preview := stripANSI(m.renderSettingsDetailSectionsPreview(110, 32))
+	if !strings.Contains(preview, "Daily Usage") {
+		t.Fatalf("expected daily trend summary in detail preview, got: %q", preview)
+	}
+	if !strings.Contains(preview, "Requests") || !strings.Contains(preview, "Analytics Cost") {
+		t.Fatalf("expected trend charts in detail preview, got: %q", preview)
+	}
+}
