@@ -1,21 +1,48 @@
-# OpenUsage
+# OpenUsage — LLM Cost Tracking & AI Agent Usage Dashboard
 
-> Free, open-source terminal dashboard for monitoring AI coding tool usage and spend.
+> Free, open-source terminal dashboard for LLM cost tracking, AI agent token usage monitoring, model usage analysis, MCP tool tracking, and API spend observability across 17 providers.
 
-OpenUsage auto-detects 17 AI coding tools installed on your machine and displays live spend, quotas, model burn rates, and telemetry in a keyboard-driven terminal interface.
+OpenUsage is an LLM dashboard that tracks AI agent costs and token consumption from your terminal. It auto-detects installed coding tools and API keys, then displays live cost tracking, quotas, model burn rates, and token usage data in a keyboard-driven terminal interface. Think of it as LLM observability for your local development environment.
 
-## Supported Providers
+## What OpenUsage Tracks
 
-- Coding Agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode
-- API Platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Gemini API, Alibaba Cloud, Z.AI
-- Local Runtimes: Ollama
+- **Agent cost tracking** — Real-time spend across Claude Code, Cursor, Copilot, Codex CLI, and more
+- **LLM token usage & consumption** — Per-model token distribution, input vs output breakdown, cost per token
+- **Model usage monitoring** — Which models you're using across all providers, burn rates, cost comparison
+- **MCP usage tracking** — MCP tool call frequency, which tools each session invokes
+- **API cost tracking** — OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek API spend monitoring
+- **Quota monitoring & rate limit tracking** — Remaining requests, token limits, plan usage percentages
+- **Session tracking** — Per-session cost analysis, token consumption, tool usage
+- **Daily cost trends** — Historical spend data, burn rate analysis, time window comparisons
+- **Code statistics** — Lines added/removed, languages used, files touched per provider
+- **Tool call tracking** — Tool and MCP server usage per session
+
+## Supported Providers (17)
+
+- Coding Agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, Ollama
+- API Platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, Alibaba Cloud
 
 ## Key Facts
 
-- Written in Go, uses Bubble Tea for the TUI
-- All data stays local (no external servers)
+- Written in Go, uses Bubble Tea for the terminal UI
+- All data stays local (no external servers) — local-first LLM observability
 - 17 built-in color themes
-- Background daemon stores telemetry in local SQLite
+- Background daemon stores telemetry in local SQLite for historical LLM cost tracking
+- Zero config — auto-detects everything on first run
 - Install: brew install janekbaraniewski/tap/openusage
 - Source: https://github.com/janekbaraniewski/openusage
+- Website: https://openusage.sh
 - License: Open source
+
+## Use Cases
+
+- Track how much your AI coding agents cost per day/week/month
+- Monitor LLM token consumption across multiple providers
+- Compare agent costs between Claude Code, Cursor, and Copilot
+- Set up a terminal LLM dashboard for real-time spend visibility
+- Analyze token usage patterns and model burn rates
+- Monitor MCP tool usage and tool call frequency across sessions
+- Track API rate limits and quota usage for OpenAI, Anthropic, and more
+- Get LLM observability without cloud dependencies or external services
+- Monitor model usage patterns — which models consume the most tokens and budget
+- Track code generation output across providers (lines, languages, files)
