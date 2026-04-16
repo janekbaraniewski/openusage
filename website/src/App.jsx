@@ -278,6 +278,46 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── Providers (asymmetric: title left, grid below) ── */}
+      <section className="prov-section" id="providers">
+        <div className="w">
+          <R>
+            <div className="prov-header">
+              <h2 className="prov-header__title">17 providers</h2>
+              <p className="prov-header__sub">
+                Coding agents, API platforms, and local runtimes.<br />One place to watch them all.
+              </p>
+            </div>
+          </R>
+
+          <div className="prov-grid">
+            <div className="prov-col">
+              <R><div className="prov-col__label prov-col__label--agents">Coding Agents &amp; IDEs</div></R>
+              {codingAgents.map((p, i) => (
+                <R key={p.name} delay={i * 0.04}>
+                  <div className="prov-item">
+                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    <span className="prov-name">{p.name}</span>
+                  </div>
+                </R>
+              ))}
+            </div>
+
+            <div className="prov-col">
+              <R><div className="prov-col__label prov-col__label--api">API Platforms</div></R>
+              {apiPlatforms.map((p, i) => (
+                <R key={p.name} delay={i * 0.03}>
+                  <div className="prov-item">
+                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    <span className="prov-name">{p.name}</span>
+                  </div>
+                </R>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Side-by-side video ────────────────────────────── */}
       <section className="demo">
         <div className="w">
@@ -298,29 +338,6 @@ export default function App() {
             </div>
           </R>
           <R><p className="demo__caption">OpenUsage running alongside OpenCode monitoring live OpenRouter usage.</p></R>
-        </div>
-      </section>
-
-      {/* ── Settings video ───────────────────────────────── */}
-      <section className="demo">
-        <div className="w">
-          <R>
-            <p className="demo__caption" style={{ textAlign: 'left', marginBottom: 16, fontSize: '1rem', color: 'var(--text-2)' }}>
-              Rearrange dashboard sections. Tune detail graphs. Switch time windows. Set thresholds.
-            </p>
-          </R>
-          <R>
-            <div className="demo__frame" style={{ aspectRatio: '16 / 8.56' }}>
-              <LazyVideo
-                style={{ objectFit: 'cover', objectPosition: 'center 48.5%' }}
-                sources={[
-                  { src: `${base}media/tile-config-example.webm`, type: "video/webm" },
-                  { src: `${base}media/tile-config-example.mp4`, type: "video/mp4" },
-                ]}
-              />
-            </div>
-          </R>
-          <R><p className="demo__caption">Settings modal — layout, graphs, thresholds, and live preview</p></R>
         </div>
       </section>
 
@@ -363,43 +380,26 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── Providers (asymmetric: title left, grid below) ── */}
-      <section className="prov-section" id="providers">
+      {/* ── Settings video ───────────────────────────────── */}
+      <section className="demo">
         <div className="w">
           <R>
-            <div className="prov-header">
-              <h2 className="prov-header__title">17 providers</h2>
-              <p className="prov-header__sub">
-                Coding agents, API platforms, and local runtimes.<br />One place to watch them all.
-              </p>
+            <p className="demo__caption" style={{ textAlign: 'left', marginBottom: 16, fontSize: '1rem', color: 'var(--text-2)' }}>
+              Rearrange dashboard sections. Tune detail graphs. Switch time windows. Set thresholds.
+            </p>
+          </R>
+          <R>
+            <div className="demo__frame" style={{ aspectRatio: '16 / 8.56' }}>
+              <LazyVideo
+                style={{ objectFit: 'cover', objectPosition: 'center 48.5%' }}
+                sources={[
+                  { src: `${base}media/tile-config-example.webm`, type: "video/webm" },
+                  { src: `${base}media/tile-config-example.mp4`, type: "video/mp4" },
+                ]}
+              />
             </div>
           </R>
-
-          <div className="prov-grid">
-            <div className="prov-col">
-              <R><div className="prov-col__label prov-col__label--agents">Coding Agents &amp; IDEs</div></R>
-              {codingAgents.map((p, i) => (
-                <R key={p.name} delay={i * 0.04}>
-                  <div className="prov-item">
-                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
-                    <span className="prov-name">{p.name}</span>
-                  </div>
-                </R>
-              ))}
-            </div>
-
-            <div className="prov-col">
-              <R><div className="prov-col__label prov-col__label--api">API Platforms</div></R>
-              {apiPlatforms.map((p, i) => (
-                <R key={p.name} delay={i * 0.03}>
-                  <div className="prov-item">
-                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
-                    <span className="prov-name">{p.name}</span>
-                  </div>
-                </R>
-              ))}
-            </div>
-          </div>
+          <R><p className="demo__caption">Settings modal — layout, graphs, thresholds, and live preview</p></R>
         </div>
       </section>
 
