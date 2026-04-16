@@ -15,11 +15,11 @@ jobs:
     name: Release (Linux & Windows)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -45,11 +45,11 @@ jobs:
     runs-on: macos-latest
     needs: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [release, release-macos]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Get version from tag
         id: version
@@ -177,7 +177,7 @@ jobs:
 
           class Openusage < Formula
             desc "Monitor your AI coding tool quotas from a single TUI dashboard"
-            homepage "https://github.com/${REPO}"
+            homepage "https://openusage.sh"
             version "${VERSION}"
             license "MIT"
 
