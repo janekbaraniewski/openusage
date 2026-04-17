@@ -93,6 +93,56 @@ func TestMouseWheelScrollsWidgetInSplitView(t *testing.T) {
 	}
 }
 
+func TestMouseLeftClickDoesNotChangeSelectionInGridView(t *testing.T) {
+	m := Model{
+		width:         220,
+		height:        40,
+		dashboardView: dashboardViewGrid,
+		cursor:        0,
+		sortedIDs:     []string{"a", "b", "c", "d"},
+		snapshots:     testSnapshots("a", "b", "c", "d"),
+	}
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      150,
+		Y:      5,
+	})
+	got := updated.(Model)
+	if got.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", got.cursor)
+	}
+	if got.tileOffset != 0 {
+		t.Fatalf("tileOffset = %d, want 0", got.tileOffset)
+	}
+}
+
+func TestMouseLeftClickDoesNotChangeSelectionInStackedView(t *testing.T) {
+	m := Model{
+		width:         90,
+		height:        40,
+		dashboardView: dashboardViewStacked,
+		cursor:        0,
+		sortedIDs:     []string{"a", "b", "c", "d"},
+		snapshots:     testSnapshots("a", "b", "c", "d"),
+	}
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      20,
+		Y:      14,
+	})
+	got := updated.(Model)
+	if got.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", got.cursor)
+	}
+	if got.tileOffset != 0 {
+		t.Fatalf("tileOffset = %d, want 0", got.tileOffset)
+	}
+}
+
 func TestMouseWheelScrollsSettingsWidgetPreview(t *testing.T) {
 	m := NewModel(
 		0.2,
