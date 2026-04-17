@@ -62,15 +62,19 @@ func buildClaudeCodeDemoSnapshot(now time.Time) core.UsageSnapshot {
 			"7d_web_fetch_requests":     {Used: ptr(467.0), Unit: "requests", Window: "7d"},
 
 			// ── Model cost/token breakdown ────────────────────────
-			"model_claude_opus_4_6_cost_usd":                {Used: ptr(2162.4), Unit: "USD", Window: "30d"},
-			"model_claude_opus_4_6_input_tokens":            {Used: ptr(829000000.0), Unit: "tokens", Window: "30d"},
-			"model_claude_opus_4_6_output_tokens":           {Used: ptr(198000000.0), Unit: "tokens", Window: "30d"},
-			"model_claude_haiku_4_5_20251001_cost_usd":      {Used: ptr(22.88), Unit: "USD", Window: "30d"},
-			"model_claude_haiku_4_5_20251001_input_tokens":  {Used: ptr(146000000.0), Unit: "tokens", Window: "30d"},
-			"model_claude_haiku_4_5_20251001_output_tokens": {Used: ptr(26200000.0), Unit: "tokens", Window: "30d"},
-			"model_claude_sonnet_4_6_cost_usd":              {Used: ptr(3.92), Unit: "USD", Window: "30d"},
-			"model_claude_sonnet_4_6_input_tokens":          {Used: ptr(4200000.0), Unit: "tokens", Window: "30d"},
-			"model_claude_sonnet_4_6_output_tokens":         {Used: ptr(900000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_opus_4_6_cost_usd":                    {Used: ptr(2162.4), Unit: "USD", Window: "30d"},
+			"model_claude_opus_4_6_input_tokens":                {Used: ptr(829000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_opus_4_6_output_tokens":               {Used: ptr(198000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_opus_4_6_cache_read_tokens":           {Used: ptr(9800000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_opus_4_6_cache_write_tokens":          {Used: ptr(412000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_haiku_4_5_20251001_cost_usd":          {Used: ptr(22.88), Unit: "USD", Window: "30d"},
+			"model_claude_haiku_4_5_20251001_input_tokens":      {Used: ptr(146000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_haiku_4_5_20251001_output_tokens":     {Used: ptr(26200000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_haiku_4_5_20251001_cache_read_tokens": {Used: ptr(1460000000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_sonnet_4_6_cost_usd":                  {Used: ptr(3.92), Unit: "USD", Window: "30d"},
+			"model_claude_sonnet_4_6_input_tokens":              {Used: ptr(4200000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_sonnet_4_6_output_tokens":             {Used: ptr(900000.0), Unit: "tokens", Window: "30d"},
+			"model_claude_sonnet_4_6_cache_read_tokens":         {Used: ptr(32000000.0), Unit: "tokens", Window: "30d"},
 
 			// ── Client breakdown ──────────────────────────────────
 			"client_api_server_input_tokens":     {Used: ptr(196000000.0), Unit: "tokens", Window: "30d"},

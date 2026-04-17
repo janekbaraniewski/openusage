@@ -9,12 +9,14 @@ import (
 type modelMetricKind string
 
 const (
-	modelMetricInput     modelMetricKind = "input"
-	modelMetricOutput    modelMetricKind = "output"
-	modelMetricCached    modelMetricKind = "cached"
-	modelMetricReasoning modelMetricKind = "reasoning"
-	modelMetricCostUSD   modelMetricKind = "cost_usd"
-	modelMetricRequests  modelMetricKind = "requests"
+	modelMetricInput      modelMetricKind = "input"
+	modelMetricOutput     modelMetricKind = "output"
+	modelMetricCached     modelMetricKind = "cached"
+	modelMetricCacheRead  modelMetricKind = "cache_read"
+	modelMetricCacheWrite modelMetricKind = "cache_write"
+	modelMetricReasoning  modelMetricKind = "reasoning"
+	modelMetricCostUSD    modelMetricKind = "cost_usd"
+	modelMetricRequests   modelMetricKind = "requests"
 )
 
 type modelWindowKey struct {
@@ -125,9 +127,9 @@ func parseModelMetricKey(key string) (rawModelID string, kind modelMetricKind, o
 	case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cached_tokens"):
 		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cached_tokens"), modelMetricCached, true
 	case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_read_tokens"):
-		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_read_tokens"), modelMetricCached, true
+		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_read_tokens"), modelMetricCacheRead, true
 	case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cache_write_tokens"):
-		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_write_tokens"), modelMetricCached, true
+		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_cache_write_tokens"), modelMetricCacheWrite, true
 	case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_reasoning_tokens"):
 		return strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_reasoning_tokens"), modelMetricReasoning, true
 	case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_cost_usd"):
@@ -171,7 +173,7 @@ func applyModelMetric(rec *ModelUsageRecord, kind modelMetricKind, value float64
 		rec.InputTokens = addPtrValue(rec.InputTokens, value)
 	case modelMetricOutput:
 		rec.OutputTokens = addPtrValue(rec.OutputTokens, value)
-	case modelMetricCached:
+	case modelMetricCached, modelMetricCacheRead, modelMetricCacheWrite:
 		rec.CachedTokens = addPtrValue(rec.CachedTokens, value)
 	case modelMetricReasoning:
 		rec.ReasoningTokens = addPtrValue(rec.ReasoningTokens, value)

@@ -86,7 +86,8 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		mk := sanitizeMetricID(model.Model)
 		snap.Metrics["model_"+mk+"_input_tokens"] = core.Metric{Used: core.Float64Ptr(model.InputTokens), Unit: "tokens", Window: windowLabel}
 		snap.Metrics["model_"+mk+"_output_tokens"] = core.Metric{Used: core.Float64Ptr(model.OutputTokens), Unit: "tokens", Window: windowLabel}
-		snap.Metrics["model_"+mk+"_cached_tokens"] = core.Metric{Used: core.Float64Ptr(model.CachedTokens), Unit: "tokens", Window: windowLabel}
+		snap.Metrics["model_"+mk+"_cache_read_tokens"] = core.Metric{Used: core.Float64Ptr(model.CacheReadTokens), Unit: "tokens", Window: windowLabel}
+		snap.Metrics["model_"+mk+"_cache_write_tokens"] = core.Metric{Used: core.Float64Ptr(model.CacheWriteTokens), Unit: "tokens", Window: windowLabel}
 		snap.Metrics["model_"+mk+"_reasoning_tokens"] = core.Metric{Used: core.Float64Ptr(model.Reasoning), Unit: "tokens", Window: windowLabel}
 		snap.Metrics["model_"+mk+"_cost_usd"] = core.Metric{Used: core.Float64Ptr(model.CostUSD), Unit: "USD", Window: windowLabel}
 		snap.Metrics["model_"+mk+"_requests"] = core.Metric{Used: core.Float64Ptr(model.Requests), Unit: "requests", Window: windowLabel}
@@ -98,7 +99,7 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 			Window:          windowLabel,
 			InputTokens:     core.Float64Ptr(model.InputTokens),
 			OutputTokens:    core.Float64Ptr(model.OutputTokens),
-			CachedTokens:    core.Float64Ptr(model.CachedTokens),
+			CachedTokens:    core.Float64Ptr(model.CachedTokens()),
 			ReasoningTokens: core.Float64Ptr(model.Reasoning),
 			TotalTokens:     core.Float64Ptr(model.TotalTokens),
 			CostUSD:         core.Float64Ptr(model.CostUSD),
@@ -246,11 +247,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 		snap.Metrics["composer_lines_removed"] = core.Metric{Used: core.Float64Ptr(codeStats.LinesRemoved), Unit: "lines", Window: windowLabel}
 	}
 
-	var windowRequests, windowCost, windowTokens float64
+	var windowRequests, windowCost, windowBillable, windowCacheRead float64
 	for _, model := range agg.Models {
 		windowRequests += model.Requests
 		windowCost += model.CostUSD
-		windowTokens += model.TotalTokens
+		windowBillable += model.BillableTokens
+		windowCacheRead += model.CacheReadTokens
 	}
 	if windowRequests > 0 {
 		snap.Metrics["window_requests"] = core.Metric{Used: core.Float64Ptr(windowRequests), Unit: "requests", Window: windowLabel}
@@ -258,8 +260,15 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	if windowCost > 0 {
 		snap.Metrics["window_cost"] = core.Metric{Used: core.Float64Ptr(windowCost), Unit: "USD", Window: windowLabel}
 	}
-	if windowTokens > 0 {
-		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowTokens), Unit: "tokens", Window: windowLabel}
+	// window_tokens represents billable token volume — input + output + cache writes
+	// + reasoning. Cache reads are excluded because they're discounted 90% and
+	// represent repeated reads of cached bytes, which inflates apparent usage
+	// by orders of magnitude without reflecting actual consumption.
+	if windowBillable > 0 {
+		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowBillable), Unit: "tokens", Window: windowLabel}
+	}
+	if windowCacheRead > 0 {
+		snap.Metrics["window_cache_read_tokens"] = core.Metric{Used: core.Float64Ptr(windowCacheRead), Unit: "tokens", Window: windowLabel}
 	}
 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(point telemetryDayPoint) float64 { return point.CostUSD })

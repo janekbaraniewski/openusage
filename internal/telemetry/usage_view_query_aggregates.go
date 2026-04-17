@@ -34,7 +34,8 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 			COALESCE(NULLIF(TRIM(COALESCE(model_canonical, model_raw)), ''), 'unknown') AS model_key,
 			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
 			SUM(COALESCE(output_tokens, 0)) AS output_tokens,
-			SUM(COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)) AS cached_tokens,
+			SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
+			SUM(COALESCE(cache_write_tokens, 0)) AS cache_write_tokens,
 			SUM(COALESCE(reasoning_tokens, 0)) AS reasoning_tokens,
 			SUM(COALESCE(total_tokens,
 				COALESCE(input_tokens, 0) +
@@ -42,6 +43,10 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 				COALESCE(reasoning_tokens, 0) +
 				COALESCE(cache_read_tokens, 0) +
 				COALESCE(cache_write_tokens, 0))) AS total_tokens,
+			SUM(COALESCE(input_tokens, 0) +
+				COALESCE(output_tokens, 0) +
+				COALESCE(reasoning_tokens, 0) +
+				COALESCE(cache_write_tokens, 0)) AS billable_tokens,
 			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
 			SUM(COALESCE(requests, 1)) AS requests,
 			SUM(CASE WHEN %s THEN COALESCE(requests, 1) ELSE 0 END) AS requests_today
@@ -50,7 +55,7 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 		  AND event_type = 'message_usage'
 		  AND status != 'error'
 		GROUP BY model_key
-		ORDER BY total_tokens DESC, requests DESC
+		ORDER BY billable_tokens DESC, requests DESC
 		LIMIT 500
 	`, filter.todayExpr("occurred_at"))
 	rows, err := db.QueryContext(ctx, query, whereArgs...)
@@ -66,9 +71,11 @@ func queryModelAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]telem
 			&row.Model,
 			&row.InputTokens,
 			&row.OutputTokens,
-			&row.CachedTokens,
+			&row.CacheReadTokens,
+			&row.CacheWriteTokens,
 			&row.Reasoning,
 			&row.TotalTokens,
+			&row.BillableTokens,
 			&row.CostUSD,
 			&row.Requests,
 			&row.Requests1d,

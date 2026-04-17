@@ -516,6 +516,48 @@ func TestCompositionBars_AreStableAcrossCollapsedAndExpanded(t *testing.T) {
 	}
 }
 
+func TestRenderModelTokenBreakdown_HidesZeroColumns(t *testing.T) {
+	// Claude-style: heavy cache reads, no reasoning, no cache writes
+	claudeModel := modelMixEntry{
+		name:      "claude-opus-4-6",
+		input:     18_300,
+		output:    356_900,
+		cacheRead: 333_100_000,
+	}
+	colors := map[string]lipgloss.Color{"claude-opus-4-6": lipgloss.Color("#ff0")}
+	lines := renderModelTokenBreakdown([]modelMixEntry{claudeModel}, 120, colors)
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines (title, header, row), got %d", len(lines))
+	}
+	header := lines[1]
+	if strings.Contains(header, "reason") {
+		t.Errorf("reason column should be hidden when all reasoning is zero, got header: %q", header)
+	}
+	if strings.Contains(header, "cache.w") {
+		t.Errorf("cache.w column should be hidden when all cache_write is zero, got header: %q", header)
+	}
+	if !strings.Contains(header, "cache.r") {
+		t.Errorf("cache.r column should be visible when cache_read is non-zero, got header: %q", header)
+	}
+	if !strings.Contains(header, "total") {
+		t.Errorf("total column should always be visible, got header: %q", header)
+	}
+}
+
+func TestRenderModelTokenBreakdown_TotalExcludesCacheReads(t *testing.T) {
+	m := modelMixEntry{
+		name:       "claude-opus-4-6",
+		input:      100,
+		output:     200,
+		cacheRead:  10_000, // huge — should not inflate total
+		cacheWrite: 50,
+		reasoning:  20,
+	}
+	if got := m.totalTokens(); got != 370 {
+		t.Errorf("totalTokens() = %v, want 370 (input 100 + output 200 + cache_write 50 + reasoning 20, excluding cache_read 10000)", got)
+	}
+}
+
 func TestSortToolMixEntries_BreaksTiesAlphabetically(t *testing.T) {
 	tools := []toolMixEntry{
 		{name: "read_today", count: 1},

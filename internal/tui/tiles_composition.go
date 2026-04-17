@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -12,9 +13,19 @@ type modelMixEntry struct {
 	cost       float64
 	input      float64
 	output     float64
+	cacheRead  float64
+	cacheWrite float64
+	reasoning  float64
 	requests   float64
 	requests1d float64
 	series     []core.TimePoint
+}
+
+// totalTokens returns billable volume: input + output + cache writes + reasoning.
+// Cache reads are excluded — they're discounted 90% by Anthropic and dominated
+// by repeated re-reads of the same cached bytes across conversation turns.
+func (m modelMixEntry) totalTokens() float64 {
+	return m.input + m.output + m.cacheWrite + m.reasoning
 }
 
 type providerMixEntry struct {
@@ -70,7 +81,7 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 	totalRequests := float64(0)
 	for _, model := range allModels {
 		totalCost += model.cost
-		totalTokens += model.input + model.output
+		totalTokens += model.totalTokens()
 		totalRequests += model.requests
 	}
 
@@ -121,18 +132,22 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(model.requests))
 		switch mode {
 		case "tokens":
-			valueStr = fmt.Sprintf("%2.0f%% %s tok", pct, shortCompact(model.input+model.output))
+			valueStr = fmt.Sprintf("%2.0f%% %s tok", pct, shortCompact(model.totalTokens()))
 			if model.cost > 0 {
 				valueStr += fmt.Sprintf(" · %s", formatUSD(model.cost))
 			}
 		case "cost":
-			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s", pct, shortCompact(model.input+model.output), formatUSD(model.cost))
+			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s", pct, shortCompact(model.totalTokens()), formatUSD(model.cost))
 		case "requests":
 			if model.requests1d > 0 {
 				valueStr += fmt.Sprintf(" · today %s", shortCompact(model.requests1d))
 			}
 		}
 		lines = append(lines, renderDotLeaderRow(displayLabel, valueStr, innerW))
+	}
+
+	if breakdown := renderModelTokenBreakdown(models, innerW, modelColors); len(breakdown) > 0 {
+		lines = append(lines, breakdown...)
 	}
 
 	trendEntries := limitModelTrendEntries(models, expanded)
@@ -172,6 +187,122 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 	}
 
 	return lines, usedKeys
+}
+
+func renderModelTokenBreakdown(models []modelMixEntry, innerW int, modelColors map[string]lipgloss.Color) []string {
+	rows := make([]modelMixEntry, 0, len(models))
+	var sumIn, sumOut, sumCacheR, sumCacheW, sumReason float64
+	for _, m := range models {
+		// Include rows where the model has any token activity, even if
+		// totalTokens() (billable) is zero — a model with only cache reads
+		// should still show up so the user understands what's happening.
+		if m.input+m.output+m.cacheRead+m.cacheWrite+m.reasoning <= 0 {
+			continue
+		}
+		rows = append(rows, m)
+		sumIn += m.input
+		sumOut += m.output
+		sumCacheR += m.cacheRead
+		sumCacheW += m.cacheWrite
+		sumReason += m.reasoning
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	type column struct {
+		header string
+		values []float64
+		total  float64
+	}
+	columns := []column{
+		{header: "in", total: sumIn},
+		{header: "out", total: sumOut},
+		{header: "cache.r", total: sumCacheR},
+		{header: "cache.w", total: sumCacheW},
+		{header: "reason", total: sumReason},
+	}
+	for _, m := range rows {
+		columns[0].values = append(columns[0].values, m.input)
+		columns[1].values = append(columns[1].values, m.output)
+		columns[2].values = append(columns[2].values, m.cacheRead)
+		columns[3].values = append(columns[3].values, m.cacheWrite)
+		columns[4].values = append(columns[4].values, m.reasoning)
+	}
+	active := make([]column, 0, 6)
+	for _, c := range columns {
+		if c.total > 0 {
+			active = append(active, c)
+		}
+	}
+	totalsCol := column{header: "total"}
+	for _, m := range rows {
+		totalsCol.values = append(totalsCol.values, m.totalTokens())
+	}
+	totalsCol.total = sumIn + sumOut + sumCacheW + sumReason
+	active = append(active, totalsCol)
+
+	const numW = 7
+	const gap = " "
+	numCols := len(active)
+	numsW := numCols * (numW + len(gap))
+	labelSegW := innerW - 2 - numsW
+	if labelSegW < 14 {
+		labelSegW = 14
+	}
+	labelW := labelSegW - 2
+
+	dim := lipgloss.NewStyle().Foreground(colorSubtext)
+	bold := lipgloss.NewStyle().Foreground(colorText).Bold(true)
+
+	renderCells := func(rowIdx int, isTotals bool) string {
+		var b strings.Builder
+		for _, c := range active {
+			b.WriteString(gap)
+			var v float64
+			if isTotals {
+				v = c.total
+			} else {
+				v = c.values[rowIdx]
+			}
+			if v <= 0 {
+				b.WriteString(dim.Render(padLeft("—", numW)))
+			} else {
+				b.WriteString(bold.Render(padLeft(shortCompact(v), numW)))
+			}
+		}
+		return b.String()
+	}
+
+	var hdr strings.Builder
+	hdr.WriteString("  ")
+	hdr.WriteString(strings.Repeat(" ", labelSegW))
+	for _, c := range active {
+		hdr.WriteString(gap)
+		hdr.WriteString(dim.Render(padLeft(c.header, numW)))
+	}
+
+	lines := []string{
+		dim.Bold(true).Render("  Token Breakdown"),
+		hdr.String(),
+	}
+
+	for i, m := range rows {
+		label := prettifyModelName(m.name)
+		if len(label) > labelW {
+			label = label[:labelW-1] + "…"
+		}
+		dot := lipgloss.NewStyle().Foreground(colorForModel(modelColors, m.name)).Render("■")
+		labelSegment := dot + " " + dim.Render(padRight(label, labelW))
+		lines = append(lines, "  "+labelSegment+renderCells(i, false))
+	}
+
+	if len(rows) > 1 {
+		totalLabel := dim.Bold(true).Render(padRight("  total", labelSegW))
+		lines = append(lines, "  "+totalLabel+renderCells(0, true))
+	}
+
+	return lines
 }
 
 func limitModelMix(models []modelMixEntry, expanded bool, maxVisible int) ([]modelMixEntry, int) {
@@ -222,7 +353,7 @@ func colorForModel(colors map[string]lipgloss.Color, name string) lipgloss.Color
 func modelMixValue(model modelMixEntry, mode string) float64 {
 	switch mode {
 	case "tokens":
-		return model.input + model.output
+		return model.totalTokens()
 	case "cost":
 		return model.cost
 	default:
@@ -250,6 +381,9 @@ func collectProviderModelMix(snap core.UsageSnapshot) ([]modelMixEntry, map[stri
 			cost:       entry.Cost,
 			input:      entry.Input,
 			output:     entry.Output,
+			cacheRead:  entry.CacheRead,
+			cacheWrite: entry.CacheWrite,
+			reasoning:  entry.Reasoning,
 			requests:   entry.Requests,
 			requests1d: entry.Requests1d,
 			series:     entry.Series,
