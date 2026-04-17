@@ -13,15 +13,24 @@ import (
 )
 
 type telemetryModelAgg struct {
-	Model        string
-	InputTokens  float64
-	OutputTokens float64
-	CachedTokens float64
-	Reasoning    float64
-	TotalTokens  float64
-	CostUSD      float64
-	Requests     float64
-	Requests1d   float64
+	Model            string
+	InputTokens      float64
+	OutputTokens     float64
+	CacheReadTokens  float64
+	CacheWriteTokens float64
+	Reasoning        float64
+	TotalTokens      float64
+	BillableTokens   float64
+	CostUSD          float64
+	Requests         float64
+	Requests1d       float64
+}
+
+// CachedTokens returns the combined cache read + write total — kept as a
+// helper for consumers that don't need the read/write split (e.g. legacy
+// per-model metrics, ModelUsageRecord hydration).
+func (m telemetryModelAgg) CachedTokens() float64 {
+	return m.CacheReadTokens + m.CacheWriteTokens
 }
 
 type telemetrySourceAgg struct {

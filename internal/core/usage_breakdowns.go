@@ -35,9 +35,20 @@ type ModelBreakdownEntry struct {
 	Cost       float64
 	Input      float64
 	Output     float64
+	CacheRead  float64
+	CacheWrite float64
+	Reasoning  float64
 	Requests   float64
 	Requests1d float64
 	Series     []TimePoint
+}
+
+// TotalTokens returns the billable token volume: input + output + cache writes
+// + reasoning. Cache reads are deliberately excluded because they're discounted
+// 90% by Anthropic and represent repeated reads of the same cached bytes across
+// turns — counting them linearly inflates "usage" by orders of magnitude.
+func (e ModelBreakdownEntry) TotalTokens() float64 {
+	return e.Input + e.Output + e.CacheWrite + e.Reasoning
 }
 
 type ProviderBreakdownEntry struct {

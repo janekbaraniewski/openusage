@@ -117,13 +117,16 @@ func TestExtractProjectUsage(t *testing.T) {
 func TestExtractModelBreakdown(t *testing.T) {
 	snap := UsageSnapshot{
 		Metrics: map[string]Metric{
-			"model_alpha_input_tokens":   {Used: Float64Ptr(10)},
-			"model_alpha_output_tokens":  {Used: Float64Ptr(3)},
-			"model_alpha_cost_usd":       {Used: Float64Ptr(1.25)},
-			"model_alpha_requests":       {Used: Float64Ptr(4)},
-			"model_alpha_requests_today": {Used: Float64Ptr(2)},
-			"input_tokens_beta":          {Used: Float64Ptr(7)},
-			"output_tokens_beta":         {Used: Float64Ptr(2)},
+			"model_alpha_input_tokens":       {Used: Float64Ptr(10)},
+			"model_alpha_output_tokens":      {Used: Float64Ptr(3)},
+			"model_alpha_cache_read_tokens":  {Used: Float64Ptr(100)},
+			"model_alpha_cache_write_tokens": {Used: Float64Ptr(50)},
+			"model_alpha_reasoning_tokens":   {Used: Float64Ptr(8)},
+			"model_alpha_cost_usd":           {Used: Float64Ptr(1.25)},
+			"model_alpha_requests":           {Used: Float64Ptr(4)},
+			"model_alpha_requests_today":     {Used: Float64Ptr(2)},
+			"input_tokens_beta":              {Used: Float64Ptr(7)},
+			"output_tokens_beta":             {Used: Float64Ptr(2)},
 		},
 		DailySeries: map[string][]TimePoint{
 			"usage_model_beta": {
@@ -137,13 +140,17 @@ func TestExtractModelBreakdown(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2", len(got))
 	}
-	if got[0].Name != "alpha" || got[0].Input != 10 || got[0].Output != 3 || got[0].Cost != 1.25 || got[0].Requests1d != 2 {
+	if got[0].Name != "alpha" || got[0].Input != 10 || got[0].Output != 3 || got[0].CacheRead != 100 || got[0].CacheWrite != 50 || got[0].Reasoning != 8 || got[0].Cost != 1.25 || got[0].Requests1d != 2 {
 		t.Fatalf("got[0] = %#v", got[0])
+	}
+	// TotalTokens excludes cache reads (discounted 90%, dominated by re-reads).
+	if total := got[0].TotalTokens(); total != 71 {
+		t.Fatalf("got[0].TotalTokens() = %v, want 71 (input 10 + output 3 + cache_write 50 + reasoning 8)", total)
 	}
 	if got[1].Name != "beta" || got[1].Requests != 9 || len(got[1].Series) != 2 {
 		t.Fatalf("got[1] = %#v", got[1])
 	}
-	if !used["model_alpha_cost_usd"] || !used["input_tokens_beta"] {
+	if !used["model_alpha_cost_usd"] || !used["input_tokens_beta"] || !used["model_alpha_cache_read_tokens"] || !used["model_alpha_reasoning_tokens"] {
 		t.Fatalf("used keys missing expected model metrics: %#v", used)
 	}
 }

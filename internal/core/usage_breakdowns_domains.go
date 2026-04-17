@@ -135,6 +135,9 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 		cost       float64
 		input      float64
 		output     float64
+		cacheRead  float64
+		cacheWrite float64
+		reasoning  float64
 		requests   float64
 		requests1d float64
 		series     []TimePoint
@@ -155,6 +158,18 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 	}
 	recordOutput := func(name string, value float64, key string) {
 		ensure(name).output += value
+		usedKeys[key] = true
+	}
+	recordCacheRead := func(name string, value float64, key string) {
+		ensure(name).cacheRead += value
+		usedKeys[key] = true
+	}
+	recordCacheWrite := func(name string, value float64, key string) {
+		ensure(name).cacheWrite += value
+		usedKeys[key] = true
+	}
+	recordReasoning := func(name string, value float64, key string) {
+		ensure(name).reasoning += value
 		usedKeys[key] = true
 	}
 	recordCost := func(name string, value float64, key string) {
@@ -189,6 +204,17 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 				recordInput(rawModel, *metric.Used, key)
 			case modelMetricOutput:
 				recordOutput(rawModel, *metric.Used, key)
+			case modelMetricCached:
+				// Legacy lumped "_cached_tokens" key — treat as cache read
+				// since that's the common meaning (cache hit) for providers
+				// that don't distinguish read from write.
+				recordCacheRead(rawModel, *metric.Used, key)
+			case modelMetricCacheRead:
+				recordCacheRead(rawModel, *metric.Used, key)
+			case modelMetricCacheWrite:
+				recordCacheWrite(rawModel, *metric.Used, key)
+			case modelMetricReasoning:
+				recordReasoning(rawModel, *metric.Used, key)
 			case modelMetricCostUSD:
 				recordCost(rawModel, *metric.Used, key)
 			}
@@ -212,7 +238,7 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 
 	out := make([]ModelBreakdownEntry, 0, len(byModel))
 	for name, entry := range byModel {
-		if entry.cost <= 0 && entry.input <= 0 && entry.output <= 0 && entry.requests <= 0 && len(entry.series) == 0 {
+		if entry.cost <= 0 && entry.input <= 0 && entry.output <= 0 && entry.cacheRead <= 0 && entry.cacheWrite <= 0 && entry.reasoning <= 0 && entry.requests <= 0 && len(entry.series) == 0 {
 			continue
 		}
 		out = append(out, ModelBreakdownEntry{
@@ -220,14 +246,17 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 			Cost:       entry.cost,
 			Input:      entry.input,
 			Output:     entry.output,
+			CacheRead:  entry.cacheRead,
+			CacheWrite: entry.cacheWrite,
+			Reasoning:  entry.reasoning,
 			Requests:   entry.requests,
 			Requests1d: entry.requests1d,
 			Series:     entry.series,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		ti := out[i].Input + out[i].Output
-		tj := out[j].Input + out[j].Output
+		ti := out[i].TotalTokens()
+		tj := out[j].TotalTokens()
 		if ti != tj {
 			return ti > tj
 		}
