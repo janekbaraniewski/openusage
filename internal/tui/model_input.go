@@ -271,9 +271,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
-	if msg.Button == tea.MouseButtonLeft {
-		return m.handleMouseClick(msg)
-	}
 
 	scroll := 0
 	switch msg.Button {
@@ -343,108 +340,6 @@ func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.settings.previewOffset < 0 {
 		m.settings.previewOffset = 0
 	}
-	return m, nil
-}
-
-func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.screen != screenDashboard || m.mode != modeList {
-		return m, nil
-	}
-
-	ids := m.filteredIDs()
-	if len(ids) == 0 {
-		return m, nil
-	}
-	view := m.activeDashboardView()
-	if view != dashboardViewGrid && view != dashboardViewStacked {
-		return m, nil
-	}
-
-	contentH := m.height - 3
-	if contentH < 5 {
-		contentH = 5
-	}
-	cols, tileW, tileMaxH := m.tileGrid(m.width, contentH, len(ids))
-	if view == dashboardViewStacked {
-		cols = 1
-	}
-
-	clickY := msg.Y - 2
-	clickX := msg.X - 1
-	if clickX < 0 || clickY < 0 {
-		return m, nil
-	}
-
-	cellW := tileW + tileBorderH + tileGapH
-	if cellW <= 0 {
-		return m, nil
-	}
-	col := clickX / cellW
-	if col >= cols {
-		return m, nil
-	}
-
-	rowH := tileMaxH + tileBorderV
-	if tileMaxH <= 0 {
-		rowH = contentH
-		if len(ids) > 1 {
-			rowH = contentH / len(ids)
-		}
-		if rowH < tileMinHeight+tileBorderV {
-			rowH = tileMinHeight + tileBorderV
-		}
-	}
-	rowCell := rowH + tileGapV
-	if rowCell <= 0 {
-		return m, nil
-	}
-
-	cursorRow := m.cursor / cols
-	totalRows := (len(ids) + cols - 1) / cols
-	rowOffsets := make([]int, totalRows)
-	acc := 0
-	for r := 0; r < totalRows; r++ {
-		rowOffsets[r] = acc
-		acc += rowH
-		if r < totalRows-1 {
-			acc += tileGapV
-		}
-	}
-
-	rowScrollOffset := 0
-	if cols == 1 {
-		rowScrollOffset = m.tileOffset
-	}
-	scrollLine := 0
-	if cursorRow >= 0 && cursorRow < totalRows {
-		scrollLine = rowOffsets[cursorRow] + rowScrollOffset
-	}
-	if scrollLine > acc-contentH {
-		scrollLine = acc - contentH
-	}
-	if scrollLine < 0 {
-		scrollLine = 0
-	}
-
-	absY := clickY + scrollLine
-	row := -1
-	for r := 0; r < totalRows; r++ {
-		if absY >= rowOffsets[r] && absY < rowOffsets[r]+rowH {
-			row = r
-			break
-		}
-	}
-	if row < 0 {
-		return m, nil
-	}
-
-	idx := row*cols + col
-	if idx < 0 || idx >= len(ids) {
-		return m, nil
-	}
-
-	m.cursor = idx
-	m.tileOffset = 0
 	return m, nil
 }
 
