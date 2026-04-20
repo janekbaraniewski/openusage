@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   acceptAnalytics,
+  analyticsConsentChoice,
   analyticsConfigured,
   declineAnalytics,
   hasConsentChoice,
@@ -153,13 +154,17 @@ const installData = [
   { label: "Go",     cmd: "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest" },
 ];
 
+const guideURL = `${base}guides/track-coding-agent-usage-across-platforms/`;
+
 /* ────────────────────────────────────────────────────────────────
    App
    ──────────────────────────────────────────────────────────────── */
 
 export default function App() {
+  const [analyticsAvailable, setAnalyticsAvailable] = useState(false);
   const [copied, setCopied] = useState("");
   const [scrolled, setScrolled] = useState(false);
+  const [analyticsChoice, setAnalyticsChoice] = useState(null);
   const [showConsentBanner, setShowConsentBanner] = useState(false);
 
   useEffect(() => {
@@ -170,7 +175,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setShowConsentBanner(analyticsConfigured() && !hasConsentChoice());
+    const configured = analyticsConfigured();
+    setAnalyticsAvailable(configured);
+    const choice = configured ? analyticsConsentChoice() : null;
+    setAnalyticsChoice(choice);
+    setShowConsentBanner(configured && !hasConsentChoice());
   }, []);
 
   useEffect(() => {
@@ -198,12 +207,34 @@ export default function App() {
 
   function acceptTracking() {
     acceptAnalytics();
+    setAnalyticsChoice("accepted");
     setShowConsentBanner(false);
   }
 
   function declineTracking() {
     declineAnalytics();
+    setAnalyticsChoice("declined");
     setShowConsentBanner(false);
+  }
+
+  function openAnalyticsPreferences() {
+    if (!analyticsAvailable) {
+      return;
+    }
+
+    setShowConsentBanner(true);
+  }
+
+  function analyticsPreferenceLabel() {
+    if (analyticsChoice === "accepted") {
+      return "Analytics on";
+    }
+
+    if (analyticsChoice === "declined") {
+      return "Analytics off";
+    }
+
+    return "Analytics";
   }
 
   return (
@@ -445,6 +476,12 @@ export default function App() {
         <div className="w" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
           <span>OpenUsage · open source</span>
           <div className="footer__links">
+            <a className="footer__link" href={guideURL}>Guide</a>
+            {analyticsAvailable ? (
+              <button className="footer__link footer__button" type="button" onClick={openAnalyticsPreferences}>
+                {analyticsPreferenceLabel()}
+              </button>
+            ) : null}
             <a className="footer__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "footer")}>GitHub</a>
             <a className="footer__link" href="https://github.com/janekbaraniewski/openusage/releases" rel="noreferrer" target="_blank" onClick={() => trackOutbound("releases", "footer")}>Releases</a>
           </div>
@@ -454,6 +491,7 @@ export default function App() {
         <div className="consent-banner" role="dialog" aria-live="polite" aria-label="Analytics preference">
           <p className="consent-banner__text">
             Allow privacy-respecting analytics so we can see pageviews, GitHub clicks, and install intent.
+            You can change this later from the footer.
           </p>
           <div className="consent-banner__actions">
             <button className="consent-banner__button consent-banner__button--primary" type="button" onClick={acceptTracking}>

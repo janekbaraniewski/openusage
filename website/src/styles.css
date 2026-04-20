@@ -564,9 +564,16 @@ button { font: inherit; cursor: pointer; }
   color: var(--text-3);
 }
 
-.footer__links { display: flex; gap: 16px; }
+.footer__links { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
 .footer__link { color: var(--text-2); transition: color 0.2s; }
 .footer__link:hover { color: var(--text); }
+.footer__button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 
 /* ── Consent ───────────────────────────────────────────────── */
 

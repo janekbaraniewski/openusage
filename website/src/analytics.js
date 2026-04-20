@@ -96,6 +96,10 @@ export function hasConsentChoice() {
   return readConsentChoice() !== null;
 }
 
+export function analyticsConsentChoice() {
+  return readConsentChoice();
+}
+
 export function acceptAnalytics() {
   writeConsentChoice("accepted");
   if (!analyticsReady) {
