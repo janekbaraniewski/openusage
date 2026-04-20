@@ -14,7 +14,7 @@
 
 ---
 
-OpenUsage auto-detects AI coding tools and API keys on your workstation and shows live quota, usage, and cost data in your terminal. Zero config required — just run `openusage`.
+OpenUsage auto-detects AI coding tools and API keys on your workstation and shows live quota, usage, spend, resets, rate limits, and model data in your terminal. It is built for mixed-tool workflows across Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more. Zero config required — just run `openusage`.
 
 ![OpenUsage dashboard](./assets/dashboard.png)
 
@@ -56,8 +56,22 @@ openusage
 
 Auto-detection picks up local tools and common API key env vars. No config needed.
 
+## Track coding agent usage across multiple platforms
+
+Native dashboards show one provider at a time. OpenUsage gives you one local-first view across coding agents, API platforms, and local runtimes so you can answer:
+
+- Which tool or provider is burning budget?
+- Which model caused the spike?
+- Which quota or reset is getting close?
+- Which sessions, projects, or MCP tools drove the change?
+
+It is built for end-user tool tracking, not for instrumenting a separate AI app with tracing SDKs or a billing backend.
+
+If you want the full positioning argument, read the guide: [best way to track coding agent usage and quotas across providers](https://openusage.sh/best-way-track-coding-agent-usage-quotas-across-providers/).
+
 ## Features
 
+- **Cross-provider tracking** — compare coding agents, API platforms, and local runtimes in one local dashboard
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, and per-model usage at a glance
 - **17 providers** — covers coding agents (Claude Code, Cursor, Copilot, Codex, Gemini CLI), API platforms (OpenAI, Anthropic, OpenRouter, and more), and local tools (Ollama)
