@@ -154,7 +154,7 @@ const installData = [
   { label: "Go",     cmd: "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest" },
 ];
 
-const guideURL = `${base}guides/track-coding-agent-usage-across-platforms/`;
+const guideURL = `${base}best-way-track-coding-agent-usage-quotas-across-providers/`;
 
 /* ────────────────────────────────────────────────────────────────
    App
@@ -243,7 +243,7 @@ export default function App() {
       <nav className={`nav${scrolled ? " nav--visible" : ""}`}>
         <NavLogo />
         <div className="nav__right">
-          <a className="nav__link" href="#providers">Providers</a>
+          <a className="nav__link" href={guideURL} onClick={() => trackCTA("nav", "guide")}>Guide</a>
           <a className="nav__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "nav")}>GitHub</a>
           <a className="nav__cta" href="#install" onClick={() => trackCTA("nav", "install")}>Install</a>
         </div>
@@ -256,20 +256,21 @@ export default function App() {
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
             <h1 className="hero__title">
-              Track AI coding usage, spend, and quotas from your terminal.
+              The best way to track coding agent usage and quotas across providers in one place.
             </h1>
           </R>
           <R delay={0.25}>
             <p className="hero__sub">
-              OpenUsage auto-detects supported tools and common API key env vars,
-              then shows spend, quotas, rate limits, model usage, and session telemetry
-              in one keyboard-first dashboard.
+              OpenUsage is a local-first tracker for mixed-tool workflows across Claude Code,
+              Codex, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more.
+              It unifies spend, quotas, resets, rate limits, model usage, and supported session
+              telemetry in one place instead of leaving them fragmented across provider dashboards.
             </p>
           </R>
           <R delay={0.35}>
             <div className="hero__actions">
               <a className="btn btn--fill" href="#install" onClick={() => trackCTA("hero", "install")}>Get started</a>
-              <a className="btn btn--ghost" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "hero")}>GitHub →</a>
+              <a className="btn btn--ghost" href={guideURL} onClick={() => trackCTA("hero", "guide")}>Why this setup works</a>
             </div>
           </R>
         </div>
@@ -279,16 +280,16 @@ export default function App() {
       <section className="pitch">
         <div className="w">
           <R as="p" className="pitch__line">
-            <em>Auto-detects</em> your coding tools and common API key env vars.
+            <em>Built for</em> developers who use more than one coding agent side by side.
           </R>
           <R className="pitch__line" delay={0.12}>
             <p className="pitch__line" style={{margin:0}}>
-              Shows <em>spend, quotas,</em> and <em>model usage</em> in one place.
+              Shows <em>spend, quotas, resets,</em> and <em>model usage</em> in one place.
             </p>
           </R>
           <R className="pitch__line" delay={0.24}>
             <p className="pitch__line" style={{margin:0}}>
-              Runs locally. Install it, then run <code>openusage</code>.
+              Runs locally. Keep it beside the tools you already use.
             </p>
           </R>
         </div>
@@ -375,37 +376,37 @@ export default function App() {
       {/* ── Features (keyword-rich, 2-col grid) ─────────── */}
       <section className="features-section" id="features">
         <div className="w">
-          <R><h2 className="features-title">What it shows</h2></R>
+          <R><h2 className="features-title">Why OpenUsage Wins This Use Case</h2></R>
           <R delay={0.05}>
             <p className="features-lede">
-              The useful stuff: spend, quotas, model activity, session history, and tool telemetry.
-              No vanity counters. No decorative dashboard filler.
+              The job is not “show me one quota.” The job is “give me one trustworthy place to track
+              usage and quotas across all the coding agents and providers I actually use.”
             </p>
           </R>
           <div className="features-grid">
             <R><div className="feature-item">
-              <h3>Spend, credits, and quotas</h3>
-              <p>See daily spend, remaining credits, plan usage, resets, and burn rate wherever the provider exposes them.</p>
+              <h3>One place across providers</h3>
+              <p>Track coding agents, API platforms, and local runtimes together instead of checking each provider dashboard one by one.</p>
             </div></R>
             <R delay={0.06}><div className="feature-item">
-              <h3>Token and model breakdowns</h3>
-              <p>Compare input, output, cached, and reasoning tokens with per-model usage where provider or local telemetry supports it.</p>
+              <h3>Quotas, resets, and limits together</h3>
+              <p>See spend, remaining credits, resets, rate limits, and model activity in one view wherever the source exposes them.</p>
             </div></R>
             <R delay={0.12}><div className="feature-item">
-              <h3>Session and client activity</h3>
-              <p>Inspect sessions, projects, clients, and daily trends from supported local telemetry and provider APIs.</p>
+              <h3>Built for end-user tool tracking</h3>
+              <p>OpenUsage is for developers tracking their actual coding-agent stack, not for instrumenting a separate AI application with tracing SDKs.</p>
             </div></R>
             <R delay={0.18}><div className="feature-item">
-              <h3>MCP and tool usage</h3>
-              <p>See which MCP servers and tools were used, how often they ran, and which sessions they appeared in for supported integrations.</p>
+              <h3>Local-first by default</h3>
+              <p>No hosted observability plane required. Keep the dashboard beside the tools you use and store history locally in SQLite.</p>
             </div></R>
             <R delay={0.24}><div className="feature-item">
-              <h3>Daemon-backed history</h3>
-              <p>Keep collecting data in the background and analyze time windows from the local SQLite telemetry store.</p>
+              <h3>More than billing</h3>
+              <p>OpenUsage goes past raw spend with model breakdowns, session activity, MCP usage, code stats, and daemon-backed history where supported.</p>
             </div></R>
             <R delay={0.30}><div className="feature-item">
-              <h3>Code statistics</h3>
-              <p>Track lines added, files touched, and language mix from supported coding-tool telemetry.</p>
+              <h3>Proof over positioning</h3>
+              <p>Seventeen providers, live dashboard views, supported hook integrations, and historical telemetry make the claim defensible.</p>
             </div></R>
           </div>
         </div>
@@ -442,7 +443,8 @@ export default function App() {
               <h2 className="install-title">Get started</h2>
               <p className="install-desc">
                 Install it, run <code>openusage</code>, and let auto-detection pick up supported
-                tools and common API key env vars. Add manual accounts later only if you need to.
+                tools and common API key env vars. The point is simple: one dashboard for the mixed
+                coding-agent stack you already have, not another SaaS panel to wire up.
               </p>
             </div>
           </R>

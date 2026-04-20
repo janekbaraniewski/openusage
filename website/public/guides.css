@@ -140,7 +140,6 @@ a:hover {
 
 .answer-box,
 .callout,
-.faq-item,
 .comparison,
 .providers {
   border: 1px solid var(--border);
@@ -220,21 +219,6 @@ a:hover {
   padding-left: 18px;
   columns: 2;
   column-gap: 28px;
-}
-
-.faq-list {
-  display: grid;
-  gap: 12px;
-}
-
-.faq-item {
-  padding: 16px 18px;
-}
-
-.faq-item h3 {
-  margin: 0 0 10px;
-  font-size: 0.82rem;
-  color: var(--text);
 }
 
 .footer {
