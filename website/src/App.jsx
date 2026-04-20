@@ -154,8 +154,6 @@ const installData = [
   { label: "Go",     cmd: "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest" },
 ];
 
-const guideURL = `${base}best-way-track-coding-agent-usage-quotas-across-providers/`;
-
 /* ────────────────────────────────────────────────────────────────
    App
    ──────────────────────────────────────────────────────────────── */
@@ -243,7 +241,6 @@ export default function App() {
       <nav className={`nav${scrolled ? " nav--visible" : ""}`}>
         <NavLogo />
         <div className="nav__right">
-          <a className="nav__link" href={guideURL} onClick={() => trackCTA("nav", "guide")}>Guide</a>
           <a className="nav__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "nav")}>GitHub</a>
           <a className="nav__cta" href="#install" onClick={() => trackCTA("nav", "install")}>Install</a>
         </div>
@@ -270,7 +267,6 @@ export default function App() {
           <R delay={0.35}>
             <div className="hero__actions">
               <a className="btn btn--fill" href="#install" onClick={() => trackCTA("hero", "install")}>Get started</a>
-              <a className="btn btn--ghost" href={guideURL} onClick={() => trackCTA("hero", "guide")}>Why this setup works</a>
             </div>
           </R>
         </div>
@@ -478,7 +474,6 @@ export default function App() {
         <div className="w" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
           <span>OpenUsage · open source</span>
           <div className="footer__links">
-            <a className="footer__link" href={guideURL}>Guide</a>
             {analyticsAvailable ? (
               <button className="footer__link footer__button" type="button" onClick={openAnalyticsPreferences}>
                 {analyticsPreferenceLabel()}

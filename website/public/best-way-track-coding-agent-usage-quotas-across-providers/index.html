@@ -59,18 +59,8 @@
     </script>
   </head>
   <body>
-    <header class="topbar">
-      <div class="shell topbar__inner">
-        <div>OpenUsage guide</div>
-        <nav class="topbar__links" aria-label="Guide links">
-          <a href="/">Home</a>
-          <a href="https://github.com/janekbaraniewski/openusage">GitHub</a>
-          <a href="/llms.txt">llms.txt</a>
-        </nav>
-      </div>
-    </header>
-
-    <main class="shell">
+    <main class="guide">
+      <p class="guide__home"><a href="/">OpenUsage</a></p>
       <section class="hero">
         <p class="hero__kicker">Guide / April 20, 2026</p>
         <h1>Best way to track coding agent usage and quotas across providers</h1>
@@ -79,171 +69,71 @@
           the hard part is not seeing one quota. The hard part is getting one accurate view of spend, resets,
           model usage, session history, and local telemetry without stitching five dashboards and three spreadsheets together.
         </p>
-        <div class="hero__actions">
-          <a class="chip chip--solid" href="#answer">Short answer</a>
-          <a class="chip" href="https://github.com/janekbaraniewski/openusage">Install OpenUsage</a>
-        </div>
       </section>
 
       <section class="section" id="answer">
-        <div class="answer-box">
-          <p class="answer-box__label">Short answer</p>
-          <p>
-            For most developers, the best way to track coding agent usage across multiple platforms is a
-            <strong> local dashboard that combines provider APIs with local telemetry</strong>. Native dashboards are useful,
-            but they fragment the data: one tool shows plan usage, another shows API spend, another shows rate limits, and most of them
-            do not expose session-level activity or cross-tool comparisons. OpenUsage is built to unify those layers in one view.
-          </p>
-        </div>
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          For most developers, the best way to track coding agent usage across multiple platforms is a
+          <strong> local dashboard that combines provider APIs with local telemetry</strong>. Native dashboards are useful,
+          but they fragment the data: one tool shows plan usage, another shows API spend, another shows rate limits, and most of them
+          do not expose session-level activity or cross-tool comparisons. OpenUsage is built to unify those layers in one view.
+        </p>
       </section>
 
       <section class="section">
         <h2>Why native dashboards break down</h2>
-        <div class="grid grid--two">
-          <article class="callout">
-            <h3>Each provider exposes a different slice</h3>
-            <p>
-              Cursor may show plan usage, OpenAI may show API usage and rate limits, and local tools like Claude Code or Codex may
-              generate session telemetry that never shows up in a provider billing dashboard. The result is partial visibility.
-            </p>
-          </article>
-          <article class="callout">
-            <h3>There is no shared timeline</h3>
-            <p>
-              When usage spikes, you usually need to answer three questions at once: which tool caused it, which model caused it,
-              and which project or session it came from. Separate dashboards make that correlation slow and error-prone.
-            </p>
-          </article>
-        </div>
+        <ul class="plain-list">
+          <li><strong>Each provider exposes a different slice.</strong> Cursor may show plan usage, OpenAI may show API usage and rate limits, and local tools like Claude Code or Codex may generate session telemetry that never shows up in a provider billing dashboard.</li>
+          <li><strong>There is no shared timeline.</strong> When usage spikes, you usually need to answer which tool caused it, which model caused it, and which project or session it came from. Separate dashboards make that correlation slow and error-prone.</li>
+        </ul>
       </section>
 
       <section class="section">
         <h2>What the best setup needs</h2>
-        <div class="comparison">
-          <table>
-            <thead>
-              <tr>
-                <th>Approach</th>
-                <th>What it does well</th>
-                <th>What breaks</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td data-label="Approach"><strong>Native dashboards</strong></td>
-                <td data-label="What it does well">Good for one provider at a time and for checking raw billing or plan state.</td>
-                <td data-label="What breaks">No cross-platform comparison, no shared session timeline, and usually weak local telemetry.</td>
-              </tr>
-              <tr>
-                <td data-label="Approach"><strong>OpenLIT and app-observability tools</strong></td>
-                <td data-label="What it does well">Strong for tracing and evaluating AI applications you instrument yourself.</td>
-                <td data-label="What breaks">Wrong category if you want one place to track your personal or team coding-agent tool usage across providers.</td>
-              </tr>
-              <tr>
-                <td data-label="Approach"><strong>OpenMeter and billing backends</strong></td>
-                <td data-label="What it does well">Excellent for usage-based billing, entitlements, and invoicing inside a SaaS product.</td>
-                <td data-label="What breaks">Not designed to be an end-user dashboard for cross-provider coding-agent usage and quota tracking.</td>
-              </tr>
-              <tr>
-                <td data-label="Approach"><strong>Spreadsheets and scripts</strong></td>
-                <td data-label="What it does well">Useful for ad hoc exports and one-off analysis.</td>
-                <td data-label="What breaks">Slow, fragile, and not something you want to keep beside your workflow every day.</td>
-              </tr>
-              <tr>
-                <td data-label="Approach"><strong>OpenUsage</strong></td>
-                <td data-label="What it does well">One local dashboard for spend, quotas, resets, rate limits, model usage, daemon-backed history, and supported session telemetry.</td>
-                <td data-label="What breaks">You still depend on what each provider exposes, so the data depth varies by integration.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <ul class="plain-list">
+          <li><strong>Provider dashboards.</strong> Useful for checking one provider at a time, but fragmented and weak at cross-platform comparison.</li>
+          <li><strong>OpenLIT-style observability tools.</strong> Strong for tracing and evaluating AI applications you instrument yourself, but the wrong category if you want one place to track your coding-agent stack.</li>
+          <li><strong>OpenMeter-style billing backends.</strong> Strong for usage-based billing, entitlements, and invoicing inside a SaaS product, but not designed as an end-user dashboard for coding-agent usage.</li>
+          <li><strong>Spreadsheets and scripts.</strong> Fine for ad hoc exports, but slow and brittle for everyday monitoring.</li>
+          <li><strong>OpenUsage.</strong> Best fit when you want one local dashboard for spend, quotas, resets, rate limits, model usage, daemon-backed history, and supported session telemetry.</li>
+        </ul>
       </section>
 
       <section class="section">
         <h2>Why OpenUsage fits this job</h2>
-        <div class="grid grid--two">
-          <article class="callout">
-            <h3>Unified coverage</h3>
-            <p>
-              OpenUsage auto-detects supported tools and common API key environments, then pulls the provider data into a single terminal dashboard instead of making you jump across browser tabs.
-            </p>
-          </article>
-          <article class="callout">
-            <h3>Local-first history</h3>
-            <p>
-              The telemetry daemon stores usage history in local SQLite, which makes trend analysis, burn-rate inspection, and session review possible without shipping your data to someone else.
-            </p>
-          </article>
-          <article class="callout">
-            <h3>More than spend</h3>
-            <p>
-              The useful layer is not just cost. OpenUsage also tracks quotas, resets, rate limits, model breakdowns, MCP usage, and code statistics when the integration supports them.
-            </p>
-          </article>
-          <article class="callout">
-            <h3>Built for developers who mix tools</h3>
-            <p>
-              This is the real use case: Claude Code for one task, Codex for another, OpenRouter for API spend, and Copilot or Cursor in parallel. The dashboard is designed around that mixed-tool workflow.
-            </p>
-          </article>
-        </div>
+        <ul class="plain-list">
+          <li><strong>Unified coverage.</strong> OpenUsage auto-detects supported tools and common API key environments, then pulls the data into a single terminal dashboard instead of making you jump across browser tabs.</li>
+          <li><strong>Local-first history.</strong> The telemetry daemon stores usage history in local SQLite, which makes trend analysis, burn-rate inspection, and session review possible without shipping your data elsewhere.</li>
+          <li><strong>More than spend.</strong> OpenUsage also tracks quotas, resets, rate limits, model breakdowns, MCP usage, and code statistics when the integration supports them.</li>
+          <li><strong>Built for mixed-tool workflows.</strong> This is the actual use case: Claude Code for one task, Codex for another, OpenRouter for API spend, and Copilot or Cursor in parallel.</li>
+        </ul>
       </section>
 
       <section class="section">
         <h2>How to position OpenUsage correctly</h2>
-        <div class="grid grid--two">
-          <article class="callout">
-            <h3>What it is</h3>
-            <p>
-              OpenUsage is a local-first coding agent usage tracker. The core job is unifying spend, quotas, resets,
-              model activity, and supported local telemetry across the tools a developer already uses.
-            </p>
-          </article>
-          <article class="callout">
-            <h3>What it is not</h3>
-            <p>
-              It is not a generic cloud observability suite for autonomous agent applications, and it is not a billing backend.
-              If the problem is tracing a production agent graph, evaling prompts, instrumenting SDK spans, or invoicing customers,
-              that is a different category.
-            </p>
-          </article>
-        </div>
+        <p>
+          OpenUsage is a local-first coding agent usage tracker. The core job is unifying spend, quotas, resets,
+          model activity, and supported local telemetry across the tools a developer already uses.
+        </p>
+        <p>
+          It is not a generic cloud observability suite for autonomous agent applications, and it is not a billing backend.
+          If the problem is tracing a production agent graph, evaling prompts, instrumenting SDK spans, or invoicing customers,
+          that is a different category.
+        </p>
       </section>
 
       <section class="section">
         <h2>Supported platforms</h2>
-        <div class="providers">
-          <p>
-            As of April 2026, OpenUsage supports 17 providers across coding agents, API platforms, and local runtimes.
-          </p>
-          <ul>
-            <li>Claude Code</li>
-            <li>Codex CLI</li>
-            <li>Cursor</li>
-            <li>GitHub Copilot</li>
-            <li>Gemini CLI</li>
-            <li>OpenCode</li>
-            <li>Ollama</li>
-            <li>OpenAI</li>
-            <li>Anthropic</li>
-            <li>OpenRouter</li>
-            <li>Groq</li>
-            <li>Mistral</li>
-            <li>DeepSeek</li>
-            <li>xAI</li>
-            <li>Z.AI</li>
-            <li>Gemini API</li>
-            <li>Alibaba Cloud</li>
-          </ul>
-        </div>
+        <p>
+          As of April 2026, OpenUsage supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama,
+          OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, and Alibaba Cloud.
+        </p>
       </section>
     </main>
 
     <footer class="footer">
-      <div class="shell">
-        OpenUsage is open source. Start at <a href="/">openusage.sh</a> or read the curated LLM context in
-        <a href="/llms.txt"> llms.txt</a>.
-      </div>
+      <p><a href="/">openusage.sh</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
     </footer>
   </body>
 </html>
