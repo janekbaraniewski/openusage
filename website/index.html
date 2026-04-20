@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>OpenUsage — Terminal Dashboard for AI Usage, Spend &amp; Quotas</title>
+    <title>OpenUsage — Track Coding Agent Usage Across Multiple Platforms</title>
     <meta
       name="description"
-      content="OpenUsage is a keyboard-first terminal dashboard for AI coding tools and APIs. Track spend, quotas, rate limits, model usage, and session telemetry across 17 providers."
+      content="Track coding agent usage across Claude Code, Codex, Cursor, Copilot, Gemini, OpenRouter, and more from one local-first dashboard with spend, quotas, rate limits, and session telemetry."
     />
     <link rel="canonical" href="https://openusage.sh/" />
 
@@ -15,8 +15,8 @@
     <meta name="color-scheme" content="dark" />
     <meta name="robots" content="index, follow" />
     <meta name="author" content="Jan Baraniewski" />
-    <meta property="og:title" content="OpenUsage — Terminal Dashboard for AI Usage" />
-    <meta property="og:description" content="Track spend, quotas, rate limits, model usage, and session telemetry across 17 providers from a keyboard-first terminal dashboard." />
+    <meta property="og:title" content="OpenUsage — Track Coding Agent Usage Across Multiple Platforms" />
+    <meta property="og:description" content="Track coding agent usage across Claude Code, Codex, Cursor, Copilot, Gemini, OpenRouter, and more from one local-first dashboard." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://openusage.sh/" />
     <meta property="og:image" content="https://openusage.sh/brand/og.png" />
@@ -26,8 +26,8 @@
     <meta property="og:site_name" content="OpenUsage" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="OpenUsage — Terminal Dashboard for AI Usage" />
-    <meta name="twitter:description" content="Track spend, quotas, rate limits, model usage, and session telemetry across 17 providers from your terminal." />
+    <meta name="twitter:title" content="OpenUsage — Track Coding Agent Usage Across Multiple Platforms" />
+    <meta name="twitter:description" content="Track coding agent usage across Claude Code, Codex, Cursor, Copilot, Gemini, OpenRouter, and more from your terminal." />
     <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
 
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%brand/favicon.svg" />
@@ -43,7 +43,7 @@
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "OpenUsage",
-      "description": "OpenUsage is a terminal dashboard for AI coding tools and APIs. Track spend, quotas, rate limits, model usage, MCP activity, session telemetry, and local history across 17 providers.",
+      "description": "OpenUsage is a local-first dashboard for tracking coding agent usage, spend, quotas, rate limits, model activity, MCP usage, and session telemetry across 17 providers.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
       "offers": {
@@ -73,111 +73,6 @@
         "Detail, compare, and analytics views in the terminal",
         "Dashboard section, graph, and time-window configuration",
         "Keyboard-driven local-first workflow"
-      ]
-    }
-    </script>
-
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "What is OpenUsage?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "OpenUsage is a free, open-source LLM dashboard that tracks AI agent costs and token usage from your terminal. It auto-detects 17 installed tools like Claude Code, Cursor, Copilot, Codex CLI, Gemini CLI, and OpenRouter, then displays live cost tracking, quotas, model burn rates, and token consumption in a keyboard-driven terminal interface."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does OpenUsage track LLM costs?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "OpenUsage provides LLM cost tracking by auto-detecting your AI coding tools and API keys, then polling provider APIs for real-time spend data, rate limits, and quota usage. It tracks agent costs across Claude Code, Cursor, Copilot, Codex CLI, and 13 other providers. The daemon mode continuously monitors token consumption and stores cost history in a local SQLite database for trend analysis."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Can OpenUsage track AI agent token usage?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. OpenUsage tracks agent token usage and consumption per model, per provider, and per session. It shows token distribution breakdowns, input vs output token counts, cost per token, and burn rates. For tools with local telemetry (Claude Code, Cursor, Codex, Gemini CLI, Copilot, Ollama), it captures detailed per-session token consumption data."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Which AI coding tools does OpenUsage support?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "OpenUsage supports 17 providers across three categories for LLM cost tracking. Coding agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, and Ollama. API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, and Alibaba Cloud."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How do I install OpenUsage?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Install via Homebrew (brew install janekbaraniewski/tap/openusage), install script (curl -fsSL from GitHub releases), or Go install (go install github.com/janekbaraniewski/openusage/cmd/openusage@latest). First run auto-detects all installed providers with zero configuration. Just run openusage to start the LLM dashboard."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Is OpenUsage free and open source?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. OpenUsage is fully open source and free to use for LLM cost tracking and agent usage monitoring. The source code is available on GitHub at github.com/janekbaraniewski/openusage. It is written in Go and uses Bubble Tea for the terminal UI."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is OpenUsage daemon mode?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Daemon mode runs a background process that continuously tracks AI agent costs and token consumption, even when the dashboard is closed. It stores telemetry in a local SQLite database with 30-day retention and supports hook integrations for Claude Code, Codex, and OpenCode to capture session-level token usage data."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What data does the OpenUsage LLM dashboard track?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "The OpenUsage LLM dashboard tracks agent costs, spend limits, quota usage, model burn rates, token consumption and distribution by model, tool and MCP usage, code statistics (lines added/removed, languages used), daily cost trends, and session-level telemetry. All data stays local on your machine."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Does OpenUsage track MCP tool usage?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. OpenUsage tracks MCP (Model Context Protocol) tool usage per session for providers that support it. You can see which MCP tools were called, how often, and in which sessions. MCP usage tracking is available for Claude Code, Codex CLI, and OpenCode through their hook integrations."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Can OpenUsage monitor model usage across multiple providers?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. OpenUsage provides model usage tracking across all 17 supported providers. It shows which models you're using (GPT-4o, Claude Sonnet, Gemini Pro, etc.), token consumption per model, cost per model, and burn rates. The analytics view lets you compare model usage patterns across providers and time windows."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Does OpenUsage track API rate limits and quotas?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. OpenUsage provides quota monitoring and rate limit tracking for API-based providers. It reads rate limit headers from OpenAI, Anthropic, Groq, Mistral, DeepSeek, xAI, and Gemini API to show remaining requests, token limits, and quota usage. For subscription-based tools like Cursor and Copilot, it tracks plan limits and usage percentages."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does OpenUsage compare to other LLM observability tools?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "OpenUsage is a lightweight, terminal-native LLM observability tool focused on local AI coding agents. Unlike cloud-based LLM monitoring platforms, OpenUsage runs entirely on your machine with zero external dependencies. It provides AI agent monitoring, API cost tracking, model usage analysis, and session tracking without sending any data to external servers."
-          }
-        }
       ]
     }
     </script>
