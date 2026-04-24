@@ -154,6 +154,37 @@ const installData = [
   { label: "Go",     cmd: "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest" },
 ];
 
+const resourceCards = [
+  {
+    id: "comparison",
+    eyebrow: "Decision page",
+    title: "OpenUsage.sh vs OpenUsage.ai",
+    description: "Use the direct comparison when the choice is terminal-first mixed-tool monitoring versus a simpler macOS menu bar limits tracker.",
+    href: "/docs/openusage-sh-vs-openusage-ai/",
+  },
+  {
+    id: "matrix",
+    eyebrow: "Proof page",
+    title: "Capability matrix",
+    description: "See the concrete coverage for quotas, resets, rate limits, spend, model usage, daemon-backed history, hooks, and analytics views.",
+    href: "/docs/capability-matrix/",
+  },
+  {
+    id: "local-quota",
+    eyebrow: "Exact answer",
+    title: "Local quota tracker",
+    description: "The shortest answer for people searching for one local dashboard across Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter.",
+    href: "/local-quota-tracker-for-claude-code-codex-cursor/",
+  },
+  {
+    id: "query-guides",
+    eyebrow: "Docs hub",
+    title: "Docs and query guides",
+    description: "Browse the docs hub for Claude Code, Codex CLI, Cursor, terminal dashboard, and mixed-provider usage questions.",
+    href: "/docs/",
+  },
+];
+
 /* ────────────────────────────────────────────────────────────────
    App
    ──────────────────────────────────────────────────────────────── */
@@ -241,6 +272,7 @@ export default function App() {
       <nav className={`nav${scrolled ? " nav--visible" : ""}`}>
         <NavLogo />
         <div className="nav__right">
+          <a className="nav__link" href="/docs/" onClick={() => trackCTA("nav", "docs")}>Docs</a>
           <a className="nav__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "nav")}>GitHub</a>
           <a className="nav__cta" href="#install" onClick={() => trackCTA("nav", "install")}>Install</a>
         </div>
@@ -252,21 +284,26 @@ export default function App() {
         <div className="w" style={{ textAlign: 'left' }}>
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
+            <p className="hero__eyebrow">OpenUsage.sh • Terminal-first • Local-first • 17 providers</p>
+          </R>
+          <R delay={0.2}>
             <h1 className="hero__title">
-              The best way to track coding agent usage and quotas across providers in one place.
+              OpenUsage.sh is the terminal-first local dashboard for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter.
             </h1>
           </R>
-          <R delay={0.25}>
+          <R delay={0.3}>
             <p className="hero__sub">
-              OpenUsage is a local-first tracker for mixed-tool workflows across Claude Code,
-              Codex, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more.
-              It unifies spend, quotas, resets, rate limits, model usage, and supported session
-              telemetry in one place instead of leaving them fragmented across provider dashboards.
+              OpenUsage.sh is a terminal-first, local-first dashboard for mixed-tool workflows across
+              Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more.
+              It unifies quotas, resets, rate limits, spend, model usage, and supported session telemetry
+              in one place instead of leaving them fragmented across provider dashboards. If you only need
+              a single-surface countdown, that is a narrower category than the mixed-tool workflow this product is built for.
             </p>
           </R>
-          <R delay={0.35}>
+          <R delay={0.4}>
             <div className="hero__actions">
               <a className="btn btn--fill" href="#install" onClick={() => trackCTA("hero", "install")}>Get started</a>
+              <a className="btn btn--ghost" href="/docs/" onClick={() => trackCTA("hero", "docs")}>Docs</a>
             </div>
           </R>
         </div>
@@ -280,7 +317,7 @@ export default function App() {
           </R>
           <R className="pitch__line" delay={0.12}>
             <p className="pitch__line" style={{margin:0}}>
-              Shows <em>spend, quotas, resets,</em> and <em>model usage</em> in one place.
+              Shows <em>quotas, resets, rate limits, spend,</em> and <em>model usage</em> in one place.
             </p>
           </R>
           <R className="pitch__line" delay={0.24}>
@@ -372,11 +409,12 @@ export default function App() {
       {/* ── Features (keyword-rich, 2-col grid) ─────────── */}
       <section className="features-section" id="features">
         <div className="w">
-          <R><h2 className="features-title">Why OpenUsage Wins This Use Case</h2></R>
+          <R><h2 className="features-title">What OpenUsage Is For</h2></R>
           <R delay={0.05}>
             <p className="features-lede">
-              The job is not “show me one quota.” The job is “give me one trustworthy place to track
-              usage and quotas across all the coding agents and providers I actually use.”
+              OpenUsage is for developers who need one local dashboard across more than one coding
+              agent or provider. The job is not “show me one quota.” The job is “show me the real
+              picture across the tools I actually use.”
             </p>
           </R>
           <div className="features-grid">
@@ -404,6 +442,29 @@ export default function App() {
               <h3>Proof over positioning</h3>
               <p>Seventeen providers, live dashboard views, supported hook integrations, and historical telemetry make the claim defensible.</p>
             </div></R>
+          </div>
+        </div>
+      </section>
+
+      <section className="resources-section" id="resources">
+        <div className="w">
+          <R><h2 className="resources-title">Pick The Right Page</h2></R>
+          <R delay={0.05}>
+            <p className="resources-lede">
+              Use the homepage for the product. Use the docs pages for direct comparisons,
+              capability proof, and narrower query matches.
+            </p>
+          </R>
+          <div className="resources-grid">
+            {resourceCards.map((card, i) => (
+              <R key={card.id} delay={i * 0.06}>
+                <a className="resource-card" href={card.href} onClick={() => trackCTA("resources", card.id)}>
+                  <span className="resource-card__eyebrow">{card.eyebrow}</span>
+                  <h3 className="resource-card__title">{card.title}</h3>
+                  <p className="resource-card__desc">{card.description}</p>
+                </a>
+              </R>
+            ))}
           </div>
         </div>
       </section>
@@ -472,13 +533,14 @@ export default function App() {
       {/* ── Footer ───────────────────────────────────── */}
       <footer className="footer">
         <div className="w" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <span>OpenUsage · open source</span>
+          <span>OpenUsage.sh · open source</span>
           <div className="footer__links">
             {analyticsAvailable ? (
               <button className="footer__link footer__button" type="button" onClick={openAnalyticsPreferences}>
                 {analyticsPreferenceLabel()}
               </button>
             ) : null}
+            <a className="footer__link" href="/docs/" onClick={() => trackCTA("footer", "docs")}>Docs</a>
             <a className="footer__link" href="https://github.com/janekbaraniewski/openusage" rel="noreferrer" target="_blank" onClick={() => trackOutbound("github", "footer")}>GitHub</a>
             <a className="footer__link" href="https://github.com/janekbaraniewski/openusage/releases" rel="noreferrer" target="_blank" onClick={() => trackOutbound("releases", "footer")}>Releases</a>
           </div>

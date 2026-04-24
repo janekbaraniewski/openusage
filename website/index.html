@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Best Way to Track Coding Agent Usage and Quotas Across Providers | OpenUsage</title>
+    <title>OpenUsage.sh: Terminal-First Local Quota Tracker for Claude Code, Codex CLI, Cursor, Copilot & OpenRouter</title>
     <meta
       name="description"
-      content="OpenUsage is the local-first way to track coding agent usage and quotas across providers in one place, with spend, resets, rate limits, model usage, and session telemetry."
+      content="OpenUsage.sh is the terminal-first local dashboard for Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more. Track quotas, resets, rate limits, spend, model usage, and local telemetry in one place."
     />
     <link rel="canonical" href="https://openusage.sh/" />
 
@@ -15,19 +15,19 @@
     <meta name="color-scheme" content="dark" />
     <meta name="robots" content="index, follow" />
     <meta name="author" content="Jan Baraniewski" />
-    <meta property="og:title" content="Best Way to Track Coding Agent Usage and Quotas Across Providers" />
-    <meta property="og:description" content="The local-first way to track coding agent usage and quotas across providers in one place." />
+    <meta property="og:title" content="OpenUsage.sh: Terminal-First Local Quota Tracker for Claude Code, Codex CLI, Cursor, Copilot & OpenRouter" />
+    <meta property="og:description" content="OpenUsage.sh is the terminal-first local dashboard for coding agent quotas, resets, spend, rate limits, model usage, and local telemetry across mixed-tool workflows." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://openusage.sh/" />
     <meta property="og:image" content="https://openusage.sh/brand/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="OpenUsage terminal dashboard showing AI usage, spend, and quota monitoring" />
-    <meta property="og:site_name" content="OpenUsage" />
+    <meta property="og:site_name" content="OpenUsage.sh" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Best Way to Track Coding Agent Usage and Quotas Across Providers" />
-    <meta name="twitter:description" content="The local-first way to track coding agent usage and quotas across providers in one place." />
+    <meta name="twitter:title" content="OpenUsage.sh: Terminal-First Local Quota Tracker for Claude Code, Codex CLI, Cursor, Copilot & OpenRouter" />
+    <meta name="twitter:description" content="OpenUsage.sh is the terminal-first local dashboard for coding agent quotas, resets, spend, rate limits, model usage, and local telemetry across mixed-tool workflows." />
     <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
 
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%brand/favicon.svg" />
@@ -42,12 +42,15 @@
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
+      "@id": "https://openusage.sh/#software",
       "name": "OpenUsage",
-      "description": "OpenUsage is the local-first way to track coding agent usage and quotas across providers in one place, with spend, resets, rate limits, model activity, MCP usage, and session telemetry across 17 providers.",
-      "applicationSubCategory": "Coding agent usage tracker",
-      "keywords": "coding agent usage tracker, ai usage dashboard, coding agent spend tracker, claude code usage, codex usage, cursor usage, local-first llm dashboard",
+      "alternateName": "OpenUsage.sh",
+      "description": "OpenUsage.sh is a terminal-first, local-first quota and usage tracker for Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and other supported providers. It unifies quotas, resets, rate limits, spend, model activity, MCP usage, and session telemetry across 17 providers.",
+      "applicationSubCategory": "Quota tracker and usage dashboard for coding agents",
+      "keywords": "local quota tracker, coding agent usage tracker, claude code quota tracker, codex cli quota tracker, cursor usage tracker, copilot quota tracker, openrouter spend tracker, terminal ai dashboard",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
+      "isAccessibleForFree": true,
       "offers": {
         "@type": "Offer",
         "price": "0",
@@ -66,6 +69,9 @@
       "programmingLanguage": "Go",
       "codeRepository": "https://github.com/janekbaraniewski/openusage",
       "license": "https://github.com/janekbaraniewski/openusage/blob/main/LICENSE",
+      "sameAs": [
+        "https://github.com/janekbaraniewski/openusage"
+      ],
       "featureList": [
         "Spend, credits, and quota visibility across 17 providers",
         "Model and token breakdowns when telemetry supports them",
@@ -83,10 +89,10 @@
   </head>
   <body>
     <noscript>
-      <h1>OpenUsage — Track Coding Agent Usage Across Multiple Platforms</h1>
-      <p>OpenUsage is a free, open-source, local-first dashboard for tracking coding agent usage across Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenRouter, and other supported tools. It unifies spend, quotas, resets, rate limits, model usage, and session telemetry from your terminal.</p>
+      <h1>OpenUsage.sh — Local Quota Tracker for Coding Agents</h1>
+      <p>OpenUsage.sh is a free, open-source, terminal-first dashboard for tracking coding agent quotas, spend, rate limits, resets, model usage, and session telemetry across Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenRouter, and other supported tools.</p>
       <h2>Why teams use it</h2>
-      <p>Native dashboards show one provider at a time. OpenUsage is built for mixed-tool workflows, where you need one place to compare coding agent spend, rate limits, model activity, and local telemetry across providers. It keeps the data local and stores daemon-backed history in SQLite.</p>
+      <p>Native dashboards show one provider at a time. OpenUsage.sh is built for mixed-tool workflows, where you need one place to compare coding agent spend, rate limits, resets, model activity, and local telemetry across providers. It keeps the data local and stores daemon-backed history in SQLite.</p>
       <h2>Supported Providers</h2>
       <p>Coding Agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, Ollama. API Platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, Alibaba Cloud.</p>
       <h2>Install</h2>

@@ -1,6 +1,6 @@
 /* ===================================================================
    OpenUsage — Asymmetric, monospace, technical.
-   Not a product page. Not a template.
+   Product-first, terminal-first, and built for mixed-tool workflows.
    =================================================================== */
 
 :root {
@@ -153,7 +153,16 @@ button { font: inherit; cursor: pointer; }
   font-weight: 800;
   line-height: 1.08;
   letter-spacing: -0.03em;
-  max-width: 16ch;
+  max-width: 18ch;
+}
+
+.hero__eyebrow {
+  margin: 0 0 10px;
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .hero__sub {
@@ -168,6 +177,7 @@ button { font: inherit; cursor: pointer; }
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .btn {
@@ -384,6 +394,71 @@ button { font: inherit; cursor: pointer; }
   .feature-item:nth-last-child(-n + 2) {
     border-bottom: 1px solid var(--border);
   }
+}
+
+/* ── Resources ─────────────────────────────────────────────── */
+
+.resources-section {
+  padding: clamp(80px, 10vw, 140px) 0;
+  border-top: 1px solid var(--border);
+}
+
+.resources-title {
+  margin: 0 0 12px;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.resources-lede {
+  max-width: 48rem;
+  margin: 0 0 clamp(28px, 4vw, 44px);
+  color: var(--text-2);
+  font-size: 0.92rem;
+  line-height: 1.75;
+}
+
+.resources-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-card {
+  display: block;
+  min-height: 196px;
+  padding: clamp(22px, 3vw, 30px);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)), var(--surface);
+  transition: border-color 0.2s, transform 0.2s, color 0.2s;
+}
+
+.resource-card:hover {
+  border-color: rgba(184, 187, 38, 0.35);
+  transform: translateY(-2px);
+}
+
+.resource-card__eyebrow {
+  display: inline-block;
+  margin-bottom: 14px;
+  color: var(--green);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.resource-card__title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.resource-card__desc {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.84rem;
+  line-height: 1.8;
 }
 
 /* ── Providers ─────────────────────────────────────────────── */
@@ -632,6 +707,7 @@ button { font: inherit; cursor: pointer; }
   .install-label { display: none; }
   .prov-detect { display: none; }
   .nav__link { display: none; }
+  .resources-grid { grid-template-columns: 1fr; }
   .consent-banner {
     right: 16px;
     left: 16px;
