@@ -135,6 +135,99 @@ a:hover {
   margin-top: 10px;
 }
 
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.card-link {
+  display: block;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)), rgba(255,255,255,0.01);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.card-link:hover {
+  border-color: rgba(184, 187, 38, 0.35);
+  transform: translateY(-1px);
+}
+
+.card-link__eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: var(--green);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card-link__title {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.card-link__desc {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}
+
+.data-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.data-table td {
+  color: var(--text-2);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.data-table td strong {
+  color: var(--text);
+}
+
+.callout {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)), rgba(255,255,255,0.01);
+  color: var(--text-2);
+  font-size: 0.92rem;
+  line-height: 1.8;
+}
+
+.callout strong {
+  color: var(--text);
+}
+
 .footer {
   width: min(760px, calc(100vw - 32px));
   margin: 0 auto;
@@ -152,6 +245,10 @@ a:hover {
   .guide {
     width: min(100vw - 24px, 760px);
     padding-top: 24px;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
   }
 
   .footer {

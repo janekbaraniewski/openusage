@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Track Cursor usage across providers | OpenUsage.sh</title>
+    <meta
+      name="description"
+      content="Track Cursor usage across providers with a local-first dashboard. Use this page when Cursor plan usage is only one part of the broader coding-agent and API workflow."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/track-cursor-usage-across-providers/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="Track Cursor usage across providers" />
+    <meta
+      property="og:description"
+      content="Use a local-first dashboard when Cursor plan usage is only one part of the broader coding-agent and API workflow."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://openusage.sh/docs/track-cursor-usage-across-providers/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Track Cursor usage across providers" />
+    <meta
+      name="twitter:description"
+      content="Use a local-first dashboard when Cursor plan usage is only one part of the broader coding-agent and API workflow."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Track Cursor usage across providers",
+      "description": "A practical page for tracking Cursor usage across providers.",
+      "author": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OpenUsage.sh",
+        "url": "https://openusage.sh/"
+      },
+      "datePublished": "2026-04-24",
+      "dateModified": "2026-04-24",
+      "mainEntityOfPage": "https://openusage.sh/docs/track-cursor-usage-across-providers/"
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Guide / April 24, 2026</p>
+        <h1>Track Cursor usage across providers</h1>
+        <p class="hero__lede">
+          Cursor plan usage is useful, but it is rarely the whole picture.
+          The real workflow usually includes Cursor plus Claude Code, Codex CLI, Copilot, OpenRouter, OpenAI, or Anthropic in parallel.
+        </p>
+      </section>
+
+      <section class="section" id="answer">
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          Use a <strong>local-first dashboard that treats Cursor as one important part of a broader stack</strong>.
+          OpenUsage.sh fits that category. It is designed for people who need one local view across more than one coding agent or provider.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Why Cursor-only views are incomplete</h2>
+        <ul class="plain-list">
+          <li><strong>Cursor does not explain the whole stack.</strong> The usage spike might come from Cursor, but it might also come from Claude Code, Codex CLI, or the underlying API platforms.</li>
+          <li><strong>Comparisons matter.</strong> You often need to decide which tool is burning budget or getting close to a limit.</li>
+          <li><strong>History matters.</strong> Live plan usage is helpful, but trend context is better.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Why OpenUsage.sh fits the Cursor workflow</h2>
+        <ul class="plain-list">
+          <li><strong>One local dashboard.</strong> Cursor sits beside other coding agents and API platforms instead of being isolated.</li>
+          <li><strong>Broader data shape.</strong> The dashboard can include quotas, resets, rate limits, spend, model usage, and local history.</li>
+          <li><strong>Terminal-first and local-first.</strong> The product stays close to the actual tools and data rather than requiring a hosted backend.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/local-quota-tracker-for-claude-code-codex-cursor/">
+            <span class="card-link__eyebrow">Local quotas</span>
+            <h3 class="card-link__title">Local quota tracker guide</h3>
+            <p class="card-link__desc">Use the broader page when the question expands from Cursor to the full local quota tracker category.</p>
+          </a>
+          <a class="card-link" href="/docs/openusage-sh-vs-openusage-ai/">
+            <span class="card-link__eyebrow">Comparison</span>
+            <h3 class="card-link__title">OpenUsage.sh vs OpenUsage.ai</h3>
+            <p class="card-link__desc">Use the comparison page when the decision is between the mixed-tool terminal dashboard category and a simpler menu bar limits tracker.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>

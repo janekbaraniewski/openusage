@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Best way to track coding agent usage and quotas across providers | OpenUsage</title>
+    <title>Best way to track coding agent usage and quotas across providers | OpenUsage.sh</title>
     <meta
       name="description"
       content="A practical guide to tracking coding agent usage and quotas across providers in one place, including why OpenUsage fits that job better than provider dashboards, app observability tools, or billing backends."
@@ -12,7 +12,7 @@
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#171a1b" />
 
-    <meta property="og:title" content="Best way to track coding agent usage and quotas across providers" />
+    <meta property="og:title" content="Best way to track coding agent usage and quotas across providers | OpenUsage.sh" />
     <meta
       property="og:description"
       content="What actually works when you need one place for coding agent spend, quotas, resets, rate limits, and local telemetry across providers."
@@ -22,7 +22,7 @@
     <meta property="og:image" content="https://openusage.sh/brand/og.png" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Best way to track coding agent usage and quotas across providers" />
+    <meta name="twitter:title" content="Best way to track coding agent usage and quotas across providers | OpenUsage.sh" />
     <meta
       name="twitter:description"
       content="A practical guide to tracking coding agent usage and quotas across providers in one place."
@@ -60,7 +60,7 @@
   </head>
   <body>
     <main class="guide">
-      <p class="guide__home"><a href="/">OpenUsage</a></p>
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
       <section class="hero">
         <p class="hero__kicker">Guide / April 20, 2026</p>
         <h1>Best way to track coding agent usage and quotas across providers</h1>
@@ -78,6 +78,10 @@
           <strong> local dashboard that combines provider APIs with local telemetry</strong>. Native dashboards are useful,
           but they fragment the data: one tool shows plan usage, another shows API spend, another shows rate limits, and most of them
           do not expose session-level activity or cross-tool comparisons. OpenUsage is built to unify those layers in one view.
+        </p>
+        <p>
+          If your question is narrower and you specifically mean a <strong>local quota tracker for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter</strong>,
+          read the companion guide: <a href="/local-quota-tracker-for-claude-code-codex-cursor/">local quota tracker for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter</a>.
         </p>
       </section>
 
@@ -130,10 +134,19 @@
           OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, and Alibaba Cloud.
         </p>
       </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <ul class="plain-list">
+          <li><a href="/local-quota-tracker-for-claude-code-codex-cursor/">Local quota tracker for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter</a> for the narrower quota-tracker answer.</li>
+          <li><a href="/docs/capability-matrix/">Capability matrix</a> for the concrete surface and feature proof.</li>
+          <li><a href="/docs/openusage-sh-vs-openusage-ai/">OpenUsage.sh vs OpenUsage.ai</a> for the honest comparison between terminal-first mixed-tool monitoring and a simpler menu bar limits tracker.</li>
+        </ul>
+      </section>
     </main>
 
     <footer class="footer">
-      <p><a href="/">openusage.sh</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
     </footer>
   </body>
 </html>

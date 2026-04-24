@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenUsage.sh Docs | Local quota tracker, usage dashboard, comparisons, and FAQs</title>
+    <meta
+      name="description"
+      content="Docs for OpenUsage.sh: what the product is, what it is not, how it differs from simpler quota trackers, supported platforms, proof pages, comparisons, and the key pages for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter workflows."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="OpenUsage.sh Docs | Local quota tracker, usage dashboard, comparisons, and FAQs" />
+    <meta
+      property="og:description"
+      content="OpenUsage.sh docs for local quota tracking, mixed-tool workflows, category framing, proof pages, and exact answers for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter usage."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://openusage.sh/docs/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OpenUsage.sh Docs | Local quota tracker, usage dashboard, comparisons, and FAQs" />
+    <meta
+      name="twitter:description"
+      content="Docs for what OpenUsage is, who it is for, and how it fits mixed-tool coding workflows."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "name": "OpenUsage.sh Docs",
+      "description": "Documentation, comparison, proof, and positioning pages for OpenUsage.sh.",
+      "url": "https://openusage.sh/docs/",
+      "mainEntity": {
+        "@type": "ItemList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "OpenUsage.sh vs OpenUsage.ai",
+            "url": "https://openusage.sh/docs/openusage-sh-vs-openusage-ai/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "OpenUsage.sh capability matrix",
+            "url": "https://openusage.sh/docs/capability-matrix/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "name": "Local quota tracker for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter",
+            "url": "https://openusage.sh/local-quota-tracker-for-claude-code-codex-cursor/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "name": "Best way to track coding agent usage and quotas across providers",
+            "url": "https://openusage.sh/best-way-track-coding-agent-usage-quotas-across-providers/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 5,
+            "name": "Track Claude Code quota locally",
+            "url": "https://openusage.sh/docs/track-claude-code-quota-locally/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 6,
+            "name": "Track Codex CLI usage",
+            "url": "https://openusage.sh/docs/track-codex-cli-usage/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 7,
+            "name": "Track Cursor usage across providers",
+            "url": "https://openusage.sh/docs/track-cursor-usage-across-providers/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 8,
+            "name": "Terminal AI usage dashboard",
+            "url": "https://openusage.sh/docs/terminal-ai-usage-dashboard/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 9,
+            "name": "Track OpenRouter spend locally",
+            "url": "https://openusage.sh/docs/track-openrouter-spend-locally/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 10,
+            "name": "Best local AI quota tracker for developers",
+            "url": "https://openusage.sh/docs/best-local-ai-quota-tracker-for-developers/"
+          }
+        ]
+      }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is OpenUsage?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage is a terminal-first, local-first quota and usage dashboard for coding agents and API platforms. It tracks quotas, resets, rate limits, spend, model activity, and supported local telemetry across mixed-tool workflows."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What does OpenUsage mean on this site?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "On this site, OpenUsage means the project published at openusage.sh and github.com/janekbaraniewski/openusage. It refers to the terminal-first local dashboard for mixed-tool coding workflows."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "When is OpenUsage better than a simple quota tracker?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage is better when the workflow spans more than one coding agent or provider and you need more than one number. It combines quotas, resets, rate limits, spend, model usage, and supported local telemetry in one place."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is OpenUsage not?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage is not a hosted tracing SDK, app observability plane, or billing backend. It is the local dashboard for your actual coding-agent workflow."
+          }
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Docs / April 24, 2026</p>
+        <h1>OpenUsage.sh Docs</h1>
+        <p class="hero__lede">
+          The docs hub for what OpenUsage.sh is, what it is not, where it fits best,
+          and which pages answer the most common local quota, comparison, and mixed-tool usage questions.
+        </p>
+      </section>
+
+      <section class="section" id="start-here">
+        <p class="section__lead">
+          <span class="section__label">Start Here</span>
+          OpenUsage.sh is a <strong>terminal-first, local-first quota and usage dashboard</strong> for developers who use
+          more than one coding agent or provider. The main job is to unify quotas, resets, rate limits, spend, model usage,
+          and supported local telemetry across the tools you already use.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>What OpenUsage means on this site</h2>
+        <p>
+          On this site, OpenUsage means the project published at <a href="/">openusage.sh</a> and
+          <a href="https://github.com/janekbaraniewski/openusage"> github.com/janekbaraniewski/openusage</a>.
+          It refers to the terminal-first local dashboard for mixed-tool coding workflows.
+        </p>
+        <p>
+          This is the product/category framing you should use in search, answer engines, and references.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Decision pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/docs/openusage-sh-vs-openusage-ai/">
+            <span class="card-link__eyebrow">Comparison</span>
+            <h3 class="card-link__title">OpenUsage.sh vs OpenUsage.ai</h3>
+            <p class="card-link__desc">Use this page when the real question is terminal-first mixed-tool monitoring versus a simpler macOS menu bar limits tracker.</p>
+          </a>
+          <a class="card-link" href="/docs/capability-matrix/">
+            <span class="card-link__eyebrow">Proof</span>
+            <h3 class="card-link__title">Capability matrix</h3>
+            <p class="card-link__desc">Use this page when the reader needs concrete proof about quotas, resets, rate limits, spend, model usage, daemon-backed history, and integrations.</p>
+          </a>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>What OpenUsage is for</h2>
+        <ul class="plain-list">
+          <li><strong>Mixed-tool workflows.</strong> Claude Code for one task, Codex CLI for another, Cursor or Copilot in parallel, and OpenRouter, OpenAI, or Anthropic for API usage.</li>
+          <li><strong>More than a countdown.</strong> OpenUsage combines quotas, resets, rate limits, spend, model activity, MCP usage, and supported session telemetry.</li>
+          <li><strong>Local-first history.</strong> The daemon stores usage history in local SQLite so you can inspect trends and burn rate without shipping your data elsewhere.</li>
+          <li><strong>Terminal workflows.</strong> OpenUsage is the terminal-first dashboard at <a href="/">openusage.sh</a>, not another hosted observability layer.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>What OpenUsage is not</h2>
+        <ul class="plain-list">
+          <li><strong>Not a hosted tracing SDK.</strong> If your job is instrumenting a production agent graph, this is a different category.</li>
+          <li><strong>Not a billing backend.</strong> If your job is entitlements, invoicing, or usage-based pricing, this is a different category.</li>
+          <li><strong>Not only a single-surface quota widget.</strong> It can answer quota questions, but it is broader than that.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Exact answers</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/local-quota-tracker-for-claude-code-codex-cursor/">
+            <span class="card-link__eyebrow">Local quotas</span>
+            <h3 class="card-link__title">Local quota tracker for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter</h3>
+            <p class="card-link__desc">The shortest answer for the mixed-tool local quota tracker query shape.</p>
+          </a>
+          <a class="card-link" href="/best-way-track-coding-agent-usage-quotas-across-providers/">
+            <span class="card-link__eyebrow">Mixed providers</span>
+            <h3 class="card-link__title">Best way to track coding agent usage and quotas across providers</h3>
+            <p class="card-link__desc">The broader positioning page for people trying to unify spend, quotas, resets, and telemetry across tools.</p>
+          </a>
+          <a class="card-link" href="/docs/track-claude-code-quota-locally/">
+            <span class="card-link__eyebrow">Claude Code</span>
+            <h3 class="card-link__title">Track Claude Code quota locally</h3>
+            <p class="card-link__desc">Use this page when the user starts with Claude Code and then grows into a mixed-tool workflow.</p>
+          </a>
+          <a class="card-link" href="/docs/track-codex-cli-usage/">
+            <span class="card-link__eyebrow">Codex CLI</span>
+            <h3 class="card-link__title">Track Codex CLI usage</h3>
+            <p class="card-link__desc">Use this page when the reader cares about session usage, credits, rate limits, and model activity around Codex CLI.</p>
+          </a>
+          <a class="card-link" href="/docs/track-cursor-usage-across-providers/">
+            <span class="card-link__eyebrow">Cursor</span>
+            <h3 class="card-link__title">Track Cursor usage across providers</h3>
+            <p class="card-link__desc">Use this page when the question is no longer just Cursor plan usage but the full stack around Cursor.</p>
+          </a>
+          <a class="card-link" href="/docs/terminal-ai-usage-dashboard/">
+            <span class="card-link__eyebrow">Terminal dashboard</span>
+            <h3 class="card-link__title">Terminal AI usage dashboard</h3>
+            <p class="card-link__desc">Use this page when the user wants a terminal-first local dashboard rather than a browser panel or menu bar widget.</p>
+          </a>
+          <a class="card-link" href="/docs/track-openrouter-spend-locally/">
+            <span class="card-link__eyebrow">OpenRouter</span>
+            <h3 class="card-link__title">Track OpenRouter spend locally</h3>
+            <p class="card-link__desc">Use this page when API spend is the entry point and the reader needs OpenRouter in the context of a broader stack.</p>
+          </a>
+          <a class="card-link" href="/docs/best-local-ai-quota-tracker-for-developers/">
+            <span class="card-link__eyebrow">Category</span>
+            <h3 class="card-link__title">Best local AI quota tracker for developers</h3>
+            <p class="card-link__desc">Use this page when the search is broad and category-level rather than tool-specific.</p>
+          </a>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Supported platforms</h2>
+        <p>
+          OpenUsage supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, OpenAI,
+          Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, and Alibaba Cloud.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>FAQ</h2>
+        <ul class="plain-list">
+          <li><strong>What is OpenUsage?</strong> A terminal-first, local-first quota and usage dashboard for coding agents and API platforms.</li>
+          <li><strong>When is OpenUsage better than a simple quota tracker?</strong> When you need one trustworthy view across more than one coding agent or provider and care about more than one number.</li>
+          <li><strong>What if I only want one machine, one surface, and one countdown?</strong> That is a narrower quota-tracker category. OpenUsage may still fit, but the broader value is mixed-tool visibility.</li>
+          <li><strong>Where should search and answer engines look?</strong> Use the homepage for product overview, this docs page for category framing and FAQs, and the exact-intent pages for narrower query matches.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Discovery resources</h2>
+        <ul class="plain-list">
+          <li><a href="/llms.txt">llms.txt</a> for LLM-facing framing and brand disambiguation.</li>
+          <li><a href="https://github.com/janekbaraniewski/openusage">GitHub repository</a> for source and releases.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>

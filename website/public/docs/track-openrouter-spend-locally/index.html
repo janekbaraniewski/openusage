@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Track OpenRouter spend locally | OpenUsage.sh</title>
+    <meta
+      name="description"
+      content="Track OpenRouter spend locally with a local-first dashboard. Use this page when OpenRouter API spend is only one part of the broader coding-agent and provider workflow."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/track-openrouter-spend-locally/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="Track OpenRouter spend locally" />
+    <meta
+      property="og:description"
+      content="Use a local-first dashboard when OpenRouter API spend is only one part of the broader coding-agent and provider workflow."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://openusage.sh/docs/track-openrouter-spend-locally/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Track OpenRouter spend locally" />
+    <meta
+      name="twitter:description"
+      content="Use a local-first dashboard when OpenRouter API spend is only one part of the broader coding-agent and provider workflow."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Track OpenRouter spend locally",
+      "description": "A practical page for tracking OpenRouter spend locally.",
+      "author": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OpenUsage.sh",
+        "url": "https://openusage.sh/"
+      },
+      "datePublished": "2026-04-24",
+      "dateModified": "2026-04-24",
+      "mainEntityOfPage": "https://openusage.sh/docs/track-openrouter-spend-locally/"
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Guide / April 24, 2026</p>
+        <h1>Track OpenRouter spend locally</h1>
+        <p class="hero__lede">
+          OpenRouter spend often matters because it sits underneath multiple tools.
+          The useful question is rarely “what is my OpenRouter number.” The useful question is
+          “how does OpenRouter spend relate to the rest of my coding-agent stack?”
+        </p>
+      </section>
+
+      <section class="section" id="answer">
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          Use a <strong>local-first dashboard that treats OpenRouter spend as part of a broader workflow</strong>.
+          OpenUsage.sh fits that job. It keeps OpenRouter visible alongside the coding agents and API platforms that actually drive the spend.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Why spend-only views break down</h2>
+        <ul class="plain-list">
+          <li><strong>OpenRouter can sit under multiple tools.</strong> Spend does not explain itself unless the rest of the stack is visible.</li>
+          <li><strong>Model activity matters.</strong> The spike usually requires model-level context, not just one total.</li>
+          <li><strong>Mixed-provider awareness matters.</strong> OpenRouter might be only one piece of a workflow that also includes Claude Code, Codex CLI, Cursor, OpenAI, or Anthropic.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Why OpenUsage.sh fits the OpenRouter workflow</h2>
+        <ul class="plain-list">
+          <li><strong>It combines spend with the rest of the stack.</strong></li>
+          <li><strong>It stays local-first.</strong> The dashboard and history stay on your machine instead of requiring a hosted observability layer.</li>
+          <li><strong>It includes compare and analytics views.</strong> That makes spend easier to explain instead of just display.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/best-way-track-coding-agent-usage-quotas-across-providers/">
+            <span class="card-link__eyebrow">Mixed providers</span>
+            <h3 class="card-link__title">Best way to track coding agent usage and quotas across providers</h3>
+            <p class="card-link__desc">Use the broader guide when the question expands beyond OpenRouter spend.</p>
+          </a>
+          <a class="card-link" href="/docs/capability-matrix/">
+            <span class="card-link__eyebrow">Proof</span>
+            <h3 class="card-link__title">Capability matrix</h3>
+            <p class="card-link__desc">Use the matrix when the reader wants a concrete feature and surface overview.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>

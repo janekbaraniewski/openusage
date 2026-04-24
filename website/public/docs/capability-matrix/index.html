@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenUsage.sh capability matrix | Quotas, spend, resets, rate limits, and model usage</title>
+    <meta
+      name="description"
+      content="A concrete capability matrix for OpenUsage.sh covering quotas, resets, rate limits, spend, model usage, local history, integrations, and mixed-provider coverage."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/capability-matrix/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="OpenUsage.sh capability matrix" />
+    <meta
+      property="og:description"
+      content="A concrete capability matrix for OpenUsage.sh covering quotas, resets, rate limits, spend, model usage, local history, integrations, and mixed-provider coverage."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://openusage.sh/docs/capability-matrix/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OpenUsage.sh capability matrix" />
+    <meta
+      name="twitter:description"
+      content="A concrete capability matrix for OpenUsage.sh covering quotas, resets, rate limits, spend, model usage, local history, integrations, and mixed-provider coverage."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "OpenUsage.sh capability matrix",
+      "description": "A concrete capability matrix for OpenUsage.sh.",
+      "author": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OpenUsage.sh",
+        "url": "https://openusage.sh/"
+      },
+      "datePublished": "2026-04-24",
+      "dateModified": "2026-04-24",
+      "mainEntityOfPage": "https://openusage.sh/docs/capability-matrix/"
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Proof / April 24, 2026</p>
+        <h1>OpenUsage.sh capability matrix</h1>
+        <p class="hero__lede">
+          This page exists to turn the product claim into something concrete. The point is not “local tracker.”
+          The point is what the dashboard actually covers once the workflow spans more than one coding agent or provider.
+        </p>
+      </section>
+
+      <section class="section" id="answer">
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          OpenUsage.sh is strongest when the workflow needs <strong>more than one number across more than one tool</strong>.
+          The matrix below shows the real surface area: quotas, resets, rate limits, spend, model activity, local history,
+          integrations, and mixed-provider comparison.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Core capability matrix</h2>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Why it matters</th>
+                <th>OpenUsage.sh coverage</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Quotas and remaining credits</strong></td>
+                <td>Users need to know what is close to exhaustion or reset.</td>
+                <td>Tracked where provider surfaces expose quota, plan, or credit data.</td>
+              </tr>
+              <tr>
+                <td><strong>Resets and usage windows</strong></td>
+                <td>Limits without reset timing are less actionable.</td>
+                <td>Included where provider APIs or local sources expose reset or billing-window information.</td>
+              </tr>
+              <tr>
+                <td><strong>Rate limits</strong></td>
+                <td>Useful for API-heavy workflows and operational awareness.</td>
+                <td>Included for supported providers where live headers or endpoints expose rate-limit data.</td>
+              </tr>
+              <tr>
+                <td><strong>Spend and billing activity</strong></td>
+                <td>Necessary when the question is not just quota but budget burn.</td>
+                <td>Included for supported providers and workflows where spend or credit data is available.</td>
+              </tr>
+              <tr>
+                <td><strong>Model usage</strong></td>
+                <td>Usage spikes usually require model-level explanation.</td>
+                <td>Included where provider or local telemetry exposes model-level usage or token data.</td>
+              </tr>
+              <tr>
+                <td><strong>Local history</strong></td>
+                <td>Without history, the dashboard cannot explain trends or burn rate.</td>
+                <td>Daemon-backed history stored locally in SQLite.</td>
+              </tr>
+              <tr>
+                <td><strong>Compare and analytics views</strong></td>
+                <td>Mixed-tool workflows need more than one static list.</td>
+                <td>Built-in dashboard, detail, compare, and analytics views in the terminal.</td>
+              </tr>
+              <tr>
+                <td><strong>Local integrations and hooks</strong></td>
+                <td>Hooks and local telemetry improve fidelity beyond provider dashboards alone.</td>
+                <td>Supported integrations for Claude Code, Codex CLI, and OpenCode.</td>
+              </tr>
+              <tr>
+                <td><strong>MCP usage visibility</strong></td>
+                <td>Tool usage matters when agent workflows call local tools and MCP servers.</td>
+                <td>Included where integrations expose the data.</td>
+              </tr>
+              <tr>
+                <td><strong>Mixed-provider coverage</strong></td>
+                <td>The real value appears when the user wants one dashboard across the whole stack.</td>
+                <td>Supports coding agents, API platforms, and local runtimes across 17 providers.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Coverage shape</h2>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Surface</th>
+                <th>Examples</th>
+                <th>Why it matters</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Coding agents and IDEs</strong></td>
+                <td>Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama</td>
+                <td>These are the tools most developers actually work inside, so the dashboard has to fit real day-to-day usage.</td>
+              </tr>
+              <tr>
+                <td><strong>API platforms</strong></td>
+                <td>OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, xAI, Z.AI, Gemini API, Alibaba Cloud</td>
+                <td>API spend and rate limits often live outside the coding agent surface, but still affect the same workflow.</td>
+              </tr>
+              <tr>
+                <td><strong>Local-first workflow</strong></td>
+                <td>Terminal UI, daemon-backed history, auto-detection, local SQLite</td>
+                <td>This keeps the product in the category of a local dashboard, not a hosted observability platform.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>What this matrix means</h2>
+        <div class="callout">
+          <strong>The winning position is not “we also track quotas.”</strong>
+          The winning position is “OpenUsage.sh is the local dashboard for the full mixed-tool coding stack.”
+          Quotas are part of that story, not the whole story.
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/docs/openusage-sh-vs-openusage-ai/">
+            <span class="card-link__eyebrow">Comparison</span>
+            <h3 class="card-link__title">OpenUsage.sh vs OpenUsage.ai</h3>
+            <p class="card-link__desc">Use the direct comparison if the reader is deciding between the terminal-first mixed-tool category and the simpler menu bar limits-tracker category.</p>
+          </a>
+          <a class="card-link" href="/best-way-track-coding-agent-usage-quotas-across-providers/">
+            <span class="card-link__eyebrow">Positioning</span>
+            <h3 class="card-link__title">Best way to track coding agent usage and quotas across providers</h3>
+            <p class="card-link__desc">Use the broader guide if the reader is still deciding what category of tool they need.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>

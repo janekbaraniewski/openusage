@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Track Codex CLI usage | OpenUsage.sh</title>
+    <meta
+      name="description"
+      content="Track Codex CLI usage with a terminal-first local dashboard. Use this page when you care about session usage, credits, rate limits, and model activity in the context of the rest of your stack."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/track-codex-cli-usage/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="Track Codex CLI usage" />
+    <meta
+      property="og:description"
+      content="Use a terminal-first local dashboard when you care about session usage, credits, rate limits, and model activity around Codex CLI."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://openusage.sh/docs/track-codex-cli-usage/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Track Codex CLI usage" />
+    <meta
+      name="twitter:description"
+      content="Use a terminal-first local dashboard when you care about session usage, credits, rate limits, and model activity around Codex CLI."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Track Codex CLI usage",
+      "description": "A practical page for tracking Codex CLI usage.",
+      "author": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OpenUsage.sh",
+        "url": "https://openusage.sh/"
+      },
+      "datePublished": "2026-04-24",
+      "dateModified": "2026-04-24",
+      "mainEntityOfPage": "https://openusage.sh/docs/track-codex-cli-usage/"
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Guide / April 24, 2026</p>
+        <h1>Track Codex CLI usage</h1>
+        <p class="hero__lede">
+          If you use Codex CLI seriously, the useful view is not just a single counter.
+          The useful view is session usage, credits, rate limits, and model activity in the same dashboard as the rest of your coding stack.
+        </p>
+      </section>
+
+      <section class="section" id="answer">
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          Use a <strong>terminal-first local dashboard that keeps Codex CLI visible alongside the rest of your workflow</strong>.
+          OpenUsage.sh fits that job. It is built for developers who use more than one coding agent or provider and want one place to inspect the real picture.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>What matters around Codex CLI</h2>
+        <ul class="plain-list">
+          <li><strong>Session-level context.</strong> Codex CLI usage only becomes useful when it is visible as part of a real working session, not as an isolated number.</li>
+          <li><strong>Credits and limits.</strong> You need to know what is close to exhaustion or reset.</li>
+          <li><strong>Model activity.</strong> When usage moves, you usually want to know which model or run shape caused it.</li>
+          <li><strong>Cross-tool comparison.</strong> The question is often whether Codex CLI or something else in the stack drove the change.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Why OpenUsage.sh fits this job</h2>
+        <ul class="plain-list">
+          <li><strong>It is terminal-first.</strong> The dashboard matches the way Codex CLI users already work.</li>
+          <li><strong>It supports mixed-tool correlation.</strong> Codex CLI usage can sit beside Claude Code, Cursor, Copilot, OpenRouter, and API-platform activity.</li>
+          <li><strong>It stores local history.</strong> The daemon-backed SQLite history is useful when you need trend context rather than just a live reading.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/local-quota-tracker-for-claude-code-codex-cursor/">
+            <span class="card-link__eyebrow">Local quotas</span>
+            <h3 class="card-link__title">Local quota tracker guide</h3>
+            <p class="card-link__desc">Use the broader guide when the question expands from Codex CLI to the whole local dashboard category.</p>
+          </a>
+          <a class="card-link" href="/docs/track-cursor-usage-across-providers/">
+            <span class="card-link__eyebrow">Cursor</span>
+            <h3 class="card-link__title">Track Cursor usage across providers</h3>
+            <p class="card-link__desc">Use this page when Codex CLI is only one part of a broader IDE and API workflow.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>

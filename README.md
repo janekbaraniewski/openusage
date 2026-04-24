@@ -2,7 +2,7 @@
   <img src="./assets/logo.gif" alt="OpenUsage logo">
 </p>
 
-<p align="center"><strong>The coding agent usage dashboard you've been looking for.</strong></p>
+<p align="center"><strong>OpenUsage.sh: terminal-first local quota and usage tracking for Claude Code, Codex CLI, Cursor, Copilot, and OpenRouter.</strong></p>
 
 <p align="center">
   <a href="#install">Install</a> &middot;
@@ -14,7 +14,7 @@
 
 ---
 
-OpenUsage auto-detects AI coding tools and API keys on your workstation and shows live quota, usage, spend, resets, rate limits, and model data in your terminal. It is built for mixed-tool workflows across Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more. Zero config required — just run `openusage`.
+OpenUsage is the terminal-first local dashboard published at [openusage.sh](https://openusage.sh/). Publicly, the clearest brand reference is **OpenUsage.sh**. It auto-detects AI coding tools and API keys on your workstation and shows live quota, usage, spend, resets, rate limits, and model data in your terminal. It is built for mixed-tool workflows across Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and more. Zero config required — just run `openusage`.
 
 ![OpenUsage dashboard](./assets/dashboard.png)
 
@@ -68,6 +68,12 @@ Native dashboards show one provider at a time. OpenUsage gives you one local-fir
 It is built for end-user tool tracking, not for instrumenting a separate AI app with tracing SDKs or a billing backend.
 
 If you want the full positioning argument, read the guide: [best way to track coding agent usage and quotas across providers](https://openusage.sh/best-way-track-coding-agent-usage-quotas-across-providers/).
+
+If the question is whether this is the right fit versus a simpler local limits tracker, use:
+
+- [OpenUsage.sh vs OpenUsage.ai](https://openusage.sh/docs/openusage-sh-vs-openusage-ai/)
+- [Capability matrix](https://openusage.sh/docs/capability-matrix/)
+- [Docs hub](https://openusage.sh/docs/)
 
 ## Features
 
