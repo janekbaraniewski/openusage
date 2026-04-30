@@ -96,6 +96,51 @@ Tracks subscription info and usage endpoints.
 
 Tracks rate limits and account balance.
 
+### Browser-session auth (universal mechanism)
+
+For providers whose billing / usage / account data is gated by web-console
+session cookies and never exposed via API key, openusage supports a
+"connect via browser" flow that reads the session cookie directly out of
+your default browser's cookie jar (Chrome / Firefox / Safari / Edge /
+Brave on macOS / Linux / Windows).
+
+**How to connect**: Settings → 5 KEYS → navigate to the provider row →
+press Enter. Openusage reads the `(domain, cookie name)` pair declared by
+the provider, persists it encrypted-at-rest in the credentials store, and
+uses it on every poll. When the cookie expires, the tile transitions to
+AUTH with a "re-login at console.X.com" hint; logging into the site again
+in your browser refreshes openusage on the next poll automatically.
+
+**Privacy**: opt-in per-account, scoped to a single (domain, cookie name)
+pair, never sent off-machine. macOS will prompt for Keychain access the
+first time openusage reads Chrome's cookie store; that's the OS-level
+consent gate.
+
+**Cookie auth currently shipping** (full implementation):
+- Perplexity → `console.perplexity.ai` — tier, balance, spend, analytics
+- OpenCode → `opencode.ai/_server` — balance, monthly limit, subscription
+
+**Cookie auth in progress** (HAR captured, RPC client needed):
+- Google AI Studio → `aistudio.google.com` — per-project quotas (needs
+  SAPISIDHASH + MakerSuite tuple decoding; captured 2026-04-30)
+- ChatGPT consumer → `chatgpt.com` — Plus/Team plan + message quotas
+  (HAR captured but thin; needs re-capture from Settings → Subscription
+  pages)
+
+**Cookie auth planned** (no HAR yet — capture and submit a HAR to enable):
+- OpenAI Platform → `platform.openai.com` — usage, billing, models
+- Anthropic Console → `console.anthropic.com` — org usage, billing
+- Mistral Console → `console.mistral.ai` — billing, per-model spend
+- Groq Console → `console.groq.com` — usage, billing
+- xAI Console → `console.x.ai` — credit balance, usage breakdown
+- DeepSeek Platform → `platform.deepseek.com` — extended usage history
+- Z.AI Console → `open.bigmodel.cn` — usage detail
+- Alibaba Cloud Console → `console.aliyun.com` — DashScope billing
+
+To add one of these: capture a HAR file from your logged-in browser on
+the site (covering the Usage / Billing / Account pages), drop at
+`~/Downloads/<host>.har`, and we wire up the RPC client + parser.
+
 ### OpenCode credential adoption (cross-provider)
 
 If [OpenCode](https://opencode.ai) is installed and you've authed any
@@ -113,6 +158,20 @@ on startup and adopt the API keys it finds. Currently maps:
 OAuth-typed entries (`anthropic`, `openai`, `google`, `cursor`) are skipped:
 they're chat-scoped tokens, not the API-key shape openusage's poll-time probes
 expect. Env-var detection runs first; if both are present the env var wins.
+
+### Perplexity
+
+**Detection:** browser-session cookie from `console.perplexity.ai` (Settings → 5 KEYS → perplexity → Enter).
+
+Browser-session-auth-only — Perplexity's API key is chat-only. Tile surfaces tier (0–5), available balance, lifetime spend, auto-reload settings, payment method, and 30-day analytics (api_requests, input/output/reasoning tokens, search queries) from the console RPCs at `/rest/pplx-api/v2/groups/<org_id>/...`.
+
+### OpenCode (Zen + Console)
+
+**Detection:** `OPENCODE_API_KEY` / `ZEN_API_KEY` env var for chat-surface auth, optionally a browser-session cookie from `console.opencode.ai` for billing data.
+
+Two-tier auth. The API key probes `/zen/v1/models` for chat-side validation and surfaces the available Zen model count. When connected via browser session (Settings → 5 KEYS → opencode → Enter), the tile gains balance, monthly limit / monthly usage, auto-reload settings, payment method, and subscription state from the SolidStart server-fn endpoints at `opencode.ai/_server`.
+
+Workspace ID required for console enrichment — set `extra_data.opencode_workspace_id` on the account config. Auto-discovery is a follow-up.
 
 ### Moonshot (Kimi)
 

@@ -290,4 +290,3 @@ func (f *FakeReader) AvailableBrowsers(_ context.Context) ([]string, error) {
 	}
 	return out, nil
 }
-

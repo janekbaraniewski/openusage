@@ -345,10 +345,10 @@ type runtimeSettings struct {
 }
 
 type groupDetailResponse struct {
-	APIOrganization          group           `json:"apiOrganization"`
-	CustomerInfo             customerInfo    `json:"customerInfo"`
-	HasDefaultPaymentMethod  bool            `json:"hasDefaultPaymentMethod"`
-	DefaultPaymentMethodCard paymentCard     `json:"defaultPaymentMethodCard"`
+	APIOrganization          group        `json:"apiOrganization"`
+	CustomerInfo             customerInfo `json:"customerInfo"`
+	HasDefaultPaymentMethod  bool         `json:"hasDefaultPaymentMethod"`
+	DefaultPaymentMethodCard paymentCard  `json:"defaultPaymentMethodCard"`
 }
 
 type customerInfo struct {
@@ -379,8 +379,8 @@ type paymentCard struct {
 }
 
 type meter struct {
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
 	DimensionGroupByKeys []string       `json:"dimension_group_by_keys"`
 	MeterEventSummaries  []meterSummary `json:"meter_event_summaries"`
 }

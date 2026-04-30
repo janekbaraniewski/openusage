@@ -122,4 +122,3 @@ func TestConsoleClient_QueryUsageMonth_PostsArgsBody(t *testing.T) {
 		t.Errorf("Keys = %d, want 2", len(got.Keys))
 	}
 }
-

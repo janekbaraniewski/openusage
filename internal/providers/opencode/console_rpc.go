@@ -275,15 +275,15 @@ func billingInfoFromMap(parsed any) (BillingInfo, error) {
 // UsageRow is one entry in queryUsage's array — a single chat completion
 // from OpenCode Zen with metadata.
 type UsageRow struct {
-	Model         string
-	Provider      string
-	InputTokens   float64
-	OutputTokens  float64
-	CacheTokens   float64
-	CostUSD       float64
-	KeyID         string
-	SessionID     string
-	TimeCreated   string
+	Model        string
+	Provider     string
+	InputTokens  float64
+	OutputTokens float64
+	CacheTokens  float64
+	CostUSD      float64
+	KeyID        string
+	SessionID    string
+	TimeCreated  string
 }
 
 // QueryUsage returns the most recent usage records (offset 0 = newest).

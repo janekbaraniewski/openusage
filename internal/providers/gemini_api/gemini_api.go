@@ -45,6 +45,13 @@ func New() *Provider {
 				Type:             core.ProviderAuthTypeAPIKey,
 				APIKeyEnv:        "GEMINI_API_KEY",
 				DefaultAccountID: "gemini-api",
+				// AI Studio (aistudio.google.com) surfaces per-project
+				// usage / quota data behind session-cookie auth at the
+				// google.internal.alkali MakerSuite RPC endpoints.
+				// Wiring up requires SAPISIDHASH auth derivation +
+				// tuple-encoded response decoding — captured in HAR but
+				// not implemented in this PR. Leaving the spec at
+				// api_key-only until the MakerSuite client lands.
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{"Set GEMINI_API_KEY to a valid Gemini API key."},

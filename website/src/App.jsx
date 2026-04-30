@@ -143,6 +143,7 @@ const apiPlatforms = [
   { name: "Mistral AI",        icon: icon("mistral") },
   { name: "DeepSeek",          icon: icon("deepseek") },
   { name: "Moonshot",          icon: icon("moonshot") },
+  { name: "Perplexity",        icon: icon("perplexity") },
   { name: "xAI",               icon: icon("xai") },
   { name: "Z.AI",              icon: icon("zai") },
   { name: "Google Gemini API", icon: icon("gemini") },

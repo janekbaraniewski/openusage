@@ -155,7 +155,7 @@ func TestParseSeroval_RejectsUnrecognisedWrapper(t *testing.T) {
 	cases := [][]byte{
 		[]byte(""),
 		[]byte("not seroval at all"),
-		[]byte(`;0xabc;{"hello":"world"}`),                           // inner JSON, missing IIFE
+		[]byte(`;0xabc;{"hello":"world"}`), // inner JSON, missing IIFE
 		[]byte(`;0xabc;((self.$R={})["server-fn:0"]=[],$R[0]=null)`), // missing the arrow lambda
 	}
 	for i, body := range cases {
