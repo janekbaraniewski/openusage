@@ -97,6 +97,17 @@
       "api_key_env": "DEEPSEEK_API_KEY"
     },
     {
+      "id": "moonshot-ai",
+      "provider": "moonshot",
+      "api_key_env": "MOONSHOT_API_KEY"
+    },
+    {
+      "id": "moonshot-cn",
+      "provider": "moonshot",
+      "api_key_env": "MOONSHOT_API_KEY",
+      "base_url": "https://api.moonshot.cn"
+    },
+    {
       "id": "xai-grok",
       "provider": "xai",
       "api_key_env": "XAI_API_KEY"

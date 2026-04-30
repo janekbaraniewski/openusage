@@ -15,6 +15,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/groq"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
+	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
 	"github.com/janekbaraniewski/openusage/internal/providers/ollama"
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/opencode"
@@ -32,6 +33,7 @@ func AllProviders() []core.UsageProvider {
 		openrouter.New(),
 		groq.New(),
 		mistral.New(),
+		moonshot.New(),
 		deepseek.New(),
 		xai.New(),
 		zai.New(),

@@ -35,6 +35,25 @@ func TestDetectEnvKeys_FindsSetKey(t *testing.T) {
 	}
 }
 
+func TestDetectEnvKeys_FindsMoonshotKey(t *testing.T) {
+	os.Setenv("MOONSHOT_API_KEY", "sk-moonshot-1234567890abcdef")
+	defer os.Unsetenv("MOONSHOT_API_KEY")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	found := false
+	for _, acct := range result.Accounts {
+		if acct.Provider == "moonshot" && acct.APIKeyEnv == "MOONSHOT_API_KEY" && acct.ID == "moonshot-ai" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected MOONSHOT_API_KEY to be detected as moonshot-ai")
+	}
+}
+
 func TestDetectEnvKeys_FindsZenKeys(t *testing.T) {
 	os.Setenv("ZEN_API_KEY", "zen-test-key-123456")
 	defer os.Unsetenv("ZEN_API_KEY")

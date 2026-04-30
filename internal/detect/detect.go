@@ -349,6 +349,7 @@ var envKeyMapping = []struct {
 	{"GROQ_API_KEY", "groq", "groq"},
 	{"MISTRAL_API_KEY", "mistral", "mistral"},
 	{"DEEPSEEK_API_KEY", "deepseek", "deepseek"},
+	{"MOONSHOT_API_KEY", "moonshot", "moonshot-ai"},
 	{"XAI_API_KEY", "xai", "xai"},
 	{"ZAI_API_KEY", "zai", "zai"},
 	{"ZHIPUAI_API_KEY", "zai", "zhipuai-auto"},
