@@ -76,6 +76,43 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget)
 		snap.Metrics["today_api_cost"].Used != nil,
 		snap.Metrics["spend_limit"].Limit != nil)
 
+	// available_balance with Used + Limit (e.g. Moonshot via high-water-mark
+	// tracking): cursor-style "$0.13 / $15.00 spent" + "$14.87 remaining".
+	// Must come before the spend_limit / plan_spend branches so providers that
+	// surface a peak-derived balance get the rich header instead of falling
+	// through to the bare "$X.XX available" total_balance branch.
+	if m, ok := snap.Metrics["available_balance"]; ok && m.Limit != nil && m.Used != nil {
+		remaining := *m.Limit - *m.Used
+		if m.Remaining != nil {
+			remaining = *m.Remaining
+		}
+		unit := m.Unit
+		if unit == "" {
+			unit = "USD"
+		}
+		// Currency symbol for USD/CNY; everything else gets the unit string.
+		sym := unit
+		switch unit {
+		case "USD":
+			sym = "$"
+		case "CNY":
+			sym = "¥"
+		}
+		info.tagEmoji = "💰"
+		info.tagLabel = "Credits"
+		info.reason = "available_balance"
+		info.summary = fmt.Sprintf("%s%.2f / %s%.2f spent", sym, *m.Used, sym, *m.Limit)
+		info.detail = fmt.Sprintf("%s%.2f remaining", sym, remaining)
+		// m.Percent() returns *remaining* percentage; gauges in this codebase
+		// fill with *used* percentage. Same convention as the spend_limit and
+		// plan_spend branches above.
+		if pct := m.Percent(); pct >= 0 {
+			info.gaugePercent = 100 - pct
+		}
+		core.Tracef("[display] %s: branch=available_balance used=%.4f limit=%.4f gauge=%.1f", snap.ProviderID, *m.Used, *m.Limit, info.gaugePercent)
+		return info
+	}
+
 	if m, ok := snap.Metrics["spend_limit"]; ok && m.Limit != nil && m.Used != nil {
 		remaining := *m.Limit - *m.Used
 		if m.Remaining != nil {
