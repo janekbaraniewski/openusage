@@ -1,16 +1,34 @@
-# Browser-Session Auth for Providers Without Programmatic Tokens
+# Browser-Session Auth: the Universal Solution for Dashboard-Gated Providers
 
 Date: 2026-04-30
 Status: Proposed
 Author: Jan Baraniewski
 
-Driven by issues #79 and #80 fallout — Perplexity and OpenCode (Zen) both hide their billing / usage / account data behind session-cookie SolidStart or NextAuth RPCs that **only accept browser cookies, never bearer tokens**. Their API keys are scoped to chat-only routes. There is no programmatic alternative on either platform today, and nothing we can build to bridge that gap unilaterally.
+Originally driven by issues #79 (Perplexity) and #80 (OpenCode / OpenAI-via-OpenCode-OAuth fallout). Live probing (2026-04-30) confirmed this isn't just an OpenCode/Perplexity quirk — **every modern AI-platform console hides usage / billing / account data behind session-cookie auth, and rejects OAuth tokens explicitly**. OpenAI's billing endpoint literally says so:
+
+> `403: must be made with a session key (browser-only). You made it with: oauth.`
+
+This same pattern was confirmed against `platform.openai.com`, `chatgpt.com`, `console.anthropic.com`, `aistudio.google.com`, `console.opencode.ai`, and `console.perplexity.ai`. All six return 403 / 302-to-login for unauthenticated requests on their dashboard API surface. All six work with a valid session cookie. **Cookie auth is the universal mechanism for full-data parity** across providers — not a workaround for two outliers.
 
 The user has rejected manual cookie-paste UX as "hacky / not secure". This doc designs the alternative.
 
+## Why OAuth doesn't substitute (verified)
+
+OAuth tokens are *delegated* credentials — designed for third-party apps and intentionally scoped to a narrow surface (usually `chat.completions`). Probes against fresh, non-expired tokens issued by OpenCode for OpenAI / Anthropic / Google all confirmed:
+
+- **OpenAI** OAuth (audience-claimed for `/v1`): 403 on `/v1/models` ("Missing scopes: api.model.read"), 401 on `/v1/usage`, 403 on `/v1/dashboard/billing/credit_grants` ("must be made with a session key").
+- **Anthropic** OAuth: 401 on `/v1/messages` ("OAuth authentication is currently not supported"). Even with Claude-Code-style `anthropic-beta: oauth-2025-04-20` header.
+- **Google** access token: 401 on `generativelanguage.googleapis.com` ("Expected OAuth 2 access token … or other valid authentication credential"). The token is opaque, OpenCode-internal.
+
+Session cookies, by contrast, carry **the full identity of the logged-in user** with all the permissions they have in the dashboard. Cookie-authed requests can hit every endpoint the user reaches by clicking through the UI.
+
 ## 1. Problem Statement
 
-Multiple providers expose rich data in their web consoles (balance, monthly usage, tier, subscription, per-model spend) that is unreachable via API key. The credential is a session cookie, set server-side after Google/GitHub OAuth. Openusage cannot mint that cookie — only the user's browser can. We need a way to get the cookie into openusage **without** asking the user to copy/paste it.
+Every major AI-platform console exposes rich data (balance, monthly usage, tier, subscription, per-model spend, organization metadata, payment method, rate-limit caps) **only behind session-cookie auth**. API keys are deliberately scoped to chat-completion / inference routes; OAuth tokens are delegated and similarly scoped. The data we need to populate full-feature provider tiles is simply not reachable from any non-browser credential.
+
+The session cookie itself is set server-side after the user's OAuth dance with Google/GitHub/SSO, and is encrypted with a server-only key. Openusage cannot mint it. Only the user's browser can.
+
+We need a way to get the cookie from the user's existing logged-in browser into openusage **without** asking the user to copy/paste it.
 
 ## 2. Goals
 
@@ -19,8 +37,9 @@ Multiple providers expose rich data in their web consoles (balance, monthly usag
 3. Works for Chrome / Safari / Firefox (the dominant ~95% of browsers).
 4. Cookie storage in openusage is encrypted-at-rest (Keychain / libsecret / DPAPI, NOT plain JSON).
 5. Auth refresh story is honest: when the cookie expires, the tile transitions to AUTH with a clear "log into provider.com to refresh" hint and re-extracts on next poll.
-6. Reusable across providers (OpenCode, Perplexity, future).
+6. **Universal — one infrastructure, every dashboard-gated provider benefits.** Cover at minimum: OpenAI (platform + ChatGPT), Anthropic (console), Google AI Studio, OpenCode (Zen), Perplexity. Cursor already has equivalent local-extraction; same pattern.
 7. Clear, explicit user consent — first time openusage reads a browser cookie, the user is prompted and informed, not surprised.
+8. **Per-provider declaration is minimal.** A provider opts in by declaring `(domain, cookie_name)` in its `ProviderSpec` and writing an API client. The cookie plumbing stays generic.
 
 ## 3. Non-Goals
 
@@ -266,7 +285,22 @@ Description: Document opt-in cookie auth, supported browsers, the privacy postur
 ### Task 7: Perplexity provider integration (separate PR)
 Files: `internal/providers/perplexity/...`
 Depends on: Tasks 1–4
-Description: New provider package that uses the same browser-session machinery against Perplexity's `/rest/pplx-api/v2/groups/...` endpoints. Out of scope for this PR — covered in #79's Perplexity follow-up.
+Description: New provider package that uses the same browser-session machinery against Perplexity's `/rest/pplx-api/v2/groups/...` endpoints.
+
+### Task 8: OpenAI provider browser-session enrichment (separate PR)
+Files: `internal/providers/openai/console_client.go` (new), provider extension
+Depends on: Tasks 1–4
+Description: Closes the issue #80 OpenAI gap. Adds session-cookie-fed RPCs against `platform.openai.com` and `chatgpt.com` to surface usage / billing / per-model breakdown / Plus-or-Team subscription state. Existing API-key probe stays as a separate code path. Pinned cookie name(s): `__Secure-next-auth.session-token` and equivalents.
+
+### Task 9: Anthropic provider browser-session enrichment (separate PR)
+Files: `internal/providers/anthropic/console_client.go` (new), provider extension
+Depends on: Tasks 1–4
+Description: Adds `console.anthropic.com` session-cookie-fed RPCs for organization usage / billing / per-model spend.
+
+### Task 10: Google AI Studio provider browser-session enrichment (separate PR)
+Files: `internal/providers/gemini_api/console_client.go` (new) or new `internal/providers/google_ai_studio/`
+Depends on: Tasks 1–4
+Description: Adds `aistudio.google.com` session-cookie-fed RPCs for free-tier quota state and any billing data exposed there.
 
 ### Dependency Graph
 
@@ -275,9 +309,11 @@ Task 1 ──┐
          ├─→ Task 2 ─┐
          └─→ Task 3 ─┼─→ Task 4 ──┐
                      └─→ Task 5 ──┴─→ Task 6
+                                   ↘
+                                    Tasks 7, 8, 9, 10 (parallel, separate PRs)
 ```
 
-Task 7 is a separate downstream effort.
+Tasks 7–10 are separate downstream provider PRs, all riding on the shared infrastructure from Tasks 1–4. Each is small (one HAR + one provider package + one parser).
 
 ## 8. Open Questions
 
