@@ -1,6 +1,6 @@
 {
   "name": "Solarized Dark",
-  "icon": "🌅",
+  "icon": "\ud83c\udf05",
   "base": "#002B36",
   "mantle": "#073642",
   "surface0": "#073642",
@@ -22,5 +22,6 @@
   "rosewater": "#EEE8D5",
   "lavender": "#6C71C4",
   "sky": "#268BD2",
-  "maroon": "#DC322F"
+  "maroon": "#DC322F",
+  "mauve": "#D33682"
 }

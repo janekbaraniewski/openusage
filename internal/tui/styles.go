@@ -80,6 +80,7 @@ var (
 	colorLavender  lipgloss.Color
 	colorSky       lipgloss.Color
 	colorMaroon    lipgloss.Color
+	colorMauve     lipgloss.Color
 
 	colorOK       lipgloss.Color
 	colorWarn     lipgloss.Color
@@ -201,6 +202,7 @@ func applyTheme(t Theme) {
 	colorLavender = t.Lavender
 	colorSky = t.Sky
 	colorMaroon = t.Maroon
+	colorMauve = t.Mauve
 
 	colorOK = colorGreen
 	colorWarn = colorYellow
@@ -336,6 +338,8 @@ func ProviderColor(providerID string) lipgloss.Color {
 		return colorFlamingo
 	case core.DashboardColorRoleRosewater:
 		return colorRosewater
+	case core.DashboardColorRoleMauve:
+		return colorMauve
 	}
 	h := 0
 	for _, ch := range providerID {

@@ -1,6 +1,6 @@
 {
   "name": "Neon Dusk",
-  "icon": "◧",
+  "icon": "\u25e7",
   "base": "#0A0A0A",
   "mantle": "#141414",
   "surface0": "#1E1E1E",
@@ -22,5 +22,6 @@
   "rosewater": "#FFC09F",
   "lavender": "#9D7CD8",
   "sky": "#5C9CF5",
-  "maroon": "#C53B53"
+  "maroon": "#C53B53",
+  "mauve": "#BB87E8"
 }

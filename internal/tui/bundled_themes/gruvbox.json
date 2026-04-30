@@ -1,6 +1,6 @@
 {
   "name": "Gruvbox",
-  "icon": "🌻",
+  "icon": "\ud83c\udf3b",
   "base": "#282828",
   "mantle": "#1D2021",
   "surface0": "#3C3836",
@@ -22,5 +22,6 @@
   "rosewater": "#EBDBB2",
   "lavender": "#D3869B",
   "sky": "#83A598",
-  "maroon": "#CC241D"
+  "maroon": "#CC241D",
+  "mauve": "#B16286"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Nightfox",
-  "icon": "🦊",
+  "icon": "\ud83e\udd8a",
   "base": "#192330",
   "mantle": "#131A24",
   "surface0": "#29394F",
@@ -22,5 +22,6 @@
   "rosewater": "#CDCECF",
   "lavender": "#9D79D6",
   "sky": "#63CDCF",
-  "maroon": "#C94F6D"
+  "maroon": "#C94F6D",
+  "mauve": "#B98AFF"
 }

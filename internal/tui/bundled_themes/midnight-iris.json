@@ -1,6 +1,6 @@
 {
   "name": "Midnight Iris",
-  "icon": "◨",
+  "icon": "\u25e8",
   "base": "#000000",
   "mantle": "#111111",
   "surface0": "#373737",
@@ -22,5 +22,6 @@
   "rosewater": "#EB9F7F",
   "lavender": "#AF87FF",
   "sky": "#B1B9F9",
-  "maroon": "#7A2936"
+  "maroon": "#7A2936",
+  "mauve": "#C66BD0"
 }

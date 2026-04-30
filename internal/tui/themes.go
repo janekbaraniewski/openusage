@@ -53,6 +53,7 @@ type Theme struct {
 	Lavender  lipgloss.Color `json:"lavender"`
 	Sky       lipgloss.Color `json:"sky"`
 	Maroon    lipgloss.Color `json:"maroon"`
+	Mauve     lipgloss.Color `json:"mauve"`
 }
 
 // themeMu protects the theme catalog (themes slice) and the active theme index
@@ -182,6 +183,7 @@ func normalizeTheme(in Theme) Theme {
 	in.Lavender = trimColor(in.Lavender)
 	in.Sky = trimColor(in.Sky)
 	in.Maroon = trimColor(in.Maroon)
+	in.Mauve = trimColor(in.Mauve)
 
 	return in
 }
@@ -201,6 +203,7 @@ func (t Theme) validate() error {
 		{"green", t.Green}, {"yellow", t.Yellow}, {"red", t.Red},
 		{"peach", t.Peach}, {"teal", t.Teal}, {"flamingo", t.Flamingo},
 		{"rosewater", t.Rosewater}, {"lavender", t.Lavender}, {"sky", t.Sky}, {"maroon", t.Maroon},
+		{"mauve", t.Mauve},
 	}
 	missing := make([]string, 0, len(fields))
 	for _, f := range fields {

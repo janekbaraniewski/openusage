@@ -1,6 +1,6 @@
 {
   "name": "Nord",
-  "icon": "❄",
+  "icon": "\u2744",
   "base": "#2E3440",
   "mantle": "#242933",
   "surface0": "#3B4252",
@@ -22,5 +22,6 @@
   "rosewater": "#D8DEE9",
   "lavender": "#B48EAD",
   "sky": "#88C0D0",
-  "maroon": "#BF616A"
+  "maroon": "#BF616A",
+  "mauve": "#A78EAB"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Grayscale",
-  "icon": "⬛",
+  "icon": "\u2b1b",
   "base": "#000000",
   "mantle": "#0A0A0A",
   "surface0": "#181818",
@@ -22,5 +22,6 @@
   "rosewater": "#F0F0F0",
   "lavender": "#D9D9D9",
   "sky": "#CDCDCD",
-  "maroon": "#989898"
+  "maroon": "#989898",
+  "mauve": "#B0B0B0"
 }

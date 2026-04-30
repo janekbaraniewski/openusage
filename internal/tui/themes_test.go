@@ -71,7 +71,8 @@ func externalThemeJSON(name, icon, accent string) string {
   "rosewater": "#E1E1E1",
   "lavender": "#C4C4C4",
   "sky": "#B4B4B4",
-  "maroon": "#757575"
+  "maroon": "#757575",
+  "mauve": "#B0A0BE"
 }`
 }
 

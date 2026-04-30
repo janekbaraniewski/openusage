@@ -1,6 +1,6 @@
 {
   "name": "Catppuccin Mocha",
-  "icon": "🐱",
+  "icon": "\ud83d\udc31",
   "base": "#1E1E2E",
   "mantle": "#181825",
   "surface0": "#313244",
@@ -22,5 +22,6 @@
   "rosewater": "#F5E0DC",
   "lavender": "#B4BEFE",
   "sky": "#89DCEB",
-  "maroon": "#EBA0AC"
+  "maroon": "#EBA0AC",
+  "mauve": "#CBA6F7"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Tokyo Night",
-  "icon": "🌃",
+  "icon": "\ud83c\udf03",
   "base": "#1A1B26",
   "mantle": "#16161E",
   "surface0": "#24283B",
@@ -22,5 +22,6 @@
   "rosewater": "#C0CAF5",
   "lavender": "#BB9AF7",
   "sky": "#7DCFFF",
-  "maroon": "#DB4B4B"
+  "maroon": "#DB4B4B",
+  "mauve": "#BB9AF7"
 }

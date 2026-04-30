@@ -1,6 +1,6 @@
 {
   "name": "Monokai",
-  "icon": "🦎",
+  "icon": "\ud83e\udd8e",
   "base": "#272822",
   "mantle": "#1E1F1C",
   "surface0": "#3E3D32",
@@ -22,5 +22,6 @@
   "rosewater": "#F8F8F2",
   "lavender": "#AE81FF",
   "sky": "#78DCE8",
-  "maroon": "#D14A68"
+  "maroon": "#D14A68",
+  "mauve": "#C792EA"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Synthwave '84",
-  "icon": "🌆",
+  "icon": "\ud83c\udf06",
   "base": "#262335",
   "mantle": "#1E1A2B",
   "surface0": "#34294F",
@@ -22,5 +22,6 @@
   "rosewater": "#F97E72",
   "lavender": "#CF8DFB",
   "sky": "#36F9F6",
-  "maroon": "#FE4450"
+  "maroon": "#FE4450",
+  "mauve": "#B86EE5"
 }

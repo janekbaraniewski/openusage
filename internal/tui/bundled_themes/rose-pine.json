@@ -1,6 +1,6 @@
 {
   "name": "Rose Pine",
-  "icon": "🌹",
+  "icon": "\ud83c\udf39",
   "base": "#191724",
   "mantle": "#16141F",
   "surface0": "#1F1D2E",
@@ -22,5 +22,6 @@
   "rosewater": "#E0DEF4",
   "lavender": "#C4A7E7",
   "sky": "#9CCFD8",
-  "maroon": "#B4637A"
+  "maroon": "#B4637A",
+  "mauve": "#C4A7E7"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Everforest",
-  "icon": "🌲",
+  "icon": "\ud83c\udf32",
   "base": "#2D353B",
   "mantle": "#232A2E",
   "surface0": "#343F44",
@@ -22,5 +22,6 @@
   "rosewater": "#D3C6AA",
   "lavender": "#D699B6",
   "sky": "#7FBBB3",
-  "maroon": "#E67E80"
+  "maroon": "#E67E80",
+  "mauve": "#C792EA"
 }

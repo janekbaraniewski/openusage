@@ -37,6 +37,7 @@ const (
 	DashboardColorRoleMaroon    DashboardColorRole = "maroon"
 	DashboardColorRoleFlamingo  DashboardColorRole = "flamingo"
 	DashboardColorRoleRosewater DashboardColorRole = "rosewater"
+	DashboardColorRoleMauve     DashboardColorRole = "mauve"
 )
 
 type DashboardCompactRow struct {

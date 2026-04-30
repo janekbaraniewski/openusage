@@ -1,6 +1,6 @@
 {
   "name": "Kanagawa",
-  "icon": "⛩",
+  "icon": "\u26e9",
   "base": "#1F1F28",
   "mantle": "#16161D",
   "surface0": "#2A2A37",
@@ -22,5 +22,6 @@
   "rosewater": "#DCD7BA",
   "lavender": "#957FB8",
   "sky": "#7FB4CA",
-  "maroon": "#E46876"
+  "maroon": "#E46876",
+  "mauve": "#B98AFF"
 }

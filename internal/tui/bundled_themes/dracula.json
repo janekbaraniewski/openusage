@@ -1,6 +1,6 @@
 {
   "name": "Dracula",
-  "icon": "🧛",
+  "icon": "\ud83e\udddb",
   "base": "#282A36",
   "mantle": "#21222C",
   "surface0": "#44475A",
@@ -22,5 +22,6 @@
   "rosewater": "#FF79C6",
   "lavender": "#BD93F9",
   "sky": "#8BE9FD",
-  "maroon": "#FF6E6E"
+  "maroon": "#FF6E6E",
+  "mauve": "#AC7FE8"
 }

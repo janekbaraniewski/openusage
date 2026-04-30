@@ -1,6 +1,6 @@
 {
   "name": "Ayu Dark",
-  "icon": "🌙",
+  "icon": "\ud83c\udf19",
   "base": "#0B0E14",
   "mantle": "#090B10",
   "surface0": "#11151C",
@@ -22,5 +22,6 @@
   "rosewater": "#E6E1CF",
   "lavender": "#D2A6FF",
   "sky": "#73D0FF",
-  "maroon": "#E06C75"
+  "maroon": "#E06C75",
+  "mauve": "#BD8AE5"
 }

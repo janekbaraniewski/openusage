@@ -1,6 +1,6 @@
 {
   "name": "One Dark",
-  "icon": "🧪",
+  "icon": "\ud83e\uddea",
   "base": "#282C34",
   "mantle": "#21252B",
   "surface0": "#2C313C",
@@ -22,5 +22,6 @@
   "rosewater": "#E5C07B",
   "lavender": "#C678DD",
   "sky": "#61AFEF",
-  "maroon": "#BE5046"
+  "maroon": "#BE5046",
+  "mauve": "#C678DD"
 }
