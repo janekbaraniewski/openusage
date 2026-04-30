@@ -102,6 +102,16 @@
       "api_key_env": "MOONSHOT_API_KEY"
     },
     {
+      "id": "perplexity",
+      "provider": "perplexity",
+      "auth": "browser_session",
+      "browser_cookie": {
+        "domain": ".perplexity.ai",
+        "cookie_name": "__Secure-next-auth.session-token",
+        "source_browser": "chrome"
+      }
+    },
+    {
       "id": "moonshot-cn",
       "provider": "moonshot",
       "api_key_env": "MOONSHOT_API_KEY",

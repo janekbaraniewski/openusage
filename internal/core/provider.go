@@ -10,9 +10,16 @@ import (
 type AccountConfig struct {
 	ID         string `json:"id"`
 	Provider   string `json:"provider"`
-	Auth       string `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token"
+	Auth       string `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token", "browser_session"
 	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
+
+	// BrowserCookie identifies the (domain, cookie_name, source_browser)
+	// triple used for browser-session-auth providers. Persisted alongside
+	// the account config. The actual cookie value is never stored here —
+	// it lives in the encrypted credentials store, keyed by account ID.
+	// See docs/BROWSER_SESSION_AUTH_DESIGN.md.
+	BrowserCookie *BrowserCookieRef `json:"browser_cookie,omitempty"`
 
 	// Binary stores a CLI binary path for providers that execute a local command.
 	// Provider-specific local data paths belong in ProviderPaths. Legacy Binary-based

@@ -131,6 +131,8 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **Mistral AI** | `MISTRAL_API_KEY` | Subscription, usage endpoints |
 | **DeepSeek** | `DEEPSEEK_API_KEY` | Rate limits, account balance |
 | **Moonshot (Kimi)** | `MOONSHOT_API_KEY` | Balance breakdown (cash + voucher), org limits, tier; supports api.moonshot.ai (default) and api.moonshot.cn |
+| **Perplexity** | Browser session at console.perplexity.ai | Tier, balance, lifetime spend, auto-reload, 30d usage analytics |
+| **OpenCode (Zen + Console)** | `OPENCODE_API_KEY` + browser session at opencode.ai | Zen models (API key) + balance, monthly limit/usage, subscription, payment method (cookie) |
 | **xAI (Grok)** | `XAI_API_KEY` | Rate limits, API key info |
 | **Z.AI Coding Plan** | `ZAI_API_KEY` / `ZHIPUAI_API_KEY` | Coding plan quotas, model/tool usage, daily trends |
 | **Google Gemini API** | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Rate limits, model limits |

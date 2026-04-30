@@ -235,11 +235,59 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
 			id := ids[m.settings.cursor]
+			providerID := providerForAccountID(id, m.accountProviders)
+			// Browser-session-auth providers route to the cookie-extraction
+			// flow instead of api-key editing. Enter triggers an immediate
+			// read attempt against any logged-in browser; on failure the
+			// status text guides the user to "press b to open the site".
+			if isBrowserSessionProvider(providerID) {
+				domain, cookieName, _ := browserCookieRefForProvider(providerID)
+				m.settings.apiKeyStatus = "reading cookie from browser..."
+				preferred := ""
+				if info := m.services.LoadBrowserSessionInfo(id); info.Connected {
+					preferred = info.SourceBrowser
+				}
+				return m, m.connectBrowserSessionCmd(id, domain, cookieName, preferred)
+			}
 			m.settings.apiKeyEditing = true
 			m.settings.apiKeyEditAccountID = id
 			m.settings.apiKeyInput = ""
 			m.settings.apiKeyStatus = ""
 			return m, nil
+		case "b":
+			// Open the provider's console URL in the user's default browser.
+			// Only meaningful for browser-session-auth providers — but
+			// harmless on api-key rows (no console URL = no-op).
+			if len(ids) == 0 {
+				return m, nil
+			}
+			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
+			id := ids[m.settings.cursor]
+			providerID := providerForAccountID(id, m.accountProviders)
+			if !isBrowserSessionProvider(providerID) {
+				return m, nil
+			}
+			_, _, consoleURL := browserCookieRefForProvider(providerID)
+			if consoleURL == "" {
+				return m, nil
+			}
+			m.settings.apiKeyStatus = "opening " + consoleURL + "…"
+			return m, m.openProviderConsoleCmd(consoleURL)
+		case "x":
+			// Disconnect the stored browser session for the current row.
+			// Distinct from "d" / "backspace" (api-key delete) because the
+			// underlying credential store entry is in Sessions, not Keys.
+			if len(ids) == 0 {
+				return m, nil
+			}
+			m.settings.cursor = clamp(m.settings.cursor, 0, len(ids)-1)
+			id := ids[m.settings.cursor]
+			providerID := providerForAccountID(id, m.accountProviders)
+			if !isBrowserSessionProvider(providerID) {
+				return m, nil
+			}
+			m.settings.apiKeyStatus = "disconnecting..."
+			return m, m.disconnectBrowserSessionCmd(id)
 		case "d", "backspace":
 			if len(ids) == 0 {
 				return m, nil
