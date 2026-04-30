@@ -162,6 +162,54 @@ func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
 	}
 }
 
+// connectBrowserSessionCmd kicks off the cookie-extraction → save flow.
+// On success the resulting BrowserSessionInfo is delivered as a
+// browserSessionConnectedMsg; the TUI uses it to flip the row's status to
+// connected and trigger a fresh poll so the tile picks up the new auth.
+func (m Model) connectBrowserSessionCmd(accountID, domain, cookieName, preferredBrowser string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return browserSessionConnectedMsg{AccountID: accountID, Err: fmt.Errorf("browser session service unavailable")}
+		}
+		info, err := m.services.ConnectBrowserSession(accountID, domain, cookieName, preferredBrowser)
+		if err != nil {
+			log.Printf("browser session connect (%s): %v", accountID, err)
+		}
+		return browserSessionConnectedMsg{AccountID: accountID, Info: info, Err: err}
+	}
+}
+
+// disconnectBrowserSessionCmd removes openusage's stored cookie for the
+// account. Doesn't touch the user's browser session.
+func (m Model) disconnectBrowserSessionCmd(accountID string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return browserSessionDisconnectedMsg{AccountID: accountID, Err: fmt.Errorf("browser session service unavailable")}
+		}
+		err := m.services.DisconnectBrowserSession(accountID)
+		if err != nil {
+			log.Printf("browser session disconnect (%s): %v", accountID, err)
+		}
+		return browserSessionDisconnectedMsg{AccountID: accountID, Err: err}
+	}
+}
+
+// openProviderConsoleCmd asks the OS to launch the provider's login URL in
+// the user's default browser. Used when the user picks "open browser" in
+// the connect modal because they're not currently logged in.
+func (m Model) openProviderConsoleCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return providerConsoleOpenedMsg{Err: fmt.Errorf("browser opener unavailable")}
+		}
+		err := m.services.OpenProviderConsole(url)
+		if err != nil {
+			log.Printf("open provider console (%s): %v", url, err)
+		}
+		return providerConsoleOpenedMsg{URL: url, Err: err}
+	}
+}
+
 func (m Model) installIntegrationCmd(id integrations.ID) tea.Cmd {
 	return func() tea.Msg {
 		if m.services == nil {

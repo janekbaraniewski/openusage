@@ -152,6 +152,11 @@ type Services interface {
 	SaveTimeWindow(window string) error
 	SaveProviderLink(source, target string) error
 	DeleteProviderLink(source string) error
+	ConnectBrowserSession(accountID, domain, cookieName, preferredBrowser string) (core.BrowserSessionInfo, error)
+	DisconnectBrowserSession(accountID string) error
+	LoadBrowserSessionInfo(accountID string) core.BrowserSessionInfo
+	OpenProviderConsole(url string) error
+	AvailableBrowsers() ([]string, error)
 	ValidateAPIKey(accountID, providerID, apiKey string) (bool, string)
 	SaveCredential(accountID, apiKey string) error
 	DeleteCredential(accountID string) error
@@ -299,6 +304,27 @@ type providerLinkPersistedMsg struct {
 type providerLinkDeletedMsg struct {
 	source string
 	err    error
+}
+
+// browserSessionConnectedMsg is emitted by connectBrowserSessionCmd. On
+// success Info carries the captured (domain, cookie_name, source_browser,
+// captured_at, expires_at) tuple — the cookie value is never marshalled
+// into TUI message types. Err is non-nil when extraction fails (no cookie
+// in any browser, keychain prompt declined, etc.).
+type browserSessionConnectedMsg struct {
+	AccountID string
+	Info      core.BrowserSessionInfo
+	Err       error
+}
+
+type browserSessionDisconnectedMsg struct {
+	AccountID string
+	Err       error
+}
+
+type providerConsoleOpenedMsg struct {
+	URL string
+	Err error
 }
 
 type validateKeyResultMsg struct {

@@ -76,6 +76,19 @@ func (a ProviderAuthSpec) SupportsAuth(t ProviderAuthType) bool {
 	return false
 }
 
+// BrowserSessionInfo summarises a stored browser-session credential without
+// exposing the cookie value. Lives in core so both the daemon's
+// service-layer and the TUI can reference it without circular imports.
+type BrowserSessionInfo struct {
+	Connected     bool
+	Domain        string
+	CookieName    string
+	SourceBrowser string
+	CapturedAt    string
+	ExpiresAt     string
+	Expired       bool
+}
+
 // ProviderSetupSpec describes setup entry points and quickstart instructions.
 type ProviderSetupSpec struct {
 	DocsURL    string

@@ -80,7 +80,7 @@ func (m Model) apiKeysTabIDs() []string {
 	var ids []string
 	for _, id := range m.providerOrder {
 		providerID := m.accountProviders[id]
-		if isAPIKeyProvider(providerID) {
+		if isAPIKeyProvider(providerID) || isBrowserSessionProvider(providerID) {
 			ids = append(ids, id)
 			registered[providerID] = true
 		}
@@ -88,6 +88,12 @@ func (m Model) apiKeysTabIDs() []string {
 	for _, entry := range apiKeyProviderEntries() {
 		if !registered[entry.ProviderID] {
 			ids = append(ids, entry.AccountID)
+		}
+	}
+	for _, entry := range browserSessionProviderEntries() {
+		if !registered[entry.ProviderID] {
+			ids = append(ids, entry.AccountID)
+			registered[entry.ProviderID] = true
 		}
 	}
 	return ids
@@ -98,6 +104,11 @@ func providerForAccountID(accountID string, accountProviders map[string]string) 
 		return providerID
 	}
 	for _, entry := range apiKeyProviderEntries() {
+		if entry.AccountID == accountID {
+			return entry.ProviderID
+		}
+	}
+	for _, entry := range browserSessionProviderEntries() {
 		if entry.AccountID == accountID {
 			return entry.ProviderID
 		}
@@ -135,9 +146,9 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 	if accountW = max(10, w-envW-18); accountW < 10 {
 		accountW = 10
 	}
-	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-5s %-*s %-*s", "#", "STAT", accountW, "ACCOUNT", envW, "ENV VAR")), settingsBodyRule(w))
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-7s %-*s %-*s", "#", "STAT", accountW, "ACCOUNT", envW, "AUTH SOURCE")), settingsBodyRule(w))
 	if len(ids) == 0 {
-		lines = append(lines, dimStyle.Render("No API-key providers available."))
+		lines = append(lines, dimStyle.Render("No providers available."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
@@ -156,8 +167,17 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
+
+		// Browser-session rows render their own status + source-label so
+		// the user can tell at a glance which providers are connected via
+		// cookie vs configured via env / API key.
+		if isBrowserSessionProvider(providerID) {
+			lines = append(lines, m.renderBrowserSessionRow(prefix, i, id, accountW, envW))
+			continue
+		}
+
 		if !isAPIKeyProvider(providerID) {
-			lines = append(lines, fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, "-"))
+			lines = append(lines, fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, "-"))
 			continue
 		}
 
@@ -168,7 +188,7 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		} else if envVar := envVarForProvider(providerID); envVar != "" && os.Getenv(envVar) != "" {
 			statusText = "ENV"
 		}
-		lines = append(lines, fmt.Sprintf("%s%-3d %-5s %-*s %-*s", prefix, i+1, statusText, accountW, truncateToWidth(id, accountW), envW, envLabel))
+		lines = append(lines, fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, statusText, accountW, truncateToWidth(id, accountW), envW, envLabel))
 		if m.settings.apiKeyEditing && i == cursor {
 			cursorChar := PulseChar("█", "▌", m.animFrame)
 			keyLine := fmt.Sprintf("     key: %s", lipgloss.NewStyle().Foreground(colorSapphire).Render(maskAPIKey(m.settings.apiKeyInput)+cursorChar))
@@ -178,7 +198,48 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 			lines = append(lines, keyLine)
 		}
 	}
+	if m.settings.apiKeyStatus != "" && !m.settings.apiKeyEditing {
+		lines = append(lines, "", dimStyle.Render("  "+m.settings.apiKeyStatus))
+	}
+	// Help line that explains the new keybindings only when at least one
+	// browser-session row is in view.
+	hasBrowserRows := false
+	for _, id := range ids {
+		if isBrowserSessionProvider(providerForAccountID(id, m.accountProviders)) {
+			hasBrowserRows = true
+			break
+		}
+	}
+	if hasBrowserRows {
+		lines = append(lines, "", dimStyle.Render("  Enter: read cookie · b: open site in browser · x: disconnect · d: delete API key (api-key rows only)"))
+	}
 	return padToSize(strings.Join(lines, "\n"), w, h)
+}
+
+// renderBrowserSessionRow formats a single 5 KEYS row for a browser-session
+// provider. Status: OK (cookie present + not expired), STALE (cookie
+// expired — needs re-login in the browser), or NEW (no stored cookie yet).
+// The "auth source" column shows the source browser name, or the cookie
+// domain when nothing is connected yet.
+func (m Model) renderBrowserSessionRow(prefix string, i int, accountID string, accountW, envW int) string {
+	providerID := providerForAccountID(accountID, m.accountProviders)
+	domain, _, _ := browserCookieRefForProvider(providerID)
+	authSource := domain
+	statusText := "NEW"
+
+	if m.services != nil {
+		info := m.services.LoadBrowserSessionInfo(accountID)
+		if info.Connected {
+			authSource = "browser:" + info.SourceBrowser
+			if info.Expired {
+				statusText = "STALE"
+			} else {
+				statusText = "OK"
+			}
+		}
+	}
+
+	return fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, statusText, accountW, truncateToWidth(accountID, accountW), envW, truncateToWidth(authSource, envW))
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {

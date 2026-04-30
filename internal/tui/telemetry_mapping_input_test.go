@@ -41,6 +41,13 @@ func (f *fakeServices) DeleteCredential(string) error                        { r
 func (f *fakeServices) InstallIntegration(integrations.ID) ([]integrations.Status, error) {
 	return nil, nil
 }
+func (f *fakeServices) ConnectBrowserSession(string, string, string, string) (core.BrowserSessionInfo, error) {
+	return core.BrowserSessionInfo{}, nil
+}
+func (f *fakeServices) DisconnectBrowserSession(string) error                  { return nil }
+func (f *fakeServices) LoadBrowserSessionInfo(string) core.BrowserSessionInfo  { return core.BrowserSessionInfo{} }
+func (f *fakeServices) OpenProviderConsole(string) error                       { return nil }
+func (f *fakeServices) AvailableBrowsers() ([]string, error)                   { return nil, nil }
 
 func telemetryFixtureModel() Model {
 	return Model{

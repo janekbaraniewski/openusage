@@ -118,6 +118,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.requestRefresh()
 		return m, nil
 
+	case browserSessionConnectedMsg:
+		if msg.Err != nil {
+			m.settings.apiKeyStatus = "connect failed: " + msg.Err.Error()
+			m.settings.status = "browser session connect failed for " + msg.AccountID
+			return m, nil
+		}
+		m.settings.apiKeyStatus = fmt.Sprintf("connected via %s", msg.Info.SourceBrowser)
+		m.settings.status = fmt.Sprintf("browser session connected for %s", msg.AccountID)
+		// Trigger a fresh poll so the tile picks up the new auth path.
+		m = m.requestRefresh()
+		return m, nil
+
+	case browserSessionDisconnectedMsg:
+		if msg.Err != nil {
+			m.settings.apiKeyStatus = "disconnect failed: " + msg.Err.Error()
+			m.settings.status = "browser session disconnect failed for " + msg.AccountID
+			return m, nil
+		}
+		m.settings.apiKeyStatus = "disconnected"
+		m.settings.status = fmt.Sprintf("browser session removed for %s", msg.AccountID)
+		m = m.requestRefresh()
+		return m, nil
+
+	case providerConsoleOpenedMsg:
+		if msg.Err != nil {
+			m.settings.apiKeyStatus = "open browser failed: " + msg.Err.Error()
+			return m, nil
+		}
+		m.settings.apiKeyStatus = "opened browser — log in, then press Enter to read cookie"
+		return m, nil
+
 	case validateKeyResultMsg:
 		return m.handleValidateKeyResultMsg(msg)
 
