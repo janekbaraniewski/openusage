@@ -42,6 +42,7 @@ func AutoDetect() Result {
 	detectGeminiCLI(&result)
 
 	detectEnvKeys(&result)
+	detectOpenCodeAuth(&result)
 
 	return result
 }

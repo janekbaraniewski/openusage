@@ -96,6 +96,24 @@ Tracks subscription info and usage endpoints.
 
 Tracks rate limits and account balance.
 
+### OpenCode credential adoption (cross-provider)
+
+If [OpenCode](https://opencode.ai) is installed and you've authed any
+of its providers, openusage will read `~/.local/share/opencode/auth.json`
+on startup and adopt the API keys it finds. Currently maps:
+
+| OpenCode entry | openusage account |
+|---|---|
+| `moonshotai` (api) | `moonshot-ai` (provider `moonshot`) |
+| `openrouter` (api) | `openrouter` |
+| `zai` (api) | `zai` |
+| `opencode` (api) | `opencode` |
+| `ollama-cloud` (api) | `ollama-cloud` (provider `ollama`) |
+
+OAuth-typed entries (`anthropic`, `openai`, `google`, `cursor`) are skipped:
+they're chat-scoped tokens, not the API-key shape openusage's poll-time probes
+expect. Env-var detection runs first; if both are present the env var wins.
+
 ### Moonshot (Kimi)
 
 **Detection:** `MOONSHOT_API_KEY` environment variable
