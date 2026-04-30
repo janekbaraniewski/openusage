@@ -13,7 +13,6 @@ dist/
 *.test
 *.out
 vendor/
-
 # IDE
 .idea/
 .vscode/
@@ -22,11 +21,9 @@ vendor/
 *~
 #.claude/
 #.opencode/
-
 # OS
 .DS_Store
 Thumbs.db
-
 # Debug / temp
 *.har
 *.prof
@@ -47,3 +44,6 @@ website/node_modules/
 website/*.tsbuildinfo
 moonshotkey.txt
 perplexitykey.txt
+# Captured HAR/cookie files for provider reverse-engineering — must never be committed
+perplexity-cookies.txt
+pplx-cookies.txt
