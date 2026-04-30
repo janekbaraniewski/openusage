@@ -45,3 +45,5 @@ website/.vite/
 website/dist/
 website/node_modules/
 website/*.tsbuildinfo
+moonshotkey.txt
+perplexitykey.txt
