@@ -144,6 +144,58 @@ func TestSnapshotsReady(t *testing.T) {
 	}
 }
 
+// available_balance is set by Moonshot (and any future provider that derives
+// a peak/limit from a high-water-mark). Display info should produce the
+// cursor-style "$X.XX / $Y.YY spent" + "$Z.ZZ remaining" header so the user
+// sees consumed/total/available at a glance, not just a bare gauge percent.
+func TestComputeDisplayInfo_AvailableBalanceWithPeak_USD(t *testing.T) {
+	limit := 15.0
+	used := 0.13
+	remaining := 14.87
+	snap := core.UsageSnapshot{
+		ProviderID: "moonshot",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"available_balance": {Limit: &limit, Used: &used, Remaining: &remaining, Unit: "USD"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if got.tagLabel != "Credits" {
+		t.Fatalf("tagLabel = %q, want Credits", got.tagLabel)
+	}
+	if !strings.Contains(got.summary, "$0.13 / $15.00 spent") {
+		t.Errorf("summary = %q, want '$0.13 / $15.00 spent'", got.summary)
+	}
+	if !strings.Contains(got.detail, "$14.87 remaining") {
+		t.Errorf("detail = %q, want '$14.87 remaining'", got.detail)
+	}
+	if got.gaugePercent < 0.5 || got.gaugePercent > 1.5 {
+		t.Errorf("gaugePercent = %.2f, want ~0.87 (=%.2f%% of $15)", got.gaugePercent, used/limit*100)
+	}
+}
+
+// Currency-aware formatting: Moonshot.cn variants use CNY, must render with ¥.
+func TestComputeDisplayInfo_AvailableBalanceWithPeak_CNY(t *testing.T) {
+	limit := 100.0
+	used := 5.0
+	remaining := 95.0
+	snap := core.UsageSnapshot{
+		ProviderID: "moonshot",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"available_balance": {Limit: &limit, Used: &used, Remaining: &remaining, Unit: "CNY"},
+		},
+	}
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget())
+	if !strings.Contains(got.summary, "¥5.00 / ¥100.00 spent") {
+		t.Errorf("summary = %q, want '¥5.00 / ¥100.00 spent'", got.summary)
+	}
+	if !strings.Contains(got.detail, "¥95.00 remaining") {
+		t.Errorf("detail = %q, want '¥95.00 remaining'", got.detail)
+	}
+}
+
 func TestComputeDisplayInfo_SpendLimitWithoutIndividualSpend(t *testing.T) {
 	used := 488.0
 	limit := 3600.0
