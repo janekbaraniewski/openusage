@@ -20,6 +20,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/opencode"
 	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
+	"github.com/janekbaraniewski/openusage/internal/providers/perplexity"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
 	"github.com/janekbaraniewski/openusage/internal/providers/zai"
@@ -31,6 +32,7 @@ func AllProviders() []core.UsageProvider {
 		anthropic.New(),
 		alibaba_cloud.New(),
 		openrouter.New(),
+		perplexity.New(),
 		groq.New(),
 		mistral.New(),
 		moonshot.New(),
