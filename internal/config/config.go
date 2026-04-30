@@ -535,6 +535,47 @@ func SaveTimeWindowTo(path string, window string) error {
 	})
 }
 
+// SaveProviderLink persists a single telemetry provider link into the config file
+// (read-modify-write). Source and target are normalized (lowercased, trimmed). An empty
+// source or target is rejected as an error.
+func SaveProviderLink(source, target string) error {
+	return SaveProviderLinkTo(ConfigPath(), source, target)
+}
+
+func SaveProviderLinkTo(path string, source, target string) error {
+	source = strings.ToLower(strings.TrimSpace(source))
+	target = strings.ToLower(strings.TrimSpace(target))
+	if source == "" || target == "" {
+		return fmt.Errorf("save provider link: source and target must be non-empty")
+	}
+	return modifyConfig(path, func(cfg *Config) {
+		if cfg.Telemetry.ProviderLinks == nil {
+			cfg.Telemetry.ProviderLinks = map[string]string{}
+		}
+		cfg.Telemetry.ProviderLinks[source] = target
+	})
+}
+
+// DeleteProviderLink removes a user-defined telemetry provider link. If the link only
+// exists as a built-in default, this is a no-op (the default cannot be erased without
+// adding a tombstone, and we don't model that today).
+func DeleteProviderLink(source string) error {
+	return DeleteProviderLinkTo(ConfigPath(), source)
+}
+
+func DeleteProviderLinkTo(path string, source string) error {
+	source = strings.ToLower(strings.TrimSpace(source))
+	if source == "" {
+		return fmt.Errorf("delete provider link: source must be non-empty")
+	}
+	return modifyConfig(path, func(cfg *Config) {
+		if cfg.Telemetry.ProviderLinks == nil {
+			return
+		}
+		delete(cfg.Telemetry.ProviderLinks, source)
+	})
+}
+
 // SaveIntegrationState persists an integration state into the config file (read-modify-write).
 func SaveIntegrationState(id string, state IntegrationState) error {
 	return SaveIntegrationStateTo(ConfigPath(), id, state)

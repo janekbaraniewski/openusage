@@ -890,6 +890,65 @@ func TestSaveTimeWindowTo_InvalidWindowDefaultsTo30d(t *testing.T) {
 	}
 }
 
+func TestSaveProviderLinkTo_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := SaveTo(path, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveProviderLinkTo(path, "  Google ", "  gemini_api  "); err != nil {
+		t.Fatalf("SaveProviderLinkTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Telemetry.ProviderLinks["google"]; got != "gemini_api" {
+		t.Fatalf("provider_links[google] = %q, want gemini_api", got)
+	}
+	// Default link must still be present after a save.
+	if got := loaded.Telemetry.ProviderLinks["anthropic"]; got != "claude_code" {
+		t.Fatalf("default link anthropic lost after save: got %q", got)
+	}
+}
+
+func TestSaveProviderLinkTo_RejectsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := SaveTo(path, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveProviderLinkTo(path, "", "gemini_api"); err == nil {
+		t.Fatal("expected error for empty source")
+	}
+	if err := SaveProviderLinkTo(path, "google", "  "); err == nil {
+		t.Fatal("expected error for empty target")
+	}
+}
+
+func TestDeleteProviderLinkTo_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := SaveTo(path, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveProviderLinkTo(path, "openai", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProviderLinkTo(path, " OpenAI "); err != nil {
+		t.Fatalf("DeleteProviderLinkTo error: %v", err)
+	}
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := loaded.Telemetry.ProviderLinks["openai"]; ok {
+		t.Fatalf("expected openai link to be deleted, got %q", got)
+	}
+}
+
 func TestLoadFrom_ModelNormalizationConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
