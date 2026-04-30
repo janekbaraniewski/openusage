@@ -6,13 +6,15 @@ func dashboardWidget() core.DashboardWidget {
 	cfg := core.DefaultDashboardWidget()
 	cfg.ColorRole = core.DashboardColorRoleMauve
 
-	// Moonshot doesn't return per-request Remaining for rate limits, so gauges
-	// surface the balance breakdown — which has both a meaningful value and
-	// an implicit cap (the cumulative deposit).
-	cfg.GaugePriority = []string{
-		"available_balance", "cash_balance", "voucher_balance",
-	}
-	cfg.GaugeMaxLines = 2
+	// One gauge — total spent vs cumulative deposit (high-water-mark of the
+	// observed available balance). Cash/voucher breakdown lives in compact
+	// rows below; surfacing them as gauges too would be redundant noise
+	// (cash + voucher == available by construction).
+	//
+	// Gauge fill semantics in this codebase = "% used" — see
+	// internal/core/metric_semantics.go. Labels below match that.
+	cfg.GaugePriority = []string{"available_balance"}
+	cfg.GaugeMaxLines = 1
 
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{Label: "Balance", Keys: []string{"available_balance", "cash_balance", "voucher_balance"}, MaxSegments: 4},
@@ -23,16 +25,17 @@ func dashboardWidget() core.DashboardWidget {
 	}
 
 	cfg.MetricLabelOverrides = map[string]string{
-		"available_balance": "Available",
-		"cash_balance":      "Cash",
-		"voucher_balance":   "Vouchers",
+		// Detail-panel labels — "Spent" matches the "% used" gauge fill.
+		"available_balance": "Spent",
+		"cash_balance":      "Cash spent",
+		"voucher_balance":   "Voucher spent",
 		"rpm":               "Req / min",
 		"tpm":               "Tokens / min",
 		"concurrency_max":   "Concurrency",
-		"total_token_quota": "Token Quota",
+		"total_token_quota": "Token quota",
 	}
 	cfg.CompactMetricLabelOverrides = map[string]string{
-		"available_balance": "avail",
+		"available_balance": "spent",
 		"cash_balance":      "cash",
 		"voucher_balance":   "vouch",
 		"concurrency_max":   "conc",
