@@ -50,6 +50,14 @@ func (s *Service) SaveTimeWindow(window string) error {
 	return config.SaveTimeWindow(window)
 }
 
+func (s *Service) SaveProviderLink(source, target string) error {
+	return config.SaveProviderLink(source, target)
+}
+
+func (s *Service) DeleteProviderLink(source string) error {
+	return config.DeleteProviderLink(source)
+}
+
 func (s *Service) ValidateAPIKey(accountID, providerID, apiKey string) (bool, string) {
 	var provider core.UsageProvider
 	for _, p := range providers.AllProviders() {
