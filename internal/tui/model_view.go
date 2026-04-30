@@ -103,7 +103,7 @@ func (m Model) renderHeader(w int) string {
 		info += " · " + m.timeWindow.Label()
 	}
 	if !m.settings.show && len(unmappedProviders) > 0 {
-		info += " · detected additional providers, check settings"
+		info += " · " + m.unmappedHeaderPhrase()
 	}
 
 	statusInfo := ""
@@ -135,6 +135,32 @@ func (m Model) renderHeader(w int) string {
 
 	line := left + strings.Repeat(" ", gap) + infoRendered
 	return line + "\n" + m.renderGradientSeparator(w)
+}
+
+// unmappedHeaderPhrase returns context-sensitive header text. When every
+// unmapped source has no account configured and no suggestion to offer, soften
+// to a passive observation. When at least one source has an actionable hint
+// (suggestion or mapped-target-missing), surface it as a call to action.
+func (m Model) unmappedHeaderPhrase() string {
+	details := m.telemetryUnmappedDetails()
+	if len(details) == 0 {
+		return ""
+	}
+	actionable := false
+	for _, d := range details {
+		if d.Category == telemetryUnmappedMappedTargetMissing {
+			actionable = true
+			break
+		}
+		if d.Category == telemetryUnmappedUnconfigured && d.Suggestion != "" {
+			actionable = true
+			break
+		}
+	}
+	if actionable {
+		return fmt.Sprintf("%d telemetry sources need mapping", len(details))
+	}
+	return fmt.Sprintf("%d telemetry sources without an account", len(details))
 }
 
 func (m Model) renderGradientSeparator(w int) string {

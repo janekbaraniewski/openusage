@@ -182,11 +182,19 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {
+	if m.settings.providerLinkPicker.active {
+		return m.renderProviderLinkPicker(w, h)
+	}
+
 	lines := settingsBodyHeaderLines("Telemetry & Time Window", "Choose aggregation window and map raw telemetry providers")
 	lines = append(lines, settingsBodyRule(w), "", lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("Time Window")+"  "+dimStyle.Render("press w or select below"), "")
+
+	rows := m.telemetryRows()
+	cursor := m.telemetryRowCursor()
+
 	for i, tw := range core.ValidTimeWindows {
 		prefix := "  "
-		if i == m.settings.cursor {
+		if isTelemetryCursorOn(rows, cursor, telemetryRowKindTimeWindow, i) {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
 		current := "  "
@@ -197,24 +205,114 @@ func (m Model) renderSettingsTelemetryBody(w, h int) string {
 	}
 	lines = append(lines, "")
 
-	unmapped := m.telemetryUnmappedProviders()
-	if len(unmapped) == 0 {
+	details := m.telemetryUnmappedDetails()
+	if len(details) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).Render("All telemetry providers are mapped."))
 	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"))
-		for _, providerID := range unmapped {
-			lines = append(lines, "  - "+providerID)
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("Detected additional telemetry providers:"),
+			dimStyle.Render("  m: map to account · x: clear user mapping · enter: open picker"))
+		for i, d := range details {
+			prefix := "  "
+			if isTelemetryCursorOn(rows, cursor, telemetryRowKindUnmapped, i) {
+				prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+			}
+			lines = append(lines, fmt.Sprintf("%s%s  %s", prefix, padRight(d.Source, 20), formatUnmappedCategory(d)))
 		}
-		lines = append(lines, "", "Map them in settings.json under telemetry.provider_links:", "  <source_provider>=<configured_provider_id>")
-		if hints := m.telemetryProviderLinkHints(); len(hints) > 0 {
-			lines = append(lines, "", "Hint:", "  "+hints[0])
-		}
+		lines = append(lines,
+			"",
+			dimStyle.Render("Or edit telemetry.provider_links in settings.json: <source_provider>=<configured_provider_id>"),
+		)
 		if configured := m.configuredProviderIDs(); len(configured) > 0 {
-			lines = append(lines, "", "Configured provider IDs:", "  "+strings.Join(configured, ", "))
+			lines = append(lines, dimStyle.Render("Configured provider IDs: "+strings.Join(configured, ", ")))
 		}
+	}
+	if status := strings.TrimSpace(m.settings.providerLinkPicker.status); status != "" {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorTeal).Render(status))
 	}
 	start, end := listWindow(len(lines), m.settings.bodyOffset, h)
 	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
+}
+
+func formatUnmappedCategory(d TelemetryUnmappedDetail) string {
+	switch d.Category {
+	case telemetryUnmappedMappedTargetMissing:
+		target := d.Suggestion
+		if target == "" {
+			target = "?"
+		}
+		return lipgloss.NewStyle().Foreground(colorPeach).Render("[mapped → " + target + ", target not configured]")
+	case telemetryUnmappedUnconfigured:
+		if d.Suggestion != "" {
+			return lipgloss.NewStyle().Foreground(colorTeal).Render("[suggested: " + d.Suggestion + "]")
+		}
+		return dimStyle.Render("[no account configured]")
+	}
+	return dimStyle.Render("[" + string(d.Category) + "]")
+}
+
+func (m Model) renderProviderLinkPicker(w, h int) string {
+	picker := m.settings.providerLinkPicker
+	lines := settingsBodyHeaderLines("Map telemetry source", "Source: "+picker.source)
+	lines = append(lines, settingsBodyRule(w), "")
+	if len(picker.choices) == 0 {
+		lines = append(lines, dimStyle.Render("No configured provider IDs available. Add an account first under 1 PROV / 5 KEYS."))
+	} else {
+		lines = append(lines, dimStyle.Render("Pick a target provider id. Enter applies, Esc cancels."), "")
+		cursor := clamp(picker.cursor, 0, len(picker.choices)-1)
+		for i, choice := range picker.choices {
+			prefix := "  "
+			if i == cursor {
+				prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+			}
+			lines = append(lines, fmt.Sprintf("%s%s", prefix, choice))
+		}
+	}
+	if status := strings.TrimSpace(picker.status); status != "" {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorTeal).Render(status))
+	}
+	start, end := listWindow(len(lines), m.settings.bodyOffset, h)
+	return padToSize(strings.Join(lines[start:end], "\n"), w, h)
+}
+
+// telemetryRowKind enumerates the kinds of rows on the TELEM tab; the input
+// handler and renderer share a unified cursor across these rows.
+type telemetryRowKind int
+
+const (
+	telemetryRowKindTimeWindow telemetryRowKind = iota
+	telemetryRowKindUnmapped
+)
+
+type telemetryRow struct {
+	kind  telemetryRowKind
+	index int // index into ValidTimeWindows OR telemetryUnmappedDetails
+}
+
+func (m Model) telemetryRows() []telemetryRow {
+	rows := make([]telemetryRow, 0, len(core.ValidTimeWindows)+len(m.telemetryUnmappedDetails()))
+	for i := range core.ValidTimeWindows {
+		rows = append(rows, telemetryRow{kind: telemetryRowKindTimeWindow, index: i})
+	}
+	for i := range m.telemetryUnmappedDetails() {
+		rows = append(rows, telemetryRow{kind: telemetryRowKindUnmapped, index: i})
+	}
+	return rows
+}
+
+func (m Model) telemetryRowCursor() int {
+	rows := m.telemetryRows()
+	if len(rows) == 0 {
+		return 0
+	}
+	return clamp(m.settings.cursor, 0, len(rows)-1)
+}
+
+func isTelemetryCursorOn(rows []telemetryRow, cursor int, kind telemetryRowKind, index int) bool {
+	if cursor < 0 || cursor >= len(rows) {
+		return false
+	}
+	r := rows[cursor]
+	return r.kind == kind && r.index == index
 }
 
 func (m Model) renderSettingsIntegrationsBody(w, h int) string {

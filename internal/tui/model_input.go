@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -93,6 +94,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.settings.status = "time window saved"
 		}
+		return m, nil
+
+	case providerLinkPersistedMsg:
+		if msg.err != nil {
+			m.settings.providerLinkPicker.status = "save failed: " + msg.err.Error()
+			m.settings.status = "provider link save failed"
+			return m, nil
+		}
+		m.settings.providerLinkPicker = providerLinkPickerState{}
+		m.settings.status = fmt.Sprintf("mapped %s → %s", msg.source, msg.target)
+		m = m.requestRefresh()
+		return m, nil
+
+	case providerLinkDeletedMsg:
+		if msg.err != nil {
+			m.settings.providerLinkPicker.status = "clear failed: " + msg.err.Error()
+			m.settings.status = "provider link clear failed"
+			return m, nil
+		}
+		m.settings.providerLinkPicker = providerLinkPickerState{}
+		m.settings.status = fmt.Sprintf("cleared mapping for %s", msg.source)
+		m = m.requestRefresh()
 		return m, nil
 
 	case validateKeyResultMsg:

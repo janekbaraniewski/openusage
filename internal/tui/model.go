@@ -127,6 +127,19 @@ type settingsState struct {
 	apiKeyInput         string
 	apiKeyEditAccountID string
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
+
+	providerLinkPicker providerLinkPickerState
+}
+
+// providerLinkPickerState tracks the in-modal target picker for a telemetry
+// provider. When active, key input on the TELEM tab is routed to the picker
+// (up/down to choose, enter to apply, esc to cancel).
+type providerLinkPickerState struct {
+	active  bool
+	source  string
+	choices []string
+	cursor  int
+	status  string
 }
 
 type Services interface {
@@ -137,6 +150,8 @@ type Services interface {
 	SaveDetailWidgetSections(sections []config.DetailWidgetSection) error
 	SaveDashboardHideSectionsWithNoData(hide bool) error
 	SaveTimeWindow(window string) error
+	SaveProviderLink(source, target string) error
+	DeleteProviderLink(source string) error
 	ValidateAPIKey(accountID, providerID, apiKey string) (bool, string)
 	SaveCredential(accountID, apiKey string) error
 	DeleteCredential(accountID string) error
@@ -275,6 +290,15 @@ type dashboardHideSectionsWithNoDataPersistedMsg struct {
 }
 type timeWindowPersistedMsg struct {
 	err error
+}
+type providerLinkPersistedMsg struct {
+	source string
+	target string
+	err    error
+}
+type providerLinkDeletedMsg struct {
+	source string
+	err    error
 }
 
 type validateKeyResultMsg struct {
@@ -712,6 +736,87 @@ func (m Model) telemetryUnmappedProviders() []string {
 	}
 
 	return core.SortedStringKeys(seen)
+}
+
+// telemetryUnmappedCategory describes why a telemetry provider id is unmapped.
+type telemetryUnmappedCategory string
+
+const (
+	telemetryUnmappedUnconfigured        telemetryUnmappedCategory = "unconfigured"
+	telemetryUnmappedMappedTargetMissing telemetryUnmappedCategory = "mapped_target_missing"
+)
+
+// TelemetryUnmappedDetail is the parsed view of one entry in
+// telemetry_unmapped_meta. Suggestion is empty when no candidate target exists.
+type TelemetryUnmappedDetail struct {
+	Source     string
+	Category   telemetryUnmappedCategory
+	Suggestion string
+}
+
+// telemetryUnmappedDetails aggregates unmapped meta diagnostics across all
+// snapshots and returns one detail per source. Sources missing from the meta
+// stream (i.e. only present in the legacy CSV) are returned as plain
+// "unconfigured" entries with no suggestion.
+func (m Model) telemetryUnmappedDetails() []TelemetryUnmappedDetail {
+	seen := make(map[string]TelemetryUnmappedDetail)
+	for _, snap := range m.snapshots {
+		raw := strings.TrimSpace(snap.Diagnostics["telemetry_unmapped_meta"])
+		if raw == "" {
+			continue
+		}
+		for _, token := range strings.Split(raw, ",") {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			eq := strings.IndexByte(token, '=')
+			if eq <= 0 {
+				continue
+			}
+			source := strings.TrimSpace(token[:eq])
+			rest := strings.TrimSpace(token[eq+1:])
+			category := telemetryUnmappedUnconfigured
+			suggestion := ""
+			colon := strings.IndexByte(rest, ':')
+			if colon < 0 {
+				category = telemetryUnmappedCategory(rest)
+			} else {
+				category = telemetryUnmappedCategory(rest[:colon])
+				suggestion = strings.TrimSpace(rest[colon+1:])
+			}
+			if source == "" {
+				continue
+			}
+			seen[source] = TelemetryUnmappedDetail{
+				Source:     source,
+				Category:   category,
+				Suggestion: suggestion,
+			}
+		}
+	}
+	for _, source := range m.telemetryUnmappedProviders() {
+		if _, ok := seen[source]; !ok {
+			seen[source] = TelemetryUnmappedDetail{
+				Source:   source,
+				Category: telemetryUnmappedUnconfigured,
+			}
+		}
+	}
+	keys := core.SortedStringKeys(boolKeys(seen))
+	out := make([]TelemetryUnmappedDetail, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, seen[k])
+	}
+	return out
+}
+
+func boolKeys[V any](m map[string]V) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }
 
 func (m Model) telemetryProviderLinkHints() []string {
