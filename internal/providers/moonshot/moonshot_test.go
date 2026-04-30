@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,6 +84,9 @@ func startFake(t *testing.T, opts fakeServerOpts) *httptest.Server {
 func setKey(t *testing.T, value string) {
 	t.Helper()
 	t.Setenv("TEST_MOONSHOT_KEY", value)
+	// Each test gets an isolated state file so peak-tracking from previous
+	// runs (or from another running daemon on the dev box) can't leak in.
+	t.Setenv("OPENUSAGE_MOONSHOT_STATE_PATH", filepath.Join(t.TempDir(), "moonshot-state.json"))
 }
 
 func newAcct(server, accountID string) core.AccountConfig {
@@ -131,6 +135,14 @@ func TestFetch_Success_International(t *testing.T) {
 	}
 	if avail.Unit != "USD" {
 		t.Errorf("available_balance unit = %q, want USD", avail.Unit)
+	}
+	// First poll: peak == observed, so Limit = 15, Used = 0. Gauge
+	// renders at 0% — accurate, and it'll fill as the user spends.
+	if avail.Limit == nil || *avail.Limit != 15 {
+		t.Errorf("available_balance Limit = %+v, want 15", avail.Limit)
+	}
+	if avail.Used == nil || *avail.Used != 0 {
+		t.Errorf("available_balance Used = %+v, want 0", avail.Used)
 	}
 
 	rpm, ok := snap.Metrics["rpm"]
