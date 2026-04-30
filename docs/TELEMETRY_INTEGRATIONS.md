@@ -65,25 +65,62 @@ The daemon also prints a hint at startup when it detects tools with missing inte
 
 ## Provider Linking (Explicit Control)
 
-If telemetry emits a provider ID that is not configured locally (for example `anthropic` from OpenCode while you track that spend under `claude_code`), add explicit links in `~/.config/openusage/settings.json`:
+Telemetry events are tagged with whatever `provider_id` the source tool uses. When that id doesn't match any configured account, openusage attempts a link via `telemetry.provider_links`, then falls back to flagging the source as unmapped.
+
+### Built-in defaults
+
+The following links are applied automatically and cover known rename mismatches between source-tool vocabulary and openusage's internal provider ids:
+
+| Source provider id | Mapped to    | Why                                                    |
+|--------------------|--------------|--------------------------------------------------------|
+| `anthropic`        | `claude_code`| OpenCode/Codex/Claude Code emit `anthropic`            |
+| `google`           | `gemini_api` | OpenCode emits `google` for the Gemini API             |
+| `github-copilot`   | `copilot`    | OpenCode emits `github-copilot` for GitHub Copilot     |
+
+Identity links (e.g. `openai` → `openai`) are intentionally not enumerated — direct id matches are handled by the matcher without a link.
+
+### User overrides
+
+Add custom or override entries in `~/.config/openusage/settings.json`:
 
 ```json
 {
   "telemetry": {
     "provider_links": {
-      "anthropic": "claude_code"
+      "google": "my-personal-gemini-account",
+      "moonshot": "kimi"
     }
   }
 }
 ```
 
-Behavior:
+User entries take precedence over defaults. The daemon picks up changes on the next poll cycle (no restart needed).
 
-1. No automatic telemetry-only providers are created.
-2. If provider is unmapped, snapshots include diagnostics:
-   - `telemetry_unmapped_providers`
-   - `telemetry_provider_link_hint`
-3. Canonical telemetry usage metrics are applied only to configured providers (or explicitly linked providers).
+### Interactive remap
+
+Open the TUI Settings modal (`s`), navigate to **6 TELEM**. Unmapped telemetry sources are listed below the time-window picker, each with a category badge:
+
+- `[no account configured]` — no openusage account exists for this source.
+- `[suggested: <id>]` — a configured provider id whose name overlaps with the source. Press `m` to open a picker pre-selecting the suggestion.
+- `[mapped → <id>, target not configured]` — a link points to an id that has no account. Resolve by changing the link target or creating the missing account.
+
+Keybindings on each unmapped row:
+
+- `m` (or Enter) — open a target picker showing all configured provider ids; Enter to apply, Esc to cancel.
+- `x` — clear an existing user-defined link for this source (built-in defaults can't be cleared this way; override them with a different target instead).
+
+### Diagnostics emitted on snapshots
+
+When at least one source is unmapped, every snapshot picks up two diagnostic keys:
+
+- `telemetry_unmapped_providers` — comma-separated list of unmapped source ids.
+- `telemetry_unmapped_meta` — comma-separated `<source>=<category>[:<suggestion-or-target>]` entries. Categories: `unconfigured`, `mapped_target_missing`. The optional suffix is a configured provider id suggestion (for `unconfigured`) or the link's target id (for `mapped_target_missing`).
+
+### Behavior summary
+
+1. No automatic telemetry-only providers are created — sources without a configured account stay flagged.
+2. Canonical telemetry usage metrics are applied only to configured providers or explicitly linked providers.
+3. Built-in defaults can be overridden but not erased; setting `provider_links.<source>` replaces the default for that source.
 
 ## Optional runtime env vars (all integrations)
 
