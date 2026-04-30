@@ -11,6 +11,9 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.settings.apiKeyEditing {
 		return m.handleAPIKeyEditKey(msg)
 	}
+	if m.settings.tab == settingsTabTelemetry && m.settings.providerLinkPicker.active {
+		return m.handleProviderLinkPickerKey(msg)
+	}
 
 	ids := m.settingsIDs()
 	if m.settings.tab == settingsTabAPIKeys {
@@ -247,26 +250,32 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.deleteCredentialCmd(id)
 		}
 	case settingsTabTelemetry:
+		rows := m.telemetryRows()
 		switch msg.String() {
 		case "up", "k":
 			if m.settings.cursor > 0 {
 				m.settings.cursor--
 			}
 		case "down", "j":
-			if m.settings.cursor < len(core.ValidTimeWindows)-1 {
+			if m.settings.cursor < len(rows)-1 {
 				m.settings.cursor++
 			}
-		case " ", "enter", "w":
-			tws := core.ValidTimeWindows
-			if len(tws) == 0 {
-				return m, nil
+		case "w":
+			if next, cmd, handled := m.applyTimeWindowAtCursor(rows); handled {
+				return next, cmd
 			}
-			idx := clamp(m.settings.cursor, 0, len(tws)-1)
-			selected := tws[idx]
-			m.settings.cursor = idx
-			m.settings.status = "saving time window..."
-			m = m.beginTimeWindowRefresh(selected)
-			return m, m.persistTimeWindowCmd(string(selected))
+		case " ", "enter":
+			if next, cmd, handled := m.activateTelemetryRow(rows); handled {
+				return next, cmd
+			}
+		case "m":
+			if next, cmd, handled := m.openProviderLinkPickerAtCursor(rows); handled {
+				return next, cmd
+			}
+		case "x":
+			if next, cmd, handled := m.clearProviderLinkAtCursor(rows); handled {
+				return next, cmd
+			}
 		}
 	case settingsTabIntegrations:
 		switch msg.String() {
@@ -421,6 +430,118 @@ func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (m Model) applyTimeWindowAtCursor(rows []telemetryRow) (Model, tea.Cmd, bool) {
+	cursor := m.telemetryRowCursor()
+	if cursor < 0 || cursor >= len(rows) {
+		return m, nil, false
+	}
+	if rows[cursor].kind != telemetryRowKindTimeWindow {
+		return m, nil, false
+	}
+	tws := core.ValidTimeWindows
+	idx := clamp(rows[cursor].index, 0, len(tws)-1)
+	selected := tws[idx]
+	m.settings.status = "saving time window..."
+	m = m.beginTimeWindowRefresh(selected)
+	return m, m.persistTimeWindowCmd(string(selected)), true
+}
+
+func (m Model) activateTelemetryRow(rows []telemetryRow) (Model, tea.Cmd, bool) {
+	cursor := m.telemetryRowCursor()
+	if cursor < 0 || cursor >= len(rows) {
+		return m, nil, false
+	}
+	switch rows[cursor].kind {
+	case telemetryRowKindTimeWindow:
+		return m.applyTimeWindowAtCursor(rows)
+	case telemetryRowKindUnmapped:
+		return m.openProviderLinkPickerAtCursor(rows)
+	}
+	return m, nil, false
+}
+
+func (m Model) openProviderLinkPickerAtCursor(rows []telemetryRow) (Model, tea.Cmd, bool) {
+	cursor := m.telemetryRowCursor()
+	if cursor < 0 || cursor >= len(rows) || rows[cursor].kind != telemetryRowKindUnmapped {
+		return m, nil, false
+	}
+	details := m.telemetryUnmappedDetails()
+	idx := rows[cursor].index
+	if idx < 0 || idx >= len(details) {
+		return m, nil, false
+	}
+	source := details[idx].Source
+	choices := m.configuredProviderIDs()
+	if len(choices) == 0 {
+		m.settings.providerLinkPicker = providerLinkPickerState{
+			active: true,
+			source: source,
+			status: "",
+		}
+		return m, nil, true
+	}
+
+	startCursor := 0
+	if details[idx].Suggestion != "" {
+		for i, c := range choices {
+			if c == details[idx].Suggestion {
+				startCursor = i
+				break
+			}
+		}
+	}
+	m.settings.providerLinkPicker = providerLinkPickerState{
+		active:  true,
+		source:  source,
+		choices: choices,
+		cursor:  startCursor,
+	}
+	return m, nil, true
+}
+
+func (m Model) clearProviderLinkAtCursor(rows []telemetryRow) (Model, tea.Cmd, bool) {
+	cursor := m.telemetryRowCursor()
+	if cursor < 0 || cursor >= len(rows) || rows[cursor].kind != telemetryRowKindUnmapped {
+		return m, nil, false
+	}
+	details := m.telemetryUnmappedDetails()
+	idx := rows[cursor].index
+	if idx < 0 || idx >= len(details) {
+		return m, nil, false
+	}
+	source := details[idx].Source
+	m.settings.providerLinkPicker.status = "clearing user mapping for " + source + "..."
+	return m, m.deleteProviderLinkCmd(source), true
+}
+
+func (m Model) handleProviderLinkPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	picker := &m.settings.providerLinkPicker
+	switch msg.String() {
+	case "esc", "q":
+		*picker = providerLinkPickerState{}
+		return m, nil
+	case "up", "k":
+		if picker.cursor > 0 {
+			picker.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if picker.cursor < len(picker.choices)-1 {
+			picker.cursor++
+		}
+		return m, nil
+	case "enter", " ":
+		if len(picker.choices) == 0 {
+			return m, nil
+		}
+		target := picker.choices[clamp(picker.cursor, 0, len(picker.choices)-1)]
+		source := picker.source
+		picker.status = "saving link " + source + " → " + target + "..."
+		return m, m.persistProviderLinkCmd(source, target)
+	}
+	return m, nil
 }
 
 func listWindow(total, cursor, visible int) (int, int) {

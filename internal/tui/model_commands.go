@@ -106,6 +106,32 @@ func (m Model) persistTimeWindowCmd(window string) tea.Cmd {
 	}
 }
 
+func (m Model) persistProviderLinkCmd(source, target string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return providerLinkPersistedMsg{source: source, target: target, err: fmt.Errorf("provider link service unavailable")}
+		}
+		err := m.services.SaveProviderLink(source, target)
+		if err != nil {
+			log.Printf("provider link persist (%s→%s): %v", source, target, err)
+		}
+		return providerLinkPersistedMsg{source: source, target: target, err: err}
+	}
+}
+
+func (m Model) deleteProviderLinkCmd(source string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return providerLinkDeletedMsg{source: source, err: fmt.Errorf("provider link service unavailable")}
+		}
+		err := m.services.DeleteProviderLink(source)
+		if err != nil {
+			log.Printf("provider link delete (%s): %v", source, err)
+		}
+		return providerLinkDeletedMsg{source: source, err: err}
+	}
+}
+
 func (m Model) validateKeyCmd(accountID, providerID, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		if m.services == nil {

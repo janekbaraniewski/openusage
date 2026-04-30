@@ -82,15 +82,52 @@ func TestRenderSettingsTelemetryBody_ShowsUnmappedProviders(t *testing.T) {
 	if !strings.Contains(body, "telemetry.provider_links") {
 		t.Fatalf("telemetry settings body missing mapping guidance: %q", body)
 	}
+	// Sources without meta default to the unconfigured category and render the
+	// "no account configured" badge.
+	if !strings.Contains(body, "no account configured") {
+		t.Fatalf("telemetry settings body missing unconfigured category badge: %q", body)
+	}
 }
 
-func TestRenderHeader_ShowsGlobalUnmappedWarning(t *testing.T) {
+func TestRenderSettingsTelemetryBody_RendersCategorizedRows(t *testing.T) {
+	m := Model{
+		snapshots: map[string]core.UsageSnapshot{
+			"copilot": {
+				ProviderID: "copilot",
+				Diagnostics: map[string]string{
+					"telemetry_unmapped_providers": "github-copilot,google,openai",
+					"telemetry_unmapped_meta":      "github-copilot=unconfigured:copilot,google=mapped_target_missing:gemini_api,openai=unconfigured",
+				},
+			},
+		},
+		accountProviders: map[string]string{
+			"copilot": "copilot",
+		},
+	}
+
+	body := m.renderSettingsTelemetryBody(140, 40)
+	if !strings.Contains(body, "github-copilot") || !strings.Contains(body, "suggested: copilot") {
+		t.Errorf("body missing suggestion row: %q", body)
+	}
+	if !strings.Contains(body, "google") || !strings.Contains(body, "mapped → gemini_api, target not configured") {
+		t.Errorf("body missing mapped-target-missing row: %q", body)
+	}
+	if !strings.Contains(body, "openai") || !strings.Contains(body, "no account configured") {
+		t.Errorf("body missing unconfigured row without suggestion: %q", body)
+	}
+	if !strings.Contains(body, "m: map to account") {
+		t.Errorf("body missing keybinding hint: %q", body)
+	}
+}
+
+func TestRenderHeader_ShowsGlobalUnmappedWarning_Passive(t *testing.T) {
 	m := Model{
 		snapshots: map[string]core.UsageSnapshot{
 			"openrouter": {
 				Status: core.StatusOK,
 				Diagnostics: map[string]string{
 					"telemetry_unmapped_providers": "anthropic,openai",
+					"telemetry_unmapped_meta":      "anthropic=unconfigured,openai=unconfigured",
 				},
 			},
 		},
@@ -98,10 +135,30 @@ func TestRenderHeader_ShowsGlobalUnmappedWarning(t *testing.T) {
 	}
 
 	header := m.renderHeader(160)
-	if !strings.Contains(header, "detected additional providers, check settings") {
-		t.Fatalf("header missing unmapped provider guidance: %q", header)
+	if !strings.Contains(header, "telemetry sources without an account") {
+		t.Fatalf("header missing passive phrasing: %q", header)
 	}
 	if !strings.Contains(header, "unmapped") {
 		t.Fatalf("header missing unmapped status badge: %q", header)
+	}
+}
+
+func TestRenderHeader_ShowsGlobalUnmappedWarning_Actionable(t *testing.T) {
+	m := Model{
+		snapshots: map[string]core.UsageSnapshot{
+			"copilot": {
+				Status: core.StatusOK,
+				Diagnostics: map[string]string{
+					"telemetry_unmapped_providers": "github-copilot,openai",
+					"telemetry_unmapped_meta":      "github-copilot=unconfigured:copilot,openai=unconfigured",
+				},
+			},
+		},
+		sortedIDs: []string{"copilot"},
+	}
+
+	header := m.renderHeader(160)
+	if !strings.Contains(header, "telemetry sources need mapping") {
+		t.Fatalf("header missing actionable phrasing: %q", header)
 	}
 }
