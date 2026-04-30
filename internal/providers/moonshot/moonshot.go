@@ -229,11 +229,45 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 	voucher := bal.Data.VoucherBalance
 	cash := bal.Data.CashBalance
 
-	snap.Metrics["available_balance"] = core.Metric{Remaining: &available, Unit: currency, Window: "current"}
-	snap.Metrics["cash_balance"] = core.Metric{Remaining: &cash, Unit: currency, Window: "current"}
-	snap.Metrics["voucher_balance"] = core.Metric{Remaining: &voucher, Unit: currency, Window: "current"}
+	// Moonshot's API only returns the currently-remaining balance — there's
+	// no lifetime-deposit or lifetime-spend field. To render gauges with a
+	// real denominator we persist a per-account high-water-mark of each
+	// balance dimension and use that as the Limit. A new top-up bumps the
+	// peak; spend-down then fills the gauge between Limit and Remaining.
+	peaks := updatePeaks(snap.AccountID, peakState{
+		PeakAvailable: available,
+		PeakCash:      cash,
+		PeakVoucher:   voucher,
+	})
+
+	snap.Metrics["available_balance"] = balanceMetric(peaks.PeakAvailable, available, currency)
+	snap.Metrics["cash_balance"] = balanceMetric(peaks.PeakCash, cash, currency)
+	snap.Metrics["voucher_balance"] = balanceMetric(peaks.PeakVoucher, voucher, currency)
 
 	return nil
+}
+
+// balanceMetric builds a fully-populated balance Metric from a persisted peak
+// (Limit) and the current remaining value. Used = Limit - Remaining is the
+// implicit spend since the peak. When peak == 0 (first poll, account never
+// observed in this state file) we still set Limit so the gauge shows full;
+// the peak is simultaneously updated so subsequent polls have proper data.
+func balanceMetric(peak, remaining float64, currency string) core.Metric {
+	limit := peak
+	if limit < remaining {
+		limit = remaining
+	}
+	used := limit - remaining
+	if used < 0 {
+		used = 0
+	}
+	return core.Metric{
+		Limit:     core.Float64Ptr(limit),
+		Remaining: core.Float64Ptr(remaining),
+		Used:      core.Float64Ptr(used),
+		Unit:      currency,
+		Window:    "current",
+	}
 }
 
 // applyBalanceStatus promotes Status / Message based on remaining available balance.
