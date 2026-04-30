@@ -96,6 +96,14 @@ Tracks subscription info and usage endpoints.
 
 Tracks rate limits and account balance.
 
+### Moonshot (Kimi)
+
+**Detection:** `MOONSHOT_API_KEY` environment variable
+
+Tracks balance breakdown (`available_balance` = `cash_balance` + `voucher_balance`), org-level rate caps (`max_request_per_minute`, `max_token_per_minute`, `max_concurrency`, `max_token_quota`), tier (`user_group_id`), and account metadata (org id, project id, masked access key).
+
+By default targets `api.moonshot.ai` (international, USD). For Moonshot.cn (China, CNY) add a second account in `settings.json` with `"base_url": "https://api.moonshot.cn"`.
+
 ### xAI (Grok)
 
 **Detection:** `XAI_API_KEY` environment variable
