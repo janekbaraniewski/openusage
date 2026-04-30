@@ -278,6 +278,7 @@ func annotateUnmappedTelemetryProviders(
 		s := snap
 		s.EnsureMaps()
 		delete(s.Diagnostics, "telemetry_unmapped_providers")
+		delete(s.Diagnostics, "telemetry_unmapped_meta")
 		delete(s.Diagnostics, "telemetry_provider_link_hint")
 		out[accountID] = s
 
@@ -303,6 +304,7 @@ func annotateUnmappedTelemetryProviders(
 	defer rows.Close()
 
 	unmapped := make([]string, 0, 32)
+	meta := make([]string, 0, 32)
 	for rows.Next() {
 		var providerID string
 		if err := rows.Scan(&providerID); err != nil {
@@ -319,10 +321,16 @@ func annotateUnmappedTelemetryProviders(
 			if configuredProviders[mappedTarget] {
 				continue
 			}
-			unmapped = append(unmapped, providerID+"->"+mappedTarget)
+			unmapped = append(unmapped, providerID)
+			meta = append(meta, providerID+"=mapped_target_missing:"+mappedTarget)
 			continue
 		}
 		unmapped = append(unmapped, providerID)
+		entry := providerID + "=unconfigured"
+		if suggestion := suggestConfiguredProvider(providerID, configuredProviders); suggestion != "" {
+			entry += ":" + suggestion
+		}
+		meta = append(meta, entry)
 	}
 
 	if rowsErr := rows.Err(); rowsErr != nil {
@@ -333,14 +341,60 @@ func annotateUnmappedTelemetryProviders(
 	}
 
 	unmappedCSV := strings.Join(unmapped, ",")
+	metaCSV := strings.Join(meta, ",")
 	for accountID, snap := range out {
 		s := snap
 		s.EnsureMaps()
 		s.SetDiagnostic("telemetry_unmapped_providers", unmappedCSV)
+		s.SetDiagnostic("telemetry_unmapped_meta", metaCSV)
 		s.SetDiagnostic("telemetry_provider_link_hint", "Configure telemetry.provider_links.<source_provider>=<configured_provider_id> in settings.json")
 		out[accountID] = s
 	}
 	return out, nil
+}
+
+// suggestConfiguredProvider returns a configured provider id whose normalized form
+// is a substring of source's normalized form, or vice versa. Returns the empty
+// string when no candidate exists. Deliberately simple — the interactive picker
+// is the safety net for cases where this guesses wrong or returns nothing.
+func suggestConfiguredProvider(source string, configured map[string]bool) string {
+	src := normalizeProviderToken(source)
+	if src == "" {
+		return ""
+	}
+	best := ""
+	bestLen := 0
+	for cand := range configured {
+		c := normalizeProviderToken(cand)
+		if c == "" || c == src {
+			continue
+		}
+		if !strings.Contains(src, c) && !strings.Contains(c, src) {
+			continue
+		}
+		// prefer the longer candidate (more specific match)
+		if len(c) > bestLen {
+			best = cand
+			bestLen = len(c)
+		}
+	}
+	return best
+}
+
+func normalizeProviderToken(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func mapCoreStatus(raw string) core.Status {

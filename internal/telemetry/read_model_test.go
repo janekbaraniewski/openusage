@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,6 +257,102 @@ func TestApplyCanonicalTelemetryView_FlagsUnmappedTelemetryProviders(t *testing.
 	if gotDiag := openrouterSnap.Diagnostics["telemetry_unmapped_providers"]; gotDiag != "anthropic" {
 		t.Fatalf("telemetry_unmapped_providers = %q, want anthropic", gotDiag)
 	}
+}
+
+func TestApplyCanonicalTelemetryView_CategorizesUnmappedTelemetryMeta(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	input := int64(11)
+	for i, providerID := range []string{"github-copilot", "google", "openai"} {
+		if _, err := store.Ingest(context.Background(), IngestRequest{
+			SourceSystem:  SourceSystem("opencode"),
+			SourceChannel: SourceChannelHook,
+			OccurredAt:    time.Date(2026, 2, 22, 15, 30, 0, i, time.UTC),
+			ProviderID:    providerID,
+			AccountID:     "opencode",
+			AgentName:     "opencode",
+			EventType:     EventTypeMessageUsage,
+			MessageID:     "msg-meta-" + providerID,
+			ModelRaw:      "model-x",
+			TokenUsage: core.TokenUsage{
+				InputTokens: &input,
+				TotalTokens: &input,
+				Requests:    int64Ptr(1),
+			},
+		}); err != nil {
+			t.Fatalf("ingest %s: %v", providerID, err)
+		}
+	}
+
+	base := map[string]core.UsageSnapshot{
+		"copilot": {
+			ProviderID: "copilot",
+			AccountID:  "copilot",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+
+	got, err := ApplyCanonicalTelemetryViewWithOptions(context.Background(), dbPath, base, ReadModelOptions{
+		// User configured a link from "google" to a provider that doesn't exist
+		// — exercises the mapped_target_missing branch. No link for openai or
+		// github-copilot — exercises the unconfigured branch (and for
+		// github-copilot, exercises the substring suggestion against "copilot").
+		ProviderLinks: map[string]string{
+			"google": "gemini_api",
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply canonical telemetry view: %v", err)
+	}
+
+	snap := got["copilot"]
+	gotMeta := snap.Diagnostics["telemetry_unmapped_meta"]
+	if gotMeta == "" {
+		t.Fatalf("expected telemetry_unmapped_meta to be populated, got empty")
+	}
+
+	want := map[string]string{
+		"github-copilot": "unconfigured:copilot",
+		"google":         "mapped_target_missing:gemini_api",
+		"openai":         "unconfigured",
+	}
+	for source, expectedSuffix := range want {
+		needle := source + "=" + expectedSuffix
+		// Only assert exact entries against comma boundaries to avoid prefix
+		// confusion ("openai=unconfigured" must not match "openai=unconfigured:copilot").
+		if !containsExactEntry(gotMeta, needle) {
+			t.Errorf("telemetry_unmapped_meta missing %q (got %q)", needle, gotMeta)
+		}
+	}
+
+	gotIDs := snap.Diagnostics["telemetry_unmapped_providers"]
+	for _, id := range []string{"github-copilot", "google", "openai"} {
+		if !containsExactEntry(gotIDs, id) {
+			t.Errorf("telemetry_unmapped_providers missing %q (got %q)", id, gotIDs)
+		}
+	}
+}
+
+func containsExactEntry(csv, needle string) bool {
+	for _, token := range splitCSV(csv) {
+		if token == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 func TestApplyCanonicalTelemetryView_UsesProviderLinksForCanonicalUsage(t *testing.T) {
