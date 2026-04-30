@@ -739,8 +739,15 @@ func TestLoadFrom_DashboardLegacyListMapsToSplit(t *testing.T) {
 
 func TestDefaultProviderLinks(t *testing.T) {
 	links := DefaultProviderLinks()
-	if got := links["anthropic"]; got != "claude_code" {
-		t.Fatalf("default link anthropic = %q, want claude_code", got)
+	want := map[string]string{
+		"anthropic":      "claude_code",
+		"google":         "gemini_api",
+		"github-copilot": "copilot",
+	}
+	for source, target := range want {
+		if got := links[source]; got != target {
+			t.Errorf("default link %q = %q, want %q", source, got, target)
+		}
 	}
 }
 

@@ -145,9 +145,20 @@ type Config struct {
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
+//
+// Telemetry sources (e.g. the OpenCode plugin) tag events with whatever provider id the
+// source tool uses internally. Those names don't always match openusage's internal provider
+// ids — e.g. OpenCode says "google" for the Gemini API, "github-copilot" for Copilot.
+// These defaults paper over the rename mismatches so users don't see "Unmapped" for
+// providers they have configured under a different name.
+//
+// Identity links (e.g. openai→openai) are intentionally omitted: the read-time matcher
+// already handles direct id matches, so identity entries would be noise.
 func DefaultProviderLinks() map[string]string {
 	return map[string]string{
-		"anthropic": "claude_code",
+		"anthropic":      "claude_code",
+		"google":         "gemini_api",
+		"github-copilot": "copilot",
 	}
 }
 
