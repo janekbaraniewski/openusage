@@ -414,7 +414,7 @@ func (m Model) handleAPIKeyEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		id := m.settings.apiKeyEditAccountID
-		providerID := m.accountProviders[id]
+		providerID := providerForAccountID(id, m.accountProviders)
 		m.settings.apiKeyStatus = "validating..."
 		return m, m.validateKeyCmd(id, providerID, m.settings.apiKeyInput)
 	case "backspace":
