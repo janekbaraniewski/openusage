@@ -129,6 +129,7 @@ type settingsState struct {
 	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
 
 	providerLinkPicker providerLinkPickerState
+	browserPicker      browserPickerState
 }
 
 // providerLinkPickerState tracks the in-modal target picker for a telemetry
@@ -140,6 +141,23 @@ type providerLinkPickerState struct {
 	choices []string
 	cursor  int
 	status  string
+}
+
+// browserPickerState drives the "which browser should we read the cookie
+// from" overlay on the 5 KEYS tab. It exists because triggering reads on
+// every Chromium-family browser at once cascades a separate macOS Keychain
+// prompt for each (Chrome → Brave → Edge → ...). Showing the picker first
+// turns that into a single, expected prompt for whichever browser the user
+// actually uses.
+type browserPickerState struct {
+	active     bool
+	accountID  string
+	domain     string
+	cookieName string
+	browsers   []string
+	cursor     int
+	loading    bool   // true while AvailableBrowsers is in flight
+	status     string // user-facing hint (e.g. "looking for installed browsers...")
 }
 
 type Services interface {
@@ -319,6 +337,17 @@ type browserSessionConnectedMsg struct {
 
 type browserSessionDisconnectedMsg struct {
 	AccountID string
+	Err       error
+}
+
+// availableBrowsersLoadedMsg is emitted by loadAvailableBrowsersCmd. It
+// drives the browser-picker overlay — populated once kooky has scanned for
+// installed cookie stores. AccountID echoes the account that requested the
+// scan so a stale message from a previous picker can't mutate the wrong
+// state.
+type availableBrowsersLoadedMsg struct {
+	AccountID string
+	Browsers  []string
 	Err       error
 }
 

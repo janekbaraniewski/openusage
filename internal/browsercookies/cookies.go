@@ -4,6 +4,10 @@
 // for providers whose billing / usage / account data lives behind dashboard
 // session cookies and isn't reachable via API key.
 //
+// Reads are always scoped to a single browser. The TUI picks one explicitly
+// (so the user sees at most one OS keychain prompt — never a cascade across
+// every Chromium-family browser on the system).
+//
 // See docs/BROWSER_SESSION_AUTH_DESIGN.md for the rationale and the
 // per-platform extraction details.
 package browsercookies
@@ -11,7 +15,6 @@ package browsercookies
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -51,45 +54,56 @@ func (c Cookie) IsExpired() bool {
 	return time.Now().After(c.Expires)
 }
 
-// ErrNoCookieFound is returned when no matching cookie was found in any of
-// the supported browsers' cookie stores. Callers should treat this as
-// "the user is not currently logged into the relevant site in any browser
-// openusage can read" — distinct from transport errors, OS-level keychain
-// failures, or kooky panicking.
-var ErrNoCookieFound = errors.New("browsercookies: no matching cookie found in any supported browser")
+// ErrNoCookieFound is returned when no matching cookie was found in the
+// browser the caller asked us to scan. Callers should treat this as
+// "the user is not currently logged into the relevant site in <that browser>".
+var ErrNoCookieFound = errors.New("browsercookies: no matching cookie found")
+
+// keychainProtectedBrowsers is the set of browsers whose cookie stores
+// require an OS-level secret (macOS Keychain item, libsecret, etc.) to
+// decrypt. Each one prompts independently, so we MUST never fan out across
+// more than one of these per ReadCookie call.
+var keychainProtectedBrowsers = map[string]bool{
+	"chrome":  true, // also covers chromium — canonicalBrowser collapses them
+	"edge":    true,
+	"brave":   true,
+	"vivaldi": true,
+	"opera":   true,
+}
+
+// noKeychainBrowsers is the set we can safely scan without triggering an OS
+// secret prompt. Used as the auto-fallback when the caller didn't pre-pick
+// a browser (rare — the TUI always picks one).
+var noKeychainBrowsers = []string{"firefox", "safari"}
 
 // Reader is a small surface around kooky for openusage's needs. The interface
 // exists so tests can swap in a fake without spinning up a real browser
 // store on disk. The concrete implementation is &kookyReader{}.
 type Reader interface {
-	// ReadCookie returns the freshest cookie matching the given (domain,
-	// name) pair across all supported browsers' cookie stores. If multiple
-	// browsers have a matching cookie, the one with the latest Expires
-	// wins. The Source field on the returned Cookie identifies which
-	// browser the value came from.
+	// ReadCookie returns the freshest cookie matching (domain, name) inside
+	// `browser`'s cookie stores. Reads NEVER fan out to other browsers —
+	// callers must specify which browser to look in. This is the contract
+	// that protects the user from a keychain-prompt cascade on macOS.
 	//
-	// preferredBrowser, if non-empty, is consulted first; on hit it
-	// short-circuits the multi-browser scan. This is how the runtime
-	// "remembers" where the user usually logs in (persisted on the
-	// account's BrowserCookieRef) so we don't trigger an OS keychain
-	// prompt for every browser on every poll.
-	ReadCookie(ctx context.Context, domain, name, preferredBrowser string) (Cookie, error)
+	// If browser is empty, the reader scans only browsers that don't
+	// require an OS secret (Firefox, Safari). Pass an explicit browser to
+	// scan a Chromium-family store.
+	ReadCookie(ctx context.Context, domain, name, browser string) (Cookie, error)
 
 	// AvailableBrowsers reports which supported browsers have at least one
-	// readable cookie store on this machine. Used by the TUI's connect
-	// flow to show "we'll look in: Chrome, Firefox" without committing to
-	// reading anything yet.
+	// cookie store on disk. The TUI uses it to render a picker so the user
+	// can choose where to look BEFORE we trigger any keychain prompt.
 	AvailableBrowsers(ctx context.Context) ([]string, error)
 }
 
 // New returns the default Reader implementation backed by kooky. Cookie reads
 // are bounded by readTimeout — kooky calls into the OS keychain on first
 // Chrome read, which can hang or wait for Touch ID; we never want a poll to
-// stall on this. 10s is generous enough for a real prompt-and-approve flow
+// stall on this. 30s is generous enough for a real prompt-and-approve flow
 // and tight enough to fall through to "no cookie found" if something is
 // genuinely broken.
 func New() Reader {
-	return &kookyReader{readTimeout: 10 * time.Second}
+	return &kookyReader{readTimeout: 30 * time.Second}
 }
 
 // NewWithTimeout returns a Reader with a custom timeout, primarily for tests.
@@ -131,7 +145,8 @@ func matches(cookieDomain, lookupDomain string) bool {
 // canonicalBrowser collapses kooky's `Browser()` strings (which vary across
 // versions: "chromium", "google-chrome", "Chrome", etc.) into the small
 // canonical set we expose. Predictability matters because we persist the
-// chosen value as `BrowserCookieRef.SourceBrowser`.
+// chosen value as `BrowserCookieRef.SourceBrowser` and use it as the picker
+// key on subsequent connects.
 func canonicalBrowser(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	switch {
@@ -153,73 +168,125 @@ func canonicalBrowser(raw string) string {
 	return raw
 }
 
-func (r *kookyReader) ReadCookie(ctx context.Context, domain, name, preferredBrowser string) (Cookie, error) {
+// readFromStores reads cookies from the given pre-selected stores and picks
+// the freshest match for (domain, name). Each store is decrypted exactly
+// once — that's the keychain-prompt unit on macOS — so we trust callers to
+// have already filtered down to a single browser.
+func readFromStores(stores []kooky.CookieStore, domain, name string) (Cookie, bool) {
+	var best Cookie
+	bestSet := false
+	for _, store := range stores {
+		if store == nil {
+			continue
+		}
+		// TraverseCookies on a single store reads only that store's file;
+		// there's no fan-out beyond what we already filtered. The Name
+		// filter narrows the in-memory pass; we still re-check below
+		// because kooky's filter doesn't know about leading-dot domain
+		// matching.
+		for kc, err := range store.TraverseCookies(kooky.Name(name)) {
+			if err != nil || kc == nil {
+				continue
+			}
+			if !matches(kc.Domain, domain) {
+				continue
+			}
+			source := ""
+			filePath := ""
+			if kc.Browser != nil {
+				source = canonicalBrowser(kc.Browser.Browser())
+				filePath = kc.Browser.FilePath()
+			}
+			candidate := Cookie{
+				Name:      kc.Name,
+				Value:     kc.Value,
+				Domain:    kc.Domain,
+				Path:      kc.Path,
+				Expires:   kc.Expires,
+				HTTPOnly:  kc.HttpOnly,
+				Secure:    kc.Secure,
+				Source:    source,
+				StorePath: filePath,
+			}
+			if !bestSet || candidate.Expires.After(best.Expires) {
+				best = candidate
+				bestSet = true
+			}
+		}
+	}
+	return best, bestSet
+}
+
+func (r *kookyReader) ReadCookie(ctx context.Context, domain, name, browser string) (Cookie, error) {
 	if r.readTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.readTimeout)
 		defer cancel()
 	}
 
-	preferredBrowser = strings.ToLower(strings.TrimSpace(preferredBrowser))
+	browser = canonicalBrowser(browser)
 
-	// Use the top-level helper that fans out across all registered finders.
-	// kooky returns errors PER STORE (locked Chrome DB while browser is
-	// open, keychain prompt declined, etc.) but doesn't fail the whole
-	// call — we just take whatever cookies it could read.
-	cookies, err := kooky.ReadCookies(ctx, kooky.Name(name))
-	if err != nil && len(cookies) == 0 {
-		return Cookie{}, fmt.Errorf("kooky read: %w", err)
-	}
+	// Enumerate stores by metadata only — this step DOES NOT decrypt
+	// anything, so it never triggers a keychain prompt. We then pick which
+	// stores to actually read from.
+	all := kooky.FindAllCookieStores(ctx)
+	defer func() {
+		for _, s := range all {
+			if s != nil {
+				_ = s.Close()
+			}
+		}
+	}()
 
-	var best Cookie
-	bestSet := false
-	for _, kc := range cookies {
-		if kc == nil {
-			continue
-		}
-		if !matches(kc.Domain, domain) {
-			continue
-		}
-		source := ""
-		filePath := ""
-		if kc.Browser != nil {
-			source = canonicalBrowser(kc.Browser.Browser())
-			filePath = kc.Browser.FilePath()
-		}
-		candidate := Cookie{
-			Name:      kc.Name,
-			Value:     kc.Value,
-			Domain:    kc.Domain,
-			Path:      kc.Path,
-			Expires:   kc.Expires,
-			HTTPOnly:  kc.HttpOnly,
-			Secure:    kc.Secure,
-			Source:    source,
-			StorePath: filePath,
-		}
-		// Selection rule:
-		//   1. preferred-browser hit always wins over non-preferred (so users
-		//      who pin a browser don't accidentally get cookies from another
-		//      profile they happen to have logged in to).
-		//   2. otherwise, latest Expires wins — gives us the freshest session
-		//      when multiple browsers have valid cookies.
-		switch {
-		case !bestSet:
-			best = candidate
-			bestSet = true
-		case preferredBrowser != "" && candidate.Source == preferredBrowser && best.Source != preferredBrowser:
-			best = candidate
-		case preferredBrowser != "" && candidate.Source != preferredBrowser && best.Source == preferredBrowser:
-			// keep current best
-		case candidate.Expires.After(best.Expires):
-			best = candidate
-		}
-	}
-
-	if !bestSet {
+	picked := pickStoresForBrowser(all, browser)
+	if len(picked) == 0 {
 		return Cookie{}, ErrNoCookieFound
 	}
-	return best, nil
+
+	cookie, ok := readFromStores(picked, domain, name)
+	if !ok {
+		return Cookie{}, ErrNoCookieFound
+	}
+	return cookie, nil
+}
+
+// pickStoresForBrowser filters the discovered stores down to a single browser.
+// Empty `browser` means "auto" — pick stores that don't require an OS secret
+// to decrypt (Firefox, Safari). For a Chromium-family browser, return only
+// that browser's stores so we never cascade keychain prompts.
+func pickStoresForBrowser(all []kooky.CookieStore, browser string) []kooky.CookieStore {
+	if browser == "" {
+		var out []kooky.CookieStore
+		for _, b := range noKeychainBrowsers {
+			for _, s := range all {
+				if s == nil {
+					continue
+				}
+				if canonicalBrowser(s.Browser()) == b {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	}
+
+	var out []kooky.CookieStore
+	for _, s := range all {
+		if s == nil {
+			continue
+		}
+		if canonicalBrowser(s.Browser()) == browser {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// IsKeychainProtected reports whether the named browser will prompt for an
+// OS-level secret on first read. The TUI uses this to warn the user before
+// firing a connect attempt on Chrome/Edge/Brave/etc.
+func IsKeychainProtected(browser string) bool {
+	return keychainProtectedBrowsers[canonicalBrowser(browser)]
 }
 
 func (r *kookyReader) AvailableBrowsers(ctx context.Context) ([]string, error) {
@@ -239,7 +306,8 @@ func (r *kookyReader) AvailableBrowsers(ctx context.Context) ([]string, error) {
 }
 
 // FakeReader is a test double for Reader. Tests populate Cookies and
-// optionally Err; ReadCookie returns the first matching entry.
+// optionally Err; ReadCookie returns the first matching entry whose Source
+// matches the requested browser (or any source when browser is empty).
 type FakeReader struct {
 	Cookies []Cookie
 	Err     error
@@ -256,18 +324,22 @@ func (f *FakeReader) Calls() int {
 	return f.calls
 }
 
-func (f *FakeReader) ReadCookie(_ context.Context, domain, name, _ string) (Cookie, error) {
+func (f *FakeReader) ReadCookie(_ context.Context, domain, name, browser string) (Cookie, error) {
 	f.mu.Lock()
 	f.calls++
 	f.mu.Unlock()
 	if f.Err != nil {
 		return Cookie{}, f.Err
 	}
+	browser = canonicalBrowser(browser)
 	for _, c := range f.Cookies {
 		if c.Name != name {
 			continue
 		}
 		if !matches(c.Domain, domain) {
+			continue
+		}
+		if browser != "" && canonicalBrowser(c.Source) != browser {
 			continue
 		}
 		return c, nil

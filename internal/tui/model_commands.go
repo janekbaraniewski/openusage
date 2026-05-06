@@ -166,16 +166,35 @@ func (m Model) deleteCredentialCmd(accountID string) tea.Cmd {
 // On success the resulting BrowserSessionInfo is delivered as a
 // browserSessionConnectedMsg; the TUI uses it to flip the row's status to
 // connected and trigger a fresh poll so the tile picks up the new auth.
-func (m Model) connectBrowserSessionCmd(accountID, domain, cookieName, preferredBrowser string) tea.Cmd {
+//
+// `browser` is the user's choice from the browser picker. It scopes the
+// cookie read to one browser's stores so we never trigger more than a
+// single OS keychain prompt per connect attempt.
+func (m Model) connectBrowserSessionCmd(accountID, domain, cookieName, browser string) tea.Cmd {
 	return func() tea.Msg {
 		if m.services == nil {
 			return browserSessionConnectedMsg{AccountID: accountID, Err: fmt.Errorf("browser session service unavailable")}
 		}
-		info, err := m.services.ConnectBrowserSession(accountID, domain, cookieName, preferredBrowser)
+		info, err := m.services.ConnectBrowserSession(accountID, domain, cookieName, browser)
 		if err != nil {
 			log.Printf("browser session connect (%s): %v", accountID, err)
 		}
 		return browserSessionConnectedMsg{AccountID: accountID, Info: info, Err: err}
+	}
+}
+
+// loadAvailableBrowsersCmd asks the cookie-reader which browsers have a
+// cookie store on disk. The picker uses the result to populate its choice
+// list. We do this asynchronously because file enumeration on a system with
+// many profiles can take a few hundred ms and we don't want the keystroke
+// that opens the picker to block the UI.
+func (m Model) loadAvailableBrowsersCmd(accountID string) tea.Cmd {
+	return func() tea.Msg {
+		if m.services == nil {
+			return availableBrowsersLoadedMsg{AccountID: accountID, Err: fmt.Errorf("browser session service unavailable")}
+		}
+		browsers, err := m.services.AvailableBrowsers()
+		return availableBrowsersLoadedMsg{AccountID: accountID, Browsers: browsers, Err: err}
 	}
 }
 

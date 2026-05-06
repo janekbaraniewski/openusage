@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -124,6 +125,9 @@ func maskAPIKey(key string) string {
 }
 
 func (m Model) renderSettingsAPIKeysBody(w, h int) string {
+	if m.settings.browserPicker.active {
+		return m.renderBrowserPicker(w, h)
+	}
 	ids := m.apiKeysTabIDs()
 	configuredCount := 0
 	for _, id := range ids {
@@ -240,6 +244,57 @@ func (m Model) renderBrowserSessionRow(prefix string, i int, accountID string, a
 	}
 
 	return fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, statusText, accountW, truncateToWidth(accountID, accountW), envW, truncateToWidth(authSource, envW))
+}
+
+// renderBrowserPicker draws the "which browser should we read from" overlay
+// shown while the user is setting up a browser-session credential for the
+// first time. We render it in place of the API Keys body so the user sees
+// just the picker — there's no useful interaction with the rows underneath
+// while the picker is up, and pretending otherwise invites mis-keys.
+func (m Model) renderBrowserPicker(w, h int) string {
+	picker := m.settings.browserPicker
+	subtitle := picker.accountID
+	if picker.domain != "" {
+		subtitle += " · " + picker.domain
+	}
+	lines := settingsBodyHeaderLines("Choose browser to read cookie from", subtitle)
+	lines = append(lines, settingsBodyRule(w))
+
+	if picker.loading {
+		lines = append(lines, "", dimStyle.Render("  scanning installed browsers..."))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+	if len(picker.browsers) == 0 {
+		msg := "no supported browser cookie stores found"
+		if picker.status != "" {
+			msg = picker.status
+		}
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorPeach).Render("  "+msg))
+		lines = append(lines, "", dimStyle.Render("  Esc: cancel"))
+		return padToSize(strings.Join(lines, "\n"), w, h)
+	}
+
+	hint := "macOS will prompt for the chosen browser's keychain item once on first read."
+	lines = append(lines, "", dimStyle.Render("  "+hint), "")
+
+	cursor := clamp(picker.cursor, 0, len(picker.browsers)-1)
+	for i, b := range picker.browsers {
+		bullet := "  "
+		if i == cursor {
+			bullet = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+		}
+		marker := dimStyle.Render("  (no prompt)")
+		if browsercookies.IsKeychainProtected(b) {
+			marker = dimStyle.Render("  (keychain prompt)")
+		}
+		lines = append(lines, fmt.Sprintf("%s%s%s", bullet, b, marker))
+	}
+
+	lines = append(lines, "", dimStyle.Render("  Enter: read cookie · Esc: cancel"))
+	if picker.status != "" {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(colorTeal).Render("  "+picker.status))
+	}
+	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsTelemetryBody(w, h int) string {

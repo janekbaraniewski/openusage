@@ -14,6 +14,9 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.settings.tab == settingsTabTelemetry && m.settings.providerLinkPicker.active {
 		return m.handleProviderLinkPickerKey(msg)
 	}
+	if m.settings.tab == settingsTabAPIKeys && m.settings.browserPicker.active {
+		return m.handleBrowserPickerKey(msg)
+	}
 
 	ids := m.settingsIDs()
 	if m.settings.tab == settingsTabAPIKeys {
@@ -242,12 +245,31 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// status text guides the user to "press b to open the site".
 			if isBrowserSessionProvider(providerID) {
 				domain, cookieName, _ := browserCookieRefForProvider(providerID)
-				m.settings.apiKeyStatus = "reading cookie from browser..."
-				preferred := ""
-				if info := m.services.LoadBrowserSessionInfo(id); info.Connected {
-					preferred = info.SourceBrowser
+				// Reconnect path: if we already remember which browser the
+				// user picked last time, scope the read to that browser
+				// directly. This is the "happy" path on subsequent reads —
+				// at most one keychain prompt, and only the one the user
+				// has already approved before.
+				if m.services != nil {
+					if info := m.services.LoadBrowserSessionInfo(id); info.Connected && info.SourceBrowser != "" {
+						m.settings.apiKeyStatus = fmt.Sprintf("re-reading cookie from %s...", info.SourceBrowser)
+						return m, m.connectBrowserSessionCmd(id, domain, cookieName, info.SourceBrowser)
+					}
 				}
-				return m, m.connectBrowserSessionCmd(id, domain, cookieName, preferred)
+				// First-time connect: open the picker so the user explicitly
+				// chooses which browser openusage should look in. Without
+				// this step, kooky would scan every Chromium-family browser
+				// and the OS would prompt for each one's keychain item in
+				// sequence — the bug we're fixing here.
+				m.settings.browserPicker = browserPickerState{
+					active:     true,
+					accountID:  id,
+					domain:     domain,
+					cookieName: cookieName,
+					loading:    true,
+					status:     "looking for installed browsers...",
+				}
+				return m, m.loadAvailableBrowsersCmd(id)
 			}
 			m.settings.apiKeyEditing = true
 			m.settings.apiKeyEditAccountID = id
@@ -562,6 +584,46 @@ func (m Model) clearProviderLinkAtCursor(rows []telemetryRow) (Model, tea.Cmd, b
 	source := details[idx].Source
 	m.settings.providerLinkPicker.status = "clearing user mapping for " + source + "..."
 	return m, m.deleteProviderLinkCmd(source), true
+}
+
+// handleBrowserPickerKey routes input while the cookie-source browser
+// picker is active. We hijack normal modal input here so the user can't
+// accidentally fall through to the row beneath the overlay.
+func (m Model) handleBrowserPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	picker := &m.settings.browserPicker
+	switch msg.String() {
+	case "esc", "q":
+		// Cancel the picker. Keystroke choices made up to this point are
+		// thrown away — no read happens, so no keychain prompt either.
+		m.settings.browserPicker = browserPickerState{}
+		m.settings.apiKeyStatus = ""
+		return m, nil
+	case "up", "k":
+		if picker.cursor > 0 {
+			picker.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if picker.cursor < len(picker.browsers)-1 {
+			picker.cursor++
+		}
+		return m, nil
+	case "enter", " ":
+		if picker.loading || len(picker.browsers) == 0 {
+			return m, nil
+		}
+		choice := picker.browsers[clamp(picker.cursor, 0, len(picker.browsers)-1)]
+		account := picker.accountID
+		domain := picker.domain
+		cookieName := picker.cookieName
+		// Tear down the picker and kick off the actual read against the
+		// chosen browser only. This is the path that triggers at most one
+		// keychain prompt — the one the user explicitly asked for.
+		m.settings.browserPicker = browserPickerState{}
+		m.settings.apiKeyStatus = fmt.Sprintf("reading cookie from %s...", choice)
+		return m, m.connectBrowserSessionCmd(account, domain, cookieName, choice)
+	}
+	return m, nil
 }
 
 func (m Model) handleProviderLinkPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

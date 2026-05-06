@@ -118,6 +118,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.requestRefresh()
 		return m, nil
 
+	case availableBrowsersLoadedMsg:
+		// Picker may have been dismissed (esc) before the scan finished —
+		// or a fresh open replaced it for a different account. In either
+		// case, drop this stale result on the floor.
+		if !m.settings.browserPicker.active || m.settings.browserPicker.accountID != msg.AccountID {
+			return m, nil
+		}
+		picker := &m.settings.browserPicker
+		picker.loading = false
+		if msg.Err != nil {
+			picker.status = "could not enumerate browsers: " + msg.Err.Error()
+			picker.browsers = nil
+			return m, nil
+		}
+		picker.browsers = msg.Browsers
+		picker.cursor = 0
+		switch len(msg.Browsers) {
+		case 0:
+			picker.status = "no supported browsers found on this machine"
+		case 1:
+			picker.status = "found 1 browser — Enter to read its cookie"
+		default:
+			picker.status = fmt.Sprintf("found %d browsers — pick the one you log in with", len(msg.Browsers))
+		}
+		return m, nil
+
 	case browserSessionConnectedMsg:
 		if msg.Err != nil {
 			m.settings.apiKeyStatus = "connect failed: " + msg.Err.Error()
