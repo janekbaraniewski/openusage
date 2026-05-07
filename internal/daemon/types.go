@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -19,6 +20,7 @@ type Config struct {
 	CollectInterval time.Duration
 	PollInterval    time.Duration
 	Verbose         bool
+	Export          config.ExportConfig
 }
 
 type ReadModelAccount struct {
@@ -126,6 +128,7 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 	}
 	c.mu.Unlock()
 }
+
 
 func (c *readModelCache) beginRefresh(cacheKey string) bool {
 	if cacheKey == "" {

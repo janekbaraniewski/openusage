@@ -87,6 +87,63 @@ func TestHandlePush_MissingMachine(t *testing.T) {
 	}
 }
 
+func TestHandleSnapshots_Empty(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/snapshots", nil)
+	w := httptest.NewRecorder()
+	srv.handleSnapshots(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var snaps map[string]core.UsageSnapshot
+	if err := json.NewDecoder(w.Body).Decode(&snaps); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(snaps))
+	}
+}
+
+func TestHandleSnapshots_WithData(t *testing.T) {
+	srv, store := newTestServer(t)
+	store.Ingest(core.RemoteEnvelope{
+		Machine:   "laptop",
+		SentAt:    time.Now(),
+		Snapshots: []core.UsageSnapshot{makeSnap("anthropic", "acct1"), makeSnap("openai", "acct2")},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/snapshots", nil)
+	w := httptest.NewRecorder()
+	srv.handleSnapshots(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var snaps map[string]core.UsageSnapshot
+	if err := json.NewDecoder(w.Body).Decode(&snaps); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
+	}
+	for _, key := range []string{"laptop:acct1", "laptop:acct2"} {
+		if _, ok := snaps[key]; !ok {
+			t.Errorf("missing key %q in response", key)
+		}
+	}
+}
+
+func TestHandleSnapshots_WrongMethod(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/snapshots", nil)
+	w := httptest.NewRecorder()
+	srv.handleSnapshots(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+}
+
 func TestHandleHealth(t *testing.T) {
 	srv, store := newTestServer(t)
 	store.Ingest(core.RemoteEnvelope{Machine: "box1", Snapshots: nil})

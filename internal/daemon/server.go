@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
@@ -30,6 +31,7 @@ type Service struct {
 	pipeline     *telemetry.Pipeline
 	quotaIngest  *telemetry.QuotaSnapshotIngestor
 	providerByID map[string]core.UsageProvider
+	exp          *exporter.Exporter
 
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
 	logThrottle *core.LogThrottle
@@ -114,6 +116,15 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		log.Printf("[daemon] warning: migrations failed: %v", err)
 	}
 
+	var exp *exporter.Exporter
+	if cfg.Export.Target != "" {
+		if e, err := exporter.New(cfg.Export); err != nil {
+			log.Printf("exporter: init failed: %v", err)
+		} else {
+			exp = e
+		}
+	}
+
 	svc := &Service{
 		cfg:           cfg,
 		ctx:           ctx,
@@ -121,6 +132,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
 		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
 		providerByID:  providersByID(),
+		exp:           exp,
 		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
 		rmCache:       newReadModelCache(),
 		pollScheduler: newPollScheduler(cfg.PollInterval),
@@ -160,6 +172,10 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runSpoolMaintenanceLoop(ctx)
 	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
+
+	if svc.exp != nil {
+		go svc.exp.Start(ctx)
+	}
 
 	return svc, nil
 }

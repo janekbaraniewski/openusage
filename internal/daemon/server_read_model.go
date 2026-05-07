@@ -50,6 +50,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			return
 		}
 		s.rmCache.set(cacheKey, snapshots)
+		s.pushToExporter(refreshCtx, snapshots)
 	}()
 }
 

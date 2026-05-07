@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -44,6 +45,13 @@ func (s *Service) runCollectLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *Service) pushToExporter(_ context.Context, snaps map[string]core.UsageSnapshot) {
+	if s.exp == nil || len(snaps) == 0 {
+		return
+	}
+	s.exp.Ingest(snaps)
 }
 
 func (s *Service) collectAndFlush(ctx context.Context) int {

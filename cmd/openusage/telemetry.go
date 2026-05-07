@@ -211,6 +211,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			CollectInterval: resolvedCollect,
 			PollInterval:    resolvedPoll,
 			Verbose:         verbose,
+			Export:          cfgFile.Export,
 		})
 	}
 
