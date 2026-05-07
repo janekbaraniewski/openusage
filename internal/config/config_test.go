@@ -45,6 +45,16 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ModelNormalization.MinConfidence != 0.80 {
 		t.Errorf("default min_confidence = %f, want 0.80", cfg.ModelNormalization.MinConfidence)
 	}
+	// Export and Hub have zero defaults — runtime defaults are applied at usage points.
+	if cfg.Export.Target != "" {
+		t.Errorf("default export.target should be empty, got %q", cfg.Export.Target)
+	}
+	if cfg.Export.IntervalSeconds != 0 {
+		t.Errorf("default export.interval_seconds should be 0 (runtime default applied later), got %d", cfg.Export.IntervalSeconds)
+	}
+	if cfg.Hub.ListenAddr != "" {
+		t.Errorf("default hub.listen_addr should be empty (runtime default applied later), got %q", cfg.Hub.ListenAddr)
+	}
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
@@ -1089,5 +1099,36 @@ func TestLoadFrom_MissingIntegrationsIsNil(t *testing.T) {
 	// Verify other fields still load correctly
 	if cfg.Theme != "Dracula" {
 		t.Errorf("theme = %q, want 'Dracula'", cfg.Theme)
+	}
+}
+
+func TestExportTargetPreservedAcrossModifyConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	// Write config with export target set.
+	initial := `{"theme":"Gruvbox","export":{"target":"http://hub:9190","interval_seconds":10,"machine_name":"mybox"}}`
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate what SaveAutoDetected does: read-modify-write only touching AutoDetectedAccounts.
+	if err := SaveAutoDetectedTo(path, nil); err != nil {
+		t.Fatalf("SaveAutoDetected: %v", err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	if cfg.Export.Target != "http://hub:9190" {
+		t.Errorf("export.target = %q after SaveAutoDetected, want http://hub:9190", cfg.Export.Target)
+	}
+	if cfg.Export.IntervalSeconds != 10 {
+		t.Errorf("export.interval_seconds = %d after SaveAutoDetected, want 10", cfg.Export.IntervalSeconds)
+	}
+	if cfg.Export.MachineName != "mybox" {
+		t.Errorf("export.machine_name = %q after SaveAutoDetected, want mybox", cfg.Export.MachineName)
 	}
 }

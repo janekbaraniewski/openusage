@@ -133,6 +133,17 @@ type DashboardConfig struct {
 	HideCosts *bool `json:"hide_costs,omitempty"`
 }
 
+type ExportConfig struct {
+	Target          string `json:"target"`           // HTTP URL of hub; empty disables export
+	IntervalSeconds int    `json:"interval_seconds"` // push interval; default 60
+	MachineName     string `json:"machine_name"`     // override hostname; empty uses os.Hostname()
+}
+
+type HubConfig struct {
+	ListenAddr          string `json:"listen_addr"`           // TCP address to listen on; default ":9190"
+	StaleTimeoutSeconds int    `json:"stale_timeout_seconds"` // seconds before a machine entry is pruned; default 300
+}
+
 type IntegrationState struct {
 	Installed   bool   `json:"installed"`
 	Version     string `json:"version,omitempty"`
@@ -152,6 +163,8 @@ type Config struct {
 	Accounts             []core.AccountConfig          `json:"accounts"`
 	AutoDetectedAccounts []core.AccountConfig          `json:"auto_detected_accounts"`
 	Integrations         map[string]IntegrationState   `json:"integrations,omitempty"`
+	Export               ExportConfig                  `json:"export,omitempty"`
+	Hub                  HubConfig                     `json:"hub,omitempty"`
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
@@ -457,13 +470,15 @@ func saveLocked(path string, cfg Config) error {
 }
 
 // modifyConfig performs an atomic read-modify-write on the config file at path.
+// If the file cannot be read, it returns an error without writing — this prevents
+// a failed read from silently overwriting user-set values with zero defaults.
 func modifyConfig(path string, mutate func(*Config)) error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
 
 	cfg, err := LoadFrom(path)
 	if err != nil {
-		cfg = DefaultConfig()
+		return fmt.Errorf("modifyConfig: reading current config: %w", err)
 	}
 	mutate(&cfg)
 	return saveLocked(path, cfg)

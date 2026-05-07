@@ -165,6 +165,15 @@
     }
   ],
   "auto_detected_accounts": [],
+  "export": {
+    "target": "",
+    "interval_seconds": 60,
+    "machine_name": ""
+  },
+  "hub": {
+    "listen_addr": ":9190",
+    "stale_timeout_seconds": 300
+  },
   "integrations": {
     "claude-code-hooks": {
       "installed": true,
