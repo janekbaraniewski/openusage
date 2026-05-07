@@ -34,8 +34,11 @@ func (m ServiceManager) installSystemdUser() error {
 	if err := os.MkdirAll(m.stateDir, 0o755); err != nil {
 		return fmt.Errorf("create telemetry state dir: %w", err)
 	}
+	if err := writeServiceEnvFile(m.EnvFilePath(), currentServiceEnvSnapshot()); err != nil {
+		return err
+	}
 
-	content := systemdUnit(m.exePath, m.socketPath)
+	content := systemdUnit(m.exePath, m.socketPath, m.EnvFilePath())
 	if err := os.WriteFile(m.unitPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
@@ -57,13 +60,14 @@ func (m ServiceManager) uninstallSystemdUser() error {
 	return nil
 }
 
-func systemdUnit(exePath, socketPath string) string {
+func systemdUnit(exePath, socketPath, envFilePath string) string {
 	return fmt.Sprintf(`[Unit]
 Description=OpenUsage Telemetry Daemon
 After=default.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%s
 ExecStart=%s telemetry daemon run --socket-path %s
 Restart=always
 RestartSec=2
@@ -71,5 +75,5 @@ WorkingDirectory=%%h
 
 [Install]
 WantedBy=default.target
-`, exePath, socketPath)
+`, envFilePath, exePath, socketPath)
 }

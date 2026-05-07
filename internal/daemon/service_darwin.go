@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -38,7 +39,11 @@ func (m ServiceManager) installLaunchd() error {
 
 	stdoutPath := filepath.Join(m.stateDir, "daemon.stdout.log")
 	stderrPath := filepath.Join(m.stateDir, "daemon.stderr.log")
-	content := launchdPlist(m.exePath, m.socketPath, stdoutPath, stderrPath)
+	env := currentServiceEnvSnapshot()
+	if err := writeServiceEnvFile(m.EnvFilePath(), env); err != nil {
+		return err
+	}
+	content := launchdPlist(m.exePath, m.socketPath, stdoutPath, stderrPath, env)
 	if err := os.WriteFile(m.unitPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write launchd plist: %w", err)
 	}
@@ -128,8 +133,9 @@ func (m ServiceManager) startLaunchd() error {
 	return lastErr
 }
 
-func launchdPlist(exePath, socketPath, stdoutPath, stderrPath string) string {
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+func launchdPlist(exePath, socketPath, stdoutPath, stderrPath string, env map[string]string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -152,9 +158,29 @@ func launchdPlist(exePath, socketPath, stdoutPath, stderrPath string) string {
 	<string>%s</string>
 	<key>StandardErrorPath</key>
 	<string>%s</string>
-</dict>
-</plist>
-`, LaunchdDaemonLabel, xmlEscape(exePath), xmlEscape(socketPath), xmlEscape(stdoutPath), xmlEscape(stderrPath))
+`, LaunchdDaemonLabel, xmlEscape(exePath), xmlEscape(socketPath), xmlEscape(stdoutPath), xmlEscape(stderrPath)))
+
+	if len(env) > 0 {
+		keys := make([]string, 0, len(env))
+		for key := range env {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		b.WriteString("\t<key>EnvironmentVariables</key>\n")
+		b.WriteString("\t<dict>\n")
+		for _, key := range keys {
+			b.WriteString("\t\t<key>")
+			b.WriteString(xmlEscape(key))
+			b.WriteString("</key>\n")
+			b.WriteString("\t\t<string>")
+			b.WriteString(xmlEscape(env[key]))
+			b.WriteString("</string>\n")
+		}
+		b.WriteString("\t</dict>\n")
+	}
+
+	b.WriteString("</dict>\n</plist>\n")
+	return b.String()
 }
 
 func xmlEscape(in string) string {
