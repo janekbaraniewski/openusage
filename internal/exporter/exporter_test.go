@@ -222,3 +222,107 @@ func TestStart_HTTPErrorLogsAndContinues(t *testing.T) {
 		t.Errorf("expected at least 2 push attempts despite errors, got %d", got)
 	}
 }
+
+func TestStart_ImmediateFirstPush(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	firstCall := make(chan struct{}, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		calls++
+		if calls == 1 {
+			select {
+			case firstCall <- struct{}{}:
+			default:
+			}
+		}
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Interval is 10s; we should still get a push well before that because
+	// Start does an immediate tick before entering the ticker loop.
+	e, _ := New(config.ExportConfig{
+		Target:          srv.URL,
+		MachineName:     "host",
+		IntervalSeconds: 10,
+	})
+	e.Ingest(map[string]core.UsageSnapshot{"a": {ProviderID: "openai"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.Start(ctx)
+
+	select {
+	case <-firstCall:
+		// success — first push happened within ~100ms
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected immediate first push before ticker interval, got nothing in 500ms")
+	}
+}
+
+func TestPush_SendsAuthorizationHeader(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "")
+	var mu sync.Mutex
+	var gotAuth string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e, _ := New(config.ExportConfig{
+		Target:          srv.URL,
+		MachineName:     "h",
+		IntervalSeconds: 1,
+		AuthToken:       "my-token",
+	})
+	e.Ingest(map[string]core.UsageSnapshot{"a": {ProviderID: "openai"}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	e.Start(ctx)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotAuth != "Bearer my-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer my-token")
+	}
+}
+
+func TestNew_AuthTokenEnvFallback(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "env-tok")
+	e, err := New(config.ExportConfig{Target: "http://example.com", MachineName: "h"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.authToken != "env-tok" {
+		t.Errorf("authToken = %q, want env-tok", e.authToken)
+	}
+}
+
+func TestNew_ExplicitTokenOverridesEnv(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "env-tok")
+	e, err := New(config.ExportConfig{Target: "http://example.com", MachineName: "h", AuthToken: "explicit"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.authToken != "explicit" {
+		t.Errorf("authToken = %q, want explicit", e.authToken)
+	}
+}
+
+func TestNew_TargetTrailingSlashTrimmed(t *testing.T) {
+	e, err := New(config.ExportConfig{Target: "http://example.com/", MachineName: "h"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.target != "http://example.com" {
+		t.Errorf("target = %q, want trailing slash trimmed", e.target)
+	}
+}
