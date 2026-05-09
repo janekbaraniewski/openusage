@@ -18,6 +18,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// hubRuntime bundles the store + server + listen addr resolved for a hub run.
+type hubRuntime struct {
+	addr      string
+	staleFor  time.Duration
+	store     *hub.Store
+	server    *hub.Server
+	authToken string
+}
+
+// resolveHubRuntime normalises config values (applying defaults) and constructs
+// the store+server pair. Called by both the interactive TUI and headless paths.
+func resolveHubRuntime(cfg config.Config) hubRuntime {
+	addr := strings.TrimSpace(cfg.Hub.ListenAddr)
+	if addr == "" {
+		addr = ":9190"
+	}
+	stale := time.Duration(cfg.Hub.StaleTimeoutSeconds) * time.Second
+	if stale <= 0 {
+		stale = 300 * time.Second
+	}
+	store := hub.NewStore(stale)
+	server := hub.NewServerWithAuth(addr, store, cfg.Hub.AuthToken)
+	return hubRuntime{
+		addr:      addr,
+		staleFor:  stale,
+		store:     store,
+		server:    server,
+		authToken: cfg.Hub.AuthToken,
+	}
+}
+
 func newHubCommand() *cobra.Command {
 	var listenAddr string
 	var headless bool
@@ -25,11 +56,18 @@ func newHubCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
 		Short: "Run a hub that aggregates usage snapshots from multiple machines",
-		Long:  "Start the OpenUsage hub server. Worker machines push snapshots here; the TUI shows an aggregated view.",
+		Long: strings.Join([]string{
+			"Start the OpenUsage hub server. Worker machines push snapshots here; the TUI shows an aggregated view.",
+			"",
+			"Security: by default the hub has NO authentication and is intended for trusted LAN use.",
+			"To require a Bearer token, set `hub.auth_token` in settings.json or export OPENUSAGE_HUB_TOKEN.",
+			"Do not expose the hub to untrusted networks without enabling auth.",
+		}, "\n"),
 		Example: strings.Join([]string{
 			"  openusage hub",
 			"  openusage hub --listen :9190",
 			"  openusage hub --headless",
+			"  OPENUSAGE_HUB_TOKEN=s3cret openusage hub --headless",
 		}, "\n"),
 		Run: func(_ *cobra.Command, _ []string) {
 			cfg, err := config.Load()
@@ -61,23 +99,13 @@ func runHub(cfg config.Config) {
 	}
 	tui.SetThemeByName(cfg.Theme)
 
-	addr := cfg.Hub.ListenAddr
-	if strings.TrimSpace(addr) == "" {
-		addr = ":9190"
-	}
-	stale := time.Duration(cfg.Hub.StaleTimeoutSeconds) * time.Second
-	if stale <= 0 {
-		stale = 300 * time.Second
-	}
-
-	store := hub.NewStore(stale)
-	server := hub.NewServer(addr, store)
+	rt := resolveHubRuntime(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
-		if err := server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+		if err := rt.server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("hub server error: %v", err)
 		}
 	}()
@@ -109,7 +137,7 @@ func runHub(cfg config.Config) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				snaps := store.Snapshots()
+				snaps := rt.store.Snapshots()
 				if len(snaps) == 0 {
 					continue
 				}
@@ -133,17 +161,7 @@ func runHub(cfg config.Config) {
 }
 
 func runHubHeadless(cfg config.Config) {
-	addr := cfg.Hub.ListenAddr
-	if strings.TrimSpace(addr) == "" {
-		addr = ":9190"
-	}
-	stale := time.Duration(cfg.Hub.StaleTimeoutSeconds) * time.Second
-	if stale <= 0 {
-		stale = 300 * time.Second
-	}
-
-	store := hub.NewStore(stale)
-	server := hub.NewServer(addr, store)
+	rt := resolveHubRuntime(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -155,8 +173,12 @@ func runHubHeadless(cfg config.Config) {
 		cancel()
 	}()
 
-	log.Printf("hub listening on %s (headless)", addr)
-	if err := server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+	authLabel := "disabled"
+	if rt.server.AuthEnabled() {
+		authLabel = "bearer-token"
+	}
+	log.Printf("hub listening on %s (headless, auth=%s)", rt.addr, authLabel)
+	if err := rt.server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 		log.Fatalf("hub server error: %v", err)
 	}
 }

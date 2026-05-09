@@ -48,6 +48,7 @@ func main() {
 	root.AddCommand(newPricingCommand())
 	root.AddCommand(newExportCommand())
 	root.AddCommand(newHubCommand())
+	root.AddCommand(newHubViewCommand())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

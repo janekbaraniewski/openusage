@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,24 +16,38 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+const (
+	defaultPushInterval = 60 * time.Second
+	defaultPushTimeout  = 10 * time.Second
+	// envAuthToken is the environment variable fallback for the hub auth token,
+	// used when ExportConfig.AuthToken is empty. Applies symmetrically on the
+	// hub side to simplify deployments where the same value is shared.
+	envAuthToken = "OPENUSAGE_HUB_TOKEN"
+)
+
 // Exporter periodically pushes usage snapshots to a remote hub.
 type Exporter struct {
-	target   string
-	machine  string
-	interval time.Duration
-	http     *http.Client
-	mu       sync.RWMutex
-	latest   []core.UsageSnapshot
+	target    string // trailing slash trimmed
+	machine   string
+	interval  time.Duration
+	authToken string // empty disables Authorization header
+	http      *http.Client
+	mu        sync.RWMutex
+	latest    []core.UsageSnapshot
 }
 
 // New creates a new Exporter from the given ExportConfig.
 // Returns an error if cfg.Target is empty.
+//
+// If cfg.AuthToken is empty and the OPENUSAGE_HUB_TOKEN env var is set, the
+// env var is used as the Bearer token. This matches the hub-side convention.
 func New(cfg config.ExportConfig) (*Exporter, error) {
-	if cfg.Target == "" {
+	target := strings.TrimRight(strings.TrimSpace(cfg.Target), "/")
+	if target == "" {
 		return nil, fmt.Errorf("exporter: target URL must not be empty")
 	}
 
-	machine := cfg.MachineName
+	machine := strings.TrimSpace(cfg.MachineName)
 	if machine == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -43,18 +58,28 @@ func New(cfg config.ExportConfig) (*Exporter, error) {
 
 	interval := time.Duration(cfg.IntervalSeconds) * time.Second
 	if cfg.IntervalSeconds <= 0 {
-		interval = 60 * time.Second
+		interval = defaultPushInterval
+	}
+
+	authToken := strings.TrimSpace(cfg.AuthToken)
+	if authToken == "" {
+		authToken = strings.TrimSpace(os.Getenv(envAuthToken))
 	}
 
 	return &Exporter{
-		target:   cfg.Target,
-		machine:  machine,
-		interval: interval,
-		http:     &http.Client{Timeout: 10 * time.Second},
+		target:    target,
+		machine:   machine,
+		interval:  interval,
+		authToken: authToken,
+		http:      &http.Client{Timeout: defaultPushTimeout},
 	}, nil
 }
 
 // Ingest replaces the latest snapshot list with the values from the given map.
+//
+// Calling Ingest with an empty map effectively pauses pushes: the next ticker
+// cycle will find len(latest)==0 and skip the HTTP request, leaving the hub's
+// last-known state in place until a non-empty Ingest resumes the stream.
 func (e *Exporter) Ingest(snaps map[string]core.UsageSnapshot) {
 	cloned := make([]core.UsageSnapshot, 0, len(snaps))
 	for _, s := range snaps {
@@ -67,7 +92,13 @@ func (e *Exporter) Ingest(snaps map[string]core.UsageSnapshot) {
 }
 
 // Start runs the push loop, blocking until ctx is cancelled.
+//
+// Start performs an immediate push attempt (if latest is non-empty) before
+// entering the ticker loop, so users do not have to wait a full interval to
+// verify that the hub connection works.
 func (e *Exporter) Start(ctx context.Context) {
+	e.tick(ctx)
+
 	ticker := time.NewTicker(e.interval)
 	defer ticker.Stop()
 
@@ -76,25 +107,31 @@ func (e *Exporter) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			e.mu.RLock()
-			snaps := make([]core.UsageSnapshot, len(e.latest))
-			copy(snaps, e.latest)
-			e.mu.RUnlock()
-
-			if len(snaps) == 0 {
-				continue
-			}
-
-			envelope := core.RemoteEnvelope{
-				Machine:   e.machine,
-				SentAt:    time.Now(),
-				Snapshots: snaps,
-			}
-
-			if err := e.push(ctx, envelope); err != nil {
-				log.Printf("exporter: push: %v", err)
-			}
+			e.tick(ctx)
 		}
+	}
+}
+
+// tick captures a snapshot of latest and pushes it if non-empty. Errors are
+// logged and swallowed — the exporter is best-effort and never aborts the loop.
+func (e *Exporter) tick(ctx context.Context) {
+	e.mu.RLock()
+	snaps := make([]core.UsageSnapshot, len(e.latest))
+	copy(snaps, e.latest)
+	e.mu.RUnlock()
+
+	if len(snaps) == 0 {
+		return
+	}
+
+	envelope := core.RemoteEnvelope{
+		Machine:   e.machine,
+		SentAt:    time.Now(),
+		Snapshots: snaps,
+	}
+
+	if err := e.push(ctx, envelope); err != nil {
+		log.Printf("exporter: push: %v", err)
 	}
 }
 
@@ -109,6 +146,9 @@ func (e *Exporter) push(ctx context.Context, envelope core.RemoteEnvelope) error
 		return fmt.Errorf("exporter: creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if e.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+e.authToken)
+	}
 
 	resp, err := e.http.Do(req)
 	if err != nil {

@@ -166,3 +166,139 @@ func TestHandleHealth(t *testing.T) {
 		t.Errorf("machines = %v, want [box1]", resp.Machines)
 	}
 }
+
+// --- Auth tests ---
+
+func TestAuth_DisabledWhenNoToken(t *testing.T) {
+	srv, _ := newTestServer(t)
+	if srv.AuthEnabled() {
+		t.Fatal("AuthEnabled() = true, want false for empty token")
+	}
+
+	env := core.RemoteEnvelope{Machine: "m1", Snapshots: []core.UsageSnapshot{makeSnap("openai", "a")}}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("push with no token and auth disabled: status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuth_PushRequiresToken(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "")
+	store := NewStore(time.Minute)
+	srv := NewServerWithAuth(":0", store, "secret-token")
+	if !srv.AuthEnabled() {
+		t.Fatal("AuthEnabled() = false, want true")
+	}
+
+	env := core.RemoteEnvelope{Machine: "m1", Snapshots: []core.UsageSnapshot{makeSnap("openai", "a")}}
+	body, _ := json.Marshal(env)
+
+	// Missing header -> 401.
+	req := httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token: status = %d, want 401", w.Code)
+	}
+
+	// Wrong token -> 401.
+	req = httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer wrong")
+	w = httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token: status = %d, want 401", w.Code)
+	}
+
+	// Correct token -> 200.
+	req = httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret-token")
+	w = httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("correct token: status = %d, want 200", w.Code)
+	}
+	if len(store.Snapshots()) != 1 {
+		t.Errorf("expected 1 snapshot ingested after authorized push, got %d", len(store.Snapshots()))
+	}
+}
+
+func TestAuth_SnapshotsRequiresToken(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "")
+	store := NewStore(time.Minute)
+	srv := NewServerWithAuth(":0", store, "s3cret")
+	store.Ingest(core.RemoteEnvelope{Machine: "m", Snapshots: []core.UsageSnapshot{makeSnap("openai", "a")}})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/snapshots", nil)
+	w := httptest.NewRecorder()
+	srv.handleSnapshots(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token on snapshots: status = %d, want 401", w.Code)
+	}
+	if got := w.Header().Get("WWW-Authenticate"); got == "" {
+		t.Error("expected WWW-Authenticate header on 401")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/snapshots", nil)
+	req.Header.Set("Authorization", "Bearer s3cret")
+	w = httptest.NewRecorder()
+	srv.handleSnapshots(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("authorized snapshots: status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuth_HealthNeverRequiresToken(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "")
+	store := NewStore(time.Minute)
+	srv := NewServerWithAuth(":0", store, "any-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealth(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("healthz should be unauthenticated: status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuth_EnvFallback(t *testing.T) {
+	t.Setenv("OPENUSAGE_HUB_TOKEN", "env-token")
+	store := NewStore(time.Minute)
+	// Explicit token is empty → env var picked up.
+	srv := NewServerWithAuth(":0", store, "")
+	if !srv.AuthEnabled() {
+		t.Fatal("expected auth enabled via env fallback")
+	}
+
+	env := core.RemoteEnvelope{Machine: "m", Snapshots: []core.UsageSnapshot{makeSnap("openai", "a")}}
+	body, _ := json.Marshal(env)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer env-token")
+	w := httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("env-token auth: status = %d, want 200", w.Code)
+	}
+}
+
+func TestPush_BodyTooLarge(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Craft a body >4 MiB with a tiny, valid-looking prefix. MaxBytesReader
+	// will trip before Unmarshal, so we just need lots of bytes.
+	big := make([]byte, (4<<20)+1024)
+	for i := range big {
+		big[i] = 'x'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(big))
+	// MaxBytesReader requires a real ResponseWriter to wire up its close behavior.
+	w := httptest.NewRecorder()
+	srv.handlePush(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize body: status = %d, want 413", w.Code)
+	}
+}
