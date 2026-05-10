@@ -1,0 +1,45 @@
+name: Dependabot rebase open PRs on main update
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  rebase:
+    name: Comment '@dependabot rebase' on open Dependabot PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find open Dependabot PRs and ask for rebase
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Skip when this push is itself a Dependabot merge — only the
+          # NEXT push (typically a non-Dependabot one) should kick a fresh
+          # rebase, otherwise we churn on every dependabot merge.
+          # Actually we DO want to rebase after every main update because
+          # that's exactly when the other PRs go stale. Keep firing.
+
+          prs=$(gh pr list \
+            --state open \
+            --author "app/dependabot" \
+            --json number,headRefName \
+            --jq '.[].number')
+
+          if [ -z "$prs" ]; then
+            echo "No open Dependabot PRs."
+            exit 0
+          fi
+
+          for pr in $prs; do
+            echo "::group::PR #$pr"
+            # Ask Dependabot to rebase. It will only do so if the branch
+            # is actually behind; otherwise it's a no-op.
+            gh pr comment "$pr" --body "@dependabot rebase"
+            echo "::endgroup::"
+          done
