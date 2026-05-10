@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.5](https://github.com/janekbaraniewski/openusage/compare/v0.10.4...v0.10.5) (2026-05-10)
+
+
+### Dependencies
+
+* align Charmbracelet x dependency updates ([#131](https://github.com/janekbaraniewski/openusage/issues/131)) ([26d4c57](https://github.com/janekbaraniewski/openusage/commit/26d4c5712ffb04f47608164262d9330503f66f9e))
+* **website:** bump the website-minor-and-patch group across 1 directory with 3 updates ([#97](https://github.com/janekbaraniewski/openusage/issues/97)) ([baee92a](https://github.com/janekbaraniewski/openusage/commit/baee92ab7d3405a87a2b25a2808152137cc40f53))
+
+
+### Refactoring
+
+* PR [#95](https://github.com/janekbaraniewski/openusage/issues/95) follow-ups (cursor cleanup, zai/openrouter decomposition, TUI/daemon/logging) ([#113](https://github.com/janekbaraniewski/openusage/issues/113)) ([3761ef2](https://github.com/janekbaraniewski/openusage/commit/3761ef28d4e2e77c5b40ed6ab92784c758394d81))
+
 ## [0.10.4](https://github.com/janekbaraniewski/openusage/compare/v0.10.3...v0.10.4) (2026-05-10)
 
 
