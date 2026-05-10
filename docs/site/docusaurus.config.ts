@@ -125,7 +125,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          to: '/llms.txt',
+          href: 'pathname:///llms.txt',
           label: 'For AI',
           position: 'right',
           target: '_blank',
@@ -157,7 +157,7 @@ const config: Config = {
           title: 'More',
           items: [
             {label: 'Capability matrix', href: 'https://openusage.sh/docs/capability-matrix/'},
-            {label: 'OpenUsage.sh vs OpenUsage.ai', href: 'https://openusage.sh/docs/openusage-sh-vs-openusage-ai/'},
+            {label: 'For AI agents (llms.txt)', href: 'pathname:///llms.txt'},
           ],
         },
       ],

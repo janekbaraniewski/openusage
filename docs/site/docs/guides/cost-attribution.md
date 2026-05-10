@@ -105,7 +105,7 @@ Set it before the data ages out. Then use `w` to cycle to `30d` (or `all`) and t
 
 ## Anti-patterns
 
-- **Trusting raw 1d totals on direct mode**, when you launched the dashboard at noon. You're seeing five hours, not a day.
+- **Trusting raw 1d totals against a fresh daemon install**, when the daemon has only been running for a few hours. The window can never reach further back than the data the daemon has actually stored.
 - **Comparing Claude Code dollars to your Anthropic invoice**, when you're on a subscription plan. Use Claude Code numbers for relative attribution, not invoice math.
 - **Counting OpenRouter cost twice** by adding it to the per-tool numbers from OpenCode. They're the same dollars, dedup'd on the daemon side.
 

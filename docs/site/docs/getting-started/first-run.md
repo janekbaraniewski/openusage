@@ -25,7 +25,7 @@ A complete list lives in [Environment variables](../reference/env-vars.md).
 openusage
 ```
 
-OpenUsage opens full-screen. The first frame may show partial data because providers are still being polled in parallel.
+OpenUsage opens full-screen. The first frame may show partial data because the daemon is still polling providers and ingesting any pending hook events.
 
 You'll see:
 
@@ -102,17 +102,17 @@ Press <kbd>,</kbd> to open the settings modal. Tabs:
 
 Move around with <kbd>j</kbd>/<kbd>k</kbd>, toggle/apply with <kbd>Space</kbd> or <kbd>Enter</kbd>, reorder with <kbd>Shift+J</kbd>/<kbd>Shift+K</kbd>. Close with <kbd>,</kbd> or <kbd>Esc</kbd>.
 
-## Step 6 — Decide on background tracking
+## Step 6 — Install agent integrations
 
-If you only run OpenUsage occasionally, the default direct mode is fine — providers are polled while you watch.
-
-If you want OpenUsage to keep collecting data even when the TUI is closed (and to capture per-session detail from hookable tools), install the daemon:
+For per-turn detail from agents you actually use (Claude Code, Codex, OpenCode), install the matching hook. Each one posts every turn directly to the daemon, capturing detail polling alone cannot see:
 
 ```bash
-openusage telemetry daemon install
+openusage integrations install claude_code
+openusage integrations install codex
+openusage integrations install opencode
 ```
 
-Read the [Daemon overview](../daemon/overview.md) before deciding.
+Read the [Daemon overview](../daemon/overview.md) for what gets captured.
 
 ## Where to go next
 

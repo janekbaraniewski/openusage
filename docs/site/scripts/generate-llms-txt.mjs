@@ -127,7 +127,7 @@ const main = async () => {
   const lines = [
     '# OpenUsage',
     '',
-    '> Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 18 providers — Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more.',
+    '> Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 19 providers — Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more.',
     '',
     'These docs cover installation, configuration, every provider integration, the optional background daemon, theming, the complete CLI and `settings.json` reference, troubleshooting, and contribution guidance.',
     '',

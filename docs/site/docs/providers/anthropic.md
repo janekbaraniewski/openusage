@@ -41,10 +41,46 @@ Set `ANTHROPIC_API_KEY`. OpenUsage registers the provider on next start.
 
 Set `base_url` for proxies or compatible gateways.
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows auth status and the most-constrained rate-limit gauge.
-- Detail view splits RPM and TPM into limit, remaining, and reset time.
+OpenUsage sends one `POST https://api.anthropic.com/v1/messages` per poll cycle (default every 30 seconds in daemon mode). The body is minimal so Anthropic responds with HTTP 400, but the response **headers** carry rate-limit data and that is all this provider reads. The body is discarded.
+
+Request headers:
+
+- `x-api-key: $ANTHROPIC_API_KEY`
+- `anthropic-version: 2023-06-01`
+- `Content-Type: application/json`
+
+### `rpm` — requests per minute
+
+- Source: response headers
+  - `anthropic-ratelimit-requests-limit`
+  - `anthropic-ratelimit-requests-remaining`
+  - `anthropic-ratelimit-requests-reset`
+- Transform: copied verbatim into the metric's `Limit` and `Remaining`. The reset string is parsed as RFC3339 and stored as `Resets["rpm"]`.
+- Window: 1 minute.
+
+### `tpm` — tokens per minute
+
+- Source: response headers
+  - `anthropic-ratelimit-tokens-limit`
+  - `anthropic-ratelimit-tokens-remaining`
+  - `anthropic-ratelimit-tokens-reset`
+- Transform: same as `rpm` but for tokens.
+
+### Auth status
+
+- Source: HTTP status code of the probe.
+- Transform: `401`/`403` → `auth`; `429` → `limited`; otherwise `ok`. The 400 that the empty-body probe triggers still carries valid rate-limit headers, so the tile reads `ok`.
+
+### What's NOT tracked
+
+- **Spend / cost.** The API does not expose dollar figures or usage totals to API tokens, and there is no billing endpoint a key can authenticate against. Install [Claude Code](./claude-code.md) for token-level cost estimates from local session logs.
+- **Per-model breakdown.** The probe is a single request; the headers reflect your active tier, not a model-by-model split.
+
+### How fresh is the data?
+
+- Polled every 30 s by default (`data.poll_interval`). Each poll is one request, no cache.
 
 ## API endpoints used
 
@@ -63,6 +99,10 @@ Anthropic's API does not expose spend or token-usage data to API keys. For full 
 
 - **Auth failed** — verify `ANTHROPIC_API_KEY` and rotate if necessary.
 - **Stale reset times** — Anthropic rolls reset windows; the next poll picks up the new value.
+
+### Why is there no $ spend?
+
+The Anthropic API does not return spend or token-usage data on response headers, and there is no per-key billing endpoint we can authenticate against. The Claude Code provider closes that gap by reading on-disk session logs and multiplying token counts by published pricing.
 
 ## Related
 

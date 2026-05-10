@@ -3,7 +3,7 @@ title: Providers
 description: What a provider is in OpenUsage, the three categories, and how each one shapes its own dashboard and detail widgets.
 ---
 
-A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 18 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
+A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 19 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
 
 ## The provider contract
 
@@ -83,14 +83,14 @@ For more detail on the snapshot model see [snapshots](snapshots.md).
 
 1. The provider package is registered in `internal/providers/registry.go` via `AllProviders()`.
 2. Detection or manual config produces an `AccountConfig` whose `provider` field matches the provider's `ID()`.
-3. The runtime calls `Fetch()` on a ticker (direct mode) or via the daemon's pipeline (daemon mode).
+3. The daemon's pipeline calls `Fetch()` on a ticker as part of the collector loop.
 4. The latest snapshot is rendered through the provider's widget definitions.
 
-## The 18 providers at a glance
+## The 19 providers at a glance
 
 | Category | Providers |
 |---|---|
-| API platforms | openai, anthropic, openrouter, groq, mistral, deepseek, xai, gemini_api, alibaba_cloud, moonshot, zai |
+| API platforms | openai, anthropic, openrouter, groq, mistral, deepseek, xai, gemini_api, alibaba_cloud, moonshot, zai, perplexity |
 | Coding agents | claude_code, cursor, codex, copilot, gemini_cli, opencode |
 | Local runtimes | ollama |
 

@@ -68,7 +68,7 @@ Checks:
    ```bash
    openusage telemetry daemon status
    ```
-   In daemon mode, a dead daemon means stale data forever — see [daemon issues](daemon-issues.md).
+   A dead daemon means stale data forever — see [daemon issues](daemon-issues.md).
 
 3. **Is the terminal too small?** Below ~80 columns the dashboard collapses to Stacked view, which can hide updates above the fold. Resize, then `r`.
 
@@ -82,13 +82,13 @@ Symptoms: spend or token counts are noticeably lower than what the vendor's own 
 
 Checks:
 
-1. **Are you in direct mode?** Direct mode only sees data the provider serves on each fetch. Some providers (Anthropic, OpenAI) only expose rate-limit headers, not historical spend. Spend totals there come from local files (claude_code, codex) or cached provider state (cursor, openrouter).
+1. **What does each provider actually expose?** Some providers (Anthropic, OpenAI) only expose rate-limit headers, not historical spend. Spend totals there come from local files (claude_code, codex) or cached provider state (cursor, openrouter). The daemon can only persist what the provider returns.
 
-2. **Is the daemon installed but not running?**
+2. **Is the daemon running?**
    ```bash
    openusage telemetry daemon status
    ```
-   If it's not running, the TUI may still connect to a stale read model. Restart:
+   If it's not running, the TUI is reading a stale read model. Restart:
    ```bash
    # macOS
    launchctl kickstart -k gui/$(id -u)/com.openusage.telemetryd

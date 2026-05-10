@@ -23,10 +23,10 @@ Effects:
 
 ## Where logs go
 
-| Mode | Where |
+| Source | Where |
 |---|---|
-| TUI in direct mode | stderr (redirect to a file as above) |
-| Daemon (foreground) | stderr |
+| TUI | stderr (redirect to a file as above) |
+| Daemon (foreground `daemon run`) | stderr |
 | Daemon (installed service) | `~/.local/state/openusage/daemon.{stdout,stderr}.log`; Linux also `journalctl --user-unit openusage-telemetry.service` |
 | Hook scripts | the agent's own logs (e.g. Claude Code session log) |
 
@@ -45,7 +45,7 @@ If you're filing an issue, include:
    echo "$TERM, $(tput colors) colors, $(tput cols)x$(tput lines)"
    ```
 
-3. **Mode** — direct or daemon, and (if daemon) `openusage telemetry daemon status` output.
+3. **Daemon status** — `openusage telemetry daemon status` output.
 
 4. **Debug log** from a fresh reproduction. Reproduce the issue, quit, attach the file:
    ```bash

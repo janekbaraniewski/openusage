@@ -52,12 +52,11 @@ A free-form key/value map for things that don't fit a standard field. Detail wid
 
 ## Refresh cadence
 
-The poll interval is configurable and applies in both runtime modes.
+The daemon drives the poll loop and the TUI refreshes its read model on a tick.
 
-- Default: **30 seconds** (`ui.refresh_interval_seconds` in `settings.json`, or `--interval` for the daemon).
-- Direct mode: every account is refetched on every tick.
-- Daemon mode: collectors poll on the configured interval; hooks deliver events between ticks.
-- Manual refresh: press `r` in the TUI to force-fetch every account.
+- Default: **30 seconds** (`--interval` for the daemon, `ui.refresh_interval_seconds` for how often the TUI re-fetches the read model).
+- Collectors run every interval; hooks deliver events between ticks for agents that emit them.
+- Manual refresh: press `r` in the TUI to ask the daemon for a fresh read model.
 
 There is no streaming — every snapshot is a fresh full state, not a delta.
 
@@ -79,7 +78,7 @@ What the window changes:
 - Per-day bar charts in the Analytics screen scale to the window.
 - Live "current" values (rate-limit gauges, balances) are not affected — those are always the latest snapshot.
 
-The window only applies to data the runtime has actually seen. In direct mode, that means data accumulated since the TUI launched. In daemon mode, that's everything within `data.retention_days` (default 30) — see [telemetry](telemetry.md).
+The window only applies to data the daemon has actually seen — everything within `data.retention_days` (default 30). See [telemetry](telemetry.md).
 
 ## Snapshot lifecycle
 
@@ -89,21 +88,19 @@ provider.Fetch()
    ▼
 UsageSnapshot
    │
-   ├─ direct mode ──► tea.Program.Send(SnapshotsMsg) ─► render
-   │
-   └─ daemon mode ──► telemetry.Store
-                              │
-                              ▼
-                         ReadModel
-                              │
-                              ▼
-                       UsageSnapshot
-                              │
-                              ▼
-                       UDS /v1/read-model ─► render
+   └─► telemetry.Store
+              │
+              ▼
+         ReadModel
+              │
+              ▼
+       UsageSnapshot
+              │
+              ▼
+       UDS /v1/read-model ─► render
 ```
 
-In daemon mode, the snapshot returned to the TUI is rebuilt from stored events on each request. That means historical data persists across TUI restarts and daemon restarts.
+The snapshot returned to the TUI is rebuilt from stored events on each request. That means historical data persists across TUI restarts and daemon restarts.
 
 ## When fields go missing
 

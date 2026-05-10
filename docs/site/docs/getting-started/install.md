@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # Install
 
-OpenUsage is a single Go binary. CGO is required (it links SQLite for the optional telemetry store), so all distribution channels ship pre-built binaries.
+OpenUsage is a single Go binary. CGO is required (it links SQLite for the telemetry store), so all distribution channels ship pre-built binaries.
 
 ## macOS — Homebrew (recommended)
 
@@ -67,11 +67,21 @@ openusage version
 
 You should see the version number, the commit, and the build date. If the command isn't found, make sure the install location is on your `PATH`.
 
+## Start the daemon
+
+The daemon is the runtime that polls providers, ingests hooks, and persists data to SQLite. The TUI reads from it. Install it once with:
+
+```bash
+openusage telemetry daemon install
+```
+
+This sets up a launchd agent (macOS) or a systemd user unit (Linux) and starts the service. See the [Daemon overview](../daemon/overview.md) for what it does and how to manage it.
+
 ## What's next
 
 - [Quickstart](./quickstart.md) — run the dashboard for the first time
 - [First-run walkthrough](./first-run.md) — what auto-detection picks up and how to read the dashboard
 
 :::note CGO and cross-compilation
-OpenUsage embeds [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) for the optional telemetry store. That requires CGO. If you want to cross-compile yourself, you need a target-specific C toolchain — most users should just use the pre-built binaries from the release page.
+OpenUsage embeds [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) for the telemetry store. That requires CGO. If you want to cross-compile yourself, you need a target-specific C toolchain — most users should just use the pre-built binaries from the release page.
 :::

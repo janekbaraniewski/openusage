@@ -54,7 +54,7 @@ These providers expose org or project-level spend and quotas. The data is whatev
 
 ### 3. Daemon per machine, manual roll-up
 
-If you want longer-term per-engineer history, run [daemon mode](../concepts/direct-vs-daemon.md) on each developer machine. The SQLite store at `~/.local/state/openusage/telemetry.db` keeps events for `data.retention_days` (default 30).
+If you want longer-term per-engineer history, install the [daemon](/daemon) on each developer machine. The SQLite store at `~/.local/state/openusage/telemetry.db` keeps events for `data.retention_days` (default 30).
 
 You can periodically:
 

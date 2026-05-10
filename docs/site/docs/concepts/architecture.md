@@ -1,60 +1,21 @@
 ---
 title: Architecture
-description: How OpenUsage discovers tools, polls providers, and renders snapshots in the TUI in both direct and daemon modes.
+description: How OpenUsage discovers tools, polls providers via the daemon, and renders snapshots in the TUI.
 ---
 
-OpenUsage is a single Go binary with two runtime modes. Both modes funnel through the same TUI and the same provider implementations; what differs is how data is collected and where it lives between runs.
+OpenUsage is a single Go binary with one runtime: a background daemon that collects data, persists it to SQLite, and serves a unified read model to a thin TUI client. The TUI never talks to provider APIs directly — it always reads from the daemon.
 
 ## Mental model
 
-At the highest level there are four moving parts:
+At the highest level there are five moving parts:
 
 1. **Detector** — scans your machine for installed AI tools and known API key environment variables.
 2. **Providers** — one per AI service, each knows how to fetch a snapshot of usage for an account.
-3. **Snapshots** — a normalized data structure (`UsageSnapshot`) that captures spend, tokens, models, rate limits, and status for one account at one point in time.
-4. **TUI** — a Bubble Tea app that renders snapshots into tiles, gauges, and detail views.
+3. **Daemon** — long-running service that drives the polling loop, accepts hook events from agent integrations, and persists everything to SQLite.
+4. **Snapshots** — a normalized data structure (`UsageSnapshot`) that captures spend, tokens, models, rate limits, and status for one account at one point in time. The daemon's `ReadModel` rebuilds these from stored events on each TUI request.
+5. **TUI** — a Bubble Tea app that connects to the daemon over a Unix domain socket and renders snapshots into tiles, gauges, and detail views.
 
-The two runtime modes plug those pieces together differently.
-
-## Direct mode (default)
-
-When you run `openusage` with no daemon installed, the TUI itself owns the polling loop. Data only exists for as long as the process runs.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ openusage process                                           │
-│                                                             │
-│  config.Load()  ─►  detect.AutoDetect()                     │
-│        │                    │                               │
-│        └─► AccountConfigs ──┘                               │
-│                    │                                        │
-│                    ▼                                        │
-│              providers.AllProviders()                       │
-│                    │                                        │
-│                    ▼                                        │
-│         ┌─────────────────────┐                             │
-│         │ poll ticker (~30s)  │ ─► provider.Fetch() per acc │
-│         └─────────┬───────────┘                             │
-│                   ▼                                         │
-│             UsageSnapshot[]                                 │
-│                   │                                         │
-│                   ▼                                         │
-│      tea.Program.Send(SnapshotsMsg)                         │
-│                   │                                         │
-│                   ▼                                         │
-│             TUI re-renders                                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-Trade-offs:
-
-- No background process, no socket, no SQLite file.
-- Closing the dashboard ends data collection.
-- Each TUI launch starts from zero history (you only see what providers themselves remember).
-
-## Daemon mode
-
-When you install the daemon (`openusage telemetry daemon install`), polling moves out of the TUI and into a long-running service. The TUI becomes a thin client over a Unix domain socket.
+## Dataflow
 
 ```
 ┌──────────────────────────┐         ┌─────────────────────────┐
@@ -79,13 +40,19 @@ When you install the daemon (`openusage telemetry daemon install`), polling move
 └──────────────────────────┘
 ```
 
+Three input sources feed the pipeline:
+
+- **Collectors** — driven by the daemon's polling loop. They call each provider's `Fetch()` on the configured interval and emit snapshots and derived events.
+- **Hooks** — agent integrations (Claude Code, Codex, OpenCode) POST per-turn events to the daemon over its Unix socket as they happen.
+- **Spool** — when the daemon is briefly unreachable, hook clients drop events into a disk queue (`~/.local/state/openusage/telemetry-spool/`) that is drained on next startup.
+
 Trade-offs:
 
-- Data survives across TUI sessions.
-- Hooks from Claude Code, Codex, and OpenCode can ship fine-grained per-turn events that polling alone could not see.
-- Adds one always-on process and a SQLite file (`~/.local/state/openusage/telemetry.db`).
+- Data survives across TUI sessions and machine reboots, capped by `data.retention_days` (default 30).
+- Per-turn detail from agents is far richer than polling alone could see.
+- One always-on process and a SQLite file (`~/.local/state/openusage/telemetry.db`).
 
-For the full comparison see [direct vs daemon](direct-vs-daemon.md).
+For more on event flow and dedup, see [telemetry](telemetry.md).
 
 ## Core types
 
@@ -103,7 +70,7 @@ type UsageProvider interface {
 ```
 
 - `Spec()` declares auth/setup metadata and widget layouts.
-- `Fetch()` is the only side-effecting call: it talks to an API, reads files, or shells out to a CLI.
+- `Fetch()` is the only side-effecting call: it talks to an API, reads files, or shells out to a CLI. The daemon drives it; the TUI never calls it.
 - `UsageSnapshot` is the only thing the TUI knows about — all rendering is driven from it plus the static widget definitions.
 
 ## How the pieces meet
@@ -119,7 +86,7 @@ type UsageProvider interface {
 
 ## Key invariants
 
-- The TUI never talks to an AI provider directly — only to providers (in direct mode) or the daemon (in daemon mode).
+- The TUI never talks to an AI provider directly — only to the daemon over its Unix socket.
 - API keys are referenced by env-var name in config (`api_key_env`), never stored.
 - `AccountConfig.Token` has `json:"-"` so runtime tokens never persist.
 - The daemon and the TUI communicate over a Unix domain socket only — no TCP, no remote attach.
@@ -130,3 +97,4 @@ type UsageProvider interface {
 - [Providers](providers.md) — what a provider is and the categories.
 - [Snapshots](snapshots.md) — the data model the TUI renders.
 - [Telemetry](telemetry.md) — events, sources, and dedup.
+- [Daemon overview](/daemon) — install, run, troubleshoot.

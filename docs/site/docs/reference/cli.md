@@ -19,9 +19,7 @@ openusage integrations <subcommand> [flags]     # tool integration management
 
 ## `openusage`
 
-Runs the TUI dashboard. With no flags it auto-detects accounts, polls providers in [Direct mode](../concepts/direct-vs-daemon.md), and opens the dashboard.
-
-If a daemon is reachable on the configured socket, the TUI uses it as the data source instead of polling directly.
+Runs the TUI dashboard. With no flags it auto-detects accounts, connects to the [daemon](../daemon/overview.md) over its Unix socket, and opens the dashboard. If the daemon is not yet installed, run `openusage telemetry daemon install` first.
 
 ### Flags
 

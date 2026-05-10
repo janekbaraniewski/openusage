@@ -5,31 +5,20 @@ description: Background telemetry daemon that aggregates AI tool usage from coll
 
 # Daemon overview
 
-OpenUsage can run a small background service that continuously collects usage data from AI providers and tool integrations, persists it to SQLite, and serves a unified read model to the TUI. This is **Daemon mode** — an alternative to the default **Direct mode** in which the dashboard polls providers itself for the lifetime of one session.
+The daemon is OpenUsage's runtime. It is a small background service that continuously collects usage data from AI providers and tool integrations, persists it to SQLite, and serves a unified read model to the TUI. The TUI is a thin client that reads from the daemon over a Unix domain socket.
 
-See [Direct vs Daemon](../concepts/direct-vs-daemon.md) for a side-by-side comparison.
+Install once with:
+
+```bash
+openusage telemetry daemon install
+```
 
 ## What you get
 
 - **Long-lived history.** Events persist across TUI restarts and machine reboots, so analytics and time-window views (`7d`, `30d`, `all`) reflect real activity.
 - **Hook-based ingestion.** Tools like Claude Code, Codex, and OpenCode push every turn, message, and tool call directly to the daemon — no polling lag, no missed events.
 - **Single source of truth.** All AI usage lives in one SQLite database with deduplication, retention, and provider linking.
-- **Lower API load.** Provider rate-limit headers are polled once per interval by the daemon instead of once per dashboard run.
-
-## When to use it
-
-Use Daemon mode when:
-
-- You want continuous tracking, not just a snapshot of "now."
-- You use tools that emit hooks (Claude Code, Codex, OpenCode) and want every turn captured.
-- You run the TUI on a headless server, in tmux, or open and close it frequently.
-- You care about analytics over multi-day windows.
-
-Stick with Direct mode when:
-
-- You only run the TUI ad-hoc to peek at current limits.
-- You don't want a background process or a service installed.
-- You're on a system where launchd / systemd-user is not available.
+- **Always-on collection.** Provider rate-limit headers are polled on the configured interval whether or not the TUI is open.
 
 ## Dataflow
 
@@ -71,7 +60,7 @@ Stick with Direct mode when:
 
 Three input sources feed the pipeline:
 
-- **Collectors** — the same provider plugins used in Direct mode, but driven by the daemon's polling loop. They ingest rate-limit headers, billing snapshots, and dashboard-scraped balances.
+- **Collectors** — provider plugins driven by the daemon's polling loop. They ingest rate-limit headers, billing snapshots, and dashboard-scraped balances.
 - **Hooks** — tool integrations POST events to the daemon over its Unix socket as they happen. See [Integrations](./integrations.md).
 - **Spool** — when the daemon is unreachable (hook fired but socket missing), events are written to a disk queue and drained on next startup. See [Storage](./storage.md).
 

@@ -39,7 +39,7 @@ ssh build-host
 openusage
 ```
 
-If a daemon is installed on the server, the TUI connects to its socket automatically and the data shown is the daemon's data. If not, the TUI runs in [direct mode](../concepts/direct-vs-daemon.md).
+The TUI connects to the daemon's socket automatically and renders the data the daemon has collected. Make sure the daemon is installed on the server first (`openusage telemetry daemon install`).
 
 Tips:
 
@@ -102,6 +102,6 @@ If the daemon is briefly unavailable, hooks spool to `~/.local/state/openusage/t
 
 ## See also
 
-- [Direct vs daemon](../concepts/direct-vs-daemon.md)
+- [Architecture](../concepts/architecture.md)
 - [Daemon overview](/daemon)
 - [Daemon issues troubleshooting](../troubleshooting/daemon-issues.md)

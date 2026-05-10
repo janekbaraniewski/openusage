@@ -3,7 +3,7 @@ title: Telemetry pipeline
 description: How the daemon stores events, deduplicates them, and turns them into snapshots — events, sources, dedup, and retention.
 ---
 
-When you run OpenUsage in [daemon mode](direct-vs-daemon.md), data flows through a small event-sourced pipeline before it ever reaches the TUI. Understanding this pipeline helps explain why hooks give richer data than polling alone, why the same conversation isn't double-counted, and where retention bounds live.
+When OpenUsage is collecting data, it flows through a small event-sourced pipeline in the daemon before it ever reaches the TUI. Understanding this pipeline helps explain why hooks give richer data than polling alone, why the same conversation isn't double-counted, and where retention bounds live.
 
 :::note
 Telemetry stays local. The daemon listens on a Unix domain socket only; no TCP, no remote attach, nothing leaves your machine. The "telemetry" name refers to event-sourced collection, not external reporting.
@@ -49,7 +49,7 @@ The pipeline addresses all three by ingesting **events** from multiple sources, 
 
 ### Collectors
 
-The same `provider.Fetch()` calls direct mode would make, but driven by the daemon on its own interval. Output: `provider_snapshots` rows + derived `usage_events`.
+`provider.Fetch()` calls driven by the daemon on its own interval. Output: `provider_snapshots` rows + derived `usage_events`.
 
 ### Hooks
 
@@ -141,6 +141,6 @@ If you live mostly in Claude Code, Codex, or OpenCode, installing the matching i
 
 ## Where to read next
 
-- [Direct vs daemon](direct-vs-daemon.md) — how the daemon fits in.
+- [Architecture](architecture.md) — how the daemon, providers, and TUI fit together.
 - [Daemon overview](/daemon) — install, configure, troubleshoot.
 - [Cost attribution](../guides/cost-attribution.md) — practical recipes for using the data.

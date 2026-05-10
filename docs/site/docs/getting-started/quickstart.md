@@ -8,7 +8,21 @@ sidebar_position: 2
 
 You should reach a useful dashboard with **zero configuration**. This page shows the happy path and the keys you need to know.
 
-## 1. Run it
+## 1. Start the daemon
+
+The daemon is the background process that polls providers, ingests agent hooks, and persists data to SQLite. The TUI reads from it.
+
+```bash
+openusage telemetry daemon install
+```
+
+This takes about five seconds. It registers a launchd agent (macOS) or a systemd user unit (Linux) and starts the service. Verify with:
+
+```bash
+openusage telemetry daemon status
+```
+
+## 2. Run the dashboard
 
 ```bash
 openusage
@@ -19,11 +33,11 @@ That's it. OpenUsage:
 1. Scans your environment for AI-tool API keys (e.g. `OPENAI_API_KEY`, `OPENROUTER_API_KEY`)
 2. Looks for installed binaries and config dirs (e.g. `claude`, `cursor`, `~/.codex`)
 3. Registers a provider account for each thing it finds
-4. Starts polling everything in parallel
+4. Connects to the daemon over its Unix socket and renders the read model
 
 If a provider doesn't show up, it's almost always because the env var or binary isn't where OpenUsage looks. See [Provider not detected](../troubleshooting/provider-not-detected.md).
 
-## 2. Move around
+## 3. Move around
 
 The defaults you'll use most often:
 
@@ -45,7 +59,7 @@ The defaults you'll use most often:
 
 Full list: [Keybindings reference](../reference/keybindings.md).
 
-## 3. Read a tile
+## 4. Read a tile
 
 Each tile shows:
 
@@ -58,7 +72,7 @@ Each tile shows:
 
 Press <kbd>Enter</kbd> on a tile to open the full detail view: per-model breakdowns, charts, billing periods, and trends.
 
-## 4. Add an API key
+## 5. Add an API key
 
 Most cloud providers need an env var. The catalog in [Providers](../providers/index.md) lists each one. For example:
 
@@ -71,18 +85,17 @@ openusage
 
 You can also paste keys interactively from the **API Keys** tab in the settings modal (<kbd>,</kbd>) — OpenUsage stores them as plain values that get loaded next session.
 
-## 5. Optional — turn on background tracking
+## 6. Install agent integrations
 
-By default, OpenUsage polls providers only while the TUI is running. If you want continuous data collection (and richer per-session detail from Claude Code, Codex, and OpenCode), install the daemon:
+For richer per-session detail from Claude Code, Codex, and OpenCode, install their hooks. They post each turn directly to the daemon, giving you per-message data that polling alone cannot see.
 
 ```bash
-openusage telemetry daemon install
 openusage integrations install claude_code   # if you use Claude Code
 openusage integrations install codex          # if you use Codex CLI
 openusage integrations install opencode       # if you use OpenCode
 ```
 
-The daemon runs as a launchd agent (macOS) or a systemd user unit (Linux). See the [Daemon overview](../daemon/overview.md) for details.
+See the [Daemon overview](../daemon/overview.md) for what each integration captures.
 
 ## What's next
 
