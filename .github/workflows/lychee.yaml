@@ -39,6 +39,8 @@ jobs:
             --cache
             --max-cache-age 1d
             --no-progress
+            --scheme https
+            --scheme http
             --config .github/lychee.toml
             "docs/site/docs/**/*.md"
             "README.md"

@@ -170,12 +170,7 @@ You can define custom themes as JSON files loaded at startup from:
 - `%APPDATA%\\openusage\\themes\\*.json` (Windows)
 - Any extra directory in `OPENUSAGE_THEME_DIR` (path-list separated)
 
-Theme files use the same color token fields as built-ins. See the full grayscale example:
-[`configs/themes/grayscale.json`](configs/themes/grayscale.json)
-
-Additional example presets:
-- Slate: [`configs/themes/slate.json`](configs/themes/slate.json)
-- Warm: [`configs/themes/warm.json`](configs/themes/warm.json)
+Theme files use the same color token fields as built-ins. Browse the bundled examples for reference shapes — every shipped theme lives at [`internal/tui/bundled_themes/`](internal/tui/bundled_themes/).
 
 ## Daemon
 
