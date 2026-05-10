@@ -6,12 +6,6 @@ accept = [200, 206, 301, 302, 308, 403, 429]
 
 # Skip these patterns (false-positive prone or rate-limited).
 exclude = [
-    # Root-relative and relative paths — Docusaurus already validates
-    # internal links at build time. Lychee can't resolve them as files
-    # without a route map, so we filter them out before URL parsing.
-    "^/",
-    "^\\./",
-    "^\\.\\./",
     # localhost variants
     "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\])",
     # GitHub anchor-style fragments often differ between rendered HTML and link text
@@ -24,6 +18,8 @@ exclude = [
     "^https?://api2\\.cursor\\.sh/",
     # Cloudflare-hosted pages.dev preview URLs (ephemeral)
     "^https?://[a-z0-9-]+\\.openusage-docs\\.pages\\.dev/",
+    # openusage.sh URLs that may not be deployed yet on PR branches
+    "^https?://openusage\\.sh/docs/",
 ]
 
 # Per-host concurrency: avoid hammering any single host.
