@@ -84,14 +84,19 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	snap.Raw = parsers.RedactHeaders(resp.Header)
 
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusBadRequest:
+	// 401/403/429 mapping comes from shared. Gemini also returns 400 on
+	// invalid API keys (other providers return 401), so we check for that
+	// specifically before delegating to the shared switch.
+	if resp.StatusCode == http.StatusBadRequest {
 		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
+		snap.Message = "HTTP 400 – check API key"
 		return snap, nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
+	}
+	shared.ApplyStatusFromResponse(resp, &snap)
+	switch snap.Status {
+	case core.StatusAuth:
+		return snap, nil
+	case core.StatusLimited:
 		p.parseRetryInfo(resp.Body, &snap)
 		return snap, nil
 	}

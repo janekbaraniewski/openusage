@@ -168,13 +168,13 @@ func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, 
 	url := baseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return fmt.Errorf("mistral: creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := p.Client().Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("mistral: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -182,16 +182,17 @@ func (p *Provider) fetchRateLimits(ctx context.Context, baseURL, apiKey string, 
 		snap.Raw[k] = v
 	}
 
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
+	// Centralised 401/403/429 mapping. Mistral has no provider-specific
+	// status codes to override, so the shared switch is sufficient.
+	shared.ApplyStatusFromResponse(resp, snap)
+	if snap.Status == core.StatusAuth {
 		return nil
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
 	}
 
+	// Mistral exposes three rate-limit header groups: unprefixed
+	// `ratelimit-*` (canonical RPM), per-request `x-ratelimit-*-requests`,
+	// and per-token `x-ratelimit-*-tokens`. The shared ApplyStandardRateLimits
+	// only knows the second-and-third pattern, so we apply each explicitly.
 	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm", "requests", "1m",
 		"ratelimit-limit", "ratelimit-remaining", "ratelimit-reset")
 	parsers.ApplyRateLimitGroup(resp.Header, snap, "rpm_alt", "requests", "1m",
