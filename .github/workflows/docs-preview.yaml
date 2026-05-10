@@ -43,6 +43,8 @@ jobs:
         working-directory: docs/site
         env:
           DOCS_PREVIEW: "1"
+          POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
         run: npm run build
 
       - name: Upload build artifact

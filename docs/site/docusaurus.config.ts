@@ -35,6 +35,13 @@ const config: Config = {
     locales: ['en'],
   },
 
+  clientModules: [require.resolve('./src/clientModules/posthog.ts')],
+
+  customFields: {
+    posthogKey: process.env.POSTHOG_KEY ?? '',
+    posthogHost: process.env.POSTHOG_HOST ?? '',
+  },
+
   themes: [
     '@docusaurus/theme-mermaid',
     [
