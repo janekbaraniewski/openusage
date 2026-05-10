@@ -1,0 +1,153 @@
+import {themes as prismThemes} from 'prism-react-renderer';
+import type {Config} from '@docusaurus/types';
+import type * as Preset from '@docusaurus/preset-classic';
+
+const config: Config = {
+  title: 'OpenUsage',
+  tagline: 'Local-first terminal dashboard for AI tool spend and quotas',
+  favicon: 'img/favicon.svg',
+
+  future: {
+    v4: true,
+  },
+
+  url: 'https://openusage.sh',
+  baseUrl: '/docs/',
+  trailingSlash: true,
+
+  organizationName: 'janekbaraniewski',
+  projectName: 'openusage',
+
+  onBrokenLinks: 'warn',
+
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
+
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en'],
+  },
+
+  presets: [
+    [
+      'classic',
+      {
+        docs: {
+          routeBasePath: '/',
+          sidebarPath: './sidebars.ts',
+          editUrl:
+            'https://github.com/janekbaraniewski/openusage/tree/main/docs/site/',
+          showLastUpdateTime: true,
+        },
+        blog: false,
+        theme: {
+          customCss: './src/css/custom.css',
+        },
+        sitemap: {
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+        },
+      } satisfies Preset.Options,
+    ],
+  ],
+
+  themeConfig: {
+    image: 'img/og.png',
+    colorMode: {
+      defaultMode: 'dark',
+      respectPrefersColorScheme: true,
+    },
+    metadata: [
+      {
+        name: 'description',
+        content:
+          'Documentation for OpenUsage — a local-first terminal dashboard that tracks AI coding agent spend, quotas, and rate limits across Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, and more.',
+      },
+      {name: 'keywords', content: 'openusage, ai usage tracker, claude code quota, codex cli, openrouter, llm spend, terminal dashboard'},
+    ],
+    navbar: {
+      title: 'OpenUsage',
+      logo: {
+        alt: 'OpenUsage logo',
+        src: 'img/logo.svg',
+      },
+      items: [
+        {
+          type: 'docSidebar',
+          sidebarId: 'docsSidebar',
+          position: 'left',
+          label: 'Docs',
+        },
+        {
+          to: '/providers/',
+          label: 'Providers',
+          position: 'left',
+        },
+        {
+          to: '/reference/cli/',
+          label: 'Reference',
+          position: 'left',
+        },
+        {
+          href: 'https://openusage.sh/',
+          label: 'Home',
+          position: 'right',
+        },
+        {
+          href: 'https://github.com/janekbaraniewski/openusage',
+          label: 'GitHub',
+          position: 'right',
+        },
+      ],
+    },
+    footer: {
+      style: 'dark',
+      links: [
+        {
+          title: 'Docs',
+          items: [
+            {label: 'Getting Started', to: '/getting-started/install/'},
+            {label: 'Concepts', to: '/concepts/architecture/'},
+            {label: 'Providers', to: '/providers/'},
+            {label: 'Configuration', to: '/reference/configuration/'},
+          ],
+        },
+        {
+          title: 'Project',
+          items: [
+            {label: 'Website', href: 'https://openusage.sh/'},
+            {label: 'GitHub', href: 'https://github.com/janekbaraniewski/openusage'},
+            {label: 'Issues', href: 'https://github.com/janekbaraniewski/openusage/issues'},
+            {label: 'Releases', href: 'https://github.com/janekbaraniewski/openusage/releases'},
+          ],
+        },
+        {
+          title: 'More',
+          items: [
+            {label: 'Capability matrix', href: 'https://openusage.sh/docs/capability-matrix/'},
+            {label: 'OpenUsage.sh vs OpenUsage.ai', href: 'https://openusage.sh/docs/openusage-sh-vs-openusage-ai/'},
+          ],
+        },
+      ],
+      copyright: `OpenUsage is MIT licensed. © ${new Date().getFullYear()} Jan Baraniewski.`,
+    },
+    prism: {
+      theme: prismThemes.oneLight,
+      darkTheme: prismThemes.oneDark,
+      additionalLanguages: ['bash', 'json', 'yaml', 'toml', 'go', 'ini', 'diff'],
+    },
+    docs: {
+      sidebar: {
+        hideable: true,
+        autoCollapseCategories: true,
+      },
+    },
+    algolia: undefined,
+  } satisfies Preset.ThemeConfig,
+};
+
+export default config;

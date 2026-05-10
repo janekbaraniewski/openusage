@@ -42,6 +42,11 @@ website/.vite/
 website/dist/
 website/node_modules/
 website/*.tsbuildinfo
+# Docusaurus docs site
+docs/site/node_modules/
+docs/site/build/
+docs/site/.docusaurus/
+docs/site/*.tsbuildinfo
 moonshotkey.txt
 perplexitykey.txt
 # Captured HAR/cookie files for provider reverse-engineering — must never be committed

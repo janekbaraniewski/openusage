@@ -75,6 +75,24 @@ demo: deps ## Build and run the demo with dummy data (for screenshots)
 sync-tools: ## Regenerate all AI tool config files from canonical template
 	@./scripts/sync-tool-configs.sh
 
+.PHONY: docs-install
+docs-install: ## Install the docs site dependencies
+	cd docs/site && npm install
+
+.PHONY: docs-dev
+docs-dev: ## Run the docs site dev server (http://localhost:3000/docs/)
+	cd docs/site && npm run start
+
+.PHONY: docs-build
+docs-build: ## Build the docs site to docs/site/build
+	cd docs/site && npm run build
+
+.PHONY: docs-deploy
+docs-deploy: docs-build ## Build the docs site and copy into website/public/docs
+	rm -rf website/public/docs
+	cp -r docs/site/build website/public/docs
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	@rm -rf $(BIN_DIR) dist coverage.out
+	@rm -rf docs/site/build docs/site/.docusaurus

@@ -1,0 +1,236 @@
+/**
+ * OpenUsage docs theme. Built on Infima with the OpenUsage terminal palette.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue',
+    sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, SFMono-Regular,
+    Menlo, monospace;
+
+  --ifm-color-primary: #d65d0e;
+  --ifm-color-primary-dark: #b54a00;
+  --ifm-color-primary-darker: #9b3f00;
+  --ifm-color-primary-darkest: #7d3300;
+  --ifm-color-primary-light: #e07020;
+  --ifm-color-primary-lighter: #ec8536;
+  --ifm-color-primary-lightest: #f3a567;
+
+  --ifm-code-font-size: 90%;
+  --ifm-heading-font-weight: 700;
+  --ifm-h1-font-size: 2.4rem;
+  --ifm-h2-font-size: 1.7rem;
+  --ifm-h3-font-size: 1.25rem;
+  --ifm-leading: 1.65;
+
+  --docusaurus-highlighted-code-line-bg: rgba(255, 102, 0, 0.12);
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-navbar-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  --ifm-toc-border-color: rgba(0, 0, 0, 0.08);
+  --ifm-blockquote-border-color: var(--ifm-color-primary);
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: #0c0e16;
+  --ifm-background-surface-color: #161928;
+  --ifm-color-primary: #ff8c42;
+  --ifm-color-primary-dark: #ff7a24;
+  --ifm-color-primary-darker: #ff7012;
+  --ifm-color-primary-darkest: #d65500;
+  --ifm-color-primary-light: #ff9e60;
+  --ifm-color-primary-lighter: #ffa86f;
+  --ifm-color-primary-lightest: #ffc197;
+
+  --ifm-navbar-background-color: rgba(12, 14, 22, 0.85);
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.07);
+  --ifm-color-content: #e4e6f0;
+  --ifm-color-content-secondary: #b0b4c8;
+  --ifm-link-color: var(--ifm-color-primary-lighter);
+  --docusaurus-highlighted-code-line-bg: rgba(255, 140, 66, 0.16);
+}
+
+/* Tighten body font, lighten captions */
+.markdown {
+  font-size: 1rem;
+}
+
+.markdown h1 + p,
+.markdown h2 + p {
+  color: var(--ifm-color-content-secondary);
+}
+
+/* Code blocks */
+.theme-code-block {
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+[data-theme='dark'] .theme-code-block {
+  background: #11131c !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+/* Inline code */
+code {
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+
+[data-theme='dark'] code {
+  background: rgba(255, 140, 66, 0.12);
+  color: #ffb38a;
+}
+
+/* Tables */
+table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+[data-theme='dark'] table th {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Admonitions: tighten + brand */
+.theme-admonition {
+  border-radius: 8px;
+}
+
+/* Hero on landing page */
+.hero--openusage {
+  background: linear-gradient(180deg, #1d2021 0%, #0c0e16 100%);
+  color: #ebdbb2;
+  padding: 5rem 0 4rem;
+}
+
+.hero--openusage .hero__title {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 3rem;
+  letter-spacing: -0.02em;
+}
+
+.hero--openusage .hero__subtitle {
+  color: #d3c5a4;
+  font-size: 1.25rem;
+  max-width: 720px;
+  margin: 1rem auto 2rem;
+}
+
+/* Pill-style status row */
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-family: var(--ifm-font-family-monospace);
+  background: rgba(255, 140, 66, 0.1);
+  color: var(--ifm-color-primary-lighter);
+  border: 1px solid rgba(255, 140, 66, 0.3);
+}
+
+/* Card grid for landing pages */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.card {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 10px;
+  padding: 1.25rem;
+  background: var(--ifm-background-surface-color);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--ifm-color-primary);
+}
+
+.card h3 {
+  margin-top: 0;
+  margin-bottom: 0.4rem;
+  font-size: 1.05rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--ifm-color-content-secondary);
+  font-size: 0.92rem;
+}
+
+.card a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Provider catalog grid */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 2rem;
+}
+
+.provider-grid a {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-color-content);
+  text-decoration: none;
+  transition: border-color 0.12s ease;
+}
+
+.provider-grid a:hover {
+  border-color: var(--ifm-color-primary);
+}
+
+.provider-grid a strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.provider-grid a span {
+  font-size: 0.83rem;
+  color: var(--ifm-color-content-secondary);
+  font-family: var(--ifm-font-family-monospace);
+}
+
+/* Keybind kbd */
+kbd {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82em;
+  border: 1px solid var(--ifm-toc-border-color);
+  background: rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] kbd {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+}

@@ -1,0 +1,150 @@
+import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+
+const sidebars: SidebarsConfig = {
+  docsSidebar: [
+    'index',
+    {
+      type: 'category',
+      label: 'Getting Started',
+      collapsed: false,
+      link: {type: 'generated-index', slug: '/getting-started'},
+      items: [
+        'getting-started/install',
+        'getting-started/quickstart',
+        'getting-started/first-run',
+        'getting-started/upgrade',
+        'getting-started/uninstall',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Concepts',
+      collapsed: false,
+      link: {type: 'generated-index', slug: '/concepts'},
+      items: [
+        'concepts/architecture',
+        'concepts/auto-detection',
+        'concepts/providers',
+        'concepts/accounts',
+        'concepts/snapshots',
+        'concepts/direct-vs-daemon',
+        'concepts/telemetry',
+        'concepts/time-windows',
+        'concepts/themes',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Providers',
+      collapsed: true,
+      link: {type: 'doc', id: 'providers/index'},
+      items: [
+        {
+          type: 'category',
+          label: 'Coding agents',
+          items: [
+            'providers/claude-code',
+            'providers/cursor',
+            'providers/copilot',
+            'providers/codex',
+            'providers/gemini-cli',
+            'providers/opencode',
+            'providers/ollama',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'API platforms',
+          items: [
+            'providers/openai',
+            'providers/anthropic',
+            'providers/openrouter',
+            'providers/groq',
+            'providers/mistral',
+            'providers/deepseek',
+            'providers/moonshot',
+            'providers/xai',
+            'providers/zai',
+            'providers/gemini-api',
+            'providers/alibaba-cloud',
+          ],
+        },
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Daemon & Telemetry',
+      collapsed: true,
+      link: {type: 'generated-index', slug: '/daemon'},
+      items: [
+        'daemon/overview',
+        'daemon/install',
+        'daemon/integrations',
+        'daemon/storage',
+        'daemon/troubleshooting',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Customization',
+      collapsed: true,
+      link: {type: 'generated-index', slug: '/customization'},
+      items: [
+        'customization/themes',
+        'customization/external-themes',
+        'customization/widgets',
+        'customization/keybindings',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Reference',
+      collapsed: true,
+      link: {type: 'generated-index', slug: '/reference'},
+      items: [
+        'reference/cli',
+        'reference/configuration',
+        'reference/env-vars',
+        'reference/paths',
+        'reference/keybindings',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Guides',
+      collapsed: true,
+      link: {type: 'generated-index', slug: '/guides'},
+      items: [
+        'guides/multi-account',
+        'guides/team-tracking',
+        'guides/cost-attribution',
+        'guides/headless-servers',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Troubleshooting',
+      collapsed: true,
+      link: {type: 'generated-index', slug: '/troubleshooting'},
+      items: [
+        'troubleshooting/common-issues',
+        'troubleshooting/provider-not-detected',
+        'troubleshooting/daemon-issues',
+        'troubleshooting/debug-mode',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Contributing',
+      collapsed: true,
+      items: [
+        'contributing/overview',
+        'contributing/add-provider',
+        'contributing/development',
+      ],
+    },
+    'faq',
+  ],
+};
+
+export default sidebars;
