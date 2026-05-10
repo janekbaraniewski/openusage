@@ -161,7 +161,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `OpenUsage is MIT licensed. © ${new Date().getFullYear()} Jan Baraniewski.`,
+      copyright: `OpenUsage is MIT licensed. © ${new Date().getFullYear()} <a href="https://baraniewski.com" target="_blank" rel="noopener">baraniewski.com</a>.`,
     },
     prism: {
       theme: prismThemes.oneLight,
