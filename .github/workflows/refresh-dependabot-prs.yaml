@@ -32,11 +32,26 @@ jobs:
               error.status === 422 &&
               /no new commits|not behind|up to date/i.test(error.message);
 
+            const baseShaByRef = new Map();
+
+            async function latestBaseSha(pull) {
+              if (!baseShaByRef.has(pull.base.ref)) {
+                const response = await github.rest.repos.getBranch({
+                  owner,
+                  repo,
+                  branch: pull.base.ref,
+                });
+                baseShaByRef.set(pull.base.ref, response.data.commit.sha);
+              }
+              return baseShaByRef.get(pull.base.ref);
+            }
+
             async function compareWithBase(pull) {
+              const baseSha = await latestBaseSha(pull);
               const response = await github.rest.repos.compareCommitsWithBasehead({
                 owner,
                 repo,
-                basehead: `${pull.base.sha}...${pull.head.sha}`,
+                basehead: `${baseSha}...${pull.head.sha}`,
               });
               return response.data;
             }

@@ -3,6 +3,7 @@ name: Dependabot rebase open PRs on main update
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
