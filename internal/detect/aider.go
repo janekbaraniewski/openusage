@@ -174,7 +174,12 @@ func adoptAiderYAML(result *Result, path string) {
 		value := strings.TrimSpace(entry[eq+1:])
 		mapping, ok := envKeyByAiderShortName[shortName]
 		if !ok {
-			log.Printf("[detect] aider %s: unknown provider %q in api-key list, skipping", path, shortName)
+			// Don't echo the user's untrusted entry token back into the log
+			// (CodeQL flags APIKeyList → log as a clear-text-secret flow even
+			// for the left-of-`=` provider tag, since tainting is coarse).
+			// A generic message is enough; the path is already in the log
+			// for users who want to inspect the file directly.
+			log.Printf("[detect] aider %s: unknown provider in api-key list, skipping", path)
 			continue
 		}
 		if value == "" {
