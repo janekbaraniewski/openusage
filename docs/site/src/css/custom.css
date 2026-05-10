@@ -91,11 +91,23 @@
    --ifm-font-family-base: 'Inter', system-ui, ...
 */
 
-/* Navbar */
+/* Navbar — keep this simple. Avoid backdrop-filter, which creates a stacking
+   context that hides the mobile sidebar drawer in iOS WKWebView. */
 .navbar {
-  backdrop-filter: saturate(180%) blur(16px);
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+[data-theme='dark'] .navbar {
+  background: rgba(12, 12, 12, 0.96);
+}
+
+/* Mobile sidebar drawer — make absolutely sure it sits above page content. */
+.navbar-sidebar {
+  z-index: 1000;
+}
+
+.navbar-sidebar__backdrop {
+  z-index: 999;
 }
 
 /* Mobile sidebar toggle (hamburger) — make sure it's visible on small viewports
