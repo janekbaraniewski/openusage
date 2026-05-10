@@ -62,7 +62,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			apiCh <- apiResult{snap: &apiSnap, err: err}
 		}()
 	} else {
-		apiCh <- apiResult{err: fmt.Errorf("no token")}
+		apiCh <- apiResult{err: fmt.Errorf("cursor: no token")}
 	}
 
 	if acct.RuntimeHints == nil {

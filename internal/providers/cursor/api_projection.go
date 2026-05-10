@@ -286,7 +286,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	_, hasSpendLimit := snap.Metrics["spend_limit"]
 	_, hasBillingTotal := snap.Metrics["billing_total_cost"]
 	if !hasPlanSpend && !hasSpendLimit && !hasBillingTotal && !hasPeriodUsage && !aggApplied {
-		return fmt.Errorf("all billing API endpoints failed")
+		return fmt.Errorf("cursor: all billing API endpoints failed")
 	}
 
 	return nil

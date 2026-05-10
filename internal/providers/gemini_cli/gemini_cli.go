@@ -17,6 +17,15 @@ import (
 )
 
 const (
+	// oauthClientID and oauthClientSecret are the well-known public client
+	// credentials shipped with Google's open-source Gemini CLI (the same
+	// values the upstream binary embeds). They identify the *application*,
+	// not any user, and they're not secret in any meaningful sense — the
+	// CLI distributes them in the public binary. We mirror them here so
+	// our refresh-token exchange against `tokenEndpoint` accepts the
+	// access tokens minted by the user's own `gemini auth login`.
+	// Override at build time only if you've registered a private OAuth
+	// client and want refreshes to flow through your client_id quota.
 	oauthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 	oauthClientSecret = "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"
 	tokenEndpoint     = "https://oauth2.googleapis.com/token"

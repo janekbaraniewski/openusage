@@ -31,7 +31,7 @@ func (p *Provider) callDashboardAPIWithBody(ctx context.Context, token, method s
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return json.NewDecoder(resp.Body).Decode(result)
@@ -54,7 +54,7 @@ func (p *Provider) callRESTAPI(ctx context.Context, token, path string, result i
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	return json.NewDecoder(resp.Body).Decode(result)
@@ -76,7 +76,7 @@ func (p *Provider) doPost(ctx context.Context, token, url string, result interfa
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return json.NewDecoder(resp.Body).Decode(result)
