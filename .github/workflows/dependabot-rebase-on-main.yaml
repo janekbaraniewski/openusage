@@ -5,26 +5,15 @@ on:
     branches: [main]
 
 permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+  contents: read
+  issues: write
+  pull-requests: read
 
 jobs:
-  refresh-dependabot-prs:
-    name: Update open Dependabot PR branches
-    uses: ./.github/workflows/refresh-pr-branches.yaml
-    with:
-      author-login: dependabot[bot]
+  request-dependabot-rebases:
+    name: Request open Dependabot PR rebases
+    uses: ./.github/workflows/request-dependabot-rebases.yaml
     permissions:
-      contents: write
-      pull-requests: write
-
-  dispatch-required-checks:
-    needs: refresh-dependabot-prs
-    if: needs.refresh-dependabot-prs.outputs.refs-json != '[]'
-    uses: ./.github/workflows/dispatch-required-pr-checks.yaml
-    with:
-      refs-json: ${{ needs.refresh-dependabot-prs.outputs.refs-json }}
-    permissions:
-      actions: write
       contents: read
+      issues: write
+      pull-requests: read

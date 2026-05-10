@@ -1,0 +1,103 @@
+name: Request Dependabot rebases
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  request:
+    name: Request native Dependabot updates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const duplicateWindowMs = 30 * 60 * 1000;
+            const duplicateCutoff = Date.now() - duplicateWindowMs;
+
+            async function compareWithBase(pull) {
+              const response = await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${pull.base.sha}...${pull.head.sha}`,
+              });
+              return response.data;
+            }
+
+            async function hasRecentCommand(pullNumber, command) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: pullNumber,
+                per_page: 100,
+              });
+              return comments.some((comment) =>
+                comment.body?.trim() === command &&
+                Date.parse(comment.created_at) >= duplicateCutoff
+              );
+            }
+
+            async function hasNonDependabotCommits(pullNumber) {
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              });
+              return commits.some((commit) => commit.author?.login !== 'dependabot[bot]');
+            }
+
+            async function requestDependabot(pull, command) {
+              if (await hasRecentCommand(pull.number, command)) {
+                core.info(`PR #${pull.number}: ${command} was already requested recently.`);
+                return;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull.number,
+                body: command,
+              });
+              core.notice(`Requested ${command} on PR #${pull.number}.`);
+            }
+
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            for (const pullSummary of pulls.filter((pull) => pull.user?.login === 'dependabot[bot]')) {
+              core.startGroup(`PR #${pullSummary.number}`);
+              try {
+                const response = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: pullSummary.number,
+                });
+                const pull = response.data;
+
+                if (pull.mergeable_state === 'dirty' || await hasNonDependabotCommits(pull.number)) {
+                  await requestDependabot(pull, '@dependabot recreate');
+                  continue;
+                }
+
+                const comparison = await compareWithBase(pull);
+                if (comparison.behind_by > 0 || pull.mergeable_state === 'behind') {
+                  await requestDependabot(pull, '@dependabot rebase');
+                } else {
+                  core.info(`PR #${pull.number} is not behind main.`);
+                }
+              } catch (error) {
+                core.warning(`Could not request Dependabot update for PR #${pullSummary.number}: ${error.message}`);
+              } finally {
+                core.endGroup();
+              }
+            }
