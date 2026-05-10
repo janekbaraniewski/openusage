@@ -98,6 +98,36 @@
   border-bottom: 1px solid var(--ifm-toc-border-color);
 }
 
+/* Mobile sidebar toggle (hamburger) — make sure it's visible on small viewports
+   and high-contrast against the dark navbar. */
+@media (max-width: 996px) {
+  .navbar__toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0.5rem;
+    color: var(--ifm-color-content);
+    width: 2rem;
+    height: 2rem;
+    border-radius: 6px;
+  }
+
+  .navbar__toggle:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  [data-theme='dark'] .navbar__toggle {
+    color: var(--ou-text);
+  }
+
+  /* The toggle's SVG inherits currentColor — make absolutely sure */
+  .navbar__toggle svg,
+  .navbar__toggle svg * {
+    fill: currentColor;
+    stroke: currentColor;
+  }
+}
+
 .navbar__title {
   font-weight: 700;
   letter-spacing: -0.02em;
