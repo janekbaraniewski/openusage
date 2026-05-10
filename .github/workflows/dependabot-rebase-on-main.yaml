@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -13,35 +14,30 @@ jobs:
     name: Update open Dependabot PR branches
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Update each open Dependabot PR's branch from main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # We do NOT comment "@dependabot rebase" — Dependabot rejects
-          # commands from the github-actions bot identity ("Sorry, only
-          # users with push access can use that command"). Instead we
-          # call GitHub's native update-branch API, which merges main
-          # into the PR's head branch directly. The merge commit is
-          # squashed away when the PR auto-merges, so the user-visible
-          # commit history stays clean.
           prs=$(gh pr list \
             --state open \
             --author "app/dependabot" \
-            --json number \
-            --jq '.[].number')
+            --json number,headRefName \
+            --jq '.[] | "\(.number)\t\(.headRefName)"')
 
           if [ -z "$prs" ]; then
             echo "No open Dependabot PRs."
             exit 0
           fi
 
-          for pr in $prs; do
+          while IFS=$'\t' read -r pr ref; do
             echo "::group::PR #$pr"
-            # 422 if the PR is already up to date with main; that's a no-op
-            # for us so suppress non-zero exit on that case.
-            if ! gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1 | tee /tmp/api.out; then
+            if gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1 | tee /tmp/api.out; then
+              ./scripts/dispatch-required-pr-checks.sh "$ref"
+            else
               if grep -q "no new commits on the base branch" /tmp/api.out; then
                 echo "(already current)"
               else
@@ -49,4 +45,4 @@ jobs:
               fi
             fi
             echo "::endgroup::"
-          done
+          done <<< "$prs"

@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -13,15 +14,36 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
-          # Use a PAT (or GitHub App token) so commits release-please pushes
-          # to its branch trigger downstream workflows (CI, Lychee, govulncheck,
-          # CodeQL). Falls back to GITHUB_TOKEN when no PAT is configured —
-          # in that mode the release PR will sit blocked on missing required
-          # checks and need an admin-merge.
-          #
-          # See docs/CI_AUTOMATION_BOTS.md for PAT scope + secret-name details.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Refresh open release PRs and dispatch required checks
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr list \
+            --state open \
+            --label "autorelease: pending" \
+            --json number,headRefName \
+            --jq '.[] | "\(.number)\t\(.headRefName)"' |
+            while IFS=$'\t' read -r pr ref; do
+              if [ -z "$ref" ]; then
+                continue
+              fi
+
+              if ! gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1 | tee /tmp/release-pr-update.out; then
+                if ! grep -q "no new commits on the base branch" /tmp/release-pr-update.out; then
+                  echo "::warning::update-branch failed for release PR #$pr — see log"
+                  continue
+                fi
+              fi
+
+              ./scripts/dispatch-required-pr-checks.sh "$ref"
+            done

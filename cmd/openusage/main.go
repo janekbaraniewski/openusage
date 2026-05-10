@@ -7,12 +7,13 @@ import (
 	"os"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/version"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	if os.Getenv("OPENUSAGE_DEBUG") != "" {
+	if core.DebugEnabled() {
 		log.SetOutput(os.Stderr)
 	} else {
 		log.SetOutput(io.Discard)

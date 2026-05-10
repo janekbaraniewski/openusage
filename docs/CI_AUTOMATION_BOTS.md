@@ -119,7 +119,9 @@ Benefit: the v0.10.1 / v0.10.2 cuts we just did become a single click on a PR.
 
 ### 7. Dependabot rebase-on-main-update workflow
 
-A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and comments `@dependabot rebase` on every open Dependabot PR. Without this, after one Dependabot PR auto-merges, the others stay `BEHIND` indefinitely (GitHub doesn't auto-rebase even when auto-merge is enabled, and the `strict: true` branch-protection setting blocks merging behind branches). Standard pattern; fixes the cascade.
+A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and updates open Dependabot PRs via GitHub's `update-branch` API.
+
+Important detail: the update commit is authored by `github-actions[bot]`. GitHub will not automatically chain `pull_request` workflows from that bot-authored head update, so strict required checks would otherwise stall forever on the new SHA. To keep the PR mergeable, the rebase workflow immediately re-dispatches the required workflows (`CI`, `Dependency Review`, `govulncheck`, `Lychee`, `CodeQL`) against the refreshed branch.
 
 ### 8. Stale issue/PR bot
 
@@ -150,21 +152,14 @@ For auto-merge to work, the repo needs:
 
 For `release-please`:
 
-- The workflow needs `contents: write` and `pull-requests: write` on the GITHUB_TOKEN — already granted for the existing release workflow.
-- **`RELEASE_PLEASE_TOKEN` secret** — a fine-grained PAT (or GitHub App token) that lets release-please push commits in a way that *does* trigger downstream workflows (CI, Lychee, govulncheck, CodeQL). Without it, release-please uses `GITHUB_TOKEN` and its pushes are bot-attributed; GitHub Actions explicitly will not chain workflow runs from bot pushes, so the release PR sits with required checks never reporting and stays unmergeable except via admin-merge.
+- The workflow needs `contents: write`, `pull-requests: write`, and `actions: write` on the `GITHUB_TOKEN`.
+- Release PR commits are authored by `github-actions[bot]`, so the same "no chained workflow runs from bot-authored commits" rule applies there too.
+- Instead of relying on a separate PAT, the workflow now keeps any open release PR branch current with `main` and then dispatches the required PR workflows itself.
 
-  To create the PAT:
+For manually dispatched required-check workflows:
 
-  1. Go to <https://github.com/settings/personal-access-tokens/new> (fine-grained PAT).
-  2. **Resource owner**: yourself. **Repository access**: only `janekbaraniewski/openusage`.
-  3. **Repository permissions**:
-     - **Contents** → Read and write
-     - **Pull requests** → Read and write
-     - **Workflows** → Read and write
-  4. Set an expiry (90d is fine; longer if you trust your machine).
-  5. Save the token. Add as secret `RELEASE_PLEASE_TOKEN` in repo Settings → Secrets and variables → Actions.
-
-  The workflow falls back to `GITHUB_TOKEN` when the PAT secret isn't set — so the project keeps working before the secret is configured, just with the admin-merge step.
+- `CI`, `Dependency Review`, and `CodeQL` need `workflow_dispatch` enabled.
+- `Dependency Review` must set `base-ref`/`head-ref` explicitly on `workflow_dispatch`, because outside `pull_request` events GitHub does not infer the comparison pair for the action.
 
 For Scorecard:
 

@@ -20,7 +20,7 @@ import (
 )
 
 func runDashboard(cfg config.Config) {
-	verbose := os.Getenv("OPENUSAGE_DEBUG") != ""
+	verbose := core.DebugEnabled()
 
 	if err := tui.LoadThemes(config.ConfigDir()); err != nil && verbose {
 		log.Printf("theme load: %v", err)

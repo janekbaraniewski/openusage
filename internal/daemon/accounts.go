@@ -43,7 +43,7 @@ func ResolveAccounts(cfg *config.Config) []core.AccountConfig {
 
 		allAccounts = core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 
-		if os.Getenv("OPENUSAGE_DEBUG") != "" {
+		if core.DebugEnabled() {
 			if len(result.Tools) > 0 || len(result.Accounts) > 0 {
 				log.Print(result.Summary())
 			}
