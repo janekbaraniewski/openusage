@@ -201,7 +201,7 @@ func TestProvider_Fetch_WithMockAPI(t *testing.T) {
 	}
 
 	var profile stripeProfileResp
-	err = p.callRESTAPI(context.Background(), "test-token",
+	err = p.callRESTAPI(context.Background(), server.URL, "test-token",
 		"", &profile) // Won't work with test server directly
 	req, _ := http.NewRequest("GET", server.URL+"/auth/full_stripe_profile", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
@@ -317,13 +317,8 @@ func TestProvider_Fetch_ExposesPlanSplitAndCacheTokenMetrics(t *testing.T) {
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
-
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
-	snap, err := p.Fetch(context.Background(), testCursorAccount("cursor-split-test", "test-token", nil))
+	snap, err := p.Fetch(context.Background(), testCursorAccountWithBase("cursor-split-test", "test-token", server.URL, nil))
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -395,13 +390,8 @@ func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointErrors(
 		http.Error(w, "temporary upstream error", http.StatusInternalServerError)
 	}))
 	defer server.Close()
-
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
-	acct := testCursorAccount("cursor-cache-error", "test-token", nil)
+	acct := testCursorAccountWithBase("cursor-cache-error", "test-token", server.URL, nil)
 
 	first, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -447,13 +437,8 @@ func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointReturns
 		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
 	}))
 	defer server.Close()
-
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
-	acct := testCursorAccount("cursor-cache-empty", "test-token", nil)
+	acct := testCursorAccountWithBase("cursor-cache-empty", "test-token", server.URL, nil)
 
 	first, err := p.Fetch(context.Background(), acct)
 	if err != nil {
@@ -494,15 +479,12 @@ func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
 	}))
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID:       "cursor-api-local-merge",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 		RuntimeHints: map[string]string{
 			"tracking_db": trackingDBPath,
 		},
@@ -604,10 +586,6 @@ func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *test
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -616,6 +594,7 @@ func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *test
 		ID:       "cursor-optional-timeout",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 		RuntimeHints: map[string]string{
 			"tracking_db": trackingDBPath,
 		},

@@ -246,15 +246,12 @@ func TestProvider_Fetch_PlanSpendGaugeUsesIncludedAmountWhenNoLimit(t *testing.T
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID:       "cursor-gauge-test",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 	})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
@@ -324,10 +321,6 @@ func TestProvider_Fetch_CachedBillingMetricsRestoreOnAPIFailure(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	// Create state DB with composer cost data.
 	stateDBPath := filepath.Join(t.TempDir(), "state.vscdb")
 	db, err := sql.Open("sqlite3", stateDBPath)
@@ -345,6 +338,7 @@ func TestProvider_Fetch_CachedBillingMetricsRestoreOnAPIFailure(t *testing.T) {
 		ID:       "cursor-cache-billing",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 		RuntimeHints: map[string]string{
 			"state_db": stateDBPath,
 		},
@@ -442,15 +436,12 @@ func TestProvider_Fetch_PartialAPIFailure_PeriodUsageDown(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
 	acct := core.AccountConfig{
 		ID:       "cursor-partial",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 	}
 
 	// First fetch: everything works.
@@ -522,15 +513,12 @@ func TestProvider_Fetch_NoPeriodUsage_AggregationCreatesGauge(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	prevBase := cursorAPIBase
-	cursorAPIBase = server.URL
-	defer func() { cursorAPIBase = prevBase }()
-
 	p := New()
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID:       "cursor-no-period",
 		Provider: "cursor",
 		Token:    "test-token",
+		BaseURL:  server.URL,
 	})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -631,7 +619,7 @@ func TestProvider_Fetch_LocalOnlyCachedLimitCreatesPlanSpendGauge(t *testing.T) 
 
 	// Pre-populate the cache with an effective limit from a previous API call.
 	p.mu.Lock()
-	p.modelAggregationCache["test-cached"] = cachedModelAggregation{
+	p.accountCache["test-cached"] = cachedAccountState{
 		EffectiveLimitUSD: 500.0,
 	}
 	p.mu.Unlock()

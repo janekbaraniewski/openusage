@@ -19,3 +19,12 @@ func testCursorAccount(id, token string, extra map[string]string) core.AccountCo
 	}
 	return acct
 }
+
+// testCursorAccountWithBase mirrors testCursorAccount but also sets BaseURL,
+// used by tests that point Fetch at an httptest server. Replaces the
+// pre-const-conversion idiom of mutating package-level cursorAPIBase.
+func testCursorAccountWithBase(id, token, baseURL string, extra map[string]string) core.AccountConfig {
+	acct := testCursorAccount(id, token, extra)
+	acct.BaseURL = baseURL
+	return acct
+}

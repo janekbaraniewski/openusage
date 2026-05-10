@@ -12,7 +12,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.UsageSnapshot) error {
+func (p *Provider) fetchFromAPI(ctx context.Context, baseURL, token string, snap *core.UsageSnapshot) error {
 	var (
 		hasPeriodUsage                  bool
 		periodUsage                     currentPeriodUsageResp
@@ -20,7 +20,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 		su                              spendLimitUsage
 		totalSpendDollars, limitDollars float64
 	)
-	if err := p.callDashboardAPI(ctx, token, "GetCurrentPeriodUsage", &periodUsage); err != nil {
+	if err := p.callDashboardAPI(ctx, baseURL, token, "GetCurrentPeriodUsage", &periodUsage); err != nil {
 		log.Printf("[cursor] GetCurrentPeriodUsage failed (continuing with other endpoints): %v", err)
 		snap.Raw["period_usage_error"] = err.Error()
 	} else {
@@ -154,7 +154,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	}
 
 	var planInfo planInfoResp
-	if err := p.callDashboardAPI(ctx, token, "GetPlanInfo", &planInfo); err == nil {
+	if err := p.callDashboardAPI(ctx, baseURL, token, "GetPlanInfo", &planInfo); err == nil {
 		snap.Raw["plan_name"] = planInfo.PlanInfo.PlanName
 		snap.Raw["plan_price"] = planInfo.PlanInfo.Price
 		snap.Raw["plan_billing_cycle_end"] = formatTimestamp(planInfo.PlanInfo.BillingCycleEnd)
@@ -179,7 +179,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	}
 
 	var aggUsage aggregatedUsageResp
-	aggErr := p.callDashboardAPI(ctx, token, "GetAggregatedUsageEvents", &aggUsage)
+	aggErr := p.callDashboardAPI(ctx, baseURL, token, "GetAggregatedUsageEvents", &aggUsage)
 	aggApplied := false
 	if aggErr == nil {
 		aggApplied = applyModelAggregations(snap, aggUsage.Aggregations)
@@ -214,7 +214,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	}
 
 	var hardLimit hardLimitResp
-	if err := p.callDashboardAPI(ctx, token, "GetHardLimit", &hardLimit); err == nil {
+	if err := p.callDashboardAPI(ctx, baseURL, token, "GetHardLimit", &hardLimit); err == nil {
 		if hardLimit.NoUsageBasedAllowed {
 			snap.Raw["usage_based_billing"] = "disabled"
 		} else {
@@ -223,7 +223,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	}
 
 	var profile stripeProfileResp
-	if err := p.callRESTAPI(ctx, token, "/auth/full_stripe_profile", &profile); err == nil {
+	if err := p.callRESTAPI(ctx, baseURL, token, "/auth/full_stripe_profile", &profile); err == nil {
 		snap.Raw["membership_type"] = profile.MembershipType
 		snap.Raw["is_team_member"] = strconv.FormatBool(profile.IsTeamMember)
 		snap.Raw["team_membership"] = profile.TeamMembershipType
@@ -234,7 +234,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 	}
 
 	var limitPolicy usageLimitPolicyResp
-	if err := p.callDashboardAPI(ctx, token, "GetUsageLimitPolicyStatus", &limitPolicy); err == nil {
+	if err := p.callDashboardAPI(ctx, baseURL, token, "GetUsageLimitPolicyStatus", &limitPolicy); err == nil {
 		snap.Raw["can_configure_spend_limit"] = strconv.FormatBool(limitPolicy.CanConfigureSpendLimit)
 		snap.Raw["limit_policy_type"] = limitPolicy.LimitType
 	}
@@ -243,7 +243,7 @@ func (p *Provider) fetchFromAPI(ctx context.Context, token string, snap *core.Us
 		teamIDStr := fmt.Sprintf("%.0f", profile.TeamID)
 		body := []byte(fmt.Sprintf(`{"teamId":"%s"}`, teamIDStr))
 		var teamMembers teamMembersResp
-		if err := p.callDashboardAPIWithBody(ctx, token, "GetTeamMembers", body, &teamMembers); err == nil {
+		if err := p.callDashboardAPIWithBody(ctx, baseURL, token, "GetTeamMembers", body, &teamMembers); err == nil {
 			var activeCount int
 			var memberNames []string
 			var ownerCount int

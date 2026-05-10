@@ -29,22 +29,28 @@ type scoredCommitsAggregate struct {
 	TotalCommits  int
 }
 
-// cursorAPIBase is Cursor's billing/usage API host.
-//
-// Kept as a var (not const) only because the existing tests mutate it via
-// `prev := cursorAPIBase; cursorAPIBase = ts.URL; defer func(){cursorAPIBase = prev}()`
-// to point at a fake httptest server. Production code never mutates it; the
-// path forward when these tests get rewritten is to thread the URL through
-// AccountConfig.BaseURL like other providers and make this a const.
-//
-//nolint:gochecknoglobals // see comment above
-var cursorAPIBase = "https://api2.cursor.sh"
+// cursorAPIBase is Cursor's billing/usage API host. Tests override via
+// AccountConfig.BaseURL — production code resolves the URL via
+// shared.ResolveBaseURL once per Fetch and threads it through the API
+// helpers as an explicit parameter.
+const cursorAPIBase = "https://api2.cursor.sh"
 
+// Provider holds three independent caches, each guarded by its own mutex:
+//
+//   - mu (RWMutex): guards accountCache, the per-account state holding the
+//     latest billing cycle, model aggregations, effective plan limit, and
+//     cached billing metrics for local-only fallback.
+//   - trackingCacheMu (Mutex): guards trackingMaxRowID + trackingRecords —
+//     incremental reads of Cursor's ai-code-tracking SQLite DB.
+//   - stateCacheMu (Mutex): guards composer/bubble/scored-commits caches —
+//     incremental reads of Cursor's state.vscdb SQLite DB.
+//
+// All three are independent; never hold more than one at a time.
 type Provider struct {
 	providerbase.Base
-	mu                    sync.RWMutex
-	clock                 core.Clock
-	modelAggregationCache map[string]cachedModelAggregation
+	mu           sync.RWMutex
+	clock        core.Clock
+	accountCache map[string]cachedAccountState
 
 	// Incremental read caches — tracking DB
 	trackingCacheMu  sync.Mutex
@@ -61,7 +67,7 @@ type Provider struct {
 	scoredCommitsAgg   *scoredCommitsAggregate
 }
 
-type cachedModelAggregation struct {
+type cachedAccountState struct {
 	BillingCycleStart string
 	BillingCycleEnd   string
 	Aggregations      []modelAggregation
@@ -90,7 +96,7 @@ func New() *Provider {
 			Dashboard: dashboardWidget(),
 		}),
 		clock:                 core.SystemClock{},
-		modelAggregationCache: make(map[string]cachedModelAggregation),
+		accountCache: make(map[string]cachedAccountState),
 	}
 }
 

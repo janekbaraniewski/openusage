@@ -9,13 +9,13 @@ import (
 	"net/http"
 )
 
-func (p *Provider) callDashboardAPI(ctx context.Context, token, method string, result interface{}) error {
-	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", cursorAPIBase, method)
+func (p *Provider) callDashboardAPI(ctx context.Context, baseURL, token, method string, result interface{}) error {
+	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", baseURL, method)
 	return p.doPost(ctx, token, url, result)
 }
 
-func (p *Provider) callDashboardAPIWithBody(ctx context.Context, token, method string, body []byte, result interface{}) error {
-	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", cursorAPIBase, method)
+func (p *Provider) callDashboardAPIWithBody(ctx context.Context, baseURL, token, method string, body []byte, result interface{}) error {
+	url := fmt.Sprintf("%s/aiserver.v1.DashboardService/%s", baseURL, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -37,8 +37,8 @@ func (p *Provider) callDashboardAPIWithBody(ctx context.Context, token, method s
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-func (p *Provider) callRESTAPI(ctx context.Context, token, path string, result interface{}) error {
-	url := cursorAPIBase + path
+func (p *Provider) callRESTAPI(ctx context.Context, baseURL, token, path string, result interface{}) error {
+	url := baseURL + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
@@ -41,6 +42,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if token == "" && stateDBPath != "" {
 		token = extractTokenFromStateDB(stateDBPath)
 	}
+	baseURL := shared.ResolveBaseURL(acct, cursorAPIBase)
 
 	type apiResult struct {
 		snap *core.UsageSnapshot
@@ -58,7 +60,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 				Raw:         make(map[string]string),
 				DailySeries: make(map[string][]core.TimePoint),
 			}
-			err := p.fetchFromAPI(apiCtx, token, &apiSnap)
+			err := p.fetchFromAPI(apiCtx, baseURL, token, &apiSnap)
 			apiCh <- apiResult{snap: &apiSnap, err: err}
 		}()
 	} else {

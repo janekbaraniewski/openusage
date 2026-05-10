@@ -15,19 +15,19 @@ func (p *Provider) storeModelAggregationCache(accountID, billingCycleStart, bill
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.modelAggregationCache == nil {
-		p.modelAggregationCache = make(map[string]cachedModelAggregation)
+	if p.accountCache == nil {
+		p.accountCache = make(map[string]cachedAccountState)
 	}
-	entry := cachedModelAggregation{
+	entry := cachedAccountState{
 		BillingCycleStart: billingCycleStart,
 		BillingCycleEnd:   billingCycleEnd,
 		Aggregations:      copied,
 		EffectiveLimitUSD: effectiveLimitUSD,
 	}
-	if prev, ok := p.modelAggregationCache[accountID]; ok && len(prev.BillingMetrics) > 0 {
+	if prev, ok := p.accountCache[accountID]; ok && len(prev.BillingMetrics) > 0 {
 		entry.BillingMetrics = prev.BillingMetrics
 	}
-	p.modelAggregationCache[accountID] = entry
+	p.accountCache[accountID] = entry
 }
 
 func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, billingCycleEnd string, snap *core.UsageSnapshot) bool {
@@ -36,7 +36,7 @@ func (p *Provider) applyCachedModelAggregations(accountID, billingCycleStart, bi
 	}
 
 	p.mu.RLock()
-	cached, ok := p.modelAggregationCache[accountID]
+	cached, ok := p.accountCache[accountID]
 	p.mu.RUnlock()
 	if !ok || len(cached.Aggregations) == 0 {
 		return false
@@ -89,12 +89,12 @@ func (p *Provider) storeBillingMetricsCache(accountID string, snap *core.UsageSn
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.modelAggregationCache == nil {
-		p.modelAggregationCache = make(map[string]cachedModelAggregation)
+	if p.accountCache == nil {
+		p.accountCache = make(map[string]cachedAccountState)
 	}
-	entry := p.modelAggregationCache[accountID]
+	entry := p.accountCache[accountID]
 	entry.BillingMetrics = cached
-	p.modelAggregationCache[accountID] = entry
+	p.accountCache[accountID] = entry
 }
 
 func (p *Provider) applyCachedBillingMetrics(accountID string, snap *core.UsageSnapshot) {
@@ -102,7 +102,7 @@ func (p *Provider) applyCachedBillingMetrics(accountID string, snap *core.UsageS
 		return
 	}
 	p.mu.RLock()
-	cached, ok := p.modelAggregationCache[accountID]
+	cached, ok := p.accountCache[accountID]
 	p.mu.RUnlock()
 	if !ok || len(cached.BillingMetrics) == 0 {
 		return
@@ -146,7 +146,7 @@ func (p *Provider) ensureCreditGauges(accountID string, snap *core.UsageSnapshot
 	}
 	if limitUSD <= 0 {
 		p.mu.RLock()
-		if cached, ok := p.modelAggregationCache[accountID]; ok && cached.EffectiveLimitUSD > 0 {
+		if cached, ok := p.accountCache[accountID]; ok && cached.EffectiveLimitUSD > 0 {
 			limitUSD = cached.EffectiveLimitUSD
 		}
 		p.mu.RUnlock()
