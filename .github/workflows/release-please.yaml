@@ -28,7 +28,7 @@ jobs:
     with:
       labels: "autorelease: pending"
     secrets:
-      github_token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.AUTOMATION_TOKEN }}
+      branch_refresh_token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.AUTOMATION_TOKEN }}
     permissions:
       contents: write
       pull-requests: write

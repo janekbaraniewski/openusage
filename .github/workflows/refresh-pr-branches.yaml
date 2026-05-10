@@ -14,7 +14,7 @@ on:
         type: string
         default: ""
     secrets:
-      github_token:
+      branch_refresh_token:
         description: Token used for branch updates.
         required: false
     outputs:
@@ -36,7 +36,7 @@ jobs:
       - id: refresh
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.github_token || github.token }}
+          github-token: ${{ secrets.branch_refresh_token || github.token }}
           script: |
             const { owner, repo } = context.repo;
             const authorLogin = process.env.AUTHOR_LOGIN.trim();
