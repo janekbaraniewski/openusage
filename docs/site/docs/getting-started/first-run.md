@@ -14,10 +14,10 @@ You don't need a config file. OpenUsage will create `~/.config/openusage/setting
 
 The more of the following you have on your machine, the more populated the dashboard will be:
 
-- **Coding tools**: `claude` CLI, `cursor`, `codex`, `gemini`, `gh` (with Copilot extension), `ollama`
-- **API keys** in your environment: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`, `XAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `ALIBABA_CLOUD_API_KEY`
+- **Coding tools**: `claude` CLI, `cursor`, `codex`, `gemini`, `gh` (with Copilot extension), `ollama`, `aider`
+- **API keys** — set as env vars in your shell (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`, `XAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `ALIBABA_CLOUD_API_KEY`), exported in your shell rc files (`~/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`, modular `~/.zshrc.d/*`), or stored by Aider/OpenCode/Codex in their config files. macOS keychain entries from the Claude Code CLI are also picked up.
 
-A complete list lives in [Environment variables](../reference/env-vars.md).
+A complete list of env-var names lives in [Environment variables](../reference/env-vars.md). To preview what will be detected before launch, run `openusage detect`.
 
 ## Step 1 — Launch
 

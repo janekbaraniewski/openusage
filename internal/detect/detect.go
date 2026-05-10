@@ -32,6 +32,10 @@ type Result struct {
 func AutoDetect() Result {
 	var result Result
 
+	// Phase 1: tool-binding detectors. These may populate Token directly
+	// from local stores (Cursor state.vscdb, Codex auth.json, Z.AI YAML)
+	// and register a per-tool account ID that subsequent detectors won't
+	// duplicate.
 	detectCursor(&result)
 	detectClaudeCode(&result)
 	detectCodex(&result)
@@ -41,8 +45,21 @@ func AutoDetect() Result {
 	detectGHCopilot(&result)
 	detectGeminiCLI(&result)
 
+	// Phase 2: process env vars. Most authoritative; runs before any
+	// file-based credential adoption so a freshly-set env var always
+	// overrides stale values found in dotfiles.
 	detectEnvKeys(&result)
+
+	// Phase 3: file-based credential adoption. Each detector here
+	// re-checks os.Getenv per-var so it skips anything Phase 2 already
+	// adopted, and addAccount is idempotent on account ID.
+	detectShellRC(&result)
 	detectOpenCodeAuth(&result)
+	detectAiderConfig(&result)
+
+	// Phase 4: OS keychain probes. We only annotate accounts here — the
+	// providers themselves still read the secret value at fetch time.
+	detectMacOSKeychainCredentials(&result)
 
 	return result
 }

@@ -43,6 +43,7 @@ func main() {
 	})
 	root.AddCommand(newTelemetryCommand())
 	root.AddCommand(newIntegrationsCommand())
+	root.AddCommand(newDetectCommand())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
