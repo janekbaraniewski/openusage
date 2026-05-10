@@ -110,11 +110,11 @@ func TestDetectCodex_NoAPIKey_StillEmitsCodexAccount(t *testing.T) {
 	if a.ID != "codex-cli" {
 		t.Errorf("ID = %q, want codex-cli", a.ID)
 	}
-	if a.ExtraData["email"] != "user@example.com" {
-		t.Errorf("email = %q, want user@example.com", a.ExtraData["email"])
+	if a.RuntimeHints["email"] != "user@example.com" {
+		t.Errorf("email = %q, want user@example.com", a.RuntimeHints["email"])
 	}
-	if a.ExtraData["plan_type"] != "plus" {
-		t.Errorf("plan_type = %q, want plus", a.ExtraData["plan_type"])
+	if a.RuntimeHints["plan_type"] != "plus" {
+		t.Errorf("plan_type = %q, want plus", a.RuntimeHints["plan_type"])
 	}
 }
 

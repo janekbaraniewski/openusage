@@ -273,10 +273,6 @@ func detectGHCopilot(result *Result) {
 		Provider: "copilot",
 		Auth:     "cli",
 		Binary:   binaryPath,
-		ExtraData: map[string]string{
-			"copilot_binary": copilotBin,
-			"config_dir":     copilotDir,
-		},
 		RuntimeHints: map[string]string{
 			"copilot_binary": copilotBin,
 			"config_dir":     copilotDir,
@@ -326,10 +322,10 @@ func detectGeminiCLI(result *Result) {
 		Provider:  "gemini_cli",
 		Auth:      "oauth",
 		Binary:    bin,
-		ExtraData: make(map[string]string),
+		RuntimeHints: make(map[string]string),
 	}
 	acct.SetHint("config_dir", configDir)
-	acct.ExtraData["config_dir"] = configDir
+	acct.RuntimeHints["config_dir"] = configDir
 
 	if hasAccounts {
 		if data, err := os.ReadFile(accountsFile); err == nil {
@@ -337,7 +333,7 @@ func detectGeminiCLI(result *Result) {
 				Active string `json:"active"`
 			}
 			if json.Unmarshal(data, &accounts) == nil && accounts.Active != "" {
-				acct.ExtraData["email"] = accounts.Active
+				acct.RuntimeHints["email"] = accounts.Active
 				log.Printf("[detect] Gemini CLI active account: %s", accounts.Active)
 			}
 		}
@@ -345,38 +341,100 @@ func detectGeminiCLI(result *Result) {
 
 	if v := os.Getenv("GOOGLE_CLOUD_PROJECT"); v != "" {
 		acct.SetHint("project_id", v)
-		acct.ExtraData["project_id"] = v
+		acct.RuntimeHints["project_id"] = v
 		log.Printf("[detect] Gemini CLI project from GOOGLE_CLOUD_PROJECT: %s", v)
 	} else if v := os.Getenv("GOOGLE_CLOUD_PROJECT_ID"); v != "" {
 		acct.SetHint("project_id", v)
-		acct.ExtraData["project_id"] = v
+		acct.RuntimeHints["project_id"] = v
 		log.Printf("[detect] Gemini CLI project from GOOGLE_CLOUD_PROJECT_ID: %s", v)
 	}
 
 	addAccount(result, acct)
 }
 
-var envKeyMapping = []struct {
-	EnvVar    string
-	Provider  string
-	AccountID string
-}{
-	{"OPENAI_API_KEY", "openai", "openai"},
-	{"ANTHROPIC_API_KEY", "anthropic", "anthropic"},
-	{"OPENROUTER_API_KEY", "openrouter", "openrouter"},
-	{"GROQ_API_KEY", "groq", "groq"},
-	{"MISTRAL_API_KEY", "mistral", "mistral"},
-	{"DEEPSEEK_API_KEY", "deepseek", "deepseek"},
-	{"MOONSHOT_API_KEY", "moonshot", "moonshot-ai"},
-	{"XAI_API_KEY", "xai", "xai"},
-	{"ZAI_API_KEY", "zai", "zai"},
-	{"ZHIPUAI_API_KEY", "zai", "zhipuai-auto"},
-	{"ZEN_API_KEY", "opencode", "opencode"},
-	{"OPENCODE_API_KEY", "opencode", "opencode"},
-	{"GEMINI_API_KEY", "gemini_api", "gemini-api"},
-	{"GOOGLE_API_KEY", "gemini_api", "gemini-google"},
-	{"OLLAMA_API_KEY", "ollama", "ollama-cloud"},
-	{"ALIBABA_CLOUD_API_KEY", "alibaba_cloud", "alibaba_cloud"},
+// envKeyMappingEntry is the single source of truth for "this env var name
+// belongs to this provider/account". Every file-based detector that adopts a
+// raw API key — shell rc parsing, Aider .env/.aider.conf.yml, future Tier-1
+// detectors — funnels through this table.
+//
+// AiderShortNames lists the provider tokens Aider accepts in its list-form
+// `api-key:` config (e.g. `gemini=...`, `moonshotai=...`). Add new short
+// names alongside the env-var entry; aider.go looks them up via
+// envKeyByAiderShortName().
+type envKeyMappingEntry struct {
+	EnvVar          string
+	Provider        string
+	AccountID       string
+	AiderShortNames []string
+}
+
+var envKeyMapping = []envKeyMappingEntry{
+	{EnvVar: "OPENAI_API_KEY", Provider: "openai", AccountID: "openai", AiderShortNames: []string{"openai"}},
+	{EnvVar: "ANTHROPIC_API_KEY", Provider: "anthropic", AccountID: "anthropic", AiderShortNames: []string{"anthropic"}},
+	{EnvVar: "OPENROUTER_API_KEY", Provider: "openrouter", AccountID: "openrouter", AiderShortNames: []string{"openrouter"}},
+	{EnvVar: "GROQ_API_KEY", Provider: "groq", AccountID: "groq", AiderShortNames: []string{"groq"}},
+	{EnvVar: "MISTRAL_API_KEY", Provider: "mistral", AccountID: "mistral", AiderShortNames: []string{"mistral"}},
+	{EnvVar: "DEEPSEEK_API_KEY", Provider: "deepseek", AccountID: "deepseek", AiderShortNames: []string{"deepseek"}},
+	{EnvVar: "MOONSHOT_API_KEY", Provider: "moonshot", AccountID: "moonshot-ai", AiderShortNames: []string{"moonshot", "moonshotai"}},
+	{EnvVar: "XAI_API_KEY", Provider: "xai", AccountID: "xai", AiderShortNames: []string{"xai", "grok"}},
+	{EnvVar: "ZAI_API_KEY", Provider: "zai", AccountID: "zai", AiderShortNames: []string{"zai", "zhipuai"}},
+	{EnvVar: "ZHIPUAI_API_KEY", Provider: "zai", AccountID: "zhipuai-auto"},
+	{EnvVar: "ZEN_API_KEY", Provider: "opencode", AccountID: "opencode"},
+	{EnvVar: "OPENCODE_API_KEY", Provider: "opencode", AccountID: "opencode"},
+	{EnvVar: "GEMINI_API_KEY", Provider: "gemini_api", AccountID: "gemini-api", AiderShortNames: []string{"gemini", "google"}},
+	{EnvVar: "GOOGLE_API_KEY", Provider: "gemini_api", AccountID: "gemini-google"},
+	{EnvVar: "OLLAMA_API_KEY", Provider: "ollama", AccountID: "ollama-cloud"},
+	{EnvVar: "ALIBABA_CLOUD_API_KEY", Provider: "alibaba_cloud", AccountID: "alibaba_cloud", AiderShortNames: []string{"alibaba", "qwen"}},
+}
+
+// envKeyByVar indexes envKeyMapping by env-var name for O(1) lookup. Built
+// once at init.
+var envKeyByVar = func() map[string]envKeyMappingEntry {
+	out := make(map[string]envKeyMappingEntry, len(envKeyMapping))
+	for _, m := range envKeyMapping {
+		out[m.EnvVar] = m
+	}
+	return out
+}()
+
+// envKeyByAiderShortName indexes envKeyMapping by Aider's per-provider short
+// name (the left side of `<provider>=<key>` entries in `.aider.conf.yml`'s
+// `api-key:` list). Multiple short names can map to the same entry.
+var envKeyByAiderShortName = func() map[string]envKeyMappingEntry {
+	out := make(map[string]envKeyMappingEntry)
+	for _, m := range envKeyMapping {
+		for _, name := range m.AiderShortNames {
+			out[strings.ToLower(name)] = m
+		}
+	}
+	return out
+}()
+
+// adoptAPIKey is the shared "register an api_key account from a known env-var
+// mapping" path. Used by every file-based detector (shell rc, Aider .env /
+// YAML, future Tier-1 detectors). Honours "process env wins" by short-
+// circuiting when the env var is already set, defers to addAccount's
+// id-dedupe for cross-detector precedence, and emits a uniform masked log
+// line on success.
+func adoptAPIKey(result *Result, mapping envKeyMappingEntry, value, source string) {
+	if os.Getenv(mapping.EnvVar) != "" {
+		return
+	}
+	acct := core.AccountConfig{
+		ID:        mapping.AccountID,
+		Provider:  mapping.Provider,
+		Auth:      "api_key",
+		APIKeyEnv: mapping.EnvVar,
+		Token:     value,
+	}
+	acct.SetHint("credential_source", source)
+
+	before := len(result.Accounts)
+	addAccount(result, acct)
+	if len(result.Accounts) > before {
+		log.Printf("[detect] %s → %s/%s (%s=%s)",
+			source, mapping.Provider, mapping.AccountID, mapping.EnvVar, MaskKey(value))
+	}
 }
 
 func detectEnvKeys(result *Result) {
@@ -386,11 +444,7 @@ func detectEnvKeys(result *Result) {
 			continue
 		}
 
-		masked := val[:4] + "..." + val[len(val)-4:]
-		if len(val) < 10 {
-			masked = "****"
-		}
-		log.Printf("[detect] Found %s=%s", mapping.EnvVar, masked)
+		log.Printf("[detect] Found %s=%s", mapping.EnvVar, MaskKey(val))
 
 		addAccount(result, core.AccountConfig{
 			ID:        mapping.AccountID,
@@ -449,7 +503,9 @@ func ApplyCredentials(result *Result) {
 	}
 }
 
-// providerForStoredCredential maps a stored credential's account ID to its provider.
+// providerForStoredCredential maps a stored credential's account ID to its
+// provider. Linear scan over envKeyMapping; the table is small and this runs
+// at most once per stored credential.
 func providerForStoredCredential(accountID string) string {
 	for _, mapping := range envKeyMapping {
 		if mapping.AccountID == accountID {

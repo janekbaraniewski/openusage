@@ -13,7 +13,7 @@ func TestBuildCollectors_ScopesConfiguredAccount(t *testing.T) {
 		{
 			ID:       "codex-main",
 			Provider: "codex",
-			ExtraData: map[string]string{
+			RuntimeHints: map[string]string{
 				"sessions_dir": "/tmp/codex-main",
 			},
 		},
@@ -62,14 +62,14 @@ func TestResolveTelemetrySourceOptionsFromAccounts_UsesExplicitAccount(t *testin
 		{
 			ID:       "codex-a",
 			Provider: "codex",
-			ExtraData: map[string]string{
+			RuntimeHints: map[string]string{
 				"sessions_dir": "/tmp/codex-a",
 			},
 		},
 		{
 			ID:       "codex-b",
 			Provider: "codex",
-			ExtraData: map[string]string{
+			RuntimeHints: map[string]string{
 				"sessions_dir": "/tmp/codex-b",
 			},
 		},

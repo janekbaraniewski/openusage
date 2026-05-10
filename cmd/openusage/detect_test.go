@@ -9,6 +9,9 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/detect"
 )
 
+// MaskKey behaviour is covered in internal/detect/mask_test.go. The test
+// below just smoke-tests that maskKey is reachable through the report path.
+
 func TestPrintDetectReport_RendersAccountsAndMissing(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -86,7 +89,7 @@ func TestPrintDetectReport_EmptyResult(t *testing.T) {
 	}
 }
 
-func TestMaskToken(t *testing.T) {
+func TestMaskKeyEndToEnd(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
@@ -96,8 +99,8 @@ func TestMaskToken(t *testing.T) {
 		{"   sk-test1234567890   ", "sk-t...7890"},
 	}
 	for _, tc := range cases {
-		if got := maskToken(tc.in); got != tc.want {
-			t.Errorf("maskToken(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := detect.MaskKey(tc.in); got != tc.want {
+			t.Errorf("detect.MaskKey(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

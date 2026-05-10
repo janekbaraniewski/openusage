@@ -235,11 +235,11 @@ api_key: test-zai-token
 	if acct.Token != "test-zai-token" {
 		t.Fatalf("token = %q, want test-zai-token", acct.Token)
 	}
-	if acct.ExtraData == nil || acct.ExtraData["plan_type"] != "glm_coding_plan_china" {
-		t.Fatalf("plan_type = %q, want glm_coding_plan_china", acct.ExtraData["plan_type"])
+	if acct.RuntimeHints == nil || acct.RuntimeHints["plan_type"] != "glm_coding_plan_china" {
+		t.Fatalf("plan_type = %q, want glm_coding_plan_china", acct.RuntimeHints["plan_type"])
 	}
-	if acct.ExtraData["source"] != "chelper" {
-		t.Fatalf("source = %q, want chelper", acct.ExtraData["source"])
+	if acct.RuntimeHints["source"] != "chelper" {
+		t.Fatalf("source = %q, want chelper", acct.RuntimeHints["source"])
 	}
 }
 
@@ -354,7 +354,7 @@ func TestDetectGHCopilot_StandaloneBinaryDetected(t *testing.T) {
 	// Restrict PATH to only the temp dir. Note: findBinary also searches
 	// hardcoded system dirs (e.g. /opt/homebrew/bin), so gh may still be
 	// found on machines where it is installed. The key assertion is that the
-	// standalone copilot path ends up in ExtraData regardless.
+	// standalone copilot path ends up in RuntimeHints regardless.
 	t.Setenv("PATH", tmp)
 	t.Setenv("HOME", home)
 	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
@@ -383,14 +383,14 @@ func TestDetectGHCopilot_StandaloneBinaryDetected(t *testing.T) {
 	if acct.Auth != "cli" {
 		t.Errorf("account Auth = %q, want %q", acct.Auth, "cli")
 	}
-	if acct.ExtraData == nil {
-		t.Fatal("account ExtraData is nil")
+	if acct.RuntimeHints == nil {
+		t.Fatal("account RuntimeHints is nil")
 	}
-	if acct.ExtraData["copilot_binary"] != copilotBin {
-		t.Errorf("ExtraData[copilot_binary] = %q, want %q", acct.ExtraData["copilot_binary"], copilotBin)
+	if acct.RuntimeHints["copilot_binary"] != copilotBin {
+		t.Errorf("RuntimeHints[copilot_binary] = %q, want %q", acct.RuntimeHints["copilot_binary"], copilotBin)
 	}
-	if acct.ExtraData["config_dir"] != copilotDir {
-		t.Errorf("ExtraData[config_dir] = %q, want %q", acct.ExtraData["config_dir"], copilotDir)
+	if acct.RuntimeHints["config_dir"] != copilotDir {
+		t.Errorf("RuntimeHints[config_dir] = %q, want %q", acct.RuntimeHints["config_dir"], copilotDir)
 	}
 }
 
@@ -477,9 +477,9 @@ func TestDetectGHCopilot_GHCopilotTakesPrecedence(t *testing.T) {
 	if acct.Binary != ghBin {
 		t.Errorf("account Binary = %q, want gh path %q", acct.Binary, ghBin)
 	}
-	// gh copilot path should NOT have ExtraData (legacy behavior).
-	if acct.ExtraData != nil {
-		t.Errorf("account ExtraData should be nil for gh copilot path, got %v", acct.ExtraData)
+	// gh copilot path should NOT have RuntimeHints (legacy behavior).
+	if acct.RuntimeHints != nil {
+		t.Errorf("account RuntimeHints should be nil for gh copilot path, got %v", acct.RuntimeHints)
 	}
 }
 
@@ -520,8 +520,8 @@ func TestDetectGHCopilot_StandaloneBinaryWithGH(t *testing.T) {
 	if acct.Binary != ghBin {
 		t.Errorf("account Binary = %q, want gh path %q (gh available for api calls)", acct.Binary, ghBin)
 	}
-	if acct.ExtraData["copilot_binary"] != copilotBin {
-		t.Errorf("ExtraData[copilot_binary] = %q, want %q", acct.ExtraData["copilot_binary"], copilotBin)
+	if acct.RuntimeHints["copilot_binary"] != copilotBin {
+		t.Errorf("RuntimeHints[copilot_binary] = %q, want %q", acct.RuntimeHints["copilot_binary"], copilotBin)
 	}
 }
 

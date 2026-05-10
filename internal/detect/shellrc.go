@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 // detectShellRC parses common shell startup files for `export VAR=...` lines
@@ -32,14 +30,8 @@ func detectShellRC(result *Result) {
 		return
 	}
 
-	// Build a set of var names we know how to map.
-	knownVars := make(map[string]envKeyMappingEntry, len(envKeyMapping))
-	for _, m := range envKeyMapping {
-		knownVars[m.EnvVar] = envKeyMappingEntry{EnvVar: m.EnvVar, Provider: m.Provider, AccountID: m.AccountID}
-	}
-
 	for _, path := range files {
-		discoveries, err := parseShellRCFile(path, knownVars)
+		discoveries, err := parseShellRCFile(path, envKeyByVar)
 		if err != nil {
 			// Read errors logged at debug-ish level; missing files were
 			// filtered out earlier so a real error here is unusual.
@@ -47,36 +39,9 @@ func detectShellRC(result *Result) {
 			continue
 		}
 		for _, d := range discoveries {
-			// Env var wins over file. Skip silently — same precedence rule
-			// as detectEnvKeys → file-based detectors.
-			if os.Getenv(d.EnvVar) != "" {
-				continue
-			}
-			acct := core.AccountConfig{
-				ID:        d.AccountID,
-				Provider:  d.Provider,
-				Auth:      "api_key",
-				APIKeyEnv: d.EnvVar,
-				Token:     d.Value,
-			}
-			acct.SetHint("credential_source", "shell_rc:"+path)
-			before := len(result.Accounts)
-			addAccount(result, acct)
-			if len(result.Accounts) > before {
-				log.Printf("[detect] shell rc %s → %s/%s (%s=%s)",
-					path, d.Provider, d.AccountID, d.EnvVar, maskKey(d.Value))
-			}
+			adoptAPIKey(result, d.envKeyMappingEntry, d.Value, "shell_rc:"+path)
 		}
 	}
-}
-
-// envKeyMappingEntry mirrors the anonymous struct in envKeyMapping; we
-// re-declare it as a named type so the shellrc and aider detectors can pass
-// it around without re-declaring the same fields inline.
-type envKeyMappingEntry struct {
-	EnvVar    string
-	Provider  string
-	AccountID string
 }
 
 // shellRCDiscovery is a parsed (var, value, source-file) triple from a single

@@ -7,18 +7,32 @@ import (
 	"testing"
 )
 
-// withAiderHome rewires HOME to a fresh temp dir, neutralises PATH, and clears
-// the env vars our aider detector might compete with so tests don't leak.
+// withAiderHome rewires HOME to a fresh temp dir, drops a fake `aider` binary
+// onto PATH (so detectAiderConfig's "Aider installed?" gate passes), and
+// clears the env vars our aider detector might compete with so tests don't
+// leak. Returns the home dir path.
 func withAiderHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "aider"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake aider bin: %v", err)
+	}
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", "")
-	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
+	t.Setenv("PATH", binDir)
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", binDir)
 	for _, m := range envKeyMapping {
 		t.Setenv(m.EnvVar, "")
 	}
 	return home
+}
+
+// detectAiderConfigForTest runs detectAider so result.Tools is populated,
+// then runs detectAiderConfig. Production AutoDetect does this in order; the
+// privacy gate in detectAiderConfig requires it.
+func detectAiderConfigForTest(result *Result) {
+	detectAider(result)
+	detectAiderConfig(result)
 }
 
 // chdirTo changes cwd for the duration of the test and restores it after.
@@ -51,7 +65,7 @@ model: gpt-4o
 	}
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	want := map[string]string{
 		"openai":    "sk-aider-yaml-12345",
@@ -85,7 +99,7 @@ func TestDetectAiderConfig_ListFormKeys(t *testing.T) {
 	}
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	want := map[string]string{
 		"gemini_api": "gem-aider-yaml-12345",
@@ -116,7 +130,7 @@ GROQ_API_KEY="gsk-quoted-67890"
 	}
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	got := map[string]string{}
 	for _, a := range result.Accounts {
@@ -143,7 +157,7 @@ func TestDetectAiderConfig_EnvVarBeatsFile(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env-12345")
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	for _, a := range result.Accounts {
 		if a.Provider == "openai" {
@@ -168,7 +182,7 @@ func TestDetectAiderConfig_CwdConfigBeatsHome(t *testing.T) {
 	}
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	var openai string
 	for _, a := range result.Accounts {
@@ -201,7 +215,7 @@ func TestDetectAiderConfig_GitRootConfig(t *testing.T) {
 	_ = home
 
 	var result Result
-	detectAiderConfig(&result)
+	detectAiderConfigForTest(&result)
 
 	var openai string
 	for _, a := range result.Accounts {
@@ -214,12 +228,70 @@ func TestDetectAiderConfig_GitRootConfig(t *testing.T) {
 	}
 }
 
+func TestDetectAiderConfig_DotenvBeatsHomeYAML(t *testing.T) {
+	// Aider treats .aider.conf.yml and .env as equivalent at the same scope,
+	// with deeper scopes overriding shallower ones. cwd/.env must beat
+	// home/.aider.conf.yml — earlier code processed all YAML before any
+	// .env, which broke this.
+	home := withAiderHome(t)
+	project := t.TempDir()
+	chdirTo(t, project)
+
+	if err := os.WriteFile(filepath.Join(home, ".aider.conf.yml"),
+		[]byte("openai-api-key: sk-from-home-yaml-12345\n"), 0o600); err != nil {
+		t.Fatalf("write home yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".env"),
+		[]byte("OPENAI_API_KEY=sk-from-project-env-67890\n"), 0o600); err != nil {
+		t.Fatalf("write project env: %v", err)
+	}
+
+	var result Result
+	detectAiderConfigForTest(&result)
+
+	var openai string
+	for _, a := range result.Accounts {
+		if a.Provider == "openai" {
+			openai = a.Token
+		}
+	}
+	if openai != "sk-from-project-env-67890" {
+		t.Errorf("openai Token = %q, want sk-from-project-env-67890 (cwd/.env must beat home/.aider.conf.yml)", openai)
+	}
+}
+
+func TestDetectAiderConfig_NotInstalledIsNoOp(t *testing.T) {
+	// Privacy gate: if Aider isn't installed, .env files in cwd/git-root must
+	// NOT be scanned even if they exist with our known env-var names.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
+	for _, m := range envKeyMapping {
+		t.Setenv(m.EnvVar, "")
+	}
+	if err := os.WriteFile(filepath.Join(home, ".env"),
+		[]byte("OPENAI_API_KEY=sk-private-do-not-adopt\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	chdirTo(t, home)
+
+	var result Result
+	detectAiderConfig(&result) // direct call — no detectAider runs first
+
+	for _, a := range result.Accounts {
+		if a.Provider == "openai" {
+			t.Errorf("Aider not installed; .env should not have been adopted, got %+v", a)
+		}
+	}
+}
+
 func TestDetectAiderConfig_NoConfigIsSafe(t *testing.T) {
 	withAiderHome(t)
 	chdirTo(t, t.TempDir())
 
 	var result Result
-	detectAiderConfig(&result) // must not panic
+	detectAiderConfigForTest(&result) // must not panic
 	if len(result.Accounts) != 0 {
 		t.Errorf("expected 0 accounts with no config, got %+v", result.Accounts)
 	}
@@ -234,5 +306,5 @@ func TestDetectAiderConfig_MalformedYAMLIsSafe(t *testing.T) {
 	}
 
 	var result Result
-	detectAiderConfig(&result) // must not panic
+	detectAiderConfigForTest(&result) // must not panic
 }

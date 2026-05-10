@@ -42,25 +42,25 @@ func detectOllama(result *Result) {
 		Binary:    bin,
 		BaseURL:   "http://127.0.0.1:11434",
 		APIKeyEnv: "OLLAMA_API_KEY",
-		ExtraData: make(map[string]string),
+		RuntimeHints: make(map[string]string),
 	}
 
 	acct.SetHint("config_dir", configDir)
 	acct.SetHint("cloud_base_url", "https://ollama.com")
-	acct.ExtraData["config_dir"] = configDir
-	acct.ExtraData["cloud_base_url"] = "https://ollama.com"
+	acct.RuntimeHints["config_dir"] = configDir
+	acct.RuntimeHints["cloud_base_url"] = "https://ollama.com"
 
 	if fileExists(dbPath) {
 		acct.SetHint("db_path", dbPath)
-		acct.ExtraData["db_path"] = dbPath
+		acct.RuntimeHints["db_path"] = dbPath
 	}
 	if dirExists(logsDir) {
 		acct.SetHint("logs_dir", logsDir)
-		acct.ExtraData["logs_dir"] = logsDir
+		acct.RuntimeHints["logs_dir"] = logsDir
 	}
 	if fileExists(serverConfig) {
 		acct.SetHint("server_config", serverConfig)
-		acct.ExtraData["server_config"] = serverConfig
+		acct.RuntimeHints["server_config"] = serverConfig
 	}
 
 	addAccount(result, acct)

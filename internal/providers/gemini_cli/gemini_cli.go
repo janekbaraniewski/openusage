@@ -394,8 +394,8 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	if acct.ExtraData != nil {
-		if email := acct.ExtraData["email"]; email != "" && snap.Raw["account_email"] == "" {
+	if acct.RuntimeHints != nil {
+		if email := acct.RuntimeHints["email"]; email != "" && snap.Raw["account_email"] == "" {
 			snap.Raw["account_email"] = email
 		}
 	}

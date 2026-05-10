@@ -632,7 +632,7 @@ func TestResolveAPIBases(t *testing.T) {
 		{
 			name: "plan china",
 			acct: core.AccountConfig{
-				ExtraData: map[string]string{"plan_type": "glm_coding_plan_china"},
+				RuntimeHints: map[string]string{"plan_type": "glm_coding_plan_china"},
 			},
 			wantCoding:  defaultChinaCodingBaseURL,
 			wantMonitor: defaultChinaMonitorBaseURL,

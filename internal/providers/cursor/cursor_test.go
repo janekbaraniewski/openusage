@@ -503,7 +503,7 @@ func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
 		ID:       "cursor-api-local-merge",
 		Provider: "cursor",
 		Token:    "test-token",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"tracking_db": trackingDBPath,
 		},
 	})
@@ -616,7 +616,7 @@ func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *test
 		ID:       "cursor-optional-timeout",
 		Provider: "cursor",
 		Token:    "test-token",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"tracking_db": trackingDBPath,
 		},
 	})

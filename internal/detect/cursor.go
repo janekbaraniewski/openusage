@@ -48,18 +48,18 @@ func detectCursor(result *Result) {
 		ID:        "cursor-ide",
 		Provider:  "cursor",
 		Auth:      "local",
-		ExtraData: make(map[string]string),
+		RuntimeHints: make(map[string]string),
 	}
 
 	if hasTracking {
 		acct.SetPath("tracking_db", trackingDB)
 		acct.SetHint("tracking_db", trackingDB)
-		acct.ExtraData["tracking_db"] = trackingDB
+		acct.RuntimeHints["tracking_db"] = trackingDB
 	}
 	if hasState {
 		acct.SetPath("state_db", stateDB)
 		acct.SetHint("state_db", stateDB)
-		acct.ExtraData["state_db"] = stateDB
+		acct.RuntimeHints["state_db"] = stateDB
 	}
 
 	if hasState {
@@ -70,11 +70,11 @@ func detectCursor(result *Result) {
 			log.Printf("[detect] Extracted Cursor auth token for API access")
 		}
 		if email != "" {
-			acct.ExtraData["email"] = email
+			acct.RuntimeHints["email"] = email
 			log.Printf("[detect] Cursor account: %s", email)
 		}
 		if membership != "" {
-			acct.ExtraData["membership"] = membership
+			acct.RuntimeHints["membership"] = membership
 			log.Printf("[detect] Cursor membership: %s", membership)
 		}
 	}

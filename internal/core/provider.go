@@ -41,12 +41,12 @@ type AccountConfig struct {
 	Paths map[string]string `json:"paths,omitempty"`
 
 	Token        string            `json:"-"` // runtime-only: access token (never persisted)
-	RuntimeHints map[string]string `json:"-"` // runtime-only: non-persisted local/runtime hints
-	ExtraData    map[string]string `json:"-"` // runtime-only: extra detection metadata (never persisted)
+	RuntimeHints map[string]string `json:"-"` // runtime-only: detection metadata + local hints (never persisted)
 }
 
-// Path returns the named provider-specific path. It checks ProviderPaths first,
-// then legacy Paths, then runtime hints, then legacy ExtraData fallbacks, then the fallback.
+// Path returns the named provider-specific path. It checks ProviderPaths
+// first, then the legacy Paths field, then RuntimeHints (which detectors use
+// for transient locators), and finally the caller's fallback.
 func (c AccountConfig) Path(key, fallback string) string {
 	if c.ProviderPaths != nil {
 		if v, ok := c.ProviderPaths[key]; ok && v != "" {
@@ -60,11 +60,6 @@ func (c AccountConfig) Path(key, fallback string) string {
 	}
 	if c.RuntimeHints != nil {
 		if v, ok := c.RuntimeHints[key]; ok && v != "" {
-			return v
-		}
-	}
-	if c.ExtraData != nil {
-		if v, ok := c.ExtraData[key]; ok && v != "" {
 			return v
 		}
 	}
@@ -88,11 +83,6 @@ func (c *AccountConfig) SetPath(key, value string) {
 func (c AccountConfig) Hint(key, fallback string) string {
 	if c.RuntimeHints != nil {
 		if v, ok := c.RuntimeHints[key]; ok && v != "" {
-			return v
-		}
-	}
-	if c.ExtraData != nil {
-		if v, ok := c.ExtraData[key]; ok && v != "" {
 			return v
 		}
 	}

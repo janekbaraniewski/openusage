@@ -24,11 +24,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		Raw:         make(map[string]string),
 		DailySeries: make(map[string][]core.TimePoint),
 	}
-	if acct.ExtraData != nil {
-		if email := strings.TrimSpace(acct.ExtraData["email"]); email != "" {
+	if acct.RuntimeHints != nil {
+		if email := strings.TrimSpace(acct.RuntimeHints["email"]); email != "" {
 			snap.Raw["account_email"] = email
 		}
-		if membership := strings.TrimSpace(acct.ExtraData["membership"]); membership != "" {
+		if membership := strings.TrimSpace(acct.RuntimeHints["membership"]); membership != "" {
 			snap.Raw["membership_type"] = membership
 		}
 	}
@@ -65,15 +65,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		apiCh <- apiResult{err: fmt.Errorf("no token")}
 	}
 
-	if acct.ExtraData == nil {
-		acct.ExtraData = make(map[string]string)
+	if acct.RuntimeHints == nil {
+		acct.RuntimeHints = make(map[string]string)
 	}
-	if acct.ExtraData["tracking_db"] == "" && trackingDBPath != "" {
-		acct.ExtraData["tracking_db"] = trackingDBPath
+	if acct.RuntimeHints["tracking_db"] == "" && trackingDBPath != "" {
+		acct.RuntimeHints["tracking_db"] = trackingDBPath
 		acct.SetHint("tracking_db", trackingDBPath)
 	}
-	if acct.ExtraData["state_db"] == "" && stateDBPath != "" {
-		acct.ExtraData["state_db"] = stateDBPath
+	if acct.RuntimeHints["state_db"] == "" && stateDBPath != "" {
+		acct.RuntimeHints["state_db"] = stateDBPath
 		acct.SetHint("state_db", stateDBPath)
 	}
 

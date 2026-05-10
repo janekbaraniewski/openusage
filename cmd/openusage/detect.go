@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -115,11 +114,11 @@ func displayAuth(a core.AccountConfig) string {
 // or "-" for accounts that don't carry a secret (CLI/local providers).
 func displayCredential(a core.AccountConfig) string {
 	if a.Token != "" {
-		return maskToken(a.Token)
+		return detect.MaskKey(a.Token)
 	}
 	if a.APIKeyEnv != "" {
 		if value := os.Getenv(a.APIKeyEnv); value != "" {
-			return fmt.Sprintf("$%s=%s", a.APIKeyEnv, maskToken(value))
+			return fmt.Sprintf("$%s=%s", a.APIKeyEnv, detect.MaskKey(value))
 		}
 		return fmt.Sprintf("$%s (unset)", a.APIKeyEnv)
 	}
@@ -135,16 +134,6 @@ func displaySource(a core.AccountConfig) string {
 		return "env"
 	}
 	return "-"
-}
-
-// maskToken redacts a secret for display: first/last 4 chars surrounding "...".
-// Mirrors the masking convention used by the detect package's logging.
-func maskToken(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= 12 {
-		return "****"
-	}
-	return s[:4] + "..." + s[len(s)-4:]
 }
 
 // providersWithoutAccount returns the list of provider IDs registered in the

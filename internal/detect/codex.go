@@ -53,30 +53,30 @@ func detectCodex(result *Result) {
 		Provider:  "codex",
 		Auth:      "local",
 		Binary:    bin,
-		ExtraData: make(map[string]string),
+		RuntimeHints: make(map[string]string),
 	}
 
 	acct.SetHint("config_dir", configDir)
-	acct.ExtraData["config_dir"] = configDir
+	acct.RuntimeHints["config_dir"] = configDir
 
 	if hasSessions {
 		acct.SetHint("sessions_dir", sessionsDir)
-		acct.ExtraData["sessions_dir"] = sessionsDir
+		acct.RuntimeHints["sessions_dir"] = sessionsDir
 	}
 
 	if hasAuth {
 		acct.SetHint("auth_file", authFile)
-		acct.ExtraData["auth_file"] = authFile
+		acct.RuntimeHints["auth_file"] = authFile
 		email, accountID, planType, openaiAPIKey := extractCodexAuth(authFile)
 		if email != "" {
-			acct.ExtraData["email"] = email
+			acct.RuntimeHints["email"] = email
 			log.Printf("[detect] Codex account: %s", email)
 		}
 		if accountID != "" {
-			acct.ExtraData["account_id"] = accountID
+			acct.RuntimeHints["account_id"] = accountID
 		}
 		if planType != "" {
-			acct.ExtraData["plan_type"] = planType
+			acct.RuntimeHints["plan_type"] = planType
 			log.Printf("[detect] Codex plan: %s", planType)
 		}
 		// When the user logged in via API key, codex stores the raw

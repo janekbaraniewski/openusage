@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 // detectAiderConfig parses Aider's documented credential locations and adopts
@@ -24,37 +22,63 @@ import (
 //     plus list-form `api-key:` with `<provider>=<value>` strings.
 //   - .env files use the standard provider env-var names (OPENAI_API_KEY etc.).
 //
+// Privacy: this detector ONLY runs if detectAider has registered the Aider
+// binary in this run. Without that gate we'd be scanning every `.env` in any
+// cwd or git root we happen to be launched from, which is too broad for a
+// user who has never installed Aider.
+//
 // We treat env vars as absolute truth: any var set in os.Getenv wins and we
-// skip adopting the value from a file. Within files, we honour Aider's
-// last-loaded-wins precedence (cwd → git-root → home reversed).
+// skip adopting the value from a file. Within files we honour Aider's
+// last-loaded-wins precedence by walking cwd first; addAccount's id-dedupe
+// makes earlier scope's value win. We interleave .aider.conf.yml and .env at
+// each scope so cwd/.env beats home/.aider.conf.yml (Aider treats them as
+// equivalent at the same scope).
 func detectAiderConfig(result *Result) {
+	if !aiderToolDetected(result) {
+		return
+	}
+
 	home := homeDir()
 	if home == "" {
 		return
 	}
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Printf("[detect] aider: cwd unavailable: %v", err)
+		cwd = ""
+	}
 	gitRoot := nearestGitRoot(cwd)
 
-	// Aider's documented order is "home, git-root, cwd; later wins". We walk
-	// in reverse (cwd first) so the first hit per var also wins; later hits
-	// are no-ops because addAccount de-dupes by ID.
-	yamlPaths := uniqueExisting([]string{
-		filepath.Join(cwd, ".aider.conf.yml"),
-		filepath.Join(gitRoot, ".aider.conf.yml"),
-		filepath.Join(home, ".aider.conf.yml"),
-	})
-	envPaths := uniqueExisting([]string{
-		filepath.Join(cwd, ".env"),
-		filepath.Join(gitRoot, ".env"),
-		filepath.Join(home, ".env"),
-	})
+	var paths []string
+	for _, scope := range []string{cwd, gitRoot, home} {
+		if scope == "" {
+			continue
+		}
+		paths = append(paths,
+			filepath.Join(scope, ".aider.conf.yml"),
+			filepath.Join(scope, ".env"),
+		)
+	}
 
-	for _, p := range yamlPaths {
-		adoptAiderYAML(result, p)
+	for _, p := range uniqueExisting(paths) {
+		switch filepath.Base(p) {
+		case ".aider.conf.yml":
+			adoptAiderYAML(result, p)
+		case ".env":
+			adoptAiderDotenv(result, p)
+		}
 	}
-	for _, p := range envPaths {
-		adoptAiderDotenv(result, p)
+}
+
+// aiderToolDetected reports whether detectAider already added the Aider
+// binary to result.Tools in this run.
+func aiderToolDetected(result *Result) bool {
+	for _, t := range result.Tools {
+		if t.Name == "Aider" {
+			return true
+		}
 	}
+	return false
 }
 
 // nearestGitRoot walks up from start until it finds a directory containing
@@ -119,38 +143,44 @@ func adoptAiderYAML(result *Result, path string) {
 		log.Printf("[detect] aider %s parse error: %v", path, err)
 		return
 	}
+	source := "aider_yaml:" + path
 
-	dedicated := []struct {
+	for _, d := range []struct {
 		envVar string
 		value  string
 	}{
 		{"OPENAI_API_KEY", cfg.OpenAIAPIKey},
 		{"ANTHROPIC_API_KEY", cfg.AnthropicAPIKey},
-	}
-	for _, d := range dedicated {
+	} {
 		if d.value == "" {
 			continue
 		}
-		registerAiderKey(result, path, "aider_yaml", d.envVar, d.value)
+		mapping, ok := envKeyByVar[d.envVar]
+		if !ok {
+			continue
+		}
+		adoptAPIKey(result, mapping, d.value, source)
 	}
 
-	// List form: each entry is "<provider>=<key>". The provider name is
-	// Aider's own taxonomy (e.g. "gemini", "openrouter") which we map back
-	// to our env-var-name table. Provider names without a known mapping are
-	// silently skipped — we'd have nowhere to store them.
+	// List form: each entry is "<provider>=<key>" where <provider> is
+	// Aider's own short name. envKeyByAiderShortName indexes those names.
 	for _, entry := range cfg.APIKeyList {
 		entry = strings.TrimSpace(entry)
 		eq := strings.IndexByte(entry, '=')
 		if eq <= 0 {
 			continue
 		}
-		provider := strings.TrimSpace(entry[:eq])
+		shortName := strings.ToLower(strings.TrimSpace(entry[:eq]))
 		value := strings.TrimSpace(entry[eq+1:])
-		envVar := aiderProviderToEnvVar(provider)
-		if envVar == "" || value == "" {
+		mapping, ok := envKeyByAiderShortName[shortName]
+		if !ok {
+			log.Printf("[detect] aider %s: unknown provider %q in api-key list, skipping", path, shortName)
 			continue
 		}
-		registerAiderKey(result, path, "aider_yaml", envVar, value)
+		if value == "" {
+			continue
+		}
+		adoptAPIKey(result, mapping, value, source)
 	}
 }
 
@@ -163,11 +193,7 @@ func adoptAiderDotenv(result *Result, path string) {
 		return
 	}
 	defer f.Close()
-
-	knownVars := make(map[string]struct{}, len(envKeyMapping))
-	for _, m := range envKeyMapping {
-		knownVars[m.EnvVar] = struct{}{}
-	}
+	source := "aider_dotenv:" + path
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 1<<20)
@@ -176,76 +202,14 @@ func adoptAiderDotenv(result *Result, path string) {
 		if !ok {
 			continue
 		}
-		if _, known := knownVars[name]; !known {
+		mapping, known := envKeyByVar[name]
+		if !known {
 			continue
 		}
-		registerAiderKey(result, path, "aider_dotenv", name, value)
+		adoptAPIKey(result, mapping, value, source)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("[detect] aider %s scan error: %v", path, err)
 	}
 }
 
-// registerAiderKey adopts a (var, value) pair as a provider account, honouring
-// the "env var wins" rule. Idempotent on account id via addAccount.
-func registerAiderKey(result *Result, path, source, envVar, value string) {
-	if os.Getenv(envVar) != "" {
-		return
-	}
-	mapping, ok := mappingForEnvVar(envVar)
-	if !ok {
-		return
-	}
-	acct := core.AccountConfig{
-		ID:        mapping.AccountID,
-		Provider:  mapping.Provider,
-		Auth:      "api_key",
-		APIKeyEnv: envVar,
-		Token:     value,
-	}
-	acct.SetHint("credential_source", source+":"+path)
-	before := len(result.Accounts)
-	addAccount(result, acct)
-	if len(result.Accounts) > before {
-		log.Printf("[detect] aider %s → %s/%s (%s=%s)",
-			path, mapping.Provider, mapping.AccountID, envVar, maskKey(value))
-	}
-}
-
-// mappingForEnvVar looks up the (provider, account-id) for an env var. Returns
-// false if the env var is not in our known map.
-func mappingForEnvVar(envVar string) (envKeyMappingEntry, bool) {
-	for _, m := range envKeyMapping {
-		if m.EnvVar == envVar {
-			return envKeyMappingEntry{EnvVar: m.EnvVar, Provider: m.Provider, AccountID: m.AccountID}, true
-		}
-	}
-	return envKeyMappingEntry{}, false
-}
-
-// aiderProviderToEnvVar maps Aider's provider taxonomy (used in `api-key:`
-// list entries like `gemini=...`) back to the standard env-var name we use
-// elsewhere. Aider names tend to be the LiteLLM short form.
-func aiderProviderToEnvVar(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "gemini", "google":
-		return "GEMINI_API_KEY"
-	case "openrouter":
-		return "OPENROUTER_API_KEY"
-	case "deepseek":
-		return "DEEPSEEK_API_KEY"
-	case "groq":
-		return "GROQ_API_KEY"
-	case "mistral":
-		return "MISTRAL_API_KEY"
-	case "xai", "grok":
-		return "XAI_API_KEY"
-	case "moonshot", "moonshotai":
-		return "MOONSHOT_API_KEY"
-	}
-	return ""
-}

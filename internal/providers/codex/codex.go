@@ -285,14 +285,14 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	if acct.ExtraData != nil {
-		if email := acct.ExtraData["email"]; email != "" {
+	if acct.RuntimeHints != nil {
+		if email := acct.RuntimeHints["email"]; email != "" {
 			snap.Raw["account_email"] = email
 		}
-		if planType := acct.ExtraData["plan_type"]; planType != "" {
+		if planType := acct.RuntimeHints["plan_type"]; planType != "" {
 			snap.Raw["plan_type"] = planType
 		}
-		if accountID := acct.ExtraData["account_id"]; accountID != "" {
+		if accountID := acct.RuntimeHints["account_id"]; accountID != "" {
 			snap.Raw["account_id"] = accountID
 		}
 	}

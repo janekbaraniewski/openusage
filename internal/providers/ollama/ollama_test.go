@@ -117,7 +117,7 @@ func TestFetch_Success(t *testing.T) {
 		Auth:      "local",
 		APIKeyEnv: "TEST_OLLAMA_KEY",
 		BaseURL:   localServer.URL,
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"db_path":        dbPath,
 			"logs_dir":       logDir,
 			"server_config":  serverConfigPath,
@@ -282,7 +282,7 @@ func TestFetch_AuthRequired_CloudOnlyWithoutKey(t *testing.T) {
 		Provider:  "ollama",
 		Auth:      "api_key",
 		APIKeyEnv: "TEST_OLLAMA_MISSING",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"cloud_base_url": "https://ollama.com",
 		},
 	}
@@ -312,7 +312,7 @@ func TestFetch_RateLimited_CloudOnly(t *testing.T) {
 		Provider:  "ollama",
 		Auth:      "api_key",
 		APIKeyEnv: "TEST_OLLAMA_KEY",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"cloud_base_url": cloudServer.URL,
 		},
 	}
@@ -398,7 +398,7 @@ func TestFetch_NoSyntheticUsageWithoutCloudWindows(t *testing.T) {
 		Auth:      "local",
 		APIKeyEnv: "TEST_OLLAMA_KEY",
 		BaseURL:   localServer.URL,
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"db_path":        dbPath,
 			"logs_dir":       logDir,
 			"server_config":  serverConfigPath,
@@ -469,7 +469,7 @@ func TestFetch_CloudSettingsFallbackUsage(t *testing.T) {
 		Provider:  "ollama",
 		Auth:      "api_key",
 		APIKeyEnv: "TEST_OLLAMA_KEY",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"cloud_base_url": cloudServer.URL + "/api/v1",
 		},
 	}
@@ -541,7 +541,7 @@ func TestFetchServerLogs_CountsAnthropicMessagesPath(t *testing.T) {
 		Provider: "ollama",
 		Auth:     "local",
 		BaseURL:  localServer.URL,
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"logs_dir":      logDir,
 			"server_config": serverConfigPath,
 			// No DB path on purpose; this test should be log-driven.
