@@ -35,17 +35,18 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
+          # Docusaurus validates internal docs links at build time.
+          # Lychee runs against top-level repo READMEs only, so we catch
+          # external URL rot without fighting Docusaurus's route system.
           args: >-
             --cache
             --max-cache-age 1d
             --no-progress
-            --scheme https
-            --scheme http
             --config .github/lychee.toml
-            "docs/site/docs/**/*.md"
             "README.md"
             "AGENTS.md"
             "CODEX.md"
+            "docs/CI_AUTOMATION_BOTS.md"
           fail: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
