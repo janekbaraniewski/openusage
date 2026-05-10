@@ -1,24 +1,36 @@
-name: Request Dependabot rebases
+name: Refresh Dependabot PRs
 
 on:
   workflow_call:
+    secrets:
+      AUTOMATION_TOKEN:
+        description: User PAT or equivalent token with repo/write and workflow permission.
+        required: true
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: read
 
 jobs:
-  request:
-    name: Request native Dependabot updates
+  refresh:
+    name: Refresh open Dependabot PRs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
+          github-token: ${{ secrets.AUTOMATION_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
             const duplicateWindowMs = 30 * 60 * 1000;
             const duplicateCutoff = Date.now() - duplicateWindowMs;
+
+            if (!process.env.GH_TOKEN) {
+              core.setFailed('AUTOMATION_TOKEN is required. Use a PAT with repo and workflow scope, or an equivalent GitHub App token.');
+              return;
+            }
+
+            const isAlreadyCurrent = (error) =>
+              error.status === 422 &&
+              /no new commits|not behind|up to date/i.test(error.message);
 
             async function compareWithBase(pull) {
               const response = await github.rest.repos.compareCommitsWithBasehead({
@@ -52,7 +64,8 @@ jobs:
               return commits.some((commit) => commit.author?.login !== 'dependabot[bot]');
             }
 
-            async function requestDependabot(pull, command) {
+            async function requestRecreate(pull) {
+              const command = '@dependabot recreate';
               if (await hasRecentCommand(pull.number, command)) {
                 core.info(`PR #${pull.number}: ${command} was already requested recently.`);
                 return;
@@ -85,19 +98,32 @@ jobs:
                 const pull = response.data;
 
                 if (pull.mergeable_state === 'dirty' || await hasNonDependabotCommits(pull.number)) {
-                  await requestDependabot(pull, '@dependabot recreate');
+                  await requestRecreate(pull);
                   continue;
                 }
 
                 const comparison = await compareWithBase(pull);
-                if (comparison.behind_by > 0 || pull.mergeable_state === 'behind') {
-                  await requestDependabot(pull, '@dependabot rebase');
-                } else {
+                if (comparison.behind_by === 0 && pull.mergeable_state !== 'behind') {
                   core.info(`PR #${pull.number} is not behind main.`);
+                  continue;
                 }
+
+                await github.rest.pulls.updateBranch({
+                  owner,
+                  repo,
+                  pull_number: pull.number,
+                  expected_head_sha: pull.head.sha,
+                });
+                core.notice(`Requested branch update for PR #${pull.number}.`);
               } catch (error) {
-                core.warning(`Could not request Dependabot update for PR #${pullSummary.number}: ${error.message}`);
+                if (isAlreadyCurrent(error)) {
+                  core.info(`PR #${pullSummary.number} is already current with main.`);
+                } else {
+                  core.warning(`Could not refresh PR #${pullSummary.number}: ${error.message}`);
+                }
               } finally {
                 core.endGroup();
               }
             }
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}

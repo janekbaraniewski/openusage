@@ -10,10 +10,9 @@ permissions:
   pull-requests: read
 
 jobs:
-  request-dependabot-rebases:
-    name: Request open Dependabot PR rebases
-    uses: ./.github/workflows/request-dependabot-rebases.yaml
+  refresh-dependabot-prs:
+    name: Refresh open Dependabot PRs
+    uses: ./.github/workflows/refresh-dependabot-prs.yaml
+    secrets: inherit
     permissions:
       contents: read
-      issues: write
-      pull-requests: read

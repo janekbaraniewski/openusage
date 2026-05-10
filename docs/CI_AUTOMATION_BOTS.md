@@ -119,9 +119,11 @@ Benefit: the v0.10.1 / v0.10.2 cuts we just did become a single click on a PR.
 
 ### 7. Dependabot rebase-on-main-update workflow
 
-A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and asks Dependabot to update open Dependabot PRs with its native comment commands.
+A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and updates open Dependabot PR branches with an automation token.
 
-Dependabot does automatically rebase PRs, but it is not an immediate per-push guarantee and strict branch protection requires PR branches to be current before auto-merge can complete. The workflow is the deterministic backstop: it posts `@dependabot rebase` for behind PRs and `@dependabot recreate` for conflicted PRs. This avoids GitHub Actions `updateBranch` limitations on PRs that modify `.github/workflows/**`, and it lets Dependabot's native branch update trigger normal PR checks instead of detached workflow-dispatch runs.
+Dependabot does automatically rebase PRs, but it is not an immediate per-push guarantee and strict branch protection requires PR branches to be current before auto-merge can complete. The workflow is the deterministic backstop: it calls GitHub's `updateBranch` API with `AUTOMATION_TOKEN`, which must be a PAT with `repo` + `workflow` scope or an equivalent GitHub App token. Using `GITHUB_TOKEN` here is not sufficient: GitHub suppresses follow-up workflow runs for most events created by `GITHUB_TOKEN`, and it also cannot update PRs that touch `.github/workflows/**` without workflow-level permission.
+
+Conflicted or polluted Dependabot PRs are handled separately. If a PR is `dirty` or already has non-Dependabot commits, the workflow requests `@dependabot recreate` using `AUTOMATION_TOKEN`; this must be a real write-access user token because Dependabot ignores/denies commands from `github-actions[bot]`.
 
 ### 8. Stale issue/PR bot
 
@@ -153,7 +155,7 @@ For auto-merge to work, the repo needs:
 For `release-please`:
 
 - The workflow needs `contents: write`, `pull-requests: write`, and `actions: write` on the `GITHUB_TOKEN`.
-- Configure a `RELEASE_PLEASE_TOKEN` repository secret with `contents`, `pull_requests`, and `workflow` write access for native release PR updates that trigger downstream PR checks. The workflow falls back to `GITHUB_TOKEN`, but that fallback still needs the explicit refresh/dispatch backstop below because events created by `GITHUB_TOKEN` do not chain into normal `pull_request` runs.
+- Configure a `RELEASE_PLEASE_TOKEN` repository secret with `contents`, `pull_requests`, and `workflow` write access for native release PR updates that trigger downstream PR checks. If that secret is absent, the workflow uses `AUTOMATION_TOKEN`. It falls back to `GITHUB_TOKEN` only as a last resort, and that fallback still needs the explicit refresh/dispatch backstop below because events created by `GITHUB_TOKEN` do not chain into normal `pull_request` runs.
 - Release PR commits are authored by `github-actions[bot]`, so the same "no chained workflow runs from bot-authored commits" rule applies there too.
 - When the fallback `GITHUB_TOKEN` path is used, the workflow keeps any open release PR branch current with `main` through `refresh-pr-branches` and then calls the same reusable required-check dispatcher. This is required because `release-please` PR updates made with `GITHUB_TOKEN` do not automatically trigger downstream `pull_request` workflows.
 

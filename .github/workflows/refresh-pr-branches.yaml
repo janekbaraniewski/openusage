@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      github_token:
+        description: Token used for branch updates.
+        required: false
     outputs:
       refs-json:
         description: JSON array of refreshed branch refs.
@@ -31,10 +35,8 @@ jobs:
     steps:
       - id: refresh
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          AUTHOR_LOGIN: ${{ inputs.author-login }}
-          LABELS: ${{ inputs.labels }}
         with:
+          github-token: ${{ secrets.github_token || github.token }}
           script: |
             const { owner, repo } = context.repo;
             const authorLogin = process.env.AUTHOR_LOGIN.trim();
@@ -149,3 +151,6 @@ jobs:
             }
 
             return refs;
+        env:
+          AUTHOR_LOGIN: ${{ inputs.author-login }}
+          LABELS: ${{ inputs.labels }}
