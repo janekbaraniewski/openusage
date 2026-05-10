@@ -46,7 +46,7 @@ The active theme by name. Must match a built-in or external theme. See [Themes](
 { "theme": "Tokyo Night" }
 ```
 
-Default: `"Deep Space"`.
+Default: `"Gruvbox"`.
 
 ## `ui`
 
@@ -110,6 +110,7 @@ Edit interactively via the Telemetry settings tab (<kbd>,</kbd> then <kbd>6</kbd
 {
   "dashboard": {
     "view": "grid",
+    "hide_sections_with_no_data": false,
     "providers": [
       { "account_id": "openai-personal", "enabled": true },
       { "account_id": "anthropic-work",  "enabled": true }
@@ -143,6 +144,12 @@ Ordered list of accounts to render in the dashboard. Order in the array is the d
 | `account_id` | string | Must match an `id` from `accounts` or `auto_detected_accounts`. |
 | `enabled` | bool | Show the tile or hide it. |
 
+### `dashboard.hide_sections_with_no_data`
+
+| Type | Default | Purpose |
+|---|---|---|
+| bool | `false` | When `true`, any widget section that produces no rows for the active provider is hidden instead of rendered as an empty card. |
+
 ### `dashboard.widget_sections`
 
 Ordered list of widget sections. See [Widgets](../customization/widgets.md).
@@ -151,7 +158,6 @@ Ordered list of widget sections. See [Widgets](../customization/widgets.md).
 |---|---|---|
 | `id` | string | Section ID (provider-defined). |
 | `enabled` | bool | Render or hide globally. |
-| `hide_empty` | bool | Hide the section when it has no rows. |
 
 ## `experimental`
 

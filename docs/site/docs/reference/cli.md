@@ -53,14 +53,14 @@ Argument:
 |---|---|---|
 | `--socket-path PATH` | `~/.local/state/openusage/telemetry.sock` | Daemon socket. Honors `OPENUSAGE_TELEMETRY_SOCKET`. |
 | `--account-id ID` | (none) | Tag the event with an explicit account id. |
-| `--db-path PATH` | (none) | Used only when bypassing the daemon (`--spool-only` write path). |
+| `--db-path PATH` | `~/.local/state/openusage/telemetry.db` | Used only when bypassing the daemon (`--spool-only` write path). |
 | `--spool-dir PATH` | `~/.local/state/openusage/telemetry-spool/` | Where to spool the event if the daemon is unreachable. |
 | `--spool-only` | off | Write to the spool unconditionally; do not contact the daemon. |
 | `--verbose` | off | Verbose stderr logging. |
 
 ### Behavior
 
-- Tries to POST to `/v1/hook/<source>?account_id=…` with a 2-second dial / 12-second request timeout.
+- Tries to POST to `/v1/hook/<source>?account_id=…` with an overall 15-second context timeout.
 - On dial failure, writes the event to a JSON line in the spool directory.
 - Returns exit code 0 in both cases — hooks should not fail their parent tool because telemetry is offline.
 

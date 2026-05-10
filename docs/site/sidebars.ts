@@ -63,7 +63,6 @@ const sidebars: SidebarsConfig = {
             'providers/mistral',
             'providers/deepseek',
             'providers/moonshot',
-            'providers/perplexity',
             'providers/xai',
             'providers/zai',
             'providers/gemini-api',

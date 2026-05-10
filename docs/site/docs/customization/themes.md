@@ -11,13 +11,13 @@ OpenUsage ships with 18 bundled color themes. You can cycle them live, pin one i
 
 | Theme | Notes |
 |---|---|
-| Deep Space | Default. Cool blues over a near-black base. |
+| Gruvbox | Default. Retro warm contrast. |
+| Deep Space | Cool blues over a near-black base (built-in, hardcoded; not a JSON file). |
 | Ayu Dark | Warm orange accents on slate. |
 | Catppuccin Mocha | The popular pastel-on-dark palette. |
 | Dracula | Classic vivid purple/cyan/pink. |
 | Everforest | Muted green forest tones. |
 | Grayscale | Pure achromatic — useful for screenshots and accessibility tests. |
-| Gruvbox | Retro warm contrast. |
 | Kanagawa | Soft Japanese woodblock palette. |
 | Midnight Iris | Deep blue-purple with iris accent. |
 | Monokai | Bright magenta and lime on dark. |
@@ -34,7 +34,7 @@ OpenUsage ships with 18 bundled color themes. You can cycle them live, pin one i
 
 ### From the dashboard
 
-Press <kbd>t</kbd> to cycle to the next theme. Press <kbd>Shift+T</kbd> to cycle back.
+Press <kbd>t</kbd> to cycle to the next theme.
 
 The change is immediate and persisted to `~/.config/openusage/settings.json` automatically.
 
