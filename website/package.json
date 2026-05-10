@@ -12,7 +12,7 @@
     "@lobehub/icons-static-svg": "^1.86.0",
     "posthog-js": "^1.369.1",
     "react": "^19.2.6",
-    "react-dom": "^18.3.1"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
