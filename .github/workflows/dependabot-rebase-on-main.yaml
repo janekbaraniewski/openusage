@@ -5,30 +5,31 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
   rebase:
-    name: Comment '@dependabot rebase' on open Dependabot PRs
+    name: Update open Dependabot PR branches
     runs-on: ubuntu-latest
     steps:
-      - name: Find open Dependabot PRs and ask for rebase
+      - name: Update each open Dependabot PR's branch from main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Skip when this push is itself a Dependabot merge — only the
-          # NEXT push (typically a non-Dependabot one) should kick a fresh
-          # rebase, otherwise we churn on every dependabot merge.
-          # Actually we DO want to rebase after every main update because
-          # that's exactly when the other PRs go stale. Keep firing.
-
+          # We do NOT comment "@dependabot rebase" — Dependabot rejects
+          # commands from the github-actions bot identity ("Sorry, only
+          # users with push access can use that command"). Instead we
+          # call GitHub's native update-branch API, which merges main
+          # into the PR's head branch directly. The merge commit is
+          # squashed away when the PR auto-merges, so the user-visible
+          # commit history stays clean.
           prs=$(gh pr list \
             --state open \
             --author "app/dependabot" \
-            --json number,headRefName \
+            --json number \
             --jq '.[].number')
 
           if [ -z "$prs" ]; then
@@ -38,8 +39,14 @@ jobs:
 
           for pr in $prs; do
             echo "::group::PR #$pr"
-            # Ask Dependabot to rebase. It will only do so if the branch
-            # is actually behind; otherwise it's a no-op.
-            gh pr comment "$pr" --body "@dependabot rebase"
+            # 422 if the PR is already up to date with main; that's a no-op
+            # for us so suppress non-zero exit on that case.
+            if ! gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1 | tee /tmp/api.out; then
+              if grep -q "no new commits on the base branch" /tmp/api.out; then
+                echo "(already current)"
+              else
+                echo "::warning::update-branch failed for PR #$pr — see log"
+              fi
+            fi
             echo "::endgroup::"
           done
