@@ -1,4 +1,4 @@
-name: Docs Preview Build
+name: Docs Preview
 
 on:
   pull_request:
@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
+  deployments: write
 
 concurrency:
   group: docs-preview-${{ github.ref }}
@@ -16,11 +18,10 @@ concurrency:
 
 jobs:
   build:
-    name: Build docs
+    name: Build & Preview
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docs/site
+    env:
+      CF_TOKEN_PRESENT: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -31,12 +32,15 @@ jobs:
           cache-dependency-path: docs/site/package-lock.json
 
       - name: Install dependencies
+        working-directory: docs/site
         run: npm ci
 
       - name: Type-check
+        working-directory: docs/site
         run: npm run typecheck
 
       - name: Build docs
+        working-directory: docs/site
         run: npm run build
 
       - name: Upload build artifact
@@ -45,3 +49,66 @@ jobs:
           name: docs-build
           path: docs/site/build
           retention-days: 7
+
+      - name: Deploy preview to Cloudflare Pages
+        id: cfp
+        if: env.CF_TOKEN_PRESENT == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: docs/site
+          command: pages deploy build --project-name=openusage-docs --branch=preview
+
+      - name: Post or update preview comment
+        if: env.CF_TOKEN_PRESENT == 'true' && steps.cfp.outputs.deployment-url != ''
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_URL: ${{ steps.cfp.outputs.deployment-url }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const url = process.env.DEPLOYMENT_URL;
+            const sha = process.env.COMMIT_SHA;
+            const marker = '<!-- docs-preview-comment -->';
+            const body = [
+              marker,
+              '## 📘 Docs preview',
+              '',
+              `Built and deployed for commit \`${sha.slice(0, 7)}\`.`,
+              '',
+              `**Preview URL:** ${url}`,
+              '',
+              `Routes to check: [/](${url}) · [/getting-started/install/](${url}/getting-started/install/) · [/providers/](${url}/providers/) · [/reference/cli/](${url}/reference/cli/)`,
+              '',
+              '_Re-deployed on every push to this PR. The build artifact is also attached to the workflow run._',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Note: Cloudflare secrets not set
+        if: env.CF_TOKEN_PRESENT != 'true'
+        run: |
+          echo "::notice::Cloudflare Pages secrets not configured — preview deploy skipped."
+          echo "::notice::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repo secrets to enable preview URLs."
+          echo "::notice::See docs/site/README.md for setup instructions."

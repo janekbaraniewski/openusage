@@ -47,19 +47,35 @@ npm run typecheck
 
 ## PR previews via Cloudflare Pages
 
-Cloudflare Pages is free for OSS, auto-deploys every PR with a unique preview URL, and posts a comment on the PR with the link. To wire it up:
+Every pull request that touches `docs/site/**` gets a unique preview URL via the
+`docs-preview` GitHub Actions workflow, which deploys the built docs to
+Cloudflare Pages and posts a sticky comment on the PR with the link.
 
-1. Sign in to the [Cloudflare dashboard](https://dash.cloudflare.com) and pick **Workers & Pages → Create → Pages**
-2. Connect this GitHub repo
-3. Configure the build:
-   - **Framework preset:** Docusaurus
-   - **Root directory:** `docs/site`
-   - **Build command:** `npm run build`
-   - **Build output:** `build`
-   - **Node version:** 22 (set under env vars or pulled from `wrangler.toml`)
-4. Add a custom domain (`docs.openusage.sh` is the suggested one) — or use the default `pages.dev` URL until ready
+### One-time setup
 
-The `wrangler.toml` and `static/_headers` files in this directory document the expected build output and HTTP headers. They're also picked up if you deploy via `wrangler pages deploy build`.
+1. Create a Cloudflare Pages project:
+   - Sign in to the [Cloudflare dashboard](https://dash.cloudflare.com)
+   - **Workers & Pages → Create → Pages → Direct upload**
+   - Project name: `openusage-docs`
+   - Skip the initial upload step (the workflow will do it)
+
+2. Generate an API token:
+   - **My profile → API tokens → Create token**
+   - Use the **Cloudflare Pages — Edit** template (or a custom token with `Account → Cloudflare Pages → Edit` permission)
+
+3. Add two secrets to this GitHub repository (**Settings → Secrets and variables → Actions**):
+   - `CLOUDFLARE_API_TOKEN` — the token from step 2
+   - `CLOUDFLARE_ACCOUNT_ID` — visible in the Cloudflare dashboard sidebar
+
+4. (Optional) Add a custom domain such as `docs-preview.openusage.sh` to the
+   project so previews share a stable hostname pattern.
+
+If the secrets are missing, the workflow still builds and uploads the static
+artifact to the run page — it just skips the deploy + comment.
+
+The `wrangler.toml` and `static/_headers` files in this directory document the
+expected build output and HTTP headers. They're picked up by `wrangler pages
+deploy build` whether the deploy runs from CI or from your laptop.
 
 ## Production deploy
 
