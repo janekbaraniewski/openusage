@@ -29,6 +29,7 @@ Thumbs.db
 *.prof
 .aider/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .tmp/
 .continuerules
 .windsurfrules
