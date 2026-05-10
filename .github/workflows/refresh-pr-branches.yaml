@@ -19,7 +19,7 @@ on:
         value: ${{ jobs.refresh.outputs.refs-json }}
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -44,6 +44,9 @@ jobs:
             const isAlreadyCurrent = (error) =>
               error.status === 422 &&
               /no new commits|not behind|up to date/i.test(error.message);
+
+            const isCurrent = (pull) =>
+              !['behind', 'dirty', 'unknown'].includes(pull.mergeable_state);
 
             async function listPulls() {
               if (!labels) {
@@ -74,21 +77,29 @@ jobs:
               return pulls;
             }
 
-            async function waitForBranchUpdate(pr, previousSha) {
+            async function getPull(pullNumber) {
+              const response = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pullNumber,
+              });
+              return response.data;
+            }
+
+            async function waitForCurrentBranch(pr, previousSha) {
               let current = pr;
+              if ((!previousSha || current.head.sha !== previousSha) && isCurrent(current)) {
+                return current;
+              }
+
               for (const delay of [2000, 3000, 5000, 10000, 15000, 25000]) {
                 await sleep(delay);
-                const response = await github.rest.pulls.get({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                });
-                current = response.data;
-                if (current.head.sha !== previousSha) {
+                current = await getPull(pr.number);
+                if ((!previousSha || current.head.sha !== previousSha) && isCurrent(current)) {
                   return current;
                 }
               }
-              core.warning(`PR #${pr.number} branch update did not finish before dispatch; dispatching current ref.`);
+              core.warning(`PR #${pr.number} branch update did not finish; skipping required-check dispatch for now.`);
               return current;
             }
 
@@ -96,27 +107,45 @@ jobs:
               authorLogin ? pull.user?.login === authorLogin : true
             );
             const refs = [];
+            const skipped = [];
 
             for (const pull of pulls) {
               core.startGroup(`PR #${pull.number}`);
-              refs.push(pull.head.ref);
               try {
                 await github.rest.pulls.updateBranch({
                   owner,
                   repo,
                   pull_number: pull.number,
+                  expected_head_sha: pull.head.sha,
                 });
-                const updated = await waitForBranchUpdate(pull, pull.head.sha);
-                core.info(`Updated ${pull.head.ref}: ${pull.head.sha} -> ${updated.head.sha}`);
+                const updated = await waitForCurrentBranch(pull, pull.head.sha);
+                if (isCurrent(updated)) {
+                  refs.push(updated.head.ref);
+                  core.info(`Updated ${pull.head.ref}: ${pull.head.sha} -> ${updated.head.sha}`);
+                } else {
+                  skipped.push({ number: pull.number, ref: pull.head.ref, state: updated.mergeable_state });
+                }
               } catch (error) {
                 if (isAlreadyCurrent(error)) {
-                  core.info(`${pull.head.ref} is already current with main.`);
+                  const current = await waitForCurrentBranch(pull, '');
+                  if (isCurrent(current)) {
+                    refs.push(current.head.ref);
+                    core.info(`${current.head.ref} is already current with main.`);
+                  } else {
+                    skipped.push({ number: pull.number, ref: pull.head.ref, state: current.mergeable_state });
+                    core.warning(`PR #${pull.number} is ${current.mergeable_state}; skipping required-check dispatch.`);
+                  }
                 } else {
                   core.warning(`Could not update PR #${pull.number}: ${error.message}`);
+                  skipped.push({ number: pull.number, ref: pull.head.ref, state: pull.mergeable_state });
                 }
               } finally {
                 core.endGroup();
               }
+            }
+
+            if (skipped.length > 0) {
+              core.notice(`Skipped ${skipped.length} PR branch(es) that were not safe to dispatch: ${JSON.stringify(skipped)}`);
             }
 
             return refs;

@@ -16,7 +16,7 @@ jobs:
     with:
       author-login: dependabot[bot]
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
   dispatch-required-checks:

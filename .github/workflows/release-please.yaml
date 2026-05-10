@@ -28,7 +28,7 @@ jobs:
     with:
       labels: "autorelease: pending"
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
   dispatch-required-checks:

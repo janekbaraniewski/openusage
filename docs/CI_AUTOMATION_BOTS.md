@@ -121,7 +121,7 @@ Benefit: the v0.10.1 / v0.10.2 cuts we just did become a single click on a PR.
 
 A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and updates open Dependabot PRs via GitHub's `update-branch` API.
 
-Important detail: the update commit is authored by `github-actions[bot]`. GitHub will not automatically chain `pull_request` workflows from that bot-authored head update, so strict required checks would otherwise stall forever on the new SHA. To keep the PR mergeable, the rebase workflow calls the reusable `refresh-pr-branches` workflow, waits for the branch update to land, then calls `dispatch-required-pr-checks` to run `CI`, `Dependency Review`, `govulncheck`, `Lychee`, and `CodeQL` against the refreshed branch.
+Dependabot does automatically rebase PRs, but it is not an immediate per-push guarantee and strict branch protection requires PR branches to be current before auto-merge can complete. The workflow is the deterministic backstop: it calls the reusable `refresh-pr-branches` workflow with `contents: write`, waits until each branch is current with `main`, and only then calls `dispatch-required-pr-checks` to run `CI`, `Dependency Review`, `govulncheck`, `Lychee`, and `CodeQL` against the refreshed branch. Branches that cannot be made current are skipped instead of dispatching stale refs.
 
 ### 8. Stale issue/PR bot
 
@@ -154,7 +154,7 @@ For `release-please`:
 
 - The workflow needs `contents: write`, `pull-requests: write`, and `actions: write` on the `GITHUB_TOKEN`.
 - Release PR commits are authored by `github-actions[bot]`, so the same "no chained workflow runs from bot-authored commits" rule applies there too.
-- Instead of relying on a separate PAT, the workflow now keeps any open release PR branch current with `main` through `refresh-pr-branches` and then calls the same reusable required-check dispatcher.
+- Instead of relying on a separate PAT, the workflow now keeps any open release PR branch current with `main` through `refresh-pr-branches` and then calls the same reusable required-check dispatcher. This is required because `release-please` PR updates made with `GITHUB_TOKEN` do not automatically trigger downstream `pull_request` workflows.
 
 For manually dispatched required-check workflows:
 

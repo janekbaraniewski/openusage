@@ -28,21 +28,33 @@ jobs:
           - codeql.yaml
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          REFS_JSON: ${{ inputs.refs-json }}
-          WORKFLOW_FILE: ${{ matrix.workflow }}
         with:
+          retries: 3
+          retry-exempt-status-codes: 400,401,403,404
           script: |
             const refs = JSON.parse(process.env.REFS_JSON);
             const workflow_id = process.env.WORKFLOW_FILE;
             const { owner, repo } = context.repo;
 
+            const failures = [];
             for (const ref of refs) {
               core.info(`Dispatching ${workflow_id} on ${ref}`);
-              await github.rest.actions.createWorkflowDispatch({
-                owner,
-                repo,
-                workflow_id,
-                ref,
-              });
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner,
+                  repo,
+                  workflow_id,
+                  ref,
+                });
+              } catch (error) {
+                failures.push(`${ref}: ${error.message}`);
+                core.warning(`Could not dispatch ${workflow_id} on ${ref}: ${error.message}`);
+              }
             }
+
+            if (failures.length > 0) {
+              core.setFailed(`Failed to dispatch ${workflow_id}: ${failures.join('; ')}`);
+            }
+        env:
+          REFS_JSON: ${{ inputs.refs-json }}
+          WORKFLOW_FILE: ${{ matrix.workflow }}
