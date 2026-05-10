@@ -117,6 +117,37 @@ Override in `settings.json`:
 }
 ```
 
+## Why a configured account is still required when telemetry is doing the work
+
+A common point of confusion: you've installed the OpenCode plugin (or Claude Code hook), spend events are streaming into the store, you can see them in the SQLite database — but unless an account is configured for the provider those events are tagged with, no tile renders.
+
+That's by design. A dashboard tile is owned by a configured account. An account exists when one of two things is true:
+
+- A provider's auto-detection signal is present (typically the env var, e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
+- An entry exists in `accounts` in your `settings.json`
+
+Telemetry events are the **data** that lands on a tile. The account is the **container** that lets the tile exist in the first place. Without it, ingested events are stored, deduplicated, and remain queryable — but they don't surface in the UI because there's no place for them to appear.
+
+### Why this split?
+
+Three reasons:
+
+1. **Each provider has data the plugin can't carry** — rate-limit headers, balance, plan, model catalog. Those come from native provider polling, which needs auth.
+2. **A telemetry source ID is not the same as your account** — the OpenCode plugin tags events with whatever ID OpenCode uses for the upstream model (`anthropic`, `google`, `github-copilot`). Those IDs become tile owners only after you've configured the matching account in OpenUsage.
+3. **No silent account creation** — auto-creating an account from a stream of foreign events would leak whatever provider the integration knows about into your dashboard without consent.
+
+### What this looks like in practice
+
+If you only have `OPENCODE_API_KEY` set and you're using OpenCode to call OpenAI, Anthropic, and Gemini:
+
+- The OpenCode tile exists and shows the Zen model catalog and key validity (from native polling).
+- The OpenCode plugin emits per-turn events tagged `openai`, `anthropic`, `google`.
+- None of those have configured accounts → no tiles → events sit in the store.
+
+To make the spend visible, set the env vars for the upstream providers (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). Once configured, those tiles appear, and the plugin events route to them automatically.
+
+If your tile names don't match the source IDs (`google` ↔ `gemini_api`, `github-copilot` ↔ `copilot`), see the next section.
+
 ## Retention
 
 | Setting | Default | Effect |

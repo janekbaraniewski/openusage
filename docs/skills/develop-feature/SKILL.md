@@ -96,13 +96,36 @@ Chains these skills in order, with user decision points between each:
 4. Maximum 3 iteration rounds before requiring user decision on whether to continue.
 5. After clean re-validation: ask "All issues resolved. Finalize?"
 
+### Phase 5.5 — Docs sweep (mandatory, before finalize)
+
+Every feature ships a docs update. After a clean validation, audit
+`docs/site/docs/` for pages that need to change because of this work and
+create new pages where required. The full procedure is documented as
+**Phase 0.5** in `/finalize-feature` — this phase exists in the parent
+flow as a hard gate so that finalize doesn't have to recover from a
+"no docs touched" situation.
+
+1. Diff the implementation against the user-facing surface (providers,
+   CLI, settings.json, daemon, integrations, TUI, paths, env vars).
+2. Update or create the relevant pages under `docs/site/docs/`.
+3. Build the docs site (`DOCS_PREVIEW=1 npm run build` in `docs/site/`)
+   and confirm `[SUCCESS]` with no broken-link warnings.
+4. If you find no docs change is needed, write a one-line justification
+   that goes in the PR description ("no docs change required because
+   …").
+
+This phase is not optional and not deferrable. A PR that ships code
+without the matching docs update gets bounced.
+
 ### Phase 6 — Finalize
 
 **Skill**: `/finalize-feature`
 
 1. Execute the finalize-feature skill.
 2. This creates the branch, commits with proper message, and opens a PR.
-3. Report the PR URL.
+3. The PR description must include a "Docs impact" section produced
+   in Phase 5.5.
+4. Report the PR URL.
 
 ### Phase 7 — Summary
 

@@ -42,17 +42,60 @@ Set `MISTRAL_API_KEY`.
 }
 ```
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows monthly spend against budget in EUR.
-- Detail view lists credit balance, plan name, and input/output token totals for the calendar month.
-- Rate-limit gauges (RPM, TPM) come from header probes.
+Each poll (default every 30 seconds in daemon mode) makes three calls under `https://api.mistral.ai/v1`. All requests use `Authorization: Bearer $MISTRAL_API_KEY`.
+
+| Call | Endpoint | What it provides |
+|---|---|---|
+| 1 | `GET /billing/subscription` | Plan name, monthly budget cap, credit balance |
+| 2 | `GET /billing/usage?start_date=YYYY-MM-01&end_date=<today>` | Daily spend & tokens for the current month |
+| 3 | `GET /models` | Rate-limit headers (RPM, TPM) |
+
+### `monthly_budget` — plan cap
+
+- Source: `monthly_budget` field of `/billing/subscription`.
+- Transform: copied verbatim into `Limit`. Currency: EUR.
+
+### `credit_balance` — remaining credits
+
+- Source: `credit_balance` field of `/billing/subscription`.
+- Transform: copied verbatim into `Remaining`. Currency: EUR.
+
+### `monthly_spend` — month-to-date cost
+
+- Source: `total_cost` from `/billing/usage` for `start_date = first of the current UTC month`, `end_date = today`.
+- Transform: stored as `Used`. If `monthly_budget` is known, `Limit` is set to it and `Remaining = Limit - Used`. Currency: EUR.
+
+### `monthly_input_tokens` / `monthly_output_tokens`
+
+- Source: sum of `input_tokens` / `output_tokens` across every entry in `data[]` returned by `/billing/usage` for the current month.
+- Transform: simple row-by-row sum. Stored as raw token counts.
+
+### `rpm` / `tpm` — rate limits
+
+- Source: response headers on `GET /v1/models`
+  - `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests`
+  - `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens`
+- Transform: parsed verbatim.
+
+### Auth status
+
+- Source: HTTP status code on any of the three endpoints. `401`/`403` → `auth`; `429` → `limited`; otherwise `ok`.
+
+### What's NOT tracked
+
+- **Per-model breakdown.** `/billing/usage` returns daily aggregates; the provider sums them month-to-date and does not split by model.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. The `/billing/usage` totals are themselves aggregates Mistral updates on its own cadence — typically a few minutes behind real time.
 
 ## API endpoints used
 
-- `/v1/billing/subscription`
-- `/v1/billing/usage`
-- `/v1/models`
+- `GET /v1/billing/subscription`
+- `GET /v1/billing/usage?start_date=…&end_date=…`
+- `GET /v1/models`
 
 ## Caveats
 
@@ -67,3 +110,7 @@ Mistral bills in **EUR**. Mixing it with USD-billed providers in a single dashbo
 
 - **No spend data** — verify the API key has billing scope; check Mistral's console.
 - **Currency confusion** — Mistral always reports EUR; OpenUsage displays whatever the API returns.
+
+### Why doesn't monthly spend match the Mistral console exactly?
+
+The dashboard sums `data[].total_cost` from `/v1/billing/usage` for `[first-of-month, today]`. Mistral's console can include same-day usage that hasn't aggregated yet, or apply different rounding. Refresh after the next aggregation pass.

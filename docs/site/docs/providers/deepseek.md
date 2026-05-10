@@ -41,16 +41,53 @@ Set `DEEPSEEK_API_KEY`.
 }
 ```
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows total balance and account availability.
-- Detail view splits balance into granted (free credits) and topped-up (paid) portions.
-- RPM and TPM gauges come from header probes.
+Each poll (default every 30 seconds in daemon mode) makes two calls under `https://api.deepseek.com`. All requests use `Authorization: Bearer $DEEPSEEK_API_KEY`.
+
+| Call | Endpoint | What it provides |
+|---|---|---|
+| 1 | `GET /user/balance` | Balance breakdown + currency |
+| 2 | `GET /v1/models` | Rate-limit headers |
+
+### `account_available` (status flag)
+
+- Source: `is_available` field at the top of the `/user/balance` JSON.
+- Transform: stored as `Raw["account_available"]`. When `false`, the snapshot is set to status `error` with message `DeepSeek account is not available`.
+
+### `total_balance` / `granted_balance` / `topped_up_balance`
+
+- Source: the **first** entry in the `balance_infos[]` array of `/user/balance`. Fields used:
+  - `total_balance`
+  - `granted_balance` (free credits)
+  - `topped_up_balance` (paid balance)
+  - `currency` (default `CNY` if absent)
+- Transform: each string-encoded number is parsed with `strconv.ParseFloat` and stored as `Remaining` on the matching metric. The currency is propagated to each metric's `Unit`.
+
+### `rpm` / `tpm` — rate limits
+
+- Source: response headers on `GET /v1/models`
+  - `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests`
+  - `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens`
+- Transform: parsed verbatim.
+
+### Auth status
+
+- Source: HTTP status code. `401`/`403` → `auth`; `429` → `limited`; otherwise `ok` (unless `account_available` is false, which forces `error`).
+
+### What's NOT tracked
+
+- **Spend / cost.** DeepSeek's API does not expose period-to-date spend. The granted-vs-topped-up split is the only signal of how credits are being consumed.
+- **Grant expiry.** Granted credits typically have an expiry date but the API does not expose it.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. The balance endpoint is updated by DeepSeek with a small ingestion delay (seconds to minutes).
 
 ## API endpoints used
 
-- `/user/balance`
-- `/v1/models`
+- `GET /user/balance`
+- `GET /v1/models`
 
 ## Caveats
 

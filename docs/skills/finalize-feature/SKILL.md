@@ -29,6 +29,62 @@ Before any git operations, verify the implementation is ready:
 6. If any BLOCK issues: stop and report. Do not proceed.
 7. If any WARN issues: report and ask user to confirm proceeding.
 
+### Phase 0.5 — Docs Sweep (MANDATORY)
+
+**Every PR is also a docs PR until proven otherwise.** Before opening the
+PR, audit user-facing documentation for changes the implementation just
+introduced. Skipping this phase is not allowed; record the audit result
+in the PR description.
+
+For each pull request, do all of the following:
+
+1. **Diff against the user-facing surface.** From the staged diff,
+   identify changes that affect any of:
+   - Provider behavior (added / removed / renamed providers, new fields,
+     new endpoints, new env vars)
+   - CLI surface (commands, subcommands, flags, defaults)
+   - `settings.json` schema (new keys, type changes, default changes)
+   - Daemon, telemetry, integrations behavior
+   - TUI keybindings, themes, view modes, settings tabs
+   - Paths read or written
+   - Any `Default` value referenced in code (theme, intervals, retention)
+2. **Map each change to docs locations** under `docs/site/docs/`:
+   - `getting-started/` — onboarding flow
+   - `concepts/` — mental model, terminology
+   - `providers/<id>.md` — per-provider reference
+   - `daemon/` — daemon, integrations, storage
+   - `customization/` — themes, widgets, keybindings
+   - `reference/` — CLI, config, env vars, paths, full keybindings
+   - `guides/` — workflows
+   - `troubleshooting/` — known confusions
+   - `faq.md` — recurring questions
+3. **Update or create pages.** For each affected location:
+   - Update existing pages where the change is incremental
+   - Create a new page when the change introduces a concept that
+     doesn't fit any existing page (e.g. a new integration class, a
+     new dashboard view mode)
+   - Treat `docs/site/docs/reference/configuration.md`,
+     `docs/site/docs/reference/cli.md`, and `docs/site/docs/reference/env-vars.md`
+     as canonical — every new field, flag, or env var goes in there
+4. **Build the docs site.** From `docs/site/`:
+   ```
+   DOCS_PREVIEW=1 npm run build
+   ```
+   - Must complete with `[SUCCESS]`
+   - No broken-link warnings
+5. **Sanity-check the change against the existing review-loop fact sheets**
+   if any are still present in `/tmp/openusage-docs-*.md`. If a fact
+   sheet contradicts the new code, update the docs to match the code,
+   not the fact sheet.
+6. **Record the audit in the PR description.** Add a "Docs impact"
+   section listing every docs file touched, plus an explicit
+   "no docs change required because <reason>" line if the PR genuinely
+   doesn't affect user-visible behavior (rare).
+
+If this phase reveals doc changes, commit them on the same branch
+**before** opening the PR. The PR must always include the documentation
+update for the change it ships.
+
 ### Phase 1 — Branch
 
 1. Ask user for the branch name. Suggest format: `feat/<short-desc>` or `<linear-id>/<short-desc>`.

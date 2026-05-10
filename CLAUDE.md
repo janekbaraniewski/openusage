@@ -145,10 +145,24 @@ Use these directly when you need a specific phase, or let `/develop-feature` cha
 ### Lifecycle Flow
 
 ```
-/design-feature  →  /review-design  →  /implement-feature  →  /validate-feature  →  /iterate-feature  →  /finalize-feature
+/design-feature  →  /review-design  →  /implement-feature  →  /validate-feature  →  /iterate-feature  →  [docs sweep]  →  /finalize-feature
 ```
 
 Each skill has a design doc in `docs/skills/<name>/` and a slash command in `.claude/commands/<name>.md`.
+
+### Docs sweep is mandatory on every PR
+
+Every PR that ships code is also a docs PR. Before opening or
+re-pushing the PR you MUST audit user-facing docs under
+`docs/site/docs/` and update or create pages affected by the change.
+This is enforced as `Phase 0.5` of `/finalize-feature` and `Phase 5.5`
+of `/develop-feature`. A PR that ships code without the matching docs
+update gets bounced. If no docs change is genuinely needed, the PR
+description must include a one-line justification.
+
+The docs site lives at `docs/site/`. Build it with
+`DOCS_PREVIEW=1 npm run build` from that directory; it must complete
+with `[SUCCESS]` and no broken-link warnings.
 
 ## Key design notes
 
