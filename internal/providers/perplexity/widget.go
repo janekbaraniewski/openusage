@@ -1,10 +1,15 @@
 package perplexity
 
-import "github.com/janekbaraniewski/openusage/internal/core"
+import (
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+)
 
 func dashboardWidget() core.DashboardWidget {
-	cfg := core.DefaultDashboardWidget()
-	cfg.ColorRole = core.DashboardColorRoleSky
+	// Routed through providerbase.DefaultDashboard so future option
+	// additions in providerbase apply to perplexity uniformly with other
+	// providers.
+	cfg := providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleSky))
 	// Single primary gauge — balance (USD remaining). Tier is shown as a
 	// raw line below since tier 0/5 doesn't make sense as a percent.
 	cfg.GaugePriority = []string{"available_balance"}

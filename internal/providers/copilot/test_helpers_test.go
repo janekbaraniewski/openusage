@@ -12,13 +12,13 @@ func testCopilotAccount(binary, configDir, copilotBinary string) core.AccountCon
 	if configDir == "" && copilotBinary == "" {
 		return acct
 	}
-	acct.ExtraData = map[string]string{}
+	acct.RuntimeHints = map[string]string{}
 	if configDir != "" {
-		acct.ExtraData["config_dir"] = configDir
+		acct.RuntimeHints["config_dir"] = configDir
 		acct.SetHint("config_dir", configDir)
 	}
 	if copilotBinary != "" {
-		acct.ExtraData["copilot_binary"] = copilotBinary
+		acct.RuntimeHints["copilot_binary"] = copilotBinary
 		acct.SetHint("copilot_binary", copilotBinary)
 	}
 	return acct

@@ -15,8 +15,8 @@ import (
 
 func resolveAPIBases(acct core.AccountConfig) (codingBase, monitorBase, region string) {
 	planType := ""
-	if acct.ExtraData != nil {
-		planType = strings.TrimSpace(acct.ExtraData["plan_type"])
+	if acct.RuntimeHints != nil {
+		planType = strings.TrimSpace(acct.RuntimeHints["plan_type"])
 	}
 
 	isChina := strings.Contains(strings.ToLower(planType), "china")

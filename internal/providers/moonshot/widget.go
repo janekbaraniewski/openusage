@@ -1,10 +1,15 @@
 package moonshot
 
-import "github.com/janekbaraniewski/openusage/internal/core"
+import (
+	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+)
 
 func dashboardWidget() core.DashboardWidget {
-	cfg := core.DefaultDashboardWidget()
-	cfg.ColorRole = core.DashboardColorRoleMauve
+	// Routed through providerbase.DefaultDashboard so future option
+	// additions in providerbase apply to moonshot uniformly with other
+	// providers.
+	cfg := providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleMauve))
 
 	// One gauge — total spent vs cumulative deposit (high-water-mark of the
 	// observed available balance). Cash/voucher breakdown lives in compact

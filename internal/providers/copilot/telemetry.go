@@ -88,7 +88,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read copilot session directory: %w", err)
+		return nil, fmt.Errorf("copilot: read session directory: %w", err)
 	}
 
 	var out []shared.TelemetryEvent
@@ -104,7 +104,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		eventsPath := filepath.Join(sessionDir, entry.Name(), "events.jsonl")
 		events, err := parseCopilotTelemetrySessionFile(eventsPath, entry.Name())
 		if err != nil {
-			return nil, fmt.Errorf("parse copilot session telemetry %s: %w", eventsPath, err)
+			return nil, fmt.Errorf("copilot: parse session telemetry %s: %w", eventsPath, err)
 		}
 		out = append(out, events...)
 	}
@@ -113,7 +113,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	// events.jsonl state (Copilot rotates session-state aggressively).
 	storeEvents, err := parseCopilotTelemetrySessionStore(ctx, storeDB, seenSessions)
 	if err != nil {
-		return nil, fmt.Errorf("parse copilot session store telemetry: %w", err)
+		return nil, fmt.Errorf("copilot: parse session store telemetry: %w", err)
 	}
 	out = append(out, storeEvents...)
 

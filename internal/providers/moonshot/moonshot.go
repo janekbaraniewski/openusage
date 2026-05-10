@@ -19,7 +19,6 @@ package moonshot
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -143,14 +142,8 @@ func (p *Provider) fetchUserInfo(ctx context.Context, url, apiKey string, snap *
 	var info userInfoResponse
 	statusCode, _, err := shared.FetchJSON(ctx, url, apiKey, &info, p.Client())
 	if err != nil {
-		switch statusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			snap.Status = core.StatusAuth
-			snap.Message = fmt.Sprintf("HTTP %d – check MOONSHOT_API_KEY", statusCode)
-			return nil
-		case http.StatusTooManyRequests:
-			snap.Status = core.StatusLimited
-			snap.Message = "rate limited (HTTP 429)"
+		shared.ApplyStatusFromCode(statusCode, snap, "MOONSHOT_API_KEY")
+		if snap.Status != "" {
 			return nil
 		}
 		return fmt.Errorf("user info: %w", err)
@@ -200,18 +193,11 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 	var bal balanceResponse
 	statusCode, _, err := shared.FetchJSON(ctx, url, apiKey, &bal, p.Client())
 	if err != nil {
-		switch statusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			if snap.Status == "" {
-				snap.Status = core.StatusAuth
-				snap.Message = fmt.Sprintf("HTTP %d – check MOONSHOT_API_KEY", statusCode)
-			}
-			return nil
-		case http.StatusTooManyRequests:
-			if snap.Status == "" {
-				snap.Status = core.StatusLimited
-				snap.Message = "rate limited (HTTP 429)"
-			}
+		// Don't clobber a status set by a previous fetch in the same poll.
+		if snap.Status == "" {
+			shared.ApplyStatusFromCode(statusCode, snap, "MOONSHOT_API_KEY")
+		}
+		if snap.Status == core.StatusAuth || snap.Status == core.StatusLimited {
 			return nil
 		}
 		return fmt.Errorf("balance: %w", err)

@@ -529,7 +529,7 @@ func TestFetchProducesIdenticalOutput_CachedVsFresh(t *testing.T) {
 	acct := core.AccountConfig{
 		ID:       "test-identical",
 		Provider: "cursor",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"tracking_db": trackingDBPath,
 			"state_db":    stateDBPath,
 		},
