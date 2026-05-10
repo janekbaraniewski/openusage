@@ -1,0 +1,32 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: go
+          package-name: openusage
+          # Conventional commits drive version bumps automatically.
+          # docs(...) and ci(...) commits do not bump the version.
+          changelog-types: |
+            [
+              {"type":"feat","section":"Features"},
+              {"type":"fix","section":"Bug Fixes"},
+              {"type":"perf","section":"Performance"},
+              {"type":"deps","section":"Dependencies"},
+              {"type":"refactor","section":"Refactoring","hidden":false},
+              {"type":"docs","section":"Documentation","hidden":true},
+              {"type":"chore","section":"Miscellaneous","hidden":true},
+              {"type":"ci","section":"CI/CD","hidden":true},
+              {"type":"test","section":"Tests","hidden":true}
+            ]

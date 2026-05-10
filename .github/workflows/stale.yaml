@@ -1,0 +1,42 @@
+name: Stale issues and PRs
+
+on:
+  schedule:
+    - cron: "37 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          # Issues
+          days-before-issue-stale: 90
+          days-before-issue-close: 30
+          stale-issue-label: stale
+          stale-issue-message: |
+            This issue has been quiet for 90 days. It will close in 30 days
+            unless someone comments or applies the `pinned` label. Reopen
+            anytime if it's still relevant.
+          close-issue-message: |
+            Closing as stale. Reopen if the issue is still relevant.
+          exempt-issue-labels: pinned,security
+          # Pull requests
+          days-before-pr-stale: 60
+          days-before-pr-close: 30
+          stale-pr-label: stale
+          stale-pr-message: |
+            This pull request has been quiet for 60 days. It will close in 30
+            days unless someone comments or pushes. Reopen anytime if you
+            want to pick it back up.
+          close-pr-message: |
+            Closing as stale. Push or reopen if you want to continue.
+          exempt-pr-labels: pinned,security
+          # Don't be too aggressive on a sweep.
+          operations-per-run: 50

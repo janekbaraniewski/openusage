@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Go modules
+  # ── Go modules ─────────────────────────────────────────────────────
   - package-ecosystem: gomod
     directory: /
     schedule:
@@ -13,8 +13,13 @@ updates:
     commit-message:
       prefix: "deps"
       include: scope
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
 
-  # GitHub Actions
+  # ── GitHub Actions ─────────────────────────────────────────────────
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -27,3 +32,55 @@ updates:
     commit-message:
       prefix: "ci"
       include: scope
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── Marketing site (Vite + React) ──────────────────────────────────
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 8
+    labels:
+      - dependencies
+      - website
+    commit-message:
+      prefix: "deps(website)"
+      include: scope
+    groups:
+      website-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+      website-types:
+        patterns:
+          - "@types/*"
+
+  # ── Docusaurus docs site ───────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /docs/site
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 8
+    labels:
+      - dependencies
+      - docs
+    commit-message:
+      prefix: "deps(docs)"
+      include: scope
+    groups:
+      docusaurus:
+        patterns:
+          - "@docusaurus/*"
+      docs-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+      docs-types:
+        patterns:
+          - "@types/*"

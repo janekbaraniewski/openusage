@@ -1,0 +1,67 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: Auto-merge safe Dependabot PRs
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide auto-merge eligibility
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+        run: |
+          set -euo pipefail
+          eligible=false
+          if [ "$UPDATE_TYPE" = "version-update:semver-patch" ]; then
+            eligible=true
+          fi
+          if [ "$UPDATE_TYPE" = "version-update:semver-minor" ]; then
+            case "$DEP_TYPE" in
+              direct:development|indirect)
+                eligible=true
+                ;;
+            esac
+          fi
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "::notice::update_type=$UPDATE_TYPE dep_type=$DEP_TYPE eligible=$eligible"
+
+      - name: Approve the PR
+        if: steps.decide.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review --approve "$PR_URL" --body "Auto-approved by policy."
+
+      - name: Enable auto-merge (squash)
+        if: steps.decide.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      - name: Comment on PRs left for review
+        if: steps.decide.outputs.eligible != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+        run: |
+          gh pr comment "$PR_URL" --body "This update is **$UPDATE_TYPE** on a **$DEP_TYPE** dependency, so it's left for human review per the auto-merge policy. See \`docs/CI_AUTOMATION_BOTS.md\`."

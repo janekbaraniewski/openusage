@@ -1,0 +1,45 @@
+# Lychee configuration for the broken-link checker.
+# See https://lychee.cli.rs/usage/config/ for the full schema.
+
+# Treat redirects as success.
+accept = [200, 206, 301, 302, 308, 403, 429]
+
+# Skip these patterns (false-positive prone or rate-limited).
+exclude = [
+    # localhost variants
+    "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\])",
+    # GitHub anchor-style fragments often differ between rendered HTML and link text
+    "^https?://github\\.com/.*#",
+    # Anthropic / OpenAI / vendor docs that 403 to lychee but work in browsers
+    "^https?://(www\\.)?(anthropic|openai|console\\.anthropic|platform\\.openai)\\.com/",
+    # OpenCode internal endpoints
+    "^https?://opencode\\.ai/",
+    # Cursor billing endpoints (auth-gated)
+    "^https?://api2\\.cursor\\.sh/",
+    # Cloudflare-hosted pages.dev preview URLs (ephemeral)
+    "^https?://[a-z0-9-]+\\.openusage-docs\\.pages\\.dev/",
+]
+
+# Per-host concurrency: avoid hammering any single host.
+max_concurrency = 8
+
+# Timeouts and retries.
+timeout = 20
+retry_wait_time = 5
+max_retries = 2
+
+# Be polite — identify ourselves.
+user_agent = "lychee-link-checker (openusage docs CI)"
+
+# Skip mailto and file:// schemes.
+include_mail = false
+exclude_path = [
+    "node_modules",
+    "build",
+    "dist",
+    ".docusaurus",
+]
+
+# Cache hits for 1 day to keep CI runs cheap.
+cache = true
+max_cache_age = "1d"
