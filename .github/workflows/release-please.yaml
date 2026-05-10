@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: write
   pull-requests: write
 
@@ -32,13 +31,3 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-
-  dispatch-required-checks:
-    needs: refresh-release-prs
-    if: needs.refresh-release-prs.outputs.refs-json != '[]'
-    uses: ./.github/workflows/dispatch-required-pr-checks.yaml
-    with:
-      refs-json: ${{ needs.refresh-release-prs.outputs.refs-json }}
-    permissions:
-      actions: write
-      contents: read
