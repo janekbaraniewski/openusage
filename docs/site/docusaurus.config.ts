@@ -124,6 +124,12 @@ const config: Config = {
           label: 'GitHub',
           position: 'right',
         },
+        {
+          to: '/llms.txt',
+          label: 'For AI',
+          position: 'right',
+          target: '_blank',
+        },
       ],
     },
     footer: {

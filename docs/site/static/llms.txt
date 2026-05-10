@@ -1,0 +1,103 @@
+# OpenUsage
+
+> Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 19 providers — Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more.
+
+These docs cover installation, configuration, every provider integration, the optional background daemon, theming, the complete CLI and `settings.json` reference, troubleshooting, and contribution guidance.
+
+Project home: https://openusage.sh
+Source: https://github.com/janekbaraniewski/openusage
+Full docs (machine-readable): /llms-full.txt
+
+## OpenUsage docs
+
+- [OpenUsage docs](/): Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 19 providers.
+
+## Getting Started
+
+- [First-run walkthrough](/getting-started/first-run/): A tour of the OpenUsage dashboard on first launch, from auto-detection output to keybindings.
+- [Install](/getting-started/install/): Install OpenUsage on macOS, Linux, or Windows via Homebrew, script, or Go.
+- [Quickstart](/getting-started/quickstart/): Get OpenUsage running and see live data from your AI tools in under five minutes.
+- [Uninstall](/getting-started/uninstall/): Cleanly remove OpenUsage, its daemon, integrations, config, and data.
+- [Upgrade](/getting-started/upgrade/): Upgrade an existing OpenUsage install and refresh integrations.
+
+## Concepts
+
+- [Accounts](/concepts/accounts/): The AccountConfig model, how api_key_env points to a variable name not a value, and how to track multiple accounts of the same provider.
+- [Architecture](/concepts/architecture/): How OpenUsage discovers tools, polls providers, and renders snapshots in the TUI in both direct and daemon modes.
+- [Auto-detection](/concepts/auto-detection/): How OpenUsage discovers AI tools and API keys on first run, and how detected accounts merge with manual configuration.
+- [Direct mode vs daemon mode](/concepts/direct-vs-daemon/): The two runtime modes of OpenUsage, when to pick each, and how to switch between them.
+- [Providers](/concepts/providers/): What a provider is in OpenUsage, the three categories, and how each one shapes its own dashboard and detail widgets.
+- [Snapshots](/concepts/snapshots/): The UsageSnapshot data model, what metrics it carries, refresh cadence, and how time-window filtering works.
+- [Telemetry pipeline](/concepts/telemetry/): How the daemon stores events, deduplicates them, and turns them into snapshots — events, sources, dedup, and retention.
+- [Themes](/concepts/themes/): 18 bundled themes, how to cycle them, and where external theme files live.
+- [Time windows](/concepts/time-windows/): How OpenUsage filters aggregations by time, the difference between calendar 1d and rolling windows, and how retention bounds what you can query.
+
+## Providers
+
+- [Alibaba Cloud Model Studios](/providers/alibaba-cloud/): Track Alibaba Cloud DashScope billing period, balance, spend, and per-model quotas in OpenUsage.
+- [Anthropic](/providers/anthropic/): Track Anthropic API rate limits in OpenUsage.
+- [Claude Code](/providers/claude-code/): Track Claude Code CLI sessions, billing blocks, burn rate, and per-model token usage in OpenUsage.
+- [Codex CLI](/providers/codex/): Track OpenAI Codex CLI sessions, rate limits, and credit balance in OpenUsage.
+- [GitHub Copilot](/providers/copilot/): Track GitHub Copilot quotas, org seats, and rate limits in OpenUsage via the gh CLI.
+- [Cursor IDE](/providers/cursor/): Track Cursor IDE plan spend, billing cycle, composer sessions, and per-model usage in OpenUsage.
+- [DeepSeek](/providers/deepseek/): Track DeepSeek balance breakdown and rate limits in OpenUsage.
+- [Gemini API](/providers/gemini-api/): Track Google Gemini API model catalog and per-model token limits in OpenUsage.
+- [Gemini CLI](/providers/gemini-cli/): Track Gemini CLI OAuth sessions, token usage, MCP config, and user quota in OpenUsage.
+- [Groq](/providers/groq/): Track Groq API rate limits (RPM, TPM, RPD, TPD) in OpenUsage.
+- [Providers](/providers/): Catalog of every AI tool and API platform OpenUsage tracks.
+- [Mistral AI](/providers/mistral/): Track Mistral monthly budget, credit balance, spend, and tokens in OpenUsage.
+- [Moonshot](/providers/moonshot/): Track Moonshot organization, balance breakdown, quotas, and peak usage in OpenUsage.
+- [Ollama](/providers/ollama/): Track local Ollama models, VRAM, request log analytics, and cloud credits in OpenUsage.
+- [OpenAI](/providers/openai/): Track OpenAI API rate limits and quotas in OpenUsage.
+- [OpenCode](/providers/opencode/): Track OpenCode auth, available zen models, and spend via the telemetry plugin in OpenUsage.
+- [OpenRouter](/providers/openrouter/): Track OpenRouter credits, daily/weekly/monthly usage, generation analytics, and BYOK breakdown in OpenUsage.
+- [Perplexity](/providers/perplexity/): Track Perplexity Pro/Max usage in OpenUsage via browser-session auth.
+- [xAI (Grok)](/providers/xai/): Track xAI Grok credits, rate limits, and allowed models in OpenUsage.
+- [Z.AI](/providers/zai/): Track Z.AI 5-hour window, monthly usage, credit grants, and tool usage in OpenUsage.
+
+## Daemon & Telemetry
+
+- [Install the daemon](/daemon/install/): Install, uninstall, and check the OpenUsage telemetry daemon on macOS launchd and Linux systemd-user.
+- [Tool integrations](/daemon/integrations/): Install hook integrations for Claude Code, Codex, and OpenCode so every turn is captured by the daemon.
+- [Daemon overview](/daemon/overview/): Background telemetry daemon that aggregates AI tool usage from collectors, hooks, and a disk spool into a single SQLite store.
+- [Storage and retention](/daemon/storage/): SQLite schema, deduplication strategy, provider links, spool, and retention controls for the OpenUsage daemon.
+- [Daemon troubleshooting](/daemon/troubleshooting/): Diagnose and fix daemon startup failures, socket errors, missing events, and database corruption.
+
+## Customization
+
+- [External themes](/customization/external-themes/): Author custom OpenUsage themes as JSON files, where to put them, and the full color-token schema.
+- [Keybindings](/customization/keybindings/): Overview of how OpenUsage keybindings are organized by context, with a pointer to the full reference.
+- [Themes](/customization/themes/): All 18 bundled OpenUsage themes and how to switch between them from the TUI or settings.
+- [Widget sections](/customization/widgets/): Toggle, reorder, and hide-when-empty for dashboard tiles and detail widgets.
+
+## Reference
+
+- [CLI reference](/reference/cli/): Every openusage command and subcommand with flags and behavior.
+- [Configuration reference](/reference/configuration/): Every field in OpenUsage's settings.json schema with type, default, and example values.
+- [Environment variables](/reference/env-vars/): Every environment variable OpenUsage reads, including per-provider API key envs.
+- [Keybindings reference](/reference/keybindings/): Complete keybinding reference for every OpenUsage TUI context.
+- [Paths reference](/reference/paths/): Every file and directory OpenUsage reads or writes, by operating system.
+
+## Guides
+
+- [Cost attribution](/guides/cost-attribution/): Practical recipes for figuring out which tool, model, or project is burning your AI budget.
+- [Headless servers](/guides/headless-servers/): Running OpenUsage on a server without a desktop — daemon-only mode, tmux for the TUI, and SSH viewing.
+- [Tracking multiple accounts](/guides/multi-account/): How to monitor several accounts of the same provider — for example a personal and a work OpenAI key — side by side.
+- [Team tracking](/guides/team-tracking/): Practical patterns for using OpenUsage to monitor a team's combined AI tool usage — and what's out of scope.
+
+## Troubleshooting
+
+- [Common issues](/troubleshooting/common-issues/): The four issues most users hit, with fast diagnosis steps for each.
+- [Daemon issues](/troubleshooting/daemon-issues/): Diagnosing problems with the telemetry daemon — install failures, socket errors, log inspection, and SQLite recovery.
+- [Debug mode](/troubleshooting/debug-mode/): Turning on verbose logging and capturing a useful bug report.
+- [Provider not detected](/troubleshooting/provider-not-detected/): Per-detection-style checklists for finding why a provider isn't showing up in the dashboard.
+
+## Contributing
+
+- [Adding a provider](/contributing/add-provider/): High-level walk-through of the seven-phase process for contributing a new AI provider.
+- [Development conventions](/contributing/development/): Code style, branch & PR rules, and testing patterns used across OpenUsage.
+- [Contributing](/contributing/overview/): How OpenUsage is structured, the prerequisites, and the dev loop.
+
+## More
+
+- [FAQ](/faq/): Frequently asked questions about OpenUsage — privacy, cost, platform support, accuracy, and how it compares to other tools.
