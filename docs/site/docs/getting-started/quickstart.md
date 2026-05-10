@@ -63,7 +63,7 @@ Full list: [Keybindings reference](../reference/keybindings.md).
 
 Each tile shows:
 
-- A **status badge** in the corner — `OK ●`, `WARN ◐`, `LIMIT ◌`, `AUTH ◈`, `ERR ✗`
+- A **status badge** in the corner — `OK ●`, `WARN ◐`, `LIMIT ◌`, `AUTH ◈`, `ERR ✗`, `UNKNOWN ◇`
 - The **provider name** and account ID
 - The **primary metric** (spend, credits, or quota)
 - A **gauge bar** colored green → yellow → red as you approach a limit

@@ -7,7 +7,7 @@ description: Every field in OpenUsage's settings.json schema with type, default,
 
 OpenUsage stores its configuration in a single JSON file at:
 
-- macOS / Linux — `~/.config/openusage/settings.json` (or `$XDG_CONFIG_HOME/openusage/settings.json`)
+- macOS / Linux — `~/.config/openusage/settings.json`
 - Windows — `%APPDATA%\openusage\settings.json`
 
 The TUI reads the file on startup and writes it back when you change settings interactively. You can also edit the file directly — changes take effect on the next refresh (<kbd>r</kbd>) or restart.

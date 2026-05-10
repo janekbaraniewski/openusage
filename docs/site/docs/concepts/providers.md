@@ -33,7 +33,7 @@ Providers fall into three buckets based on how they collect data.
 
 Providers that hit a vendor REST API with the user's key. Most of these probe rate-limit headers cheaply; some pull rich JSON about credits and per-model usage.
 
-Examples: `openai`, `anthropic`, `openrouter`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`, `moonshot`, `zai`.
+Examples: `openai`, `anthropic`, `openrouter`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`, `moonshot`, `perplexity`, `zai`.
 
 Detection signal: an env var holding the key.
 

@@ -24,7 +24,7 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 
 ## API key environment variables
 
-Each provider's account references its key via `api_key_env` — the name of the variable, not its value. Below are the conventional names used in [`configs/example_settings.json`](https://github.com/loft-sh/openusage/blob/main/configs/example_settings.json). You may override these; just keep `api_key_env` in sync.
+Each provider's account references its key via `api_key_env` — the name of the variable, not its value. Below are the conventional names used in [`configs/example_settings.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/example_settings.json). You may override these; just keep `api_key_env` in sync.
 
 | Provider | Default env var |
 |---|---|

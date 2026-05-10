@@ -20,7 +20,7 @@ Local-first tracking for the Claude Code CLI. Reads on-disk session logs, billin
   - Cost estimates (API-equivalent)
   - Sessions and billing blocks (5-hour windows)
   - Burn rate
-  - MCP server and skill counts
+  - Skill usage counts
   - Subscription status
 
 ## Setup
@@ -60,9 +60,9 @@ Local data sources, all under `~/.claude/`:
 | `~/.claude/projects/**/*.jsonl` | Per-conversation transcripts. Authoritative source for tokens, tool calls, billing blocks. |
 | `~/.claude/stats-cache.json` (or `stats.json`) | Daily activity rollups Claude Code computes itself: messages, sessions, tool calls. |
 | `~/.claude.json` | OAuth state, subscription metadata, organization UUID. |
-| `~/.claude/settings.json` | MCP server configuration, skill settings. |
+| `~/.claude/settings.json` | Active model and `alwaysThinkingEnabled` flag. |
 
-Optional remote source: `POST https://admin.anthropic.com/api/organizations/{org_uuid}/usage` — only when [browser-session auth](../daemon/integrations.md) is configured. Provides organization-level rolled-up usage (the same numbers the Anthropic admin console shows).
+Optional remote source: `GET https://claude.ai/api/organizations/{org_uuid}/usage` — only when [browser-session auth](../daemon/integrations.md) is configured. Provides organization-level rolled-up usage (the same numbers the Anthropic admin console shows).
 
 ### Pricing tables
 
@@ -131,10 +131,10 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - Source: distinct `sessionId` values from the JSONL turns, scoped per window.
 - Transform: a `total_prompts` metric counts unique `(messageID, requestID)` keys.
 
-### MCP, skills, subscription, account email
+### Skills, subscription, account email, active model
 
 - Source:
-  - MCP server count from `settings.json` `mcpServers` and from `mcp-server-enablement.json` (if present).
+  - Active model and `alwaysThinkingEnabled` from `~/.claude/settings.json`.
   - Skill usage counts from `~/.claude.json` → `skillUsage[name].usageCount`.
   - Subscription status from `~/.claude.json` → `hasAvailableSubscription`, `oauthAccount.billingType`, `subscriptionCreatedAt`.
   - Account email from `oauthAccount.emailAddress`.
@@ -142,7 +142,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Optional Usage API (organization-wide)
 
-- Source: `POST admin.anthropic.com/api/organizations/{org_uuid}/usage` with session cookies imported via Settings → 5 KEYS. Returns aggregate per-day usage for the entire organization.
+- Source: `GET https://claude.ai/api/organizations/{org_uuid}/usage` with session cookies imported via Settings → 5 KEYS. Returns aggregate per-day usage for the entire organization.
 - Transform: when available, the response is cached in memory and applied on top of the local data. Errors fall back to the cached response (if any) so transient failures don't blank the tile.
 
 ### Auth status
@@ -164,13 +164,13 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - `~/.claude/projects/**/*.jsonl` — per-turn transcripts (authoritative for tokens, cost, blocks)
 - `~/.claude/stats-cache.json` (or `stats.json`, with legacy fallbacks) — daily activity rollups
 - `~/.claude.json` — OAuth state, subscription metadata, organization UUID, skill usage
-- `~/.claude/settings.json` — MCP server configuration
+- `~/.claude/settings.json` — active model, `alwaysThinkingEnabled` flag
 
 On Linux the provider also probes `~/.config/claude/projects/` as a fallback.
 
 ## API endpoints used
 
-- Optional: `POST admin.anthropic.com/api/organizations/{org_uuid}/usage` — only when browser-session cookies are imported. See [Daemon integrations](../daemon/integrations.md).
+- Optional: `GET https://claude.ai/api/organizations/{org_uuid}/usage` — only when browser-session cookies are imported. See [Daemon integrations](../daemon/integrations.md).
 
 ## Caveats
 

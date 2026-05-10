@@ -151,13 +151,12 @@ openusage integrations install opencode
 
 ```json
 {
-  "plugins": {
-    "openusage-telemetry": {
-      "enabled": true
-    }
-  }
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["file:///Users/me/.config/opencode/plugins/openusage-telemetry.ts"]
 }
 ```
+
+The patcher writes the singular `plugin` key as a flat array of `file://` URLs; existing entries are preserved.
 
 The plugin uses `OPENUSAGE_BIN` and `OPENUSAGE_TELEMETRY_SOCKET` if set; otherwise it falls back to the embedded defaults captured at install time.
 

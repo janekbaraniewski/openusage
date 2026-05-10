@@ -33,7 +33,7 @@ Set `ANTHROPIC_API_KEY`. OpenUsage registers the provider on next start.
       "id": "anthropic",
       "provider": "anthropic",
       "api_key_env": "ANTHROPIC_API_KEY",
-      "base_url": "https://api.anthropic.com"
+      "base_url": "https://api.anthropic.com/v1"
     }
   ]
 }

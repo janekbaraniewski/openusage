@@ -138,7 +138,7 @@ Three reasons:
 
 ### What this looks like in practice
 
-If you only have `ZEN_API_KEY` (or `OPENCODE_API_KEY` — both are accepted) set and you're using OpenCode to call OpenAI, Anthropic, and Gemini:
+If you only have `OPENCODE_API_KEY` (or its alias `ZEN_API_KEY`) set and you're using OpenCode to call OpenAI, Anthropic, and Gemini:
 
 - The OpenCode tile exists and shows the Zen model catalog and key validity (from native polling).
 - The OpenCode plugin emits per-turn events tagged `openai`, `anthropic`, `google`.

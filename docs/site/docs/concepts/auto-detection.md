@@ -23,6 +23,7 @@ For each supported provider, the detector checks whether a known env var is set 
 | `DEEPSEEK_API_KEY` | deepseek |
 | `XAI_API_KEY` | xai |
 | `GEMINI_API_KEY` | gemini_api |
+| `GOOGLE_API_KEY` | gemini_api (account id `gemini-google`) |
 | `ALIBABA_CLOUD_API_KEY` | alibaba_cloud |
 | `MOONSHOT_API_KEY` | moonshot |
 | `ZAI_API_KEY` / `ZHIPUAI_API_KEY` | zai |

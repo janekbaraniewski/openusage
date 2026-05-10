@@ -62,9 +62,9 @@ export OPENUSAGE_THEME_DIR=~/dotfiles/openusage-themes:~/work/themes
 
 Source examples in the repo:
 
-- [`configs/themes/grayscale.json`](https://github.com/loft-sh/openusage/blob/main/configs/themes/grayscale.json)
-- [`configs/themes/tokyo-night.json`](https://github.com/loft-sh/openusage/blob/main/configs/themes/tokyo-night.json)
-- [`configs/themes/dracula.json`](https://github.com/loft-sh/openusage/blob/main/configs/themes/dracula.json)
+- [`configs/themes/grayscale.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/themes/grayscale.json)
+- [`configs/themes/tokyo-night.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/themes/tokyo-night.json)
+- [`configs/themes/dracula.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/themes/dracula.json)
 
 ## Complete example
 

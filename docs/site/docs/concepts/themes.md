@@ -11,7 +11,7 @@ Press `t` in the dashboard to advance. The selection persists to `settings.json`
 
 ## Bundled themes
 
-Deep Space (default), Ayu Dark, Catppuccin Mocha, Dracula, Everforest, Grayscale, Gruvbox, Kanagawa, Midnight Iris, Monokai, Neon Dusk, Nightfox, Nord, One Dark, Rose Pine, Solarized Dark, Synthwave 84, Tokyo Night.
+Gruvbox (default), Ayu Dark, Catppuccin Mocha, Deep Space, Dracula, Everforest, Grayscale, Kanagawa, Midnight Iris, Monokai, Neon Dusk, Nightfox, Nord, One Dark, Rose Pine, Solarized Dark, Synthwave 84, Tokyo Night. Deep Space is a hardcoded fallback used only if the JSON theme files fail to load.
 
 ## External themes
 
