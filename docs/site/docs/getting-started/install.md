@@ -83,5 +83,5 @@ This sets up a launchd agent (macOS) or a systemd user unit (Linux) and starts t
 - [First-run walkthrough](./first-run.md) — what auto-detection picks up and how to read the dashboard
 
 :::note CGO and cross-compilation
-OpenUsage embeds [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) for the telemetry store. That requires CGO. If you want to cross-compile yourself, you need a target-specific C toolchain — most users should just use the pre-built binaries from the release page.
+OpenUsage embeds [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) for the telemetry store, which requires CGO. Cross-compiling needs a target-specific C toolchain; most users should grab the pre-built binaries from the release page instead.
 :::
