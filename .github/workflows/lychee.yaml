@@ -2,13 +2,7 @@ name: Broken link check
 
 on:
   pull_request:
-    paths:
-      - "docs/site/**"
-      - "README.md"
-      - "AGENTS.md"
-      - "CODEX.md"
-      - ".github/workflows/lychee.yaml"
-      - ".github/lychee.toml"
+    branches: [main]
   schedule:
     - cron: "13 6 * * *"
   workflow_dispatch:

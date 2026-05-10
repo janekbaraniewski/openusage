@@ -60,6 +60,18 @@ If those gates pass, the bump is safe to ship. The cost of human review on every
 
 **This requires branch protection on `main` with required status checks.** Without it, `gh pr merge --auto` merges as soon as nothing is blocking — which is "immediately" if nothing's required.
 
+**Required-check workflows must NOT have `paths:` filters.** If a required workflow's path filter doesn't match a PR's diff, the check never fires, so the required-check gate is never satisfied, and auto-merge stalls forever waiting for a check that won't run. We've removed path filters from `lychee.yaml` and `govulncheck.yaml` for this reason. Non-required workflows (e.g. `docs-preview.yaml`) keep their path filters.
+
+### Required checks
+
+The current required-check set on `main`:
+
+- `Build (ubuntu-latest)`, `Build (macos-latest)`
+- `Test (ubuntu-latest)`, `Test (macos-latest)`
+- `Lint`, `Vet`, `gofmt`, `Check go.mod tidiness`
+- `Review` (Dependency Review), `CodeQL`, `Scan for known Go vulnerabilities`
+- `Lychee`
+
 We use the **native GitHub auto-merge** (via `gh pr merge --auto`) instead of a third-party action. Cleaner, no extra permissions to grant.
 
 ### 3. `govulncheck-action`
