@@ -28,31 +28,56 @@ import (
 // The probe uses /usr/bin/security with a short timeout. The user gets a
 // keychain unlock prompt the first time; subsequent calls within the same
 // session are silent.
-func detectMacOSKeychainCredentials(result *Result) {
-	probes := []struct {
-		Service     string
-		AccountID   string
-		Provider    string
-		Auth        string
-		ProvenanceK string
-	}{
-		// Anthropic Claude Code CLI: stores OAuth credentials JSON.
-		// Service confirmed via anthropics/claude-code issues #9403, #37512, #44089.
-		{"Claude Code-credentials", "claude-code", "claude_code", "local",
-			"keychain:Claude Code-credentials"},
-	}
+// keychainProbe describes one well-known credential entry in the macOS
+// keychain. Adding a new AI CLI's keychain integration is a one-liner here.
+type keychainProbe struct {
+	Service          string // keychain item service name
+	AccountID        string // account ID we annotate or create
+	Provider         string // provider ID for new-account path
+	Auth             string // auth mode for new-account path
+	ProvenanceSource string // value written to the credential_source hint
+	DefaultConfigDir string // optional: relative-to-home dir set on new accounts
+}
 
-	for _, p := range probes {
+var keychainProbes = []keychainProbe{
+	// Anthropic Claude Code CLI on macOS. Service name confirmed via
+	// anthropics/claude-code issues #9403, #37512, #44089.
+	{
+		Service:          "Claude Code-credentials",
+		AccountID:        "claude-code",
+		Provider:         "claude_code",
+		Auth:             "local",
+		ProvenanceSource: "keychain:Claude Code-credentials",
+		DefaultConfigDir: ".claude",
+	},
+	// OpenAI Codex CLI when cli_auth_credentials_store=keyring (the default
+	// on macOS when keychain is reachable). The stored value is an OpenAI
+	// OAuth access token; the codex provider reads its own auth.json and
+	// can refresh as needed. We annotate so users can see where the secret
+	// is held. Service confirmed via openai/codex issue #16728.
+	{
+		Service:          "Codex Auth",
+		AccountID:        "codex-cli",
+		Provider:         "codex",
+		Auth:             "local",
+		ProvenanceSource: "keychain:Codex Auth",
+		DefaultConfigDir: ".codex",
+	},
+}
+
+func detectMacOSKeychainCredentials(result *Result) {
+	for _, p := range keychainProbes {
 		if !keychainGenericPasswordExists(p.Service) {
 			continue
 		}
 		log.Printf("[detect] macOS keychain entry present: %s", p.Service)
 
-		// Find an existing account for this provider; if found, just annotate.
+		// Annotate the existing account if file-based detection already
+		// registered it.
 		annotated := false
 		for i := range result.Accounts {
 			if result.Accounts[i].ID == p.AccountID {
-				result.Accounts[i].SetHint("credential_source", p.ProvenanceK)
+				result.Accounts[i].SetHint("credential_source", p.ProvenanceSource)
 				annotated = true
 				break
 			}
@@ -61,19 +86,17 @@ func detectMacOSKeychainCredentials(result *Result) {
 			continue
 		}
 
-		// File-based detection didn't fire for this CLI (binary not on PATH,
-		// config dir missing, etc). Register a minimal account so the provider
-		// has something to bind to.
+		// File-based detection didn't fire (binary off PATH, config dir
+		// missing, etc). Register a minimal account so the provider has
+		// something to bind to.
 		acct := core.AccountConfig{
 			ID:       p.AccountID,
 			Provider: p.Provider,
 			Auth:     p.Auth,
 		}
-		acct.SetHint("credential_source", p.ProvenanceK)
-		// Best-effort: surface the home dir so the provider's local file
-		// readers have a consistent default to fall back to.
-		if home := homeDir(); home != "" {
-			acct.SetPath("config_dir", filepath.Join(home, ".claude"))
+		acct.SetHint("credential_source", p.ProvenanceSource)
+		if home := homeDir(); home != "" && p.DefaultConfigDir != "" {
+			acct.SetPath("config_dir", filepath.Join(home, p.DefaultConfigDir))
 		}
 		addAccount(result, acct)
 	}

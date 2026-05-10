@@ -36,12 +36,12 @@ func detectOllama(result *Result) {
 	}
 
 	acct := core.AccountConfig{
-		ID:        "ollama-local",
-		Provider:  "ollama",
-		Auth:      "local",
-		Binary:    bin,
-		BaseURL:   "http://127.0.0.1:11434",
-		APIKeyEnv: "OLLAMA_API_KEY",
+		ID:           "ollama-local",
+		Provider:     "ollama",
+		Auth:         "local",
+		Binary:       bin,
+		BaseURL:      "http://127.0.0.1:11434",
+		APIKeyEnv:    "OLLAMA_API_KEY",
 		RuntimeHints: make(map[string]string),
 	}
 

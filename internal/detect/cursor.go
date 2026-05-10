@@ -45,9 +45,9 @@ func detectCursor(result *Result) {
 	log.Printf("[detect] Cursor tracking data found (tracking_db=%v, state_db=%v)", hasTracking, hasState)
 
 	acct := core.AccountConfig{
-		ID:        "cursor-ide",
-		Provider:  "cursor",
-		Auth:      "local",
+		ID:           "cursor-ide",
+		Provider:     "cursor",
+		Auth:         "local",
 		RuntimeHints: make(map[string]string),
 	}
 

@@ -212,4 +212,3 @@ func adoptAiderDotenv(result *Result, path string) {
 		log.Printf("[detect] aider %s scan error: %v", path, err)
 	}
 }
-

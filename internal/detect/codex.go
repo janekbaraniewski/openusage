@@ -49,10 +49,10 @@ func detectCodex(result *Result) {
 	log.Printf("[detect] Codex CLI data found (sessions=%v, auth=%v)", hasSessions, hasAuth)
 
 	acct := core.AccountConfig{
-		ID:        "codex-cli",
-		Provider:  "codex",
-		Auth:      "local",
-		Binary:    bin,
+		ID:           "codex-cli",
+		Provider:     "codex",
+		Auth:         "local",
+		Binary:       bin,
 		RuntimeHints: make(map[string]string),
 	}
 

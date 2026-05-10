@@ -57,9 +57,11 @@ func AutoDetect() Result {
 	detectOpenCodeAuth(&result)
 	detectAiderConfig(&result)
 
-	// Phase 4: OS keychain probes. We only annotate accounts here — the
-	// providers themselves still read the secret value at fetch time.
+	// Phase 4: credential-store probes. We only annotate accounts (or
+	// create minimal placeholders) — the providers themselves still read
+	// the secret value at fetch time.
 	detectMacOSKeychainCredentials(&result)
+	detectCredentialFiles(&result)
 
 	return result
 }
@@ -318,10 +320,10 @@ func detectGeminiCLI(result *Result) {
 	result.Tools = append(result.Tools, tool)
 
 	acct := core.AccountConfig{
-		ID:        "gemini-cli",
-		Provider:  "gemini_cli",
-		Auth:      "oauth",
-		Binary:    bin,
+		ID:           "gemini-cli",
+		Provider:     "gemini_cli",
+		Auth:         "oauth",
+		Binary:       bin,
 		RuntimeHints: make(map[string]string),
 	}
 	acct.SetHint("config_dir", configDir)
