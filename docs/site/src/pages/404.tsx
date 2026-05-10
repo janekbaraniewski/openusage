@@ -1,8 +1,8 @@
-import React from 'react';
+import type {ReactElement} from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 
-export default function NotFound(): JSX.Element {
+export default function NotFound(): ReactElement {
   return (
     <Layout title="Page not found" description="That page doesn't exist in OpenUsage docs.">
       <main className="container margin-vert--xl">
