@@ -152,12 +152,21 @@ Ordered list of accounts to render in the dashboard. Order in the array is the d
 
 ### `dashboard.widget_sections`
 
-Ordered list of widget sections. See [Widgets](../customization/widgets.md).
+Ordered list of widget sections shown on dashboard tiles. See [Widgets](../customization/widgets.md).
 
 | Field | Type | Purpose |
 |---|---|---|
 | `id` | string | Section ID (provider-defined). |
 | `enabled` | bool | Render or hide globally. |
+
+### `dashboard.detail_sections`
+
+Same shape as `widget_sections`, but applied to the detail (full-page) view rather than the tile view. Use this to control which widget sections appear when you press <kbd>Enter</kbd> on a tile.
+
+| Field | Type | Purpose |
+|---|---|---|
+| `id` | string | Section ID (provider-defined). |
+| `enabled` | bool | Render or hide on the detail view. |
 
 ## `experimental`
 

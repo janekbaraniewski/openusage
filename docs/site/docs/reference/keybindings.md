@@ -111,8 +111,8 @@ Active in any settings tab.
 | Key | Action |
 |---|---|
 | <kbd>1</kbd>–<kbd>7</kbd> | Jump to tab |
-| <kbd>Tab</kbd> | Next tab |
-| <kbd>Shift+Tab</kbd> | Previous tab |
+| <kbd>Tab</kbd> / <kbd>]</kbd> / <kbd>→</kbd> | Next tab |
+| <kbd>Shift+Tab</kbd> / <kbd>[</kbd> / <kbd>←</kbd> | Previous tab |
 | <kbd>Esc</kbd> | Close modal |
 
 Tabs:
@@ -205,7 +205,7 @@ Tabs:
 
 | Action | Effect |
 |---|---|
-| Wheel up / down | Scroll, 3 lines per tick |
+| Wheel up / down | Scroll. Step size scales with terminal height (minimum 3 lines per tick). |
 
 Click-to-focus, drag-to-select, and other mouse interactions are intentionally not bound — the TUI is keyboard-first.
 

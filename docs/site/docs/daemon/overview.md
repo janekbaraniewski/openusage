@@ -76,7 +76,12 @@ The daemon listens on a Unix domain socket (no TCP):
 
 Default socket: `~/.local/state/openusage/telemetry.sock`. Override with `--socket-path` or the `OPENUSAGE_TELEMETRY_SOCKET` environment variable.
 
-Timeouts are tight: 2-second dial, 12-second request — the protocol is meant to be local and fast.
+Timeouts are tight and per-caller:
+
+- **TUI client** (`/v1/read-model`): 2-second dial, 12-second request.
+- **Hook command** (`POST /v1/hook/<source>`): 15-second overall context. On failure the event is written to the spool and re-ingested when the daemon comes back.
+
+The protocol is meant to be local and fast.
 
 ## What the daemon is not
 

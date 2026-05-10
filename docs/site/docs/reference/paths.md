@@ -11,9 +11,9 @@ OpenUsage follows the [XDG Base Directory Specification](https://specifications.
 
 | Path | Purpose | Override |
 |---|---|---|
-| `~/.config/openusage/settings.json` | Main config file. | `XDG_CONFIG_HOME` |
-| `~/.config/openusage/themes/` | External themes directory (scanned for `*.json`). | `XDG_CONFIG_HOME`, plus `OPENUSAGE_THEME_DIR` for extra dirs |
-| `~/.config/openusage/hooks/` | Hook scripts installed by `openusage integrations`. | `XDG_CONFIG_HOME` |
+| `~/.config/openusage/settings.json` | Main config file. | — |
+| `~/.config/openusage/themes/` | External themes directory (scanned for `*.json`). | `OPENUSAGE_THEME_DIR` (extra dirs only) |
+| `~/.config/openusage/hooks/` | Hook scripts installed by `openusage integrations`. | — |
 | `~/.local/state/openusage/` | State directory (DB, socket, spool, logs). | `XDG_STATE_HOME` |
 | `~/.local/state/openusage/telemetry.db` | Daemon SQLite store. | `--db-path` |
 | `~/.local/state/openusage/telemetry.sock` | Daemon Unix domain socket. | `--socket-path`, `OPENUSAGE_TELEMETRY_SOCKET` |
@@ -38,8 +38,8 @@ These belong to the third-party tools OpenUsage hooks into.
 |---|---|---|---|
 | `~/.claude/settings.json` | Claude Code | Hook registration. | `CLAUDE_SETTINGS_FILE` |
 | `~/.codex/config.toml` | Codex | `notify` registration. | `CODEX_CONFIG_DIR` |
-| `~/.config/opencode/opencode.json` | OpenCode | Plugin registration. | `XDG_CONFIG_HOME` |
-| `~/.config/opencode/plugins/openusage-telemetry.ts` | OpenCode | Plugin source installed by `integrations install opencode`. | `XDG_CONFIG_HOME` |
+| `~/.config/opencode/opencode.json` | OpenCode | Plugin registration. | — |
+| `~/.config/opencode/plugins/openusage-telemetry.ts` | OpenCode | Plugin source installed by `integrations install opencode`. | — |
 
 ## Per-OS expansion
 
@@ -47,16 +47,16 @@ These belong to the third-party tools OpenUsage hooks into.
 
 | Logical path | Resolved |
 |---|---|
-| `$XDG_CONFIG_HOME/openusage/` | `~/.config/openusage/` (XDG honored on macOS too) |
-| `$XDG_STATE_HOME/openusage/` | `~/.local/state/openusage/` |
+| Config dir | `~/.config/openusage/` (hardcoded; `XDG_CONFIG_HOME` is not honored) |
+| State dir | `~/.local/state/openusage/` (or `$XDG_STATE_HOME/openusage/` if set) |
 | Service file | `~/Library/LaunchAgents/com.openusage.telemetryd.plist` |
 
 ### Linux
 
 | Logical path | Resolved |
 |---|---|
-| `$XDG_CONFIG_HOME/openusage/` | `~/.config/openusage/` |
-| `$XDG_STATE_HOME/openusage/` | `~/.local/state/openusage/` |
+| Config dir | `~/.config/openusage/` (hardcoded; `XDG_CONFIG_HOME` is not honored) |
+| State dir | `~/.local/state/openusage/` (or `$XDG_STATE_HOME/openusage/` if set) |
 | Service file | `~/.config/systemd/user/openusage-telemetry.service` |
 | Logs | Files plus `journalctl --user-unit openusage-telemetry.service` |
 

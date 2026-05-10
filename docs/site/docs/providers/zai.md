@@ -29,7 +29,7 @@ Deep visibility for Z.AI coding subscriptions. Tracks the 5-hour rolling token w
 
 ### Auto-detection
 
-Set either `ZAI_API_KEY` or `ZHIPUAI_API_KEY`. Both work; the first non-empty value wins.
+`ZAI_API_KEY` and `ZHIPUAI_API_KEY` are not interchangeable — they create **separate accounts**. Setting `ZAI_API_KEY` produces an account with id `zai` configured for the global region (`api.z.ai`); setting `ZHIPUAI_API_KEY` produces an account with id `zhipuai-auto` for the China region (`open.bigmodel.cn`). Both can be active simultaneously and will appear as separate tiles.
 
 ### Manual configuration
 

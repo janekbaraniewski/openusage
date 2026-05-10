@@ -25,7 +25,7 @@ openusage telemetry daemon install
 
 What it does:
 
-- **macOS** — writes `~/Library/LaunchAgents/com.openusage.telemetryd.plist` with `KeepAlive=true` and `RunAtLoad=true`, then `launchctl load`s it.
+- **macOS** — writes `~/Library/LaunchAgents/com.openusage.telemetryd.plist` with `KeepAlive=true` and `RunAtLoad=true`, then bootstraps and kickstarts it via the modern `launchctl bootstrap` / `launchctl kickstart` API.
 - **Linux** — writes `~/.config/systemd/user/openusage-telemetry.service` (`Type=simple`, `Restart=always`, `RestartSec=2`), runs `systemctl --user daemon-reload`, and `systemctl --user enable --now openusage-telemetry.service`.
 
 After install the daemon is running and will restart automatically on logout/login or reboot (provided your platform's user services are active).
