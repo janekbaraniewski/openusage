@@ -62,7 +62,7 @@ Stick with Direct mode when:
        |        |   ReadModel     |         |
        |        +--------+--------+         |
        +------------------|-----------------+
-                          |  GET /v1/read-model
+                          |  POST /v1/read-model
                           v
                   +---------------+
                   |  TUI client   |

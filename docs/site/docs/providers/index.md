@@ -6,7 +6,7 @@ sidebar_label: Providers
 
 # Providers
 
-OpenUsage supports 18 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
+OpenUsage supports 19 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
 
 ## Coding agents
 
@@ -75,6 +75,10 @@ These providers require an API key in an environment variable. Some return only 
   <a href="./moonshot/">
     <strong>Moonshot</strong>
     <span>Balance breakdown, quotas, peak usage (USD or CNY)</span>
+  </a>
+  <a href="./perplexity/">
+    <strong>Perplexity</strong>
+    <span>Pro/Max plan quotas via browser-session auth (experimental)</span>
   </a>
   <a href="./xai/">
     <strong>xAI (Grok)</strong>

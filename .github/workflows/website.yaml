@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "website/**"
+      - "docs/site/**"
+      - ".github/workflows/website.yaml"
   workflow_dispatch:
 
 permissions:
@@ -22,9 +24,6 @@ jobs:
     env:
       VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
       VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
-    defaults:
-      run:
-        working-directory: website
     steps:
       - uses: actions/checkout@v6
 
@@ -32,16 +31,36 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            docs/site/package-lock.json
 
-      - run: npm ci
+      # Build the Docusaurus docs first
+      - name: Install docs deps
+        working-directory: docs/site
+        run: npm ci
 
-      # Puppeteer needs system libs for Chrome on Ubuntu
-      - name: Install Chromium dependencies
-        run: npx puppeteer browsers install chrome
+      - name: Build docs
+        working-directory: docs/site
+        run: npm run build
+
+      - name: Stage docs into website/public/docs
+        run: |
+          mkdir -p website/public/docs
+          cp -r docs/site/build/. website/public/docs/
+
+      # Build the Vite marketing site
+      - name: Install website deps
         working-directory: website
+        run: npm ci
 
-      - run: npm run build
+      - name: Install Chromium dependencies
+        working-directory: website
+        run: npx puppeteer browsers install chrome
+
+      - name: Build website
+        working-directory: website
+        run: npm run build
 
       - uses: actions/upload-pages-artifact@v5
         with:

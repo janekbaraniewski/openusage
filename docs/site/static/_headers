@@ -1,0 +1,18 @@
+# Cloudflare Pages headers — applied site-wide.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: interest-cohort=()
+
+# Long-cache hashed JS/CSS bundles
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Long-cache fonts/images
+/img/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Always revalidate HTML
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate

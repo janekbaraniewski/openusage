@@ -36,8 +36,8 @@ Each provider's account references its key via `api_key_env` — the name of the
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Moonshot | `MOONSHOT_API_KEY` |
 | xAI | `XAI_API_KEY` |
-| Z.ai | `ZAI_API_KEY` |
-| Gemini API | `GEMINI_API_KEY` |
+| Z.AI | `ZAI_API_KEY` |
+| Gemini API | `GEMINI_API_KEY` (also detects `GOOGLE_API_KEY` as an alias) |
 | Alibaba Cloud | `ALIBABA_CLOUD_API_KEY` |
 | Ollama (cloud) | `OLLAMA_API_KEY` |
 
@@ -51,7 +51,7 @@ Some providers don't use API keys; they read local files or shell out to a tool 
 
 | Provider | What it reads | Override |
 |---|---|---|
-| `claude_code` | `~/.claude/state.json` and friends | `CLAUDE_SETTINGS_FILE`, plus `binary` field |
+| `claude_code` | `~/.claude.json, ~/.claude/stats-cache.json, ~/.claude/projects/**/*.jsonl, ~/.claude/settings.json` | `CLAUDE_SETTINGS_FILE`, plus `binary` field |
 | `codex` | `~/.codex/sessions/*.jsonl` | `CODEX_CONFIG_DIR`, plus `binary` field |
 | `cursor` | Local SQLite databases under `~/Library/Application Support/Cursor/` (or platform equivalent) | `binary` field |
 | `gemini_cli` | Gemini CLI's session files | `binary` field (default `gemini`) |

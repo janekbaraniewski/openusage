@@ -44,7 +44,7 @@ If found, the provider registers automatically and reuses the credentials Cursor
       "id": "cursor",
       "provider": "cursor",
       "extra": {
-        "tracking_db": "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+        "tracking_db": "~/.cursor/ai-tracking/ai-code-tracking.db",
         "state_db": "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
       }
     }

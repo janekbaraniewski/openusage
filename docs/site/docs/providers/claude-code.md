@@ -40,7 +40,7 @@ OpenUsage looks for the `claude` binary and the config directory. On macOS and W
       "binary": "/usr/local/bin/claude",
       "extra": {
         "claude_dir": "~/.claude",
-        "stats_cache": "~/.claude/stats.json"
+        "stats_cache": "~/.claude/stats-cache.json"
       }
     }
   ]
@@ -58,7 +58,7 @@ The `binary` field is optional; OpenUsage resolves `claude` via `PATH` if omitte
 
 ## Files read
 
-- `~/.claude/stats.json` — daily activity rollups
+- `~/.claude/stats-cache.json` — daily activity rollups
 - `~/.claude/projects/**/*.jsonl` — session transcripts used to derive token and tool counts
 - `~/.claude.json` — OAuth state and subscription metadata
 - `~/.claude/settings.json` — MCP and skill configuration
@@ -79,7 +79,7 @@ Costs are API-equivalent estimates derived from token counts and public pricing.
 
 ## Troubleshooting
 
-- **Tile is empty** — confirm `claude` is on `PATH` and `~/.claude/stats.json` exists. Run a Claude Code session to populate it.
+- **Tile is empty** — confirm `claude` is on `PATH` and `~/.claude/stats-cache.json` exists. Run a Claude Code session to populate it.
 - **Cost looks wrong** — cost is an estimate; subscription users will see API-equivalent dollars, not actual charges.
 - **No billing block** — billing blocks only appear after the first message; the window is local to your machine.
 

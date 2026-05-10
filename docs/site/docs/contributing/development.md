@@ -130,7 +130,7 @@ Use `t.TempDir()` for fixtures so cleanup is automatic:
 
 ```go
 dir := t.TempDir()
-must(os.WriteFile(filepath.Join(dir, "stats.json"), fixture, 0644))
+must(os.WriteFile(filepath.Join(dir, "stats-cache.json"), fixture, 0644))
 p := New()
 snap, _ := p.Fetch(ctx, AccountConfig{ /* point at dir */ })
 ```

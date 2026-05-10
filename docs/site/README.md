@@ -45,6 +45,26 @@ Then build and deploy the marketing site as usual.
 npm run typecheck
 ```
 
+## PR previews via Cloudflare Pages
+
+Cloudflare Pages is free for OSS, auto-deploys every PR with a unique preview URL, and posts a comment on the PR with the link. To wire it up:
+
+1. Sign in to the [Cloudflare dashboard](https://dash.cloudflare.com) and pick **Workers & Pages → Create → Pages**
+2. Connect this GitHub repo
+3. Configure the build:
+   - **Framework preset:** Docusaurus
+   - **Root directory:** `docs/site`
+   - **Build command:** `npm run build`
+   - **Build output:** `build`
+   - **Node version:** 22 (set under env vars or pulled from `wrangler.toml`)
+4. Add a custom domain (`docs.openusage.sh` is the suggested one) — or use the default `pages.dev` URL until ready
+
+The `wrangler.toml` and `static/_headers` files in this directory document the expected build output and HTTP headers. They're also picked up if you deploy via `wrangler pages deploy build`.
+
+## Production deploy
+
+The production site at [openusage.sh/docs](https://openusage.sh/docs/) is built by `.github/workflows/website.yaml` on every push to `main` that touches `docs/site/**` or `website/**`. The Docusaurus build is staged into `website/public/docs/` so the same GitHub-Pages deployment serves both the marketing site and the docs.
+
 ## License
 
 MIT, same as OpenUsage.

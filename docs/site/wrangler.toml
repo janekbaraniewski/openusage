@@ -1,0 +1,10 @@
+# Cloudflare Pages config — used by `wrangler pages deploy` and dashboard deploys.
+# For dashboard-driven deploys, the build settings here serve as documentation;
+# the dashboard takes precedence.
+
+name = "openusage-docs"
+pages_build_output_dir = "build"
+compatibility_date = "2025-01-01"
+
+[vars]
+NODE_VERSION = "22"

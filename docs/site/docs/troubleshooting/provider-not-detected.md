@@ -71,7 +71,7 @@ Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`.
 
 5. **Permissions.** The provider must be able to read the config files. On a server with a different user, `chmod`/`chown` may have made files unreadable. Try:
    ```bash
-   ls -l ~/.claude/stats.json
+   ls -l ~/.claude/stats-cache.json
    ```
 
 6. **Override paths if needed.** Each provider exposes a knob:

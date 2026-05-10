@@ -11,7 +11,7 @@ Surfaces the Google Gemini API's model catalog and per-model rate limits. The AP
 ## At a glance
 
 - **Provider ID** — `gemini_api`
-- **Detection** — `GEMINI_API_KEY` environment variable
+- **Detection** — `GEMINI_API_KEY` environment variable (also `GOOGLE_API_KEY` as an alias)
 - **Auth** — API key
 - **Type** — API platform (header-only / catalog data)
 - **Tracks**:
@@ -24,7 +24,7 @@ Surfaces the Google Gemini API's model catalog and per-model rate limits. The AP
 
 ### Auto-detection
 
-Set `GEMINI_API_KEY`.
+Set `GEMINI_API_KEY`. OpenUsage also detects `GOOGLE_API_KEY` and aliases it to this provider, so either variable works (the corresponding account IDs are `gemini-api` and `gemini-google` respectively).
 
 ### Manual configuration
 
