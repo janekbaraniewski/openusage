@@ -101,13 +101,34 @@
   background: rgba(12, 12, 12, 0.96);
 }
 
-/* Mobile sidebar drawer — make absolutely sure it sits above page content. */
+/* Mobile sidebar drawer.
+   The drawer is a child of <nav class="navbar"> which has z-index 200.
+   On iOS WKWebView the drawer (a position:fixed descendant) renders
+   inside the navbar's stacking context — and on some pages other content
+   above z-index 200 can obscure it. When the drawer opens, lift the whole
+   navbar to the top of the stack so the drawer paints above everything. */
+.navbar.navbar-sidebar--show {
+  z-index: 9999 !important;
+}
+
 .navbar-sidebar {
-  z-index: 1000;
+  z-index: 1;
 }
 
 .navbar-sidebar__backdrop {
-  z-index: 999;
+  z-index: 0;
+}
+
+@media (max-width: 996px) {
+  .navbar-sidebar {
+    /* Force the drawer to extend the full viewport height regardless of
+       the navbar's containing block on iOS WKWebView. */
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+  }
 }
 
 /* Mobile sidebar toggle (hamburger) — make sure it's visible on small viewports
