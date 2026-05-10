@@ -264,54 +264,13 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 }
 
 func (p *Provider) fetchQuotaLimit(ctx context.Context, monitorBase, apiKey string, snap *core.UsageSnapshot, state *providerState) error {
-	status, body, err := p.requestMonitor(ctx, monitorBase, apiKey, quotaLimitPath, false)
-	if err != nil {
-		return fmt.Errorf("zai: quota limit request failed: %w", err)
-	}
-	captureEndpointPayload(snap, "quota_limit", body)
-
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return fmt.Errorf("HTTP %d", status)
-	}
-	if status == http.StatusTooManyRequests {
-		code, msg := parseAPIError(body)
-		if isNoPackageCode(code, msg) {
-			state.limited = true
-			state.noPackage = true
-			state.limitedReason = "Insufficient balance or no active coding package"
-			snap.Raw["quota_api"] = "limited"
-			return nil
-		}
-		return fmt.Errorf("HTTP 429")
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("HTTP %d", status)
+	res, err := p.evaluateMonitorEndpoint(ctx, monitorBase, apiKey, quotaLimitPath, false,
+		"quota_limit", "quota_api", snap, state)
+	if err != nil || res.Outcome != outcomeOK {
+		return err
 	}
 
-	var envelope monitorEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("parsing quota envelope: %w", err)
-	}
-	code := anyToString(envelope.Code)
-	if envelope.Error != nil && code == "" {
-		code = anyToString(envelope.Error.Code)
-	}
-	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
-		state.limited = true
-		state.noPackage = true
-		state.limitedReason = "Insufficient balance or no active coding package"
-		snap.Raw["quota_api"] = "limited"
-		return nil
-	}
-
-	if isJSONEmpty(envelope.Data) {
-		state.noPackage = true
-		snap.Raw["quota_api"] = "empty"
-		return nil
-	}
-
-	hasData := applyQuotaData(envelope.Data, snap, state)
-	if hasData {
+	if applyQuotaData(res.Envelope.Data, snap, state) {
 		state.hasQuotaData = true
 		snap.Raw["quota_api"] = "ok"
 	} else {
@@ -322,52 +281,17 @@ func (p *Provider) fetchQuotaLimit(ctx context.Context, monitorBase, apiKey stri
 }
 
 func (p *Provider) fetchModelUsage(ctx context.Context, monitorBase, apiKey string, snap *core.UsageSnapshot, state *providerState) error {
-	status, body, err := p.requestMonitor(ctx, monitorBase, apiKey, modelUsagePath, true)
-	if err != nil {
-		return fmt.Errorf("zai: model usage request failed: %w", err)
-	}
-	captureEndpointPayload(snap, "model_usage", body)
-
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return fmt.Errorf("HTTP %d", status)
-	}
-	if status == http.StatusTooManyRequests {
-		code, msg := parseAPIError(body)
-		if isNoPackageCode(code, msg) {
-			state.noPackage = true
-			state.limited = true
-			state.limitedReason = "Insufficient balance or no active coding package"
-			snap.Raw["model_usage_api"] = "limited"
-			return nil
-		}
-		return fmt.Errorf("HTTP 429")
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("HTTP %d", status)
+	res, err := p.evaluateMonitorEndpoint(ctx, monitorBase, apiKey, modelUsagePath, true,
+		"model_usage", "model_usage_api", snap, state)
+	if err != nil || res.Outcome != outcomeOK {
+		return err
 	}
 
-	var envelope monitorEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("parsing model usage envelope: %w", err)
-	}
-	code := anyToString(envelope.Code)
-	if envelope.Error != nil && code == "" {
-		code = anyToString(envelope.Error.Code)
-	}
-	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
-		state.noPackage = true
-		state.limited = true
-		state.limitedReason = "Insufficient balance or no active coding package"
-		snap.Raw["model_usage_api"] = "limited"
-		return nil
-	}
-
-	samples := extractUsageSamples(envelope.Data, "model")
+	samples := extractUsageSamples(res.Envelope.Data, "model")
 	if len(samples) == 0 {
 		snap.Raw["model_usage_api"] = "empty"
 		return nil
 	}
-
 	projectModelUsageSamples(samples, snap)
 	state.hasUsageData = true
 	snap.Raw["model_usage_api"] = "ok"
@@ -375,52 +299,17 @@ func (p *Provider) fetchModelUsage(ctx context.Context, monitorBase, apiKey stri
 }
 
 func (p *Provider) fetchToolUsage(ctx context.Context, monitorBase, apiKey string, snap *core.UsageSnapshot, state *providerState) error {
-	status, body, err := p.requestMonitor(ctx, monitorBase, apiKey, toolUsagePath, true)
-	if err != nil {
-		return fmt.Errorf("zai: tool usage request failed: %w", err)
-	}
-	captureEndpointPayload(snap, "tool_usage", body)
-
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return fmt.Errorf("HTTP %d", status)
-	}
-	if status == http.StatusTooManyRequests {
-		code, msg := parseAPIError(body)
-		if isNoPackageCode(code, msg) {
-			state.noPackage = true
-			state.limited = true
-			state.limitedReason = "Insufficient balance or no active coding package"
-			snap.Raw["tool_usage_api"] = "limited"
-			return nil
-		}
-		return fmt.Errorf("HTTP 429")
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("HTTP %d", status)
+	res, err := p.evaluateMonitorEndpoint(ctx, monitorBase, apiKey, toolUsagePath, true,
+		"tool_usage", "tool_usage_api", snap, state)
+	if err != nil || res.Outcome != outcomeOK {
+		return err
 	}
 
-	var envelope monitorEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("parsing tool usage envelope: %w", err)
-	}
-	code := anyToString(envelope.Code)
-	if envelope.Error != nil && code == "" {
-		code = anyToString(envelope.Error.Code)
-	}
-	if isNoPackageCode(code, core.FirstNonEmpty(envelope.Msg, apiErrorMessage(envelope.Error))) {
-		state.noPackage = true
-		state.limited = true
-		state.limitedReason = "Insufficient balance or no active coding package"
-		snap.Raw["tool_usage_api"] = "limited"
-		return nil
-	}
-
-	samples := extractUsageSamples(envelope.Data, "tool")
+	samples := extractUsageSamples(res.Envelope.Data, "tool")
 	if len(samples) == 0 {
 		snap.Raw["tool_usage_api"] = "empty"
 		return nil
 	}
-
 	projectToolUsageSamples(samples, snap)
 	state.hasUsageData = true
 	snap.Raw["tool_usage_api"] = "ok"
