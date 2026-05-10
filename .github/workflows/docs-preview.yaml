@@ -106,7 +106,7 @@ jobs:
               });
             }
 
-      - name: Note: Cloudflare secrets not set
+      - name: "Note — Cloudflare secrets not set"
         if: env.CF_TOKEN_PRESENT != 'true'
         run: |
           echo "::notice::Cloudflare Pages secrets not configured — preview deploy skipped."
