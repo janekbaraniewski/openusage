@@ -136,12 +136,12 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap.Raw["provider_region"] = region
 	snap.SetAttribute("provider_region", region)
 
-	if acct.ExtraData != nil {
-		if planType := strings.TrimSpace(acct.ExtraData["plan_type"]); planType != "" {
+	if acct.RuntimeHints != nil {
+		if planType := strings.TrimSpace(acct.RuntimeHints["plan_type"]); planType != "" {
 			snap.Raw["plan_type"] = planType
 			snap.SetAttribute("plan_type", planType)
 		}
-		if source := strings.TrimSpace(acct.ExtraData["source"]); source != "" {
+		if source := strings.TrimSpace(acct.RuntimeHints["source"]); source != "" {
 			snap.Raw["auth_type"] = source
 			snap.SetAttribute("auth_type", source)
 		}

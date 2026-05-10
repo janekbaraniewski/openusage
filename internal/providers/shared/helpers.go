@@ -30,24 +30,40 @@ func CreateStandardRequest(ctx context.Context, baseURL, endpoint, apiKey string
 func ProcessStandardResponse(resp *http.Response, acct core.AccountConfig, providerID string) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(providerID, acct.ID)
 	snap.Raw = parsers.RedactHeaders(resp.Header)
-	applyStatusFromResponse(resp, &snap)
+	ApplyStatusFromResponse(resp, &snap)
 	return snap, nil
 }
 
-// applyStatusFromResponse sets snap.Status and snap.Message based on the HTTP
-// status code. It centralises the 401/403 → StatusAuth, 429 → StatusLimited
-// mapping used by both ProcessStandardResponse and ProbeRateLimits.
-func applyStatusFromResponse(resp *http.Response, snap *core.UsageSnapshot) {
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		snap.Status = core.StatusAuth
-		snap.Message = fmt.Sprintf("HTTP %d – check API key", resp.StatusCode)
-	case http.StatusTooManyRequests:
-		snap.Status = core.StatusLimited
-		snap.Message = "rate limited (HTTP 429)"
+// ApplyStatusFromResponse sets snap.Status and snap.Message based on the HTTP
+// status code. Centralises the 401/403 → StatusAuth, 429 → StatusLimited
+// mapping that providers with custom response handling (mistral, gemini_api,
+// alibaba_cloud, moonshot, zai) used to hand-roll. Call this first, then add
+// provider-specific cases on top if needed. Reads Retry-After when present.
+func ApplyStatusFromResponse(resp *http.Response, snap *core.UsageSnapshot) {
+	ApplyStatusFromCode(resp.StatusCode, snap, "")
+	if snap.Status == core.StatusLimited {
 		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
 			snap.Raw["retry_after"] = retryAfter
 		}
+	}
+}
+
+// ApplyStatusFromCode is the response-less variant for callers that only have
+// the status code (e.g. shared.FetchJSON returns an error + status code).
+// The keyHint is included in the auth-failure message — pass the env-var name
+// the user should check (e.g. "MOONSHOT_API_KEY"). Empty means "API key".
+func ApplyStatusFromCode(statusCode int, snap *core.UsageSnapshot, keyHint string) {
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		hint := "API key"
+		if keyHint != "" {
+			hint = keyHint
+		}
+		snap.Status = core.StatusAuth
+		snap.Message = fmt.Sprintf("HTTP %d – check %s", statusCode, hint)
+	case http.StatusTooManyRequests:
+		snap.Status = core.StatusLimited
+		snap.Message = "rate limited (HTTP 429)"
 	}
 }
 
@@ -145,7 +161,7 @@ func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSn
 		snap.Raw[k] = v
 	}
 
-	applyStatusFromResponse(resp, snap)
+	ApplyStatusFromResponse(resp, snap)
 	if snap.Status == core.StatusAuth {
 		return nil
 	}

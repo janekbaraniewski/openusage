@@ -45,6 +45,10 @@ Each provider's account references its key via `api_key_env` — the name of the
 The TUI reads env vars on startup. After exporting a new key, press <kbd>q</kbd> to quit and re-launch — or use the API Keys settings tab (<kbd>,</kbd> then <kbd>5</kbd>) to enter the value at runtime, which writes it to your shell session for future processes only.
 :::
 
+:::info GUI launches and shell rc files
+If OpenUsage is launched from Spotlight, the Dock, or another launcher that doesn't inherit your shell environment, it will still pick up keys exported in `~/.zshrc`, `~/.bashrc`, `~/.zshrc.d/*.zsh`, fish `config.fish`, and similar files — the auto-detector parses them directly. Lines that contain shell substitutions (`$VAR`, `$(...)`, backticks) are intentionally skipped. Run `openusage detect` to see exactly which file each adopted key came from.
+:::
+
 ## CLI tool / local file providers
 
 Some providers don't use API keys; they read local files or shell out to a tool binary. Their `accounts` entries use `binary` rather than `api_key_env`.

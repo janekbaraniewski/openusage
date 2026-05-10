@@ -5,37 +5,52 @@ description: Per-detection-style checklists for finding why a provider isn't sho
 
 Auto-detection runs in three styles. Use the checklist for the style that matches the missing provider.
 
+The fastest way to see what was found and what's missing is the dedicated subcommand:
+
+```bash
+openusage detect          # show tools, accounts (with masked tokens) and source provenance
+openusage detect --all    # also list every registered provider
+```
+
+The `SOURCE` column tells you exactly where each credential came from (`env`, `shell_rc:/path`, `aider_yaml:/path`, `opencode_auth_json`, `keychain:…`). The trailing "No credentials found for:" list is the authoritative inventory of what's still missing.
+
 ## Style A: env var providers
 
 Affected: `openai`, `anthropic`, `openrouter`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`, `moonshot`, `zai`, `opencode`.
 
+OpenUsage looks for these keys in this order: process environment → shell rc files (`~/.zshrc`, `~/.bashrc`, fish, modular `~/.zshrc.d/*` etc.) → tool config files (Aider's `.aider.conf.yml`/`.env`, OpenCode's `auth.json`, Codex's `auth.json` `OPENAI_API_KEY` field).
+
 ### Checklist
 
-1. **Is the env var set in the shell that launches OpenUsage?**
+1. **Run `openusage detect`** — if your provider appears with a `SOURCE` column entry, detection is working and the issue is elsewhere (open a [GitHub issue](https://github.com/janekbaraniewski/openusage/issues)).
+
+2. **Is the env var set in the shell that launches OpenUsage, *or* in one of the supported file sources?**
    ```bash
    echo "${OPENAI_API_KEY+set}"
+   grep -E "^(export +)?OPENAI_API_KEY=" ~/.zshrc ~/.zshenv ~/.zshrc.d/*.zsh 2>/dev/null
    ```
-   Empty output means the variable is not exported in this process.
+   If neither prints anything, OpenUsage will not find the key.
 
-2. **Is it `export`ed, not just assigned?**
+3. **Is it `export`ed, not just assigned?** Plain `VAR=value` lines are detected too, but they need to be at the start of a line and not embedded in shell logic.
    ```bash
-   # Wrong (visible only in the current shell, not subprocesses):
-   OPENAI_API_KEY=sk-...
-   # Right:
+   # Both of these are picked up from a rc file:
    export OPENAI_API_KEY=sk-...
+   OPENAI_API_KEY=sk-...
    ```
 
-3. **Is the variable name spelled exactly right?** Case matters. `Openai_Api_Key` will not be picked up.
+4. **Are there shell substitutions in the value?** Lines like `export OPENAI_API_KEY=$(pass openai)` or `export FOO="$BAR"` are intentionally skipped — OpenUsage never invokes a shell. Either pre-resolve the value or set it via the process environment.
 
-4. **For providers with multiple accepted names** (Z.AI accepts `ZAI_API_KEY` or `ZHIPUAI_API_KEY`; OpenCode accepts `OPENCODE_API_KEY` or `ZEN_API_KEY`), at least one must be set.
+5. **Is the variable name spelled exactly right?** Case matters. `Openai_Api_Key` will not be picked up.
 
-5. **Is `auto_detect` enabled?** In `settings.json`:
+6. **For providers with multiple accepted names** (Z.AI accepts `ZAI_API_KEY` or `ZHIPUAI_API_KEY`; OpenCode accepts `OPENCODE_API_KEY` or `ZEN_API_KEY`), at least one must be set.
+
+7. **Is `auto_detect` enabled?** In `settings.json`:
    ```json
    { "auto_detect": true }
    ```
-   If false, no env-var detection happens.
+   If false, no auto-detection happens.
 
-6. **Did you launch from a GUI app launcher?** macOS Finder / Dock launches don't inherit your shell `~/.zshrc` exports. Run `openusage` from a terminal, or move exports into `~/.config/zsh/.zshenv` / launchd.
+8. **GUI launches still work** for shell-rc-stored keys: OpenUsage parses `~/.zshrc` and friends directly, so launching from Spotlight/Dock no longer requires re-exporting in launchd. macOS keychain entries (Claude Code) are also picked up regardless of how you launched.
 
 ## Style B: local binary + config dir
 

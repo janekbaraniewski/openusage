@@ -176,7 +176,7 @@ func TestThinkingMetricsFromDB(t *testing.T) {
 		Provider: "ollama",
 		Auth:     "local",
 		BaseURL:  localServer.URL,
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"db_path": dbPath,
 		},
 	}
@@ -254,7 +254,7 @@ func TestExpandedSettings(t *testing.T) {
 		Provider: "ollama",
 		Auth:     "local",
 		BaseURL:  localServer.URL,
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"db_path": dbPath,
 		},
 	}

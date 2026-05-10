@@ -405,7 +405,10 @@ func normalizeDetailWidgetSections(in []DetailWidgetSection) []DetailWidgetSecti
 	return normalized
 }
 
-// saveMu guards read-modify-write cycles on the config file.
+// saveMu guards every code path that writes the config file. Both modifyConfig
+// (read-modify-write helpers like SaveTheme) and direct Save/SaveTo callers
+// must take it; otherwise a Save() can race a concurrent modifyConfig and
+// roll back the modification.
 var saveMu sync.Mutex
 
 func Save(cfg Config) error {
@@ -413,6 +416,13 @@ func Save(cfg Config) error {
 }
 
 func SaveTo(path string, cfg Config) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+	return saveLocked(path, cfg)
+}
+
+// saveLocked is the actual write path; callers MUST hold saveMu.
+func saveLocked(path string, cfg Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
@@ -445,7 +455,7 @@ func modifyConfig(path string, mutate func(*Config)) error {
 		cfg = DefaultConfig()
 	}
 	mutate(&cfg)
-	return SaveTo(path, cfg)
+	return saveLocked(path, cfg)
 }
 
 // SaveTheme persists a theme name into the config file (read-modify-write).

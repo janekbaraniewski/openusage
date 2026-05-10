@@ -105,7 +105,11 @@ Replaces the manual tag-and-release flow. How it works:
 
 Benefit: the v0.10.1 / v0.10.2 cuts we just did become a single click on a PR.
 
-### 7. Stale issue/PR bot
+### 7. Dependabot rebase-on-main-update workflow
+
+A separate workflow at `.github/workflows/dependabot-rebase-on-main.yaml` runs on every push to `main` and comments `@dependabot rebase` on every open Dependabot PR. Without this, after one Dependabot PR auto-merges, the others stay `BEHIND` indefinitely (GitHub doesn't auto-rebase even when auto-merge is enabled, and the `strict: true` branch-protection setting blocks merging behind branches). Standard pattern; fixes the cascade.
+
+### 8. Stale issue/PR bot
 
 `actions/stale` with conservative defaults:
 

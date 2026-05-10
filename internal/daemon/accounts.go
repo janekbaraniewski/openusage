@@ -30,10 +30,16 @@ func ResolveAccounts(cfg *config.Config) []core.AccountConfig {
 			}
 		}
 
-		cfg.AutoDetectedAccounts = autoDetected
-		if err := config.SaveAutoDetected(autoDetected); err != nil {
-			log.Printf("Warning: could not persist auto-detected accounts: %v", err)
+		// Only persist when the auto-detected set actually changed. Without
+		// this guard we'd take saveMu and rewrite settings.json on every
+		// poll cycle (~30s), even when nothing about the workstation has
+		// moved.
+		if !sameAutoDetectedAccounts(cfg.AutoDetectedAccounts, autoDetected) {
+			if err := config.SaveAutoDetected(autoDetected); err != nil {
+				log.Printf("Warning: could not persist auto-detected accounts: %v", err)
+			}
 		}
+		cfg.AutoDetectedAccounts = autoDetected
 
 		allAccounts = core.MergeAccounts(cfg.Accounts, cfg.AutoDetectedAccounts)
 
@@ -51,6 +57,47 @@ func ApplyCredentials(accounts []core.AccountConfig) []core.AccountConfig {
 	credResult := detect.Result{Accounts: accounts}
 	detect.ApplyCredentials(&credResult)
 	return credResult.Accounts
+}
+
+// sameAutoDetectedAccounts compares two slices of auto-detected accounts by
+// the persisted-fields subset (ID, Provider, Auth, APIKeyEnv, BaseURL, Binary,
+// ProviderPaths, Paths). Runtime-only fields (Token, RuntimeHints) are
+// ignored — they change every run for sources like Cursor's vscdb token.
+func sameAutoDetectedAccounts(a, b []core.AccountConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	keyOf := func(acc core.AccountConfig) string {
+		return acc.ID + "|" + acc.Provider + "|" + acc.Auth + "|" + acc.APIKeyEnv +
+			"|" + acc.BaseURL + "|" + acc.Binary
+	}
+	indexA := make(map[string]core.AccountConfig, len(a))
+	for _, acc := range a {
+		indexA[keyOf(acc)] = acc
+	}
+	for _, acc := range b {
+		other, ok := indexA[keyOf(acc)]
+		if !ok {
+			return false
+		}
+		if !samePathMap(other.PathMap(), acc.PathMap()) {
+			return false
+		}
+	}
+	return true
+}
+
+// samePathMap reports map-equality, treating nil and empty as equal.
+func samePathMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func ResolveSocketPath() string {

@@ -16,13 +16,13 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 	for _, endpoint := range []string{"/key", "/auth/key"} {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+endpoint, nil)
 		if err != nil {
-			return fmt.Errorf("creating request: %w", err)
+			return fmt.Errorf("openrouter: creating request: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 
 		resp, err := p.Client().Do(req)
 		if err != nil {
-			return fmt.Errorf("request failed: %w", err)
+			return fmt.Errorf("openrouter: request failed: %w", err)
 		}
 
 		snap.Raw = parsers.RedactHeaders(resp.Header)
@@ -34,7 +34,7 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
-			return fmt.Errorf("reading body: %w", readErr)
+			return fmt.Errorf("openrouter: reading body: %w", readErr)
 		}
 
 		switch resp.StatusCode {
@@ -62,7 +62,7 @@ func (p *Provider) fetchAuthKey(ctx context.Context, baseURL, apiKey string, sna
 		return nil
 	}
 
-	return fmt.Errorf("key endpoint not available (HTTP 404)")
+	return fmt.Errorf("openrouter: key endpoint not available (HTTP 404)")
 }
 
 func applyKeyData(data *keyData, snap *core.UsageSnapshot) {
@@ -259,7 +259,7 @@ func (p *Provider) fetchKeysMeta(ctx context.Context, baseURL, apiKey string, sn
 
 		var pageResp keysResponse
 		if err := json.Unmarshal(body, &pageResp); err != nil {
-			return fmt.Errorf("parsing keys list: %w", err)
+			return fmt.Errorf("openrouter: parsing keys list: %w", err)
 		}
 		if len(pageResp.Data) == 0 {
 			break

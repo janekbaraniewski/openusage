@@ -39,13 +39,13 @@ func detectZAICodingHelper(result *Result) {
 		Provider:  "zai",
 		Auth:      "api_key",
 		APIKeyEnv: "ZAI_API_KEY",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"source":      "chelper",
 			"config_file": configFile,
 		},
 	}
 	if planType != "" {
-		acct.ExtraData["plan_type"] = planType
+		acct.RuntimeHints["plan_type"] = planType
 	}
 	if apiKey != "" {
 		acct.Token = apiKey

@@ -10,15 +10,91 @@ import (
 )
 
 func TestAutoDetect_Runs(t *testing.T) {
+	// Smoke test: AutoDetect must complete without panic regardless of what
+	// the host machine has installed. We can't assert specific accounts
+	// because the test runs against the real workstation, but we can assert
+	// the contract: every returned account has a non-empty ID and Provider.
 	result := AutoDetect()
 
-	if result.Tools == nil && result.Accounts == nil {
+	for i, acct := range result.Accounts {
+		if acct.ID == "" {
+			t.Errorf("Accounts[%d] has empty ID: %+v", i, acct)
+		}
+		if acct.Provider == "" {
+			t.Errorf("Accounts[%d] has empty Provider: %+v", i, acct)
+		}
+	}
+	for i, tool := range result.Tools {
+		if tool.Name == "" {
+			t.Errorf("Tools[%d] has empty Name: %+v", i, tool)
+		}
+	}
+}
+
+// TestAutoDetect_PrecedenceShellRCWinsWhenEnvUnset verifies the boot scenario
+// the user cares about: a key exported only in ~/.zshrc still surfaces when
+// the running process didn't inherit a set OPENAI_API_KEY (e.g. openusage
+// launched from Spotlight/Dock).
+func TestAutoDetect_PrecedenceShellRCWinsWhenEnvUnset(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"),
+		[]byte("export OPENAI_API_KEY=sk-from-zshrc-precedence-12345\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
+	for _, m := range envKeyMapping {
+		t.Setenv(m.EnvVar, "")
+	}
+
+	result := AutoDetect()
+
+	var found bool
+	for _, a := range result.Accounts {
+		if a.Provider == "openai" && a.Token == "sk-from-zshrc-precedence-12345" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected openai account from ~/.zshrc to surface via AutoDetect, got %+v", result.Accounts)
+	}
+}
+
+// TestAutoDetect_PrecedenceEnvVarBeatsAllFiles asserts an env var set in the
+// process beats a different value in a shell rc / aider config.
+func TestAutoDetect_PrecedenceEnvVarBeatsAllFiles(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"),
+		[]byte("export OPENAI_API_KEY=sk-from-zshrc\n"), 0o600); err != nil {
+		t.Fatalf("write zshrc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".aider.conf.yml"),
+		[]byte("openai-api-key: sk-from-aider\n"), 0o600); err != nil {
+		t.Fatalf("write aider: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
+	t.Setenv("OPENAI_API_KEY", "sk-from-process-env-12345")
+
+	result := AutoDetect()
+
+	for _, a := range result.Accounts {
+		if a.Provider != "openai" {
+			continue
+		}
+		// detectEnvKeys registers the account with no Token (env var resolved
+		// at fetch time via APIKeyEnv). Token may be empty here — what
+		// matters is that the file-based shadows did NOT overwrite it.
+		if a.Token != "" && a.Token != "sk-from-process-env-12345" {
+			t.Errorf("openai Token = %q (file value leaked); env var must win", a.Token)
+		}
 	}
 }
 
 func TestDetectEnvKeys_FindsSetKey(t *testing.T) {
-	os.Setenv("OPENAI_API_KEY", "sk-test1234567890abcdef")
-	defer os.Unsetenv("OPENAI_API_KEY")
+	t.Setenv("OPENAI_API_KEY", "sk-test1234567890abcdef")
 
 	var result Result
 	detectEnvKeys(&result)
@@ -36,8 +112,7 @@ func TestDetectEnvKeys_FindsSetKey(t *testing.T) {
 }
 
 func TestDetectEnvKeys_FindsMoonshotKey(t *testing.T) {
-	os.Setenv("MOONSHOT_API_KEY", "sk-moonshot-1234567890abcdef")
-	defer os.Unsetenv("MOONSHOT_API_KEY")
+	t.Setenv("MOONSHOT_API_KEY", "sk-moonshot-1234567890abcdef")
 
 	var result Result
 	detectEnvKeys(&result)
@@ -55,8 +130,7 @@ func TestDetectEnvKeys_FindsMoonshotKey(t *testing.T) {
 }
 
 func TestDetectEnvKeys_FindsZenKeys(t *testing.T) {
-	os.Setenv("ZEN_API_KEY", "zen-test-key-123456")
-	defer os.Unsetenv("ZEN_API_KEY")
+	t.Setenv("ZEN_API_KEY", "zen-test-key-123456")
 
 	var result Result
 	detectEnvKeys(&result)
@@ -74,8 +148,7 @@ func TestDetectEnvKeys_FindsZenKeys(t *testing.T) {
 }
 
 func TestDetectEnvKeys_FindsOpenCodeKey(t *testing.T) {
-	os.Setenv("OPENCODE_API_KEY", "opencode-test-key-123456")
-	defer os.Unsetenv("OPENCODE_API_KEY")
+	t.Setenv("OPENCODE_API_KEY", "opencode-test-key-123456")
 
 	var result Result
 	detectEnvKeys(&result)
@@ -162,16 +235,16 @@ api_key: test-zai-token
 	if acct.Token != "test-zai-token" {
 		t.Fatalf("token = %q, want test-zai-token", acct.Token)
 	}
-	if acct.ExtraData == nil || acct.ExtraData["plan_type"] != "glm_coding_plan_china" {
-		t.Fatalf("plan_type = %q, want glm_coding_plan_china", acct.ExtraData["plan_type"])
+	if acct.RuntimeHints == nil || acct.RuntimeHints["plan_type"] != "glm_coding_plan_china" {
+		t.Fatalf("plan_type = %q, want glm_coding_plan_china", acct.RuntimeHints["plan_type"])
 	}
-	if acct.ExtraData["source"] != "chelper" {
-		t.Fatalf("source = %q, want chelper", acct.ExtraData["source"])
+	if acct.RuntimeHints["source"] != "chelper" {
+		t.Fatalf("source = %q, want chelper", acct.RuntimeHints["source"])
 	}
 }
 
 func TestDetectEnvKeys_SkipsEmpty(t *testing.T) {
-	os.Unsetenv("OPENAI_API_KEY")
+	t.Setenv("OPENAI_API_KEY", "")
 
 	var result Result
 	detectEnvKeys(&result)
@@ -281,7 +354,7 @@ func TestDetectGHCopilot_StandaloneBinaryDetected(t *testing.T) {
 	// Restrict PATH to only the temp dir. Note: findBinary also searches
 	// hardcoded system dirs (e.g. /opt/homebrew/bin), so gh may still be
 	// found on machines where it is installed. The key assertion is that the
-	// standalone copilot path ends up in ExtraData regardless.
+	// standalone copilot path ends up in RuntimeHints regardless.
 	t.Setenv("PATH", tmp)
 	t.Setenv("HOME", home)
 	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
@@ -310,14 +383,14 @@ func TestDetectGHCopilot_StandaloneBinaryDetected(t *testing.T) {
 	if acct.Auth != "cli" {
 		t.Errorf("account Auth = %q, want %q", acct.Auth, "cli")
 	}
-	if acct.ExtraData == nil {
-		t.Fatal("account ExtraData is nil")
+	if acct.RuntimeHints == nil {
+		t.Fatal("account RuntimeHints is nil")
 	}
-	if acct.ExtraData["copilot_binary"] != copilotBin {
-		t.Errorf("ExtraData[copilot_binary] = %q, want %q", acct.ExtraData["copilot_binary"], copilotBin)
+	if acct.RuntimeHints["copilot_binary"] != copilotBin {
+		t.Errorf("RuntimeHints[copilot_binary] = %q, want %q", acct.RuntimeHints["copilot_binary"], copilotBin)
 	}
-	if acct.ExtraData["config_dir"] != copilotDir {
-		t.Errorf("ExtraData[config_dir] = %q, want %q", acct.ExtraData["config_dir"], copilotDir)
+	if acct.RuntimeHints["config_dir"] != copilotDir {
+		t.Errorf("RuntimeHints[config_dir] = %q, want %q", acct.RuntimeHints["config_dir"], copilotDir)
 	}
 }
 
@@ -404,9 +477,9 @@ func TestDetectGHCopilot_GHCopilotTakesPrecedence(t *testing.T) {
 	if acct.Binary != ghBin {
 		t.Errorf("account Binary = %q, want gh path %q", acct.Binary, ghBin)
 	}
-	// gh copilot path should NOT have ExtraData (legacy behavior).
-	if acct.ExtraData != nil {
-		t.Errorf("account ExtraData should be nil for gh copilot path, got %v", acct.ExtraData)
+	// gh copilot path should NOT have RuntimeHints (legacy behavior).
+	if acct.RuntimeHints != nil {
+		t.Errorf("account RuntimeHints should be nil for gh copilot path, got %v", acct.RuntimeHints)
 	}
 }
 
@@ -447,8 +520,8 @@ func TestDetectGHCopilot_StandaloneBinaryWithGH(t *testing.T) {
 	if acct.Binary != ghBin {
 		t.Errorf("account Binary = %q, want gh path %q (gh available for api calls)", acct.Binary, ghBin)
 	}
-	if acct.ExtraData["copilot_binary"] != copilotBin {
-		t.Errorf("ExtraData[copilot_binary] = %q, want %q", acct.ExtraData["copilot_binary"], copilotBin)
+	if acct.RuntimeHints["copilot_binary"] != copilotBin {
+		t.Errorf("RuntimeHints[copilot_binary] = %q, want %q", acct.RuntimeHints["copilot_binary"], copilotBin)
 	}
 }
 
