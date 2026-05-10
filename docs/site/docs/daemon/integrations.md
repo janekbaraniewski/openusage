@@ -174,3 +174,23 @@ The plugin uses `OPENUSAGE_BIN` and `OPENUSAGE_TELEMETRY_SOCKET` if set; otherwi
 :::tip Verifying a hook
 Trigger one turn in your tool, then watch `~/.local/state/openusage/daemon.stderr.log` (with `OPENUSAGE_DEBUG=1`). You should see one `POST /v1/hook/<source>` per turn. If you instead see entries written to `telemetry-spool/`, the daemon is not running.
 :::
+
+## FAQ
+
+### Why does the API key still have to be set when the OpenCode plugin is doing the work?
+
+A dashboard tile is owned by a **configured account**, not by an integration. An account exists when the provider is auto-detected (env var present) or manually defined under `accounts` in `settings.json`. Telemetry events from integrations are tagged with a provider ID and routed to the matching tile — but if no tile owns that ID, the events stay in storage unused.
+
+This matters because the OpenCode plugin (and the Claude Code hook, and the Codex notify hook) can tag events with the **upstream provider** that served the turn (`anthropic`, `openai`, `google`, `github-copilot`, …). For those events to surface, the upstream provider needs an account too.
+
+A second reason to set the env var: the polled provider unlocks data the integration cannot provide — rate-limit headers, balance endpoints, model catalog, plan info. Spend from the plugin merges with those native fields on the same tile, giving you one row per upstream provider with both real-time spend and account context.
+
+Practical setup for someone whose AI is routed entirely through OpenCode:
+
+- Set `OPENCODE_API_KEY` (or `ZEN_API_KEY`) — gives you the OpenCode tile with auth status and Zen models.
+- Set `ANTHROPIC_API_KEY` if turns route to Claude — that tile then absorbs the plugin's `anthropic`-tagged spend.
+- Set `OPENAI_API_KEY` if turns route to GPT — same logic for the OpenAI tile.
+- Set `GEMINI_API_KEY` if turns route to Gemini — same logic for the Gemini API tile.
+- Optionally remap with `telemetry.provider_links` if the default (`google → gemini_api`, `github-copilot → copilot`) does not match your account layout.
+
+If you skip the env vars, the events still land in the SQLite store (and show up under `telemetry_unmapped_providers` diagnostics) but no tile renders them.

@@ -53,25 +53,74 @@ Run `gh auth status` to confirm you're signed in.
 
 Set `binary` to the `gh` path; `copilot_binary` is only needed if the standalone CLI lives somewhere unusual.
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows your plan and SKU plus headline quota usage (chat, code, premium).
-- Detail view splits each quota into entitlement, used, overage, and remaining.
-- Org admins see active/engaged user counts broken down by editor (VS Code, JetBrains, etc.) and model.
-- Rate limits appear as a gauge.
+Copilot has two data paths:
+
+1. **`gh` subprocess.** Several `gh api …` calls return user, plan/SKU, rate limits, and (for org admins) org-level billing and metrics.
+2. **Local Copilot CLI files.** When the standalone `copilot` binary is installed, additional session metadata is read from `~/.copilot/`.
+
+No direct HTTPS calls are made — everything goes through `gh`, which uses the credentials from `gh auth login`.
+
+### User, plan, SKU
+
+- Source: `gh api /user` and `gh api /copilot_internal/user`.
+- Transform: `login`, `id`, `name`, `email` from `/user`; SKU and plan flags from `/copilot_internal/user`. Stored as snapshot attributes.
+
+### Quotas (chat, code, premium): entitlement, overage, remaining
+
+- Source: `gh api /copilot_internal/user` returns `quota_snapshots.{chat,code,premium_interactions}` with `entitlement`, `remaining`, `unlimited`, `overage`, etc.
+- Transform: each quota becomes a metric: `Limit = entitlement`, `Used = entitlement - remaining`, `Remaining = remaining`. Overage is stored separately for the detail row.
+
+### Rate limits (`core`, `search`, `graphql`)
+
+- Source: `gh api /rate_limit` returns `resources.{core,search,graphql}` with `limit`, `remaining`, `reset` (Unix seconds).
+- Transform: each is exposed as a metric (`rate_limit_core`, `rate_limit_search`, `rate_limit_graphql`). Reset times go to `Resets[…]`.
+
+### Org seats and feature toggles
+
+- Source: `gh api /orgs/<org>/copilot/billing`.
+- Transform: total seats / pending invitations / cancelled seats and the `seat_breakdown` map become detail rows. Feature toggles (e.g. `public_code_suggestions`, `chat`) are stored as attributes.
+
+### Org metrics (active / engaged users by editor and model)
+
+- Source: `gh api /orgs/<org>/copilot/metrics` — returns daily rows of active / engaged users sliced by editor and model.
+- Transform: rolled up into `active_users`, `engaged_users` and per-editor / per-model rows. Only available to Copilot Business / Enterprise admins.
+
+### Local sessions (standalone CLI)
+
+- Source: `~/.copilot/session-state/<id>/` directories, each containing `workspace.yaml` plus a JSONL log of session events (`session.start`, `session.model_change`, `session.info`, `session.shutdown`).
+- Transform: total sessions, per-client tokens, and last-active workspace are derived. Only present when the standalone `copilot` binary has been used.
+
+### Auth status
+
+- Source: result of `gh auth status` (cached). Failure → snapshot status `auth`.
+
+### What's NOT tracked
+
+- **$ spend per turn.** Copilot is per-seat, so the dashboard exposes seat counts and quota usage rather than dollars per call.
+- **Org metrics for non-admin accounts.** GitHub does not return them.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. `gh` calls are throttled by GitHub's own rate limit; the values OpenUsage reads include `remaining` and `reset` so you can see headroom.
 
 ## API endpoints used
 
 All via `gh` subprocess; no direct HTTP calls:
 
 - `gh auth status`
-- `gh api user`
-- `gh api graphql` for SKU status, rate limits, and org data
+- `gh api /user`
+- `gh api /copilot_internal/user`
+- `gh api /rate_limit`
+- `gh api /orgs/{org}/copilot/billing`
+- `gh api /orgs/{org}/copilot/metrics`
 
 ## Files read
 
 - `~/.copilot/logs/**`
-- `~/.copilot/session-state/`
+- `~/.copilot/session-state/<id>/workspace.yaml`
+- `~/.copilot/session-state/<id>/<events>.jsonl`
 - `~/.copilot/config.json`
 - `~/.config/github-copilot/devices.json`
 
