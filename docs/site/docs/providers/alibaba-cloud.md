@@ -45,15 +45,68 @@ Set `ALIBABA_CLOUD_API_KEY` to your DashScope API key.
 }
 ```
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows monthly spend against the spend limit and current balance.
-- Detail view lists the billing period window, daily spend, total tokens, and total requests.
-- Per-model rows show RPM/TPM usage against limits, so you can see which models you're saturating.
+OpenUsage sends one `GET https://dashscope.aliyuncs.com/api/v1/quotas` per poll cycle (default every 30 seconds in daemon mode). All other metrics are derived from the single response. Auth: `Authorization: Bearer $ALIBABA_CLOUD_API_KEY`.
+
+The response shape is `{ "code": "Success", "data": { … } }`. A non-`Success` `code` is treated as an error.
+
+### `rpm` / `tpm` — account-wide rate limits
+
+- Source: `data.rate_limit.rpm` and `data.rate_limit.tpm`.
+- Transform: each integer is stored as a metric `Limit`. These are caps; live counters are not exposed at the account level.
+
+### `credit_balance` — available credit
+
+- Source: `data.credits`.
+- Transform: stored as `Limit` of `credit_balance` (USD).
+
+### `available_balance`
+
+- Source: `data.available`.
+- Transform: stored as `Limit` of `available_balance` (USD).
+
+### `spend_limit` — hard cap
+
+- Source: `data.spend_limit`.
+- Transform: stored as `Limit` of `spend_limit` (USD).
+
+### `daily_spend` / `monthly_spend`
+
+- Source: `data.daily_spend` and `data.monthly_spend`.
+- Transform: stored as `Used`. Window is `1d` and `1mo` respectively.
+
+### `tokens_used` / `requests_used`
+
+- Source: `data.tokens_used`, `data.requests_used`.
+- Transform: copied verbatim into `Used` (units `tokens`, `requests`).
+
+### Billing period
+
+- Source: `data.billing_period_start` and `data.billing_period_end`.
+- Transform: stored under `Raw["billing_period_start"]`, `Raw["billing_period_end"]` and reflected as `Resets["billing_period_end"]`.
+
+### Per-model rows
+
+- Source: `data.models[]` array. Each row carries a model name, RPM/TPM limits, RPM/TPM used, and (sometimes) cost.
+- Transform: each model becomes a detail row with `rpm_used / rpm_limit` and `tpm_used / tpm_limit` gauges.
+
+### Auth status
+
+- Source: HTTP status code first. `401`/`403` → `auth` (`Invalid or expired API key`); `429` → `limited`; non-200 → `error`. After that, a non-`Success` `code` in the body promotes the snapshot to `error`.
+
+### What's NOT tracked
+
+- **Day-by-day breakdown.** The endpoint returns totals; no time series is produced.
+- **Per-model spend.** The per-model rows expose rate-limit usage but not dollar cost.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. DashScope's `/quotas` is a near-real-time aggregate.
 
 ## API endpoints used
 
-- `/api/v1/quotas`
+- `GET /api/v1/quotas`
 
 ## Caveats
 

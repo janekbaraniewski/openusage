@@ -96,6 +96,8 @@ const config: Config = {
       logo: {
         alt: 'OpenUsage logo',
         src: 'img/logo.svg',
+        href: 'https://openusage.sh/',
+        target: '_self',
       },
       items: [
         {
@@ -113,11 +115,6 @@ const config: Config = {
           to: '/reference/cli/',
           label: 'Reference',
           position: 'left',
-        },
-        {
-          href: 'https://openusage.sh/',
-          label: 'Home',
-          position: 'right',
         },
         {
           href: 'https://github.com/janekbaraniewski/openusage',

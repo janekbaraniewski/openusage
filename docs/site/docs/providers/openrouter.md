@@ -43,19 +43,76 @@ Set `OPENROUTER_API_KEY`. A management key (also stored in the same env var if y
 }
 ```
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows credit balance against limit and today's spend.
-- Detail view lists per-model and per-endpoint rows with token counts, cost, latency, and cache hit rate.
-- A 30-day analytics chart breaks down generations by model and provider.
-- BYOK rows are flagged separately so you can see what's billed to OpenRouter vs to your own keys.
+Each poll (default every 30 seconds in daemon mode) issues several authenticated GET requests under `https://openrouter.ai/api/v1`. All requests use `Authorization: Bearer $OPENROUTER_API_KEY`. OpenRouter is one of the few providers where a single API key returns enough data to render a fully-populated dashboard.
+
+| Call | Endpoint | What it provides |
+|---|---|---|
+| 1 | `GET /key` (with `/auth/key` fallback) | Key info, tier, label, management-key flag |
+| 2 | `GET /credits` | Balance and limit |
+| 3 | `GET /keys?include_disabled=true&offset=…` | List of keys (management-key only) |
+| 4 | `GET /activity` (and fallbacks) | 30-day analytics rollup |
+| 5 | `GET /generation?limit=…&offset=…` then `GET /generation?id=…` | Per-generation drill-down (≤20 lookups per poll) |
+
+### Key info
+
+- Source: `/key` JSON. Fields: `data.label`, `data.name`, `data.tier`, `data.is_provisioning_key`, `data.is_free_tier`.
+- Transform: each is stored under `Raw[…]`. The provisioning-key flag enables call 3.
+
+### `credit_balance` / `credit_limit`
+
+- Source: `/credits` JSON. Fields: `data.total_credits`, `data.total_usage`.
+- Transform: `Used = total_usage`, `Limit = total_credits`, `Remaining = Limit - Used`. Currency: USD.
+
+### Daily / weekly / monthly usage
+
+- Source: the analytics rollup. The provider walks four candidate endpoints in order until one returns 200:
+  - `/activity`
+  - `/activity?date=<yesterday-UTC>`
+  - `/analytics/user-activity`
+  - `/api/internal/v1/transaction-analytics?window=1mo`
+- Transform: per-day rows are summed into `daily_spend`, `weekly_spend`, `monthly_spend`. Tokens are summed into matching `*_tokens` metrics. Cache hits feed `cache_hit_rate`.
+
+### Per-model & per-provider analytics
+
+- Source: rows of the same analytics response, plus enrichment from `/generation?id=…`.
+- Transform: each row is bucketed by `model` and `provider`. Up to 20 generation IDs per poll are followed up with `/generation?id=…` to backfill provider metadata that the rollup endpoint omits. Higher-volume rows are prioritized for enrichment.
+
+### BYOK breakdown
+
+- Source: a `byok` flag on per-generation rows.
+- Transform: rows with `byok=true` are summed into a separate "BYOK" track so you can reconcile native OpenRouter spend vs your own upstream keys.
+
+### Generation latency, caching
+
+- Source: `latency_ms`, `cache_discount`, etc. on `/generation` rows.
+- Transform: averaged across the enriched-generation set; rendered in the detail view.
+
+### Rate limits
+
+- Source: response headers on whichever calls return them (OpenRouter is selective).
+- Transform: standard `x-ratelimit-*` parsing into `rpm` / `tpm` metrics. May be missing on a fresh poll.
+
+### Auth status
+
+- Source: HTTP status code on `/key`. `401`/`403` → `auth`; `429` → `limited`; otherwise `ok`. The `/keys` 403 (regular key) is non-fatal — every other call still runs.
+
+### What's NOT tracked
+
+- **Generations older than the 30-day analytics window.** OpenRouter's analytics rollups only cover the trailing 30 days.
+- **Per-key spend on a regular key.** `/keys` only works with a management/provisioning key. Regular keys still see balance and analytics for themselves.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. Analytics rollups are themselves cached server-side; the `cached_at` timestamp is stored in `Raw["activity_cached_at"]`. Per-generation enrichment is capped at 20 lookups per poll to avoid hammering OpenRouter's per-key limits.
 
 ## API endpoints used
 
-- `GET /api/v1/auth/key`
-- `GET /api/v1/billing/credits/details`
+- `GET /api/v1/key` (or `/api/v1/auth/key`)
+- `GET /api/v1/credits`
 - `GET /api/v1/keys` — only with a management key
-- `GET /api/v1/analytics/generations`
+- `GET /api/v1/activity` (and `/analytics/user-activity` / `/api/internal/v1/transaction-analytics` fallbacks)
 - `GET /api/v1/generation?id=…` — up to 20 lookups per cycle
 
 ## Caveats
