@@ -59,7 +59,7 @@ Tools you've integrated (Claude Code, Codex, OpenCode) post each turn or message
 POST /v1/hook/{source}?account_id=…
 ```
 
-Setup: `openusage integrations install <id>`. See [daemon/integrations](/docs/daemon).
+Setup: `openusage integrations install <id>`. See [daemon/integrations](/daemon).
 
 ### Spool
 
@@ -142,5 +142,5 @@ If you live mostly in Claude Code, Codex, or OpenCode, installing the matching i
 ## Where to read next
 
 - [Direct vs daemon](direct-vs-daemon.md) — how the daemon fits in.
-- [Daemon overview](/docs/daemon) — install, configure, troubleshoot.
+- [Daemon overview](/daemon) — install, configure, troubleshoot.
 - [Cost attribution](../guides/cost-attribution.md) — practical recipes for using the data.

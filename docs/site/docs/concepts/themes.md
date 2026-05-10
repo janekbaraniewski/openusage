@@ -25,5 +25,5 @@ External files with the same `name` as a built-in theme override the built-in. I
 
 ## Where to read next
 
-- [Customization · Themes](/docs/customization/themes/) — full color-token reference and structure of a theme JSON file.
-- [Customization · External themes](/docs/customization/external-themes/) — building, sharing, and distributing custom themes.
+- [Customization · Themes](/customization/themes/) — full color-token reference and structure of a theme JSON file.
+- [Customization · External themes](/customization/external-themes/) — building, sharing, and distributing custom themes.

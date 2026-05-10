@@ -82,7 +82,7 @@ If any of these matter, treat OpenUsage as the per-engineer view and pair it wit
 
 - Standardize the same `~/.config/openusage/settings.json` across machines (commit it to a dotfiles repo) so every engineer sees the same providers in the same order.
 - Use [time windows](../concepts/time-windows.md) (`w`) to align comparisons — pick `7d` for weekly checkpoints, `1d` for daily standup.
-- For Claude Code teams, install the [integration hook](/docs/daemon) so per-turn costs accumulate even when the dashboard is closed.
+- For Claude Code teams, install the [integration hook](/daemon) so per-turn costs accumulate even when the dashboard is closed.
 
 ## See also
 

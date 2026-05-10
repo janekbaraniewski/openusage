@@ -189,6 +189,6 @@ You'll lose all history. Auto-detection rebuilds account configuration on the ne
 
 ## See also
 
-- [Daemon overview](/docs/daemon)
+- [Daemon overview](/daemon)
 - [Telemetry pipeline](../concepts/telemetry.md)
 - [Debug mode](debug-mode.md)

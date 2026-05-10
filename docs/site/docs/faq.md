@@ -83,7 +83,7 @@ Depends on the provider:
 - **Cursor**: aggregated from the Cursor billing API. Composer cost is billable; AI code scoring is cached.
 - **Codex / Gemini CLI / Copilot**: a mix of vendor APIs and local session files. Counts match what the vendor reports.
 
-When in doubt, the per-provider page in the [provider catalog](/docs/providers) lists exactly what each integration tracks and what it estimates.
+When in doubt, the per-provider page in the [provider catalog](/providers) lists exactly what each integration tracks and what it estimates.
 
 ### Why doesn't a balance match the vendor dashboard exactly?
 

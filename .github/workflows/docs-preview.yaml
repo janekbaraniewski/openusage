@@ -39,8 +39,10 @@ jobs:
         working-directory: docs/site
         run: npm run typecheck
 
-      - name: Build docs
+      - name: Build docs (preview baseUrl=/)
         working-directory: docs/site
+        env:
+          DOCS_PREVIEW: "1"
         run: npm run build
 
       - name: Upload build artifact
@@ -89,9 +91,9 @@ jobs:
               '',
               `Built and deployed for commit \`${sha.slice(0, 7)}\`.`,
               '',
-              `**Preview URL:** ${url}/docs/`,
+              `**Preview URL:** ${url}/`,
               '',
-              `Routes to check: [Home](${url}/docs/) · [Install](${url}/docs/getting-started/install/) · [Providers](${url}/docs/providers/) · [CLI reference](${url}/docs/reference/cli/) · [FAQ](${url}/docs/faq/)`,
+              `Routes to check: [Home](${url}/) · [Install](${url}/getting-started/install/) · [Providers](${url}/providers/) · [CLI reference](${url}/reference/cli/) · [FAQ](${url}/faq/)`,
               '',
               '_Re-deployed on every push to this PR. The build artifact is also attached to the workflow run._',
             ].join('\n');

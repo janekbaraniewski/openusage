@@ -94,7 +94,7 @@ For more detail on the snapshot model see [snapshots](snapshots.md).
 | Coding agents | claude_code, cursor, codex, copilot, gemini_cli, opencode |
 | Local runtimes | ollama |
 
-For the full per-provider reference (auth, endpoints, fields tracked, caveats), see the [provider catalog](/docs/providers).
+For the full per-provider reference (auth, endpoints, fields tracked, caveats), see the [provider catalog](/providers).
 
 ## Adding your own
 

@@ -22,7 +22,7 @@ The skill breaks the work into seven phases, each with its own validation:
 
 ### Phase 1: Provider discovery
 
-Read vendor docs, identify endpoints, capture sample responses. Output: a fact sheet that mirrors the structure of the existing [provider catalog](/docs/providers).
+Read vendor docs, identify endpoints, capture sample responses. Output: a fact sheet that mirrors the structure of the existing [provider catalog](/providers).
 
 ### Phase 2: Package skeleton
 

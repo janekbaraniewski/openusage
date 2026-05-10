@@ -121,5 +121,5 @@ You cannot run the daemon and a direct-mode TUI against the same provider accoun
 ## Where to read next
 
 - [Telemetry](telemetry.md) — what the daemon stores and how dedup works.
-- [Daemon overview](/docs/daemon) — install, run, troubleshoot.
+- [Daemon overview](/daemon) — install, run, troubleshoot.
 - [Headless servers](../guides/headless-servers.md) — daemon-only on a remote host.

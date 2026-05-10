@@ -12,7 +12,10 @@ const config: Config = {
   },
 
   url: 'https://openusage.sh',
-  baseUrl: '/docs/',
+  // Preview builds (Cloudflare Pages *.pages.dev) serve at the host root,
+  // so baseUrl needs to be "/". Production builds are mounted at openusage.sh/docs/
+  // by the website-deploy workflow.
+  baseUrl: process.env.DOCS_PREVIEW === '1' ? '/' : '/docs/',
   trailingSlash: true,
 
   organizationName: 'janekbaraniewski',

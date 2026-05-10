@@ -103,5 +103,5 @@ If the daemon is briefly unavailable, hooks spool to `~/.local/state/openusage/t
 ## See also
 
 - [Direct vs daemon](../concepts/direct-vs-daemon.md)
-- [Daemon overview](/docs/daemon)
+- [Daemon overview](/daemon)
 - [Daemon issues troubleshooting](../troubleshooting/daemon-issues.md)
