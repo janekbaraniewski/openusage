@@ -19,10 +19,11 @@ Perplexity uses browser-session auth, which reads cookies from your locally-inst
 - **Auth** — browser session cookie (read from Chrome / Edge / Brave / Vivaldi / Firefox / Safari)
 - **Type** — API platform (dashboard-scraped)
 - **Tracks**:
-  - Subscription plan (Pro, Max, Enterprise) and renewal date
-  - Monthly query usage against the plan quota
-  - Pro Search usage and remaining count
-  - Reasoning / research mode quotas where exposed
+  - API org and usage tier
+  - Available balance, pending balance, lifetime spend (USD)
+  - Auto-top-up amount and threshold
+  - Account email, country, payment method (brand + last 4)
+  - Past-30-day rollups: API requests, input/output/citation/reasoning tokens, search queries, Pro Search count
   - Auth status
 
 ## Setup
@@ -71,20 +72,70 @@ Browser-session accounts persist their **cookie reference** (which browser, whic
 
 `source_browser` is auto-detected on connect. Leave it blank to let OpenUsage rediscover the cookie if you switch browsers.
 
-## What you'll see
+## Data sources & how each metric is computed
 
-- Dashboard tile shows the subscription plan and the most-constrained quota gauge (typically Pro Search remaining for the current cycle).
-- Detail view breaks down per-feature usage: standard queries, Pro Search, reasoning mode, and any quotas the dashboard exposes.
-- Plan renewal date is shown alongside the cycle window.
-- When the cookie is missing or expired, the tile transitions to the AUTH state with a hint to re-login at `perplexity.ai`.
+Perplexity is a **browser-session-only** provider. There is no API-key fallback — the public API is purely chat-completion and exposes no `/usage` or `/credits` endpoint. All visible metrics come from the same dashboard-internal endpoints `console.perplexity.ai` calls when you open the Usage page in your browser.
+
+Each poll (default every 30 seconds in daemon mode) makes up to three calls. All requests carry the session cookie and the trio of `x-app-*` headers the SPA sets:
+
+| Call | Endpoint | What it provides |
+|---|---|---|
+| 1 | `GET /rest/pplx-api/v2/groups` | List of API orgs you have access to + tier metadata |
+| 2 | `GET /rest/pplx-api/v2/groups/<orgID>` | Customer info: balance, pending balance, total spend, payment method, top-up rules |
+| 3 | `GET /rest/pplx-api/v2/groups/<orgID>/usage-analytics?time_bucket=day&time_range=past_month` | Meter-event time-series: requests, input/output/citation/reasoning tokens, search queries |
+
+Auth header for every call: `Cookie: __Secure-next-auth.session-token=<value>`. The cookie is read locally from the browser's encrypted store on each poll, so a fresh login is picked up automatically without restart.
+
+### Org selection
+
+- Source: `groups` list response. Each entry has `api_org_id`, `display_name`, `is_default_org`, `runtime_settings.usage_tier`, `user_role`.
+- Transform: the default org wins unless `extra.perplexity_org_id` overrides it. The chosen org's `display_name` becomes `Attributes["org_display_name"]`; its `usage_tier` becomes both an `Attributes["usage_tier"]` and a `Metrics["usage_tier"]` (unit `tier`, used for the tile's tier badge).
+
+### `available_balance` — current cycle balance
+
+- Source: `customerInfo.balance` on the org-detail response.
+- Transform: stored as `Remaining` in USD. The status message becomes `$X.XX balance · Tier <N>`.
+
+### `pending_balance`, `total_spend`
+
+- Source: `customerInfo.pending_balance`, `customerInfo.spend.total_spend` on the same response.
+- Transform: copied verbatim. Pending balance is what's been charged but not yet posted; total spend is lifetime.
+
+### `auto_top_up_amount` / `auto_top_up_threshold`
+
+- Source: `customerInfo.auto_top_up_amount`, `customerInfo.auto_top_up_threshold`.
+- Transform: each becomes a `Limit` metric (USD). Only emitted when the corresponding value is &gt; 0.
+
+### Account email, country, payment method
+
+- Source: `customerInfo.contact_info.{email, country}`, `defaultPaymentMethodCard.{brand, last_digits}`.
+- Transform: stored as `Attributes["account_email"]`, `account_country`, `payment_method_last4`, `payment_method_brand`.
+
+### `requests_window`, `input_tokens_window`, `output_tokens_window`, `citation_tokens_window`, `reasoning_tokens_window`, `search_queries_window`, `pro_search_window`
+
+- Source: usage-analytics meter-event summaries. Each meter has a `name` (e.g. `api_requests`, `input_tokens`, `output_tokens`, `citation_tokens`, `reasoning_tokens`, `num_search_queries` / `search_request_count`, `pro_search_request_count`) and an array of `meter_event_summaries` with per-day `value`.
+- Transform: for each known meter the values are summed across the past-month window and stored under the matching `*_window` metric (window label `30d`, unit `requests` / `tokens` / `queries`). Meters whose total is zero are omitted.
+
+### Auth status
+
+- Source: HTTP status from any of the three calls. `401`/`403` becomes `auth` with the message `session expired — re-login at console.perplexity.ai`. With no session configured the snapshot is `auth` with `browser session not configured — Settings → 5 KEYS → perplexity → Enter`. Otherwise `ok`.
+
+### What's NOT tracked
+
+- **Native API spend.** The public chat-completion API doesn't expose any usage data; everything you see comes from the dashboard surface, which only authenticates against a logged-in session.
+- **Multi-org balance aggregation.** Only the chosen org is read per poll. Configure separate accounts (different `extra.perplexity_org_id`) to track multiple orgs.
+
+### How fresh is the data?
+
+- Polled every 30 s by default. The cookie is re-read from the browser store each poll, so a freshly-renewed session is picked up on the next cycle without any restart.
 
 ## API endpoints used
 
-All under `https://www.perplexity.ai` and `https://console.perplexity.ai` (cookie-authed):
+All under `https://console.perplexity.ai` (cookie-authed):
 
-- `GET /rest/pplx-api/v2/groups/<group>/usage` — per-group usage counters
-- `GET /rest/pplx-api/v2/groups/<group>/subscription` — plan and billing window
-- Endpoints are dashboard-internal and may change without notice — see Caveats.
+- `GET /rest/pplx-api/v2/groups`
+- `GET /rest/pplx-api/v2/groups/<orgID>`
+- `GET /rest/pplx-api/v2/groups/<orgID>/usage-analytics?time_bucket=day&time_range=past_month`
 
 The cookie itself is read locally from the user's browser cookie store; no network call to Perplexity is made to obtain it.
 
@@ -99,7 +150,7 @@ Perplexity does not currently offer personal access tokens (PATs) or any non-coo
 - **Browser must be installed and logged in.** OpenUsage cannot mint a cookie. You need a working browser session on the same machine.
 - **Windows Chrome v20+ App-Bound Encryption** blocks the cookie read. On affected systems, use Firefox or Edge as the cookie source until upstream support lands.
 - **Multiple Chrome profiles.** OpenUsage reads the default profile in v1. If your Perplexity session lives in a non-default profile, log into the default profile too — or use a different browser.
-- **No spend in dollars.** Perplexity's plan model is flat-rate with quotas, not metered. The tile shows quota usage, not currency.
+- **API spend is in USD; consumer Pro/Max plans are not.** This provider reads the API console (`console.perplexity.ai`), which exposes per-org balance and metered spend. Personal Pro/Max subscription plans are billed flat-rate by Perplexity and are not surfaced here.
 
 ## Troubleshooting
 
@@ -108,6 +159,18 @@ Perplexity does not currently offer personal access tokens (PATs) or any non-coo
 - **"Extraction failed: browser may be open"** — Chrome holds an exclusive lock on its cookie DB while running. Close Chrome briefly, or wait for the lock to release. OpenUsage falls back to the last successfully-extracted cookie until then.
 - **"App-Bound Encryption blocks reads"** (Windows) — switch the cookie source to Firefox or Edge.
 - **Tile shows quotas that don't match the dashboard** — the dashboard endpoint may have changed shape. Run with `OPENUSAGE_DEBUG=1` and file an issue with the log.
+
+### Why does the tile stop working after a few weeks?
+
+Perplexity sets a relatively short session-cookie expiry. When your console session expires the tile transitions to `auth` with a "session expired" message. Logging back in at `console.perplexity.ai` from the same browser is enough — the next poll re-extracts the new cookie automatically. There's no need to re-run the connect flow.
+
+### Why do I see no usage data on a fresh account?
+
+The `usage-analytics` endpoint returns empty meter arrays until the org has activity. Balance and tier still populate from the org-detail call. Make a few API requests and the rollups appear on the next poll.
+
+### Can I track my Pro / Max consumer subscription this way?
+
+No — this provider talks to the API console only. Consumer Pro / Max plans bill flat-rate and have no per-account spend surface OpenUsage can read.
 
 ## Related
 
