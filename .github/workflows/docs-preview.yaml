@@ -89,9 +89,9 @@ jobs:
               '',
               `Built and deployed for commit \`${sha.slice(0, 7)}\`.`,
               '',
-              `**Preview URL:** ${url}`,
+              `**Preview URL:** ${url}/docs/`,
               '',
-              `Routes to check: [/](${url}) · [/getting-started/install/](${url}/getting-started/install/) · [/providers/](${url}/providers/) · [/reference/cli/](${url}/reference/cli/)`,
+              `Routes to check: [Home](${url}/docs/) · [Install](${url}/docs/getting-started/install/) · [Providers](${url}/docs/providers/) · [CLI reference](${url}/docs/reference/cli/) · [FAQ](${url}/docs/faq/)`,
               '',
               '_Re-deployed on every push to this PR. The build artifact is also attached to the workflow run._',
             ].join('\n');
