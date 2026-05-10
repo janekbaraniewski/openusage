@@ -11,7 +11,7 @@ Tracks the OpenCode tool's auth status and available models. Spend and per-sessi
 ## At a glance
 
 - **Provider ID** — `opencode`
-- **Detection** — `ZEN_API_KEY` or `OPENCODE_API_KEY` environment variable
+- **Detection** — `OPENCODE_API_KEY` or `ZEN_API_KEY` environment variable (`OPENCODE_API_KEY` is the primary env var; `ZEN_API_KEY` is an alias)
 - **Auth** — API key
 - **Type** — coding agent
 - **Tracks**:
@@ -23,7 +23,7 @@ Tracks the OpenCode tool's auth status and available models. Spend and per-sessi
 
 ### Auto-detection
 
-Set either `ZEN_API_KEY` or `OPENCODE_API_KEY`. Both work; the first non-empty value wins.
+Set `OPENCODE_API_KEY` (preferred) or `ZEN_API_KEY` (alias). Both work; the first non-empty value wins.
 
 ### Manual configuration
 
@@ -33,7 +33,7 @@ Set either `ZEN_API_KEY` or `OPENCODE_API_KEY`. Both work; the first non-empty v
     {
       "id": "opencode",
       "provider": "opencode",
-      "api_key_env": "ZEN_API_KEY",
+      "api_key_env": "OPENCODE_API_KEY",
       "base_url": "https://opencode.ai"
     }
   ]

@@ -74,10 +74,11 @@ Each poll (default every 30 seconds in daemon mode) makes three calls under `htt
 
 ### `rpm` / `tpm` — rate limits
 
-- Source: response headers on `GET /v1/models`
-  - `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests`
-  - `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens`
-- Transform: parsed verbatim.
+- Source: response headers on `GET /v1/models`. Three header groups are read:
+  - **Primary `rpm`** — `ratelimit-limit`, `ratelimit-remaining`, `ratelimit-reset` (no `x-` prefix).
+  - **Primary `tpm`** — `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens`.
+  - **`rpm_alt`** — `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests`. Mistral occasionally returns this alongside the primary headers; OpenUsage exposes it as a separate metric so both are visible.
+- Transform: parsed verbatim into the corresponding metrics.
 
 ### Auth status
 

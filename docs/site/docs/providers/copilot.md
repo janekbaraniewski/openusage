@@ -69,8 +69,8 @@ No direct HTTPS calls are made — everything goes through `gh`, which uses the 
 
 ### Quotas (chat, code, premium): entitlement, overage, remaining
 
-- Source: `gh api /copilot_internal/user` returns `quota_snapshots.{chat,code,premium_interactions}` with `entitlement`, `remaining`, `unlimited`, `overage`, etc.
-- Transform: each quota becomes a metric: `Limit = entitlement`, `Used = entitlement - remaining`, `Remaining = remaining`. Overage is stored separately for the detail row.
+- Source: `gh api /copilot_internal/user` returns `quota_snapshots.{chat,code,premium_interactions}` with `entitlement`, `remaining`, `unlimited`, `overage_count` (int), `overage_permitted` (bool), etc.
+- Transform: each quota becomes a metric: `Limit = entitlement`, `Used = entitlement - remaining`, `Remaining = remaining`. `overage_count` and `overage_permitted` are stored separately for the detail row.
 
 ### Rate limits (`core`, `search`, `graphql`)
 
@@ -122,7 +122,8 @@ All via `gh` subprocess; no direct HTTP calls:
 - `~/.copilot/session-state/<id>/workspace.yaml`
 - `~/.copilot/session-state/<id>/<events>.jsonl`
 - `~/.copilot/config.json`
-- `~/.config/github-copilot/devices.json`
+
+`~/.config/github-copilot/` is referenced only by auto-detection (to register the account); the provider does not read its contents.
 
 ## Caveats
 

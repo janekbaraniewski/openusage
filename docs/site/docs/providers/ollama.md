@@ -50,7 +50,7 @@ Ollama has three independent data sources. The provider runs them in parallel an
 | Source | Path / endpoint | When used |
 |---|---|---|
 | Local HTTP API | `GET http://127.0.0.1:11434/api/tags` and `/api/ps` | Always, when the server responds |
-| Local SQLite + Gin log | OS-specific (see below) | Always, falls back gracefully when missing |
+| Local SQLite + Gin log | `~/.ollama/logs/server*.log` (override via `logs_dir`); desktop DB path is OS-specific | Always, falls back gracefully when missing |
 | Cloud HTTP API | `https://ollama.com` (authenticated) | Only when `OLLAMA_API_KEY` is set |
 
 ### Models and details (local API)
@@ -65,11 +65,7 @@ Ollama has three independent data sources. The provider runs them in parallel an
 
 ### Request analytics (server log)
 
-The Ollama server emits a Gin-style HTTP access log line per request. The provider tails the OS-specific log file:
-
-- Linux — `/tmp/ollama.log`
-- macOS — `~/Library/Logs/Ollama/server.log` (and rotated siblings)
-- Windows — `%LOCALAPPDATA%\Ollama\logs\server.log`
+The Ollama server emits a Gin-style HTTP access log line per request. The provider tails `~/.ollama/logs/server*.log` (matching the rotated siblings as well) on every platform. Override with the `logs_dir` hint, or via `config_dir` (the provider then looks under `<config_dir>/logs/`).
 
 For each parsed line the provider extracts timestamp, HTTP status, latency, and path. Lines whose path is in the inference set are counted:
 
@@ -120,12 +116,12 @@ Metrics are bucketed into 5h, 1d, 7d, and "today" windows:
 
 ## Files read
 
-- Server log:
-  - Linux — `/tmp/ollama.log`
-  - macOS — `~/Library/Logs/Ollama/server.log`
-  - Windows — `%LOCALAPPDATA%\Ollama\logs\server.log`
-- Desktop database (optional, SQLite, read-only)
-- Server config (JSON)
+- Server log: `~/.ollama/logs/server*.log` (default on every platform; override with the `logs_dir` hint or via `config_dir`)
+- Desktop database (optional, SQLite, read-only) — OS-specific path:
+  - macOS — `~/Library/Application Support/Ollama/db.sqlite`
+  - Linux — `~/.local/share/Ollama/db.sqlite` or `~/.config/Ollama/db.sqlite`
+  - Windows — `%APPDATA%\Ollama\db.sqlite`
+- Server config (JSON) at `~/.ollama/server.json` (override with `server_config` or `config_dir`)
 
 ## Caveats
 
@@ -136,5 +132,5 @@ Metrics are bucketed into 5h, 1d, 7d, and "today" windows:
 ## Troubleshooting
 
 - **Server unreachable** — start Ollama (`ollama serve`) and re-run.
-- **No request analytics** — confirm the log file exists at the OS-specific path; check permissions.
+- **No request analytics** — confirm `~/.ollama/logs/server*.log` exists; check permissions, or set the `logs_dir` hint if your install writes elsewhere.
 - **Wrong port** — set `base_url` in your config.

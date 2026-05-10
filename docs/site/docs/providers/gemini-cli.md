@@ -74,7 +74,7 @@ Gemini CLI has two data paths:
 ### Conversation count
 
 - Source: count of `*.pb` files under `~/.gemini/antigravity/conversations/`. The provider decodes only the protobuf headers; it does not store transcript bodies.
-- Transform: stored as `Metrics["conversations"]` (`Used = file count`).
+- Transform: stored as `Metrics["total_conversations"]` (`Used = file count`).
 
 ### Session token usage (input / output / cached / reasoning / tool)
 
@@ -95,8 +95,8 @@ Gemini CLI has two data paths:
 
 ### Quota (when enabled)
 
-- Source: `POST https://cloudcode-pa.googleapis.com/v1internal/loadCodeAssist` returns the current tier; `POST .../retrieveUserQuota` returns per-tier quotas with `used` and `limit` fields.
-- Transform: each quota becomes a metric (`quota_<name>`) with `Used = used`, `Limit = limit`, `Remaining = Limit - Used`. The active tier is stored as `Attributes["tier"]`. When the response indicates `< 15%` remaining on any quota, status promotes to `near_limit`.
+- Source: `POST https://cloudcode-pa.googleapis.com/v1internal/loadCodeAssist` returns the current tier; `POST .../retrieveUserQuota` returns per-tier quotas. Each bucket carries `remainingAmount` and `remainingFraction`; `used` and `limit` are derived (`limit = 100`, `used = 100 - remainingFraction * 100`).
+- Transform: each quota becomes a metric (`quota_<name>`) with `Limit = 100`, `Remaining = remainingFraction * 100`, `Used = 100 - Remaining`, `Unit = %`. The active tier is stored as `Attributes["tier"]`. When the response indicates `< 15%` remaining on any quota, status promotes to `near_limit`.
 
 ### Auth status (composite)
 

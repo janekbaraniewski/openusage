@@ -22,7 +22,7 @@ Full billing visibility for Alibaba Cloud's Model Studios (DashScope). Surfaces 
   - Tokens used
   - Requests used
   - RPM and TPM
-  - Per-model RPM and TPM with usage and limits
+  - Per-model usage with `used / limit` gauges
 
 ## Setup
 
@@ -74,7 +74,7 @@ The response shape is `{ "code": "Success", "data": { … } }`. A non-`Success` 
 ### `daily_spend` / `monthly_spend`
 
 - Source: `data.daily_spend` and `data.monthly_spend`.
-- Transform: stored as `Used`. Window is `1d` and `1mo` respectively.
+- Transform: stored as `Used`. Window is `1d` and `30d` respectively.
 
 ### `tokens_used` / `requests_used`
 
@@ -83,13 +83,13 @@ The response shape is `{ "code": "Success", "data": { … } }`. A non-`Success` 
 
 ### Billing period
 
-- Source: `data.billing_period_start` and `data.billing_period_end`.
-- Transform: stored under `Raw["billing_period_start"]`, `Raw["billing_period_end"]` and reflected as `Resets["billing_period_end"]`.
+- Source: `data.billing_period.start` and `data.billing_period.end`.
+- Transform: stored as `Attributes["billing_cycle_start"]` and `Attributes["billing_cycle_end"]`.
 
 ### Per-model rows
 
-- Source: `data.models[]` array. Each row carries a model name, RPM/TPM limits, RPM/TPM used, and (sometimes) cost.
-- Transform: each model becomes a detail row with `rpm_used / rpm_limit` and `tpm_used / tpm_limit` gauges.
+- Source: `data.models[]` array. Each row carries a model name with `used` and `limit` values.
+- Transform: each model produces two metrics — `model_<name>_usage_pct` (percentage) and `model_<name>_used` (raw `used / limit` gauge in `units`).
 
 ### Auth status
 

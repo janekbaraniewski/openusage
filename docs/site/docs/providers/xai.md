@@ -15,7 +15,7 @@ Full account visibility for xAI. Surfaces key metadata, credit breakdown, rate l
 - **Auth** — API key
 - **Type** — API platform (full billing data)
 - **Tracks**:
-  - Key info: name, ID, team
+  - Key info: name, team
   - Credits: remaining, spent, granted (USD)
   - RPM and TPM
   - Allowed models

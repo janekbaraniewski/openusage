@@ -73,7 +73,7 @@ The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatg
 ### Rate-limit windows (`rate_limit_primary`, `rate_limit_secondary`)
 
 - Source: `rate_limit.primary` and `rate_limit.secondary` from the live usage endpoint. Each carries `used_percent`, `window_minutes`, `resets_at` (Unix seconds).
-- Transform: `Used = used_percent`, `Limit = 100`. `Resets[…]` is set from `resets_at`. `Window` is `<minutes>m`. The greater of the two is also exposed under `plan_auto_percent_used` / `plan_api_percent_used` aliases for the dashboard widget.
+- Transform: `Used = used_percent`, `Limit = 100`. `Resets[…]` is set from `resets_at`. `Window` is `<minutes>m`. Each window is also exposed via a direct alias for the dashboard widget: `plan_auto_percent_used` aliases `rate_limit_primary`, `plan_api_percent_used` aliases `rate_limit_secondary`. A separate `plan_percent_used` metric reflects the greater of the two.
 
 ### Credit balance
 
