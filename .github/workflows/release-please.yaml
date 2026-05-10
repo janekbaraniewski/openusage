@@ -14,8 +14,6 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
       - id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
@@ -23,27 +21,22 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Refresh open release PRs and dispatch required checks
-        env:
-          GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr list \
-            --state open \
-            --label "autorelease: pending" \
-            --json number,headRefName \
-            --jq '.[] | "\(.number)\t\(.headRefName)"' |
-            while IFS=$'\t' read -r pr ref; do
-              if [ -z "$ref" ]; then
-                continue
-              fi
+  refresh-release-prs:
+    needs: release-please
+    name: Update open release PR branches
+    uses: ./.github/workflows/refresh-pr-branches.yaml
+    with:
+      labels: "autorelease: pending"
+    permissions:
+      contents: read
+      pull-requests: write
 
-              if ! gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1 | tee /tmp/release-pr-update.out; then
-                if ! grep -q "no new commits on the base branch" /tmp/release-pr-update.out; then
-                  echo "::warning::update-branch failed for release PR #$pr — see log"
-                  continue
-                fi
-              fi
-
-              ./scripts/dispatch-required-pr-checks.sh "$ref"
-            done
+  dispatch-required-checks:
+    needs: refresh-release-prs
+    if: needs.refresh-release-prs.outputs.refs-json != '[]'
+    uses: ./.github/workflows/dispatch-required-pr-checks.yaml
+    with:
+      refs-json: ${{ needs.refresh-release-prs.outputs.refs-json }}
+    permissions:
+      actions: write
+      contents: read

@@ -1,0 +1,122 @@
+name: Refresh PR branches
+
+on:
+  workflow_call:
+    inputs:
+      author-login:
+        description: Only refresh PRs authored by this login.
+        required: false
+        type: string
+        default: ""
+      labels:
+        description: Comma-separated labels used to select PRs.
+        required: false
+        type: string
+        default: ""
+    outputs:
+      refs-json:
+        description: JSON array of refreshed branch refs.
+        value: ${{ jobs.refresh.outputs.refs-json }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Refresh matching PR branches
+    runs-on: ubuntu-latest
+    outputs:
+      refs-json: ${{ steps.refresh.outputs.result }}
+    steps:
+      - id: refresh
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          AUTHOR_LOGIN: ${{ inputs.author-login }}
+          LABELS: ${{ inputs.labels }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const authorLogin = process.env.AUTHOR_LOGIN.trim();
+            const labels = process.env.LABELS.trim();
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            const isAlreadyCurrent = (error) =>
+              error.status === 422 &&
+              /no new commits|not behind|up to date/i.test(error.message);
+
+            async function listPulls() {
+              if (!labels) {
+                return github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100,
+                });
+              }
+
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner,
+                repo,
+                state: 'open',
+                labels,
+                per_page: 100,
+              });
+              const pulls = [];
+              for (const issue of issues.filter((issue) => issue.pull_request)) {
+                const response = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: issue.number,
+                });
+                pulls.push(response.data);
+              }
+              return pulls;
+            }
+
+            async function waitForBranchUpdate(pr, previousSha) {
+              let current = pr;
+              for (const delay of [2000, 3000, 5000, 10000, 15000, 25000]) {
+                await sleep(delay);
+                const response = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                });
+                current = response.data;
+                if (current.head.sha !== previousSha) {
+                  return current;
+                }
+              }
+              core.warning(`PR #${pr.number} branch update did not finish before dispatch; dispatching current ref.`);
+              return current;
+            }
+
+            const pulls = (await listPulls()).filter((pull) =>
+              authorLogin ? pull.user?.login === authorLogin : true
+            );
+            const refs = [];
+
+            for (const pull of pulls) {
+              core.startGroup(`PR #${pull.number}`);
+              refs.push(pull.head.ref);
+              try {
+                await github.rest.pulls.updateBranch({
+                  owner,
+                  repo,
+                  pull_number: pull.number,
+                });
+                const updated = await waitForBranchUpdate(pull, pull.head.sha);
+                core.info(`Updated ${pull.head.ref}: ${pull.head.sha} -> ${updated.head.sha}`);
+              } catch (error) {
+                if (isAlreadyCurrent(error)) {
+                  core.info(`${pull.head.ref} is already current with main.`);
+                } else {
+                  core.warning(`Could not update PR #${pull.number}: ${error.message}`);
+                }
+              } finally {
+                core.endGroup();
+              }
+            }
+
+            return refs;

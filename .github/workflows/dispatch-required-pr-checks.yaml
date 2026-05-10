@@ -1,0 +1,48 @@
+name: Dispatch required PR checks
+
+on:
+  workflow_call:
+    inputs:
+      refs-json:
+        description: JSON array of branch refs to check.
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch ${{ matrix.workflow }}
+    if: inputs.refs-json != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workflow:
+          - ci.yaml
+          - dependency-review.yaml
+          - govulncheck.yaml
+          - lychee.yaml
+          - codeql.yaml
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REFS_JSON: ${{ inputs.refs-json }}
+          WORKFLOW_FILE: ${{ matrix.workflow }}
+        with:
+          script: |
+            const refs = JSON.parse(process.env.REFS_JSON);
+            const workflow_id = process.env.WORKFLOW_FILE;
+            const { owner, repo } = context.repo;
+
+            for (const ref of refs) {
+              core.info(`Dispatching ${workflow_id} on ${ref}`);
+              await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id,
+                ref,
+              });
+            }
