@@ -54,8 +54,8 @@ Default: `"Gruvbox"`.
 {
   "ui": {
     "refresh_interval_seconds": 30,
-    "warn_threshold": 0.30,
-    "crit_threshold": 0.15
+    "warn_threshold": 0.20,
+    "crit_threshold": 0.05
   }
 }
 ```
@@ -63,10 +63,10 @@ Default: `"Gruvbox"`.
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `refresh_interval_seconds` | int | `30` | How often the TUI re-fetches the read model from the daemon. |
-| `warn_threshold` | float | `0.30` | Gauge turns yellow when remaining ratio drops below this. |
-| `crit_threshold` | float | `0.15` | Gauge turns red below this. |
+| `warn_threshold` | float | `0.20` | Gauge turns yellow when remaining ratio drops below this. |
+| `crit_threshold` | float | `0.05` | Gauge turns red below this. |
 
-Thresholds are remaining-ratio fractions, so `0.30` means "yellow when less than 30% remains."
+Thresholds are remaining-ratio fractions, so `0.20` means "yellow when less than 20% remains."
 
 ## `data`
 
@@ -82,7 +82,7 @@ Thresholds are remaining-ratio fractions, so `0.30` means "yellow when less than
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `time_window` | string | `"30d"` | Default time window. One of `1d`, `3d`, `7d`, `30d`, `all`. |
-| `retention_days` | int | `30` | Days of history to keep in the daemon's SQLite store. Older rows are pruned. |
+| `retention_days` | int | `30` | Days of history to keep in the daemon's SQLite store. Older rows are pruned. Hard-capped at **90** — values above 90 are silently clamped at startup. |
 
 ## `telemetry`
 

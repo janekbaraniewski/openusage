@@ -117,7 +117,7 @@ If symptoms only appear under load, enable verbose logging:
 
 ```bash
 openusage telemetry daemon uninstall
-openusage telemetry daemon --verbose         # foreground, prints to terminal
+openusage telemetry daemon run --verbose     # foreground, prints to terminal
 ```
 
 Reproduce the issue, then reinstall when done.
@@ -151,7 +151,7 @@ openusage telemetry daemon install   # if uninstalled
 
 ### Preventing it
 
-The store is configured with WAL and `synchronous=on`, so corruption is rare absent disk failure or `kill -9` mid-write. Avoid forcing the host to power off while a poll is in flight.
+The store is configured with WAL and `synchronous=NORMAL`. Corruption is rare absent disk failure or a hard kill mid-write, but `NORMAL` doesn't fsync on every transaction — a sudden power loss can lose the most recent in-flight events. Avoid forcing the host to power off while a poll is in flight.
 
 ## Hooks not delivering events
 

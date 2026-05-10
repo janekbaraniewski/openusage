@@ -37,6 +37,13 @@ These providers read local files, OAuth credentials, or shell out to a CLI. No A
     <strong>OpenCode</strong>
     <span>Zen models, spend via telemetry plugin</span>
   </a>
+</div>
+
+## Local runtimes
+
+Self-hosted model servers running on this machine.
+
+<div className="provider-grid">
   <a href="./ollama/">
     <strong>Ollama</strong>
     <span>Local models, VRAM, request log analytics, cloud credits</span>

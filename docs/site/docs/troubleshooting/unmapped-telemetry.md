@@ -110,7 +110,7 @@ If the tile is missing entirely, check:
 
 ### "My env var is set, but the provider isn't even auto-detected"
 
-OpenUsage only auto-detects providers that have a built-in Go integration. The 18 supported providers are listed in the [provider catalog](/providers/). Setting an env var for a provider that isn't in the catalog will not produce a tile, no matter what — there's no code that knows how to talk to that API.
+OpenUsage only auto-detects providers that have a built-in Go integration. The 19 supported providers are listed in the [provider catalog](/providers/). Setting an env var for a provider that isn't in the catalog will not produce a tile, no matter what — there's no code that knows how to talk to that API.
 
 If you want a new provider supported, open a request on [GitHub Issues](https://github.com/janekbaraniewski/openusage/issues), or implement it yourself following the [add-a-provider guide](/contributing/add-provider/).
 

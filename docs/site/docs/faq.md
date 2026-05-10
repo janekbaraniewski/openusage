@@ -53,7 +53,7 @@ Yes. Pre-built Windows binaries are released; settings live at `%APPDATA%\openus
 The daemon's service install (launchd / systemd) is Unix-only. On Windows, run the daemon manually as needed:
 
 ```
-openusage telemetry daemon
+openusage telemetry daemon run
 ```
 
 ### Can I run it on Linux?

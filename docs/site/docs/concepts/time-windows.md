@@ -49,11 +49,11 @@ If you need longer-term data, raise `data.retention_days` in `settings.json` **b
 
 ```json
 {
-  "data": { "retention_days": 90 }
+  "data": { "retention_days": 60 }
 }
 ```
 
-Lowering it later prunes older events at the next pass.
+`retention_days` is hard-capped at **90** — values above 90 are silently clamped at startup. Lowering the value later prunes older events at the next pass.
 
 ## Calendar 1d vs rolling 3d
 
