@@ -81,6 +81,33 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Sigstore cosign keyless signing.
+#
+# Each release archive plus the checksums file gets a `.sig` and `.pem`
+# attached to the release. Verification is done with the GitHub Actions
+# OIDC identity that ran the workflow — no key management required.
+# Verify a downloaded artifact:
+#
+#   cosign verify-blob \
+#     --certificate openusage_X.Y.Z_linux_amd64.tar.gz.pem \
+#     --signature   openusage_X.Y.Z_linux_amd64.tar.gz.sig \
+#     --certificate-identity-regexp 'https://github\.com/janekbaraniewski/openusage/\.github/workflows/' \
+#     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+#     openusage_X.Y.Z_linux_amd64.tar.gz
+signs:
+  - id: cosign-keyless
+    cmd: cosign
+    artifacts: all
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    output: true
+
 changelog:
   sort: asc
   use: github
