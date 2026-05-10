@@ -12,6 +12,7 @@ The `openusage` binary is the dashboard, the daemon, the hook receiver, and the 
 ```
 openusage                                       # run the dashboard (default)
 openusage version                               # print version and build info
+openusage detect [--all]                        # print credential auto-detection report
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle
 openusage integrations <subcommand> [flags]     # tool integration management
@@ -32,6 +33,21 @@ openusage version
 ```
 
 Prints the binary version, commit, and build date. Useful for bug reports.
+
+## `openusage detect`
+
+Runs the same auto-detection pipeline used at dashboard startup and prints a report:
+
+- **Tools detected** — name, type (`ide` / `cli`), and binary path.
+- **Accounts detected** — provider, account ID, auth mode, masked credential, and a `SOURCE` column with the precise locator (`env`, `shell_rc:/path`, `aider_yaml:/path`, `aider_dotenv:/path`, `opencode_auth_json`, `codex_auth_json`, `keychain:Claude Code-credentials`, etc.).
+- **No credentials found for** — every registered provider that produced no account.
+
+```
+openusage detect
+openusage detect --all      # also list every registered provider, even those already covered
+```
+
+Tokens are masked (`first4...last4`); nothing is written to disk. Use this to debug "why doesn't OpenUsage see my key?" before opening an issue. See [Auto-detection](../concepts/auto-detection.md) for the full source order.
 
 ## `openusage telemetry hook`
 

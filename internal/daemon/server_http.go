@@ -144,6 +144,11 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
 	}
 
+	// Re-arm the data-ingested flag so the periodic refresh loop tries
+	// again instead of sticking on stale empty templates. Without this,
+	// a single failed compute can leave the read-model cache permanently
+	// empty until the next ingest event.
+	s.dataIngested.Store(true)
 	s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})

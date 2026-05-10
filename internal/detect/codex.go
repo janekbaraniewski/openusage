@@ -11,6 +11,11 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// codexOpenAIAccountID is the account ID we use when adopting an OPENAI_API_KEY
+// stored in ~/.codex/auth.json. It matches the canonical id used by
+// detectEnvKeys so addAccount() de-dupes consistently with the env-var path.
+const codexOpenAIAccountID = "openai"
+
 func detectCodex(result *Result) {
 	bin := findBinary("codex")
 	if bin == "" {
@@ -44,35 +49,55 @@ func detectCodex(result *Result) {
 	log.Printf("[detect] Codex CLI data found (sessions=%v, auth=%v)", hasSessions, hasAuth)
 
 	acct := core.AccountConfig{
-		ID:        "codex-cli",
-		Provider:  "codex",
-		Auth:      "local",
-		Binary:    bin,
-		ExtraData: make(map[string]string),
+		ID:           "codex-cli",
+		Provider:     "codex",
+		Auth:         "local",
+		Binary:       bin,
+		RuntimeHints: make(map[string]string),
 	}
 
 	acct.SetHint("config_dir", configDir)
-	acct.ExtraData["config_dir"] = configDir
+	acct.RuntimeHints["config_dir"] = configDir
 
 	if hasSessions {
 		acct.SetHint("sessions_dir", sessionsDir)
-		acct.ExtraData["sessions_dir"] = sessionsDir
+		acct.RuntimeHints["sessions_dir"] = sessionsDir
 	}
 
 	if hasAuth {
 		acct.SetHint("auth_file", authFile)
-		acct.ExtraData["auth_file"] = authFile
-		email, accountID, planType := extractCodexAuth(authFile)
+		acct.RuntimeHints["auth_file"] = authFile
+		email, accountID, planType, openaiAPIKey := extractCodexAuth(authFile)
 		if email != "" {
-			acct.ExtraData["email"] = email
+			acct.RuntimeHints["email"] = email
 			log.Printf("[detect] Codex account: %s", email)
 		}
 		if accountID != "" {
-			acct.ExtraData["account_id"] = accountID
+			acct.RuntimeHints["account_id"] = accountID
 		}
 		if planType != "" {
-			acct.ExtraData["plan_type"] = planType
+			acct.RuntimeHints["plan_type"] = planType
 			log.Printf("[detect] Codex plan: %s", planType)
+		}
+		// When the user logged in via API key, codex stores the raw
+		// OPENAI_API_KEY at the top level of auth.json (Rust struct field
+		// `#[serde(rename = "OPENAI_API_KEY")] api_key`). Adopt it as a
+		// standard openai account so the openai provider can use it.
+		// Skip if the env var is already set — env wins over file.
+		if openaiAPIKey != "" && os.Getenv("OPENAI_API_KEY") == "" {
+			openai := core.AccountConfig{
+				ID:       codexOpenAIAccountID,
+				Provider: "openai",
+				Auth:     "api_key",
+				Token:    openaiAPIKey,
+			}
+			openai.SetHint("credential_source", "codex_auth_json")
+			before := len(result.Accounts)
+			addAccount(result, openai)
+			if len(result.Accounts) > before {
+				log.Printf("[detect] Adopted OPENAI_API_KEY from %s (key=%s)",
+					authFile, maskKey(openaiAPIKey))
+			}
 		}
 	}
 
@@ -80,8 +105,9 @@ func detectCodex(result *Result) {
 }
 
 type codexAuthFile struct {
-	Tokens    codexTokens `json:"tokens"`
-	AccountID string      `json:"account_id"`
+	Tokens       codexTokens `json:"tokens"`
+	AccountID    string      `json:"account_id"`
+	OpenAIAPIKey string      `json:"OPENAI_API_KEY"`
 }
 
 type codexTokens struct {
@@ -90,20 +116,21 @@ type codexTokens struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-func extractCodexAuth(authFile string) (email, accountID, planType string) {
+func extractCodexAuth(authFile string) (email, accountID, planType, openaiAPIKey string) {
 	data, err := os.ReadFile(authFile)
 	if err != nil {
 		log.Printf("[detect] Cannot read Codex auth.json: %v", err)
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	var auth codexAuthFile
 	if err := json.Unmarshal(data, &auth); err != nil {
 		log.Printf("[detect] Cannot parse Codex auth.json: %v", err)
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	accountID = auth.AccountID
+	openaiAPIKey = strings.TrimSpace(auth.OpenAIAPIKey)
 
 	if auth.Tokens.IDToken != "" {
 		claims := decodeJWTPayload(auth.Tokens.IDToken)
@@ -119,7 +146,7 @@ func extractCodexAuth(authFile string) (email, accountID, planType string) {
 		}
 	}
 
-	return email, accountID, planType
+	return email, accountID, planType, openaiAPIKey
 }
 
 func decodeJWTPayload(token string) map[string]interface{} {

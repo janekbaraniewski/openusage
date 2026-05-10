@@ -11,7 +11,7 @@ func testCursorAccount(id, token string, extra map[string]string) core.AccountCo
 	if len(extra) == 0 {
 		return acct
 	}
-	acct.ExtraData = extra
+	acct.RuntimeHints = extra
 	for _, key := range []string{"tracking_db", "state_db"} {
 		if value := extra[key]; value != "" {
 			acct.SetHint(key, value)

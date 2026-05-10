@@ -59,6 +59,16 @@ func (s *Service) pollProviders(ctx context.Context) {
 		go func(account core.AccountConfig) {
 			defer wg.Done()
 
+			// Honour shutdown immediately so we don't run a fresh fetch on
+			// an account when the parent ctx has already been cancelled.
+			// Without this check the per-fetch 8s timeout (below) is the
+			// only ceiling on shutdown — N goroutines × 8s on big setups.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			provider, ok := s.providerByID[account.Provider]
 			if !ok {
 				results <- providerResult{

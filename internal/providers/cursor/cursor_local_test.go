@@ -38,7 +38,7 @@ func TestProvider_Fetch_ReadsComposerSessionsFromStateDB(t *testing.T) {
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID:       "cursor-composer-test",
 		Provider: "cursor",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"state_db": stateDBPath,
 		},
 	})
@@ -102,7 +102,7 @@ func TestProvider_Fetch_ReadsScoredCommitsFromTrackingDB(t *testing.T) {
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID:       "cursor-commits-test",
 		Provider: "cursor",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"tracking_db": dbPath,
 		},
 	})
@@ -345,7 +345,7 @@ func TestProvider_Fetch_CachedBillingMetricsRestoreOnAPIFailure(t *testing.T) {
 		ID:       "cursor-cache-billing",
 		Provider: "cursor",
 		Token:    "test-token",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"state_db": stateDBPath,
 		},
 	}
@@ -593,7 +593,7 @@ func TestProvider_Fetch_LocalOnlyComposerCostCreatesCreditsTag(t *testing.T) {
 	// Fetch with no token — API is completely unavailable.
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID: "test-local-only",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"state_db": stateDBPath,
 		},
 	})
@@ -667,7 +667,7 @@ func TestProvider_Fetch_LocalOnlyCachedLimitCreatesPlanSpendGauge(t *testing.T) 
 	// Fetch with no token.
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
 		ID: "test-cached",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"state_db": stateDBPath,
 		},
 	})

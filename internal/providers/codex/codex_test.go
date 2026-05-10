@@ -83,7 +83,7 @@ func TestFetchWithSessionData(t *testing.T) {
 		ID:       "codex-test",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":   tmpDir,
 			"sessions_dir": filepath.Join(tmpDir, "sessions"),
 			"email":        "test@example.com",
@@ -215,7 +215,7 @@ func TestFetchNearLimit(t *testing.T) {
 		ID:       "test",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":   tmpDir,
 			"sessions_dir": filepath.Join(tmpDir, "sessions"),
 		},
@@ -241,7 +241,7 @@ func TestFetchLimited(t *testing.T) {
 		ID:       "test",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":   tmpDir,
 			"sessions_dir": filepath.Join(tmpDir, "sessions"),
 		},
@@ -260,7 +260,7 @@ func TestFetchNoSessions(t *testing.T) {
 		ID:       "test",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir": tmpDir,
 		},
 	})
@@ -379,7 +379,7 @@ func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
 		ID:       "codex-live",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":       tmpDir,
 			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
 			"auth_file":        authPath,
@@ -479,7 +479,7 @@ func TestFetchParsesNestedLiveRateLimitStatus(t *testing.T) {
 		ID:       "codex-live",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":       tmpDir,
 			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
 			"auth_file":        authPath,
@@ -552,7 +552,7 @@ func TestFetchClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
 		ID:       "codex-live",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":       tmpDir,
 			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
 			"auth_file":        authPath,
@@ -615,7 +615,7 @@ func TestFetchFallsBackToSessionWhenLiveUsageFails(t *testing.T) {
 		ID:       "codex-fallback",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":       tmpDir,
 			"sessions_dir":     filepath.Join(tmpDir, "sessions"),
 			"auth_file":        authPath,
@@ -672,7 +672,7 @@ func TestFetchBuildsModelAndClientUsageSplits(t *testing.T) {
 		ID:       "codex-split",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":   tmpDir,
 			"sessions_dir": sessionsRoot,
 		},
@@ -769,7 +769,7 @@ func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
 		ID:       "codex-rich",
 		Provider: "codex",
 		Auth:     "local",
-		ExtraData: map[string]string{
+		RuntimeHints: map[string]string{
 			"config_dir":   tmpDir,
 			"sessions_dir": sessionsRoot,
 		},

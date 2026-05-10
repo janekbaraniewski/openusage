@@ -129,10 +129,3 @@ func detectOpenCodeAuth(result *Result) {
 		log.Printf("[detect] OpenCode auth.json: %d api-key accounts adopted, %d oauth/other entries skipped", matched, skipped)
 	}
 }
-
-func maskKey(key string) string {
-	if len(key) <= 12 {
-		return "****"
-	}
-	return key[:4] + "..." + key[len(key)-4:]
-}

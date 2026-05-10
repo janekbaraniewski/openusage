@@ -60,13 +60,17 @@ func (s *Service) runWatchLoop(ctx context.Context) {
 			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
 				continue
 			}
-			// Reset debounce timer on each event.
+			// Reset debounce timer on each event. Capture the event's
+			// fields by value into the closure — a literal `event` capture
+			// is by reference and would only print whichever event the loop
+			// landed on when the timer fires.
 			if debounceTimer != nil {
 				debounceTimer.Stop()
 			}
+			eventName, eventOp := event.Name, event.Op
 			debounceTimer = time.AfterFunc(debounceInterval, func() {
 				s.dataIngested.Store(true) // trigger read model refresh
-				core.Tracef("[watch] change detected: %s op=%s", event.Name, event.Op)
+				core.Tracef("[watch] change detected: %s op=%s", eventName, eventOp)
 			})
 
 		case err, ok := <-watcher.Errors:

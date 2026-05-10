@@ -29,6 +29,15 @@ type scoredCommitsAggregate struct {
 	TotalCommits  int
 }
 
+// cursorAPIBase is Cursor's billing/usage API host.
+//
+// Kept as a var (not const) only because the existing tests mutate it via
+// `prev := cursorAPIBase; cursorAPIBase = ts.URL; defer func(){cursorAPIBase = prev}()`
+// to point at a fake httptest server. Production code never mutates it; the
+// path forward when these tests get rewritten is to thread the URL through
+// AccountConfig.BaseURL like other providers and make this a const.
+//
+//nolint:gochecknoglobals // see comment above
 var cursorAPIBase = "https://api2.cursor.sh"
 
 type Provider struct {

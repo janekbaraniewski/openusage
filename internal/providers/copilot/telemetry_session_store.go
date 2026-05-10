@@ -22,7 +22,7 @@ func parseCopilotTelemetrySessionStore(ctx context.Context, dbPath string, skipS
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("stat session store db: %w", err)
+		return nil, fmt.Errorf("copilot: stat session store db: %w", err)
 	}
 
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", dbPath))
@@ -72,7 +72,7 @@ func appendSessionStoreTurnEvents(ctx context.Context, db *sql.DB, dbPath string
 		var sessionID, cwd, repo, userMsg, reply, tsRaw string
 		var turnIndex int
 		if err := rows.Scan(&sessionID, &cwd, &repo, &turnIndex, &userMsg, &reply, &tsRaw); err != nil {
-			return out, fmt.Errorf("scan session store turn row: %w", err)
+			return out, fmt.Errorf("copilot: scan session store turn row: %w", err)
 		}
 		sessionID = strings.TrimSpace(sessionID)
 		if sessionID == "" || skipSessions[sessionID] {
@@ -81,7 +81,7 @@ func appendSessionStoreTurnEvents(ctx context.Context, db *sql.DB, dbPath string
 		out = append(out, buildSessionStoreTurnEvent(dbPath, sessionID, cwd, repo, userMsg, reply, tsRaw, turnIndex))
 	}
 	if err := rows.Err(); err != nil {
-		return out, fmt.Errorf("iterate session store turn rows: %w", err)
+		return out, fmt.Errorf("copilot: iterate session store turn rows: %w", err)
 	}
 	return out, nil
 }
@@ -144,7 +144,7 @@ func appendSessionStoreFileEvents(ctx context.Context, db *sql.DB, dbPath string
 		ORDER BY sf.session_id ASC, sf.turn_index ASC, sf.id ASC
 	`)
 	if err != nil {
-		return out, fmt.Errorf("query session store file rows: %w", err)
+		return out, fmt.Errorf("copilot: query session store file rows: %w", err)
 	}
 	defer rows.Close()
 
@@ -155,7 +155,7 @@ func appendSessionStoreFileEvents(ctx context.Context, db *sql.DB, dbPath string
 		var sessionID, filePath, toolRaw, tsRaw, cwd, repo string
 		var turnIndex int
 		if err := rows.Scan(&sessionID, &filePath, &toolRaw, &turnIndex, &tsRaw, &cwd, &repo); err != nil {
-			return out, fmt.Errorf("scan session store file row: %w", err)
+			return out, fmt.Errorf("copilot: scan session store file row: %w", err)
 		}
 		sessionID = strings.TrimSpace(sessionID)
 		filePath = strings.TrimSpace(filePath)
@@ -165,7 +165,7 @@ func appendSessionStoreFileEvents(ctx context.Context, db *sql.DB, dbPath string
 		out = append(out, buildSessionStoreFileEvent(dbPath, sessionID, filePath, toolRaw, tsRaw, cwd, repo, turnIndex))
 	}
 	if err := rows.Err(); err != nil {
-		return out, fmt.Errorf("iterate session store file rows: %w", err)
+		return out, fmt.Errorf("copilot: iterate session store file rows: %w", err)
 	}
 	return out, nil
 }
