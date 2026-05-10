@@ -65,7 +65,7 @@ Cloudflare Pages and posts a sticky comment on the PR with the link.
 
 3. Add two secrets to this GitHub repository (**Settings → Secrets and variables → Actions**):
    - `CLOUDFLARE_API_TOKEN` — the token from step 2
-   - `CLOUDFLARE_ACCOUNT_ID` — visible in the Cloudflare dashboard sidebar
+   - `CLOUDFLARE_ACC_ID` — visible in the Cloudflare dashboard sidebar
 
 4. (Optional) Add a custom domain such as `docs-preview.openusage.sh` to the
    project so previews share a stable hostname pattern.

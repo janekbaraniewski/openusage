@@ -50,13 +50,25 @@ jobs:
           path: docs/site/build
           retention-days: 7
 
+      - name: Ensure Cloudflare Pages project exists
+        if: env.CF_TOKEN_PRESENT == 'true'
+        working-directory: docs/site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACC_ID }}
+        run: |
+          npx --yes wrangler pages project create openusage-docs \
+            --production-branch=main 2>&1 \
+            | tee /tmp/cfp-create.log || \
+            grep -q "already exists" /tmp/cfp-create.log
+
       - name: Deploy preview to Cloudflare Pages
         id: cfp
         if: env.CF_TOKEN_PRESENT == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACC_ID }}
           workingDirectory: docs/site
           command: pages deploy build --project-name=openusage-docs --branch=preview
 
@@ -110,5 +122,5 @@ jobs:
         if: env.CF_TOKEN_PRESENT != 'true'
         run: |
           echo "::notice::Cloudflare Pages secrets not configured — preview deploy skipped."
-          echo "::notice::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repo secrets to enable preview URLs."
+          echo "::notice::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACC_ID in repo secrets to enable preview URLs."
           echo "::notice::See docs/site/README.md for setup instructions."
