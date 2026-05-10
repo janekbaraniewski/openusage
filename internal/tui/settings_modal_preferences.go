@@ -428,11 +428,14 @@ type telemetryRow struct {
 }
 
 func (m Model) telemetryRows() []telemetryRow {
-	rows := make([]telemetryRow, 0, len(core.ValidTimeWindows)+len(m.telemetryUnmappedDetails()))
+	// One call to telemetryUnmappedDetails() per row computation; the
+	// previous code called it twice (once for cap, once for the loop).
+	unmapped := m.telemetryUnmappedDetails()
+	rows := make([]telemetryRow, 0, len(core.ValidTimeWindows)+len(unmapped))
 	for i := range core.ValidTimeWindows {
 		rows = append(rows, telemetryRow{kind: telemetryRowKindTimeWindow, index: i})
 	}
-	for i := range m.telemetryUnmappedDetails() {
+	for i := range unmapped {
 		rows = append(rows, telemetryRow{kind: telemetryRowKindUnmapped, index: i})
 	}
 	return rows

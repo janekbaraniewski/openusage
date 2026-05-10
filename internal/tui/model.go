@@ -943,7 +943,14 @@ func (m Model) isProviderEnabled(id string) bool {
 	return enabled
 }
 
+// visibleSnapshots returns the subset of m.snapshots whose providers are
+// enabled in the current dashboard config. Common case is "every provider
+// enabled", which we fast-path by returning m.snapshots directly — saves
+// a per-frame map clone in the most common state.
 func (m Model) visibleSnapshots() map[string]core.UsageSnapshot {
+	if m.allProvidersEnabled() {
+		return m.snapshots
+	}
 	out := make(map[string]core.UsageSnapshot, len(m.snapshots))
 	for id, snap := range m.snapshots {
 		if m.isProviderEnabled(id) {
@@ -951,6 +958,18 @@ func (m Model) visibleSnapshots() map[string]core.UsageSnapshot {
 		}
 	}
 	return out
+}
+
+// allProvidersEnabled reports whether every snapshot's provider is enabled.
+// Cheap O(N) scan; avoids the map allocation in visibleSnapshots when no
+// provider is currently disabled.
+func (m Model) allProvidersEnabled() bool {
+	for id := range m.snapshots {
+		if !m.isProviderEnabled(id) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Model) rebuildSortedIDs() {
