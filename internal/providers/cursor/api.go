@@ -30,7 +30,10 @@ func (p *Provider) callDashboardAPIWithBody(ctx context.Context, baseURL, token,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("cursor: HTTP %d (body read failed: %w)", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -53,7 +56,10 @@ func (p *Provider) callRESTAPI(ctx context.Context, baseURL, token, path string,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("cursor: HTTP %d (body read failed: %w)", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -75,7 +81,10 @@ func (p *Provider) doPost(ctx context.Context, token, url string, result interfa
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("cursor: HTTP %d (body read failed: %w)", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("cursor: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 

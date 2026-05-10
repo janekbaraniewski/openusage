@@ -27,6 +27,11 @@ type DetectedTool struct {
 type Result struct {
 	Tools    []DetectedTool
 	Accounts []core.AccountConfig
+
+	// accountIDs is an internal index used by addAccount to avoid the
+	// quadratic lo.ContainsBy scan over Accounts. Always in sync with the
+	// IDs in Accounts. Not exported; not part of the wire format.
+	accountIDs map[string]struct{} `json:"-"`
 }
 
 func AutoDetect() Result {
@@ -173,9 +178,18 @@ func fileExists(path string) bool {
 }
 
 func addAccount(result *Result, acct core.AccountConfig) {
-	if lo.ContainsBy(result.Accounts, func(existing core.AccountConfig) bool { return existing.ID == acct.ID }) {
+	if result.accountIDs == nil {
+		// Lazily build the index. Prevents callers that constructed a
+		// Result{} literal (tests) from blowing up.
+		result.accountIDs = make(map[string]struct{}, len(result.Accounts)+1)
+		for _, existing := range result.Accounts {
+			result.accountIDs[existing.ID] = struct{}{}
+		}
+	}
+	if _, dup := result.accountIDs[acct.ID]; dup {
 		return
 	}
+	result.accountIDs[acct.ID] = struct{}{}
 	result.Accounts = append(result.Accounts, acct)
 }
 

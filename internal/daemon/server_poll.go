@@ -164,9 +164,6 @@ func (s *Service) pollProviders(ctx context.Context) {
 	}
 	if ingestErr == nil && len(snapshots) > 0 {
 		s.dataIngested.Store(true)
-		for _, snap := range snapshots {
-			s.markProviderDirty(snap.ProviderID)
-		}
 	}
 
 	durationMs := time.Since(started).Milliseconds()
