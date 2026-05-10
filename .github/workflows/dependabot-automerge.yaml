@@ -35,6 +35,13 @@ jobs:
         run: |
           gh pr review --approve "$PR_URL" --body "Auto-approved by policy."
 
+      - name: Add auto-approved label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr edit "$PR_URL" --add-label auto-approved
+
       - name: Enable auto-merge (squash)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
