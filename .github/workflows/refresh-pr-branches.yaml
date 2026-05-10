@@ -17,10 +17,6 @@ on:
       branch_refresh_token:
         description: Token used for branch updates.
         required: false
-    outputs:
-      refs-json:
-        description: JSON array of refreshed branch refs.
-        value: ${{ jobs.refresh.outputs.refs-json }}
 
 permissions:
   contents: write
@@ -30,8 +26,6 @@ jobs:
   refresh:
     name: Refresh matching PR branches
     runs-on: ubuntu-latest
-    outputs:
-      refs-json: ${{ steps.refresh.outputs.result }}
     steps:
       - id: refresh
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -101,14 +95,14 @@ jobs:
                   return current;
                 }
               }
-              core.warning(`PR #${pr.number} branch update did not finish; skipping required-check dispatch for now.`);
+              core.warning(`PR #${pr.number} branch update did not finish.`);
               return current;
             }
 
             const pulls = (await listPulls()).filter((pull) =>
               authorLogin ? pull.user?.login === authorLogin : true
             );
-            const refs = [];
+            let refreshed = 0;
             const skipped = [];
 
             for (const pull of pulls) {
@@ -122,7 +116,7 @@ jobs:
                 });
                 const updated = await waitForCurrentBranch(pull, pull.head.sha);
                 if (isCurrent(updated)) {
-                  refs.push(updated.head.ref);
+                  refreshed += 1;
                   core.info(`Updated ${pull.head.ref}: ${pull.head.sha} -> ${updated.head.sha}`);
                 } else {
                   skipped.push({ number: pull.number, ref: pull.head.ref, state: updated.mergeable_state });
@@ -131,11 +125,11 @@ jobs:
                 if (isAlreadyCurrent(error)) {
                   const current = await waitForCurrentBranch(pull, '');
                   if (isCurrent(current)) {
-                    refs.push(current.head.ref);
+                    refreshed += 1;
                     core.info(`${current.head.ref} is already current with main.`);
                   } else {
                     skipped.push({ number: pull.number, ref: pull.head.ref, state: current.mergeable_state });
-                    core.warning(`PR #${pull.number} is ${current.mergeable_state}; skipping required-check dispatch.`);
+                    core.warning(`PR #${pull.number} is ${current.mergeable_state}; skipping branch refresh.`);
                   }
                 } else {
                   core.warning(`Could not update PR #${pull.number}: ${error.message}`);
@@ -147,10 +141,10 @@ jobs:
             }
 
             if (skipped.length > 0) {
-              core.notice(`Skipped ${skipped.length} PR branch(es) that were not safe to dispatch: ${JSON.stringify(skipped)}`);
+              core.notice(`Skipped ${skipped.length} PR branch(es): ${JSON.stringify(skipped)}`);
             }
 
-            return refs;
+            core.notice(`Refreshed ${refreshed} PR branch(es).`);
         env:
           AUTHOR_LOGIN: ${{ inputs.author-login }}
           LABELS: ${{ inputs.labels }}

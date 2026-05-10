@@ -20,8 +20,6 @@ jobs:
           github-token: ${{ secrets.AUTOMATION_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
-            const duplicateWindowMs = 30 * 60 * 1000;
-            const duplicateCutoff = Date.now() - duplicateWindowMs;
 
             if (!process.env.GH_TOKEN) {
               core.setFailed('AUTOMATION_TOKEN is required. Use a PAT with repo and workflow scope, or an equivalent GitHub App token.');
@@ -56,19 +54,6 @@ jobs:
               return response.data;
             }
 
-            async function hasRecentCommand(pullNumber, command) {
-              const comments = await github.paginate(github.rest.issues.listComments, {
-                owner,
-                repo,
-                issue_number: pullNumber,
-                per_page: 100,
-              });
-              return comments.some((comment) =>
-                comment.body?.trim() === command &&
-                Date.parse(comment.created_at) >= duplicateCutoff
-              );
-            }
-
             async function hasNonDependabotCommits(pullNumber) {
               const commits = await github.paginate(github.rest.pulls.listCommits, {
                 owner,
@@ -77,22 +62,6 @@ jobs:
                 per_page: 100,
               });
               return commits.some((commit) => commit.author?.login !== 'dependabot[bot]');
-            }
-
-            async function requestRecreate(pull) {
-              const command = '@dependabot recreate';
-              if (await hasRecentCommand(pull.number, command)) {
-                core.info(`PR #${pull.number}: ${command} was already requested recently.`);
-                return;
-              }
-
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: pull.number,
-                body: command,
-              });
-              core.notice(`Requested ${command} on PR #${pull.number}.`);
             }
 
             const pulls = await github.paginate(github.rest.pulls.list, {
@@ -112,8 +81,13 @@ jobs:
                 });
                 const pull = response.data;
 
-                if (pull.mergeable_state === 'dirty' || await hasNonDependabotCommits(pull.number)) {
-                  await requestRecreate(pull);
+                const hasExternalCommits = await hasNonDependabotCommits(pull.number);
+                if (pull.mergeable_state === 'dirty' || hasExternalCommits) {
+                  const reason = [
+                    pull.mergeable_state === 'dirty' ? 'merge conflicts' : '',
+                    hasExternalCommits ? 'non-Dependabot commits' : '',
+                  ].filter(Boolean).join(' and ');
+                  core.warning(`PR #${pull.number} requires manual attention (${reason}); skipping branch update.`);
                   continue;
                 }
 
