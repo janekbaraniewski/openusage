@@ -129,7 +129,6 @@ func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSna
 	c.mu.Unlock()
 }
 
-
 func (c *readModelCache) beginRefresh(cacheKey string) bool {
 	if cacheKey == "" {
 		return false
