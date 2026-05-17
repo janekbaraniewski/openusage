@@ -143,6 +143,23 @@ Ordered list of accounts to render in the dashboard. Order in the array is the d
 |---|---|---|
 | `account_id` | string | Must match an `id` from `accounts` or `auto_detected_accounts`. |
 | `enabled` | bool | Show the tile or hide it. |
+| `hide_costs` | nullable bool | Per-account override for monetary visibility. See [`dashboard.hide_costs`](#dashboardhide_costs). Omitted / `null` falls through to the top-level setting; `true` force-hides costs for this account; `false` force-shows them. |
+
+### `dashboard.hide_costs`
+
+| Type | Default | Purpose |
+|---|---|---|
+| nullable bool | omitted | Global default for whether monetary metrics (cost, spend, dollars) render in tiles and detail. Omitted / `null` means "automatic, plan-aware"; `true` force-hides everywhere; `false` force-shows everywhere. |
+
+Resolution order, highest precedence first:
+
+1. `dashboard.providers[].hide_costs` (per-account override)
+2. `dashboard.hide_costs` (top-level override)
+3. Automatic, plan-aware policy
+
+The automatic policy hides costs on fixed-rate subscription plans (Claude Code with an active subscription, Codex on Plus / Team / Enterprise, GitHub Copilot on any plan, Z.AI on `glm_coding_plan*`) where dollar figures would be misleading, and shows costs everywhere else.
+
+You can also toggle the per-account override live from the dashboard with <kbd>c</kbd> — it cycles auto → hide → show → auto for the focused tile and persists the choice here.
 
 ### `dashboard.hide_sections_with_no_data`
 

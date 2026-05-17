@@ -45,6 +45,7 @@ Active in any list-like view.
 | <kbd>V</kbd> | Previous dashboard view |
 | <kbd>r</kbd> | Refresh now |
 | <kbd>t</kbd> | Cycle theme forward |
+| <kbd>c</kbd> | Toggle hide-costs for focused account (auto / hide / show) |
 | <kbd>w</kbd> | Cycle time window (`1d` → `3d` → `7d` → `30d` → `all`) |
 | <kbd>Ctrl+O</kbd> | Expand model breakdown for the focused tile |
 
