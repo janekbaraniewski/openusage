@@ -27,7 +27,7 @@ func applyCanonicalUsageViewForTest(ctx context.Context, dbPath string, snaps ma
 	if err := configureSQLiteConnection(db); err != nil {
 		return snaps, fmt.Errorf("configure canonical usage db: %w", err)
 	}
-	return applyCanonicalUsageViewWithDB(ctx, db, snaps, nil, time.Time{}, time.Time{}, "")
+	return applyCanonicalUsageViewWithDB(ctx, db, usageViewCacheNamespace(dbPath), snaps, nil, time.Time{}, time.Time{}, "")
 }
 
 func applyCanonicalTelemetryViewForTest(ctx context.Context, dbPath string, snaps map[string]core.UsageSnapshot) (map[string]core.UsageSnapshot, error) {

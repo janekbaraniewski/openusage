@@ -80,6 +80,69 @@ func TestMaterializedTableNameConstant(t *testing.T) {
 	}
 }
 
+func TestMaterializeUsageFilterUsesSlimProjection(t *testing.T) {
+	_, db, store := openUsageViewRawTestStore(t)
+	occurredAt := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	mustIngestUsageEvent(t, store, IngestRequest{
+		SourceSystem:  SourceSystem("claude_code"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    occurredAt,
+		ProviderID:    "claude_code",
+		AccountID:     "claude_code",
+		AgentName:     "claude",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-1",
+		MessageID:     "msg-1",
+		ModelRaw:      "claude-sonnet",
+		TokenUsage: core.TokenUsage{
+			InputTokens:  int64Ptr(100),
+			OutputTokens: int64Ptr(20),
+			Requests:     int64Ptr(1),
+		},
+	}, "ingest message event")
+
+	filter, cleanup, err := materializeUsageFilter(context.Background(), db, usageFilter{
+		ProviderIDs: []string{"claude_code"},
+	})
+	if err != nil {
+		t.Fatalf("materialize usage filter: %v", err)
+	}
+	defer cleanup()
+
+	rows, err := db.QueryContext(context.Background(), "PRAGMA table_info("+filter.materializedTbl+")")
+	if err != nil {
+		t.Fatalf("pragma table_info: %v", err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table info: %v", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table info: %v", err)
+	}
+
+	for _, required := range []string{"event_id", "occurred_at", "provider_id", "source_payload", "status"} {
+		if !columns[required] {
+			t.Fatalf("materialized table missing required column %q; columns=%v", required, columns)
+		}
+	}
+	for _, omitted := range []string{"agent_name", "model_lineage_id", "raw_event_id", "normalization_version"} {
+		if columns[omitted] {
+			t.Fatalf("materialized table kept unused column %q; columns=%v", omitted, columns)
+		}
+	}
+}
+
 func TestApplyCanonicalUsageView_MergesTelemetryWithoutReplacingRootMetrics(t *testing.T) {
 	dbPath, store := openUsageViewTestStore(t)
 

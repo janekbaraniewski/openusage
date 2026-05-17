@@ -68,8 +68,7 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 		return
 	}
 
-	interval := s.cfg.PollInterval / 2
-	interval = max(5*time.Second, min(30*time.Second, interval))
+	interval := readModelCacheInterval(s.cfg.PollInterval)
 
 	s.infof("read_model_cache_loop_start", "interval=%s", interval)
 	s.dataIngested.Store(true) // ensure first boot always computes
@@ -104,4 +103,14 @@ func (s *Service) refreshReadModelCacheFromConfig(ctx context.Context) {
 	}
 	cacheKey := ReadModelRequestKey(req)
 	s.refreshReadModelCacheAsync(ctx, cacheKey, req, 60*time.Second)
+}
+
+func readModelCacheInterval(pollInterval time.Duration) time.Duration {
+	if pollInterval <= 0 {
+		pollInterval = 30 * time.Second
+	}
+	if pollInterval < 5*time.Second {
+		return 5 * time.Second
+	}
+	return pollInterval
 }
