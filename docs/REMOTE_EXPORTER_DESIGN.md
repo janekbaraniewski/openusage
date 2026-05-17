@@ -152,19 +152,22 @@ Key insight: `Snapshots()` rewrites the AccountID to `"{machine}:{originalAccoun
 
 ```go
 type Server struct {
-    cfg   HubServerConfig
-    store *Store
+    addr      string
+    store     *Store
+    authToken string
 }
 
 func NewServer(addr string, store *Store) *Server
+func NewServerWithAuth(addr string, store *Store, authToken string) *Server
 func (s *Server) ListenAndServe(ctx context.Context) error  // starts net/http on TCP addr
 ```
 
 HTTP routes:
 - `POST /v1/push` — decodes `RemoteEnvelope`, calls `store.Ingest()`; responds `{"ok": true}`
-- `GET  /healthz` — returns `{"status":"ok","machines":["work-mac","home-linux"]}`
+- `GET /v1/snapshots` — returns the flattened machine snapshot map for remote viewers
+- `GET /healthz` — returns `{"status":"ok","machines":["work-mac","home-linux"]}`
 
-No authentication. Intended for trusted LAN use.
+Authentication is optional. When `hub.auth_token` or `OPENUSAGE_HUB_TOKEN` is set, `/v1/push` and `/v1/snapshots` require `Authorization: Bearer <token>`. `/healthz` stays unauthenticated for liveness probes. If auth is not configured, the hub is intended only for trusted LAN use. Because `settings.json` can carry auth tokens, config saves use `0600` permissions.
 
 ### 5.5 Hub CLI Command (`cmd/openusage/hub.go`)
 
@@ -184,7 +187,11 @@ func runHub(cfg config.Config)
 
 No daemon, no providers, no auto-detect in hub mode.
 
-### 5.6 Dashboard Exporter Integration (`cmd/openusage/dashboard.go`)
+### 5.6 Hub Viewer CLI Command (`cmd/openusage/hub_view.go`)
+
+`openusage hub-view <url>` connects to a remote hub, polls `GET /v1/snapshots`, and renders the result in the normal read-only TUI. It accepts `--token` and falls back to `OPENUSAGE_HUB_TOKEN` for authenticated hubs.
+
+### 5.7 Dashboard Exporter Integration (`cmd/openusage/dashboard.go`)
 
 When `cfg.Export.Target != ""`, create an `*exporter.Exporter` and wire it:
 
@@ -208,7 +215,11 @@ func(frame daemon.SnapshotFrame) {
 },
 ```
 
-### 5.7 Backward Compatibility
+### 5.8 Daemon Exporter Integration (`internal/daemon`)
+
+Daemon mode also starts an exporter when `cfg.Export.Target` is configured. It forwards freshly computed read-model snapshots after cache refreshes so background services can push to a hub without an interactive dashboard process.
+
+### 5.9 Backward Compatibility
 
 - All new config fields are optional with zero values that disable the feature.
 - No changes to existing CLI commands, daemon behavior, TUI, or provider interfaces.

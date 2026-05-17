@@ -205,6 +205,13 @@ func TestSaveTo_CreatesFileAndDir(t *testing.T) {
 	if !loaded.Experimental.Analytics {
 		t.Error("expected analytics=true after round-trip")
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat saved config: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("settings permissions = %o, want 0600", perm)
+	}
 }
 
 func TestSaveAndLoad_RoundTrip(t *testing.T) {

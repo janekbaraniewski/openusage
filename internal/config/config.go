@@ -450,7 +450,7 @@ func saveLocked(path string, cfg Config) error {
 	data = append(data, '\n')
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing config tmp file: %w", err)
 	}
 	defer os.Remove(tmpPath) // no-op if rename succeeded; cleans up on rename failure
