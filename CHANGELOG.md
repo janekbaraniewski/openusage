@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.6](https://github.com/janekbaraniewski/openusage/compare/v0.10.5...v0.10.6) (2026-05-17)
+
+
+### Bug Fixes
+
+* **telemetry:** cache canonical usage view, lift refresh clamp, fix daemon run flags ([92ff504](https://github.com/janekbaraniewski/openusage/commit/92ff5044ce775cff7825ed6962aac3355d3610b9))
+
+
+### Dependencies
+
+* **docs:** bump mermaid from 11.14.0 to 11.15.0 in /docs/site ([#138](https://github.com/janekbaraniewski/openusage/issues/138)) ([22b8b80](https://github.com/janekbaraniewski/openusage/commit/22b8b806988e0d69d67b1d044c3d407dd34a80fa))
+* **website:** bump @protobufjs/utf8 from 1.1.0 to 1.1.1 in /website ([#141](https://github.com/janekbaraniewski/openusage/issues/141)) ([1d7340b](https://github.com/janekbaraniewski/openusage/commit/1d7340b2bb4ff38ccf04b236a2a90debe7e3fdb0))
+* **website:** bump protobufjs from 7.5.5 to 7.5.8 in /website ([#143](https://github.com/janekbaraniewski/openusage/issues/143)) ([73577cd](https://github.com/janekbaraniewski/openusage/commit/73577cd95b0f838504547d5e67d891c73f41658e))
+* **website:** bump the website-minor-and-patch group across 1 directory with 3 updates ([#142](https://github.com/janekbaraniewski/openusage/issues/142)) ([a5cc0c4](https://github.com/janekbaraniewski/openusage/commit/a5cc0c4f35579d01c63c9ecfc444b059b41023b0))
+
 ## [0.10.5](https://github.com/janekbaraniewski/openusage/compare/v0.10.4...v0.10.5) (2026-05-10)
 
 
