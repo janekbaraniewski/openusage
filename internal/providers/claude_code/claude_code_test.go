@@ -415,6 +415,80 @@ func TestReadAccount_FullDetails(t *testing.T) {
 	}
 }
 
+func TestReadAccount_PlanType(t *testing.T) {
+	cases := []struct {
+		name             string
+		acctJSON         string
+		wantSubscription string
+		wantPlanType     string // empty means "must not be set"
+	}{
+		{
+			name: "stripe subscription emits plan_type=pro",
+			acctJSON: `{
+				"hasAvailableSubscription": true,
+				"oauthAccount": {"billingType": "stripe"}
+			}`,
+			wantSubscription: "active",
+			wantPlanType:     "pro",
+		},
+		{
+			name: "non-stripe subscription emits plan_type=subscription",
+			acctJSON: `{
+				"hasAvailableSubscription": true,
+				"oauthAccount": {"billingType": "manual"}
+			}`,
+			wantSubscription: "active",
+			wantPlanType:     "subscription",
+		},
+		{
+			name: "subscription without oauthAccount emits plan_type=subscription",
+			acctJSON: `{
+				"hasAvailableSubscription": true
+			}`,
+			wantSubscription: "active",
+			wantPlanType:     "subscription",
+		},
+		{
+			name: "no subscription does not emit plan_type",
+			acctJSON: `{
+				"hasAvailableSubscription": false,
+				"oauthAccount": {"emailAddress": "x@y.com"}
+			}`,
+			wantSubscription: "none",
+			wantPlanType:     "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			accountPath := filepath.Join(tmpDir, ".claude.json")
+			os.WriteFile(accountPath, []byte(tc.acctJSON), 0644)
+
+			p := New()
+			snap := core.UsageSnapshot{
+				Metrics: make(map[string]core.Metric),
+				Raw:     make(map[string]string),
+			}
+			if err := p.readAccount(accountPath, &snap); err != nil {
+				t.Fatalf("readAccount failed: %v", err)
+			}
+			if snap.Raw["subscription"] != tc.wantSubscription {
+				t.Errorf("subscription=%q want %q", snap.Raw["subscription"], tc.wantSubscription)
+			}
+			got, present := snap.Raw["plan_type"]
+			if tc.wantPlanType == "" {
+				if present {
+					t.Errorf("expected plan_type to be unset, got %q", got)
+				}
+				return
+			}
+			if got != tc.wantPlanType {
+				t.Errorf("plan_type=%q want %q", got, tc.wantPlanType)
+			}
+		})
+	}
+}
+
 func TestFloorToHour(t *testing.T) {
 	input := time.Date(2026, 2, 10, 14, 35, 22, 0, time.UTC)
 	expected := time.Date(2026, 2, 10, 14, 0, 0, 0, time.UTC)

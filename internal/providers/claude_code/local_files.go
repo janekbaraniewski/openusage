@@ -316,6 +316,16 @@ func (p *Provider) readAccount(path string, snap *core.UsageSnapshot) error {
 
 	if acct.HasAvailableSubscription {
 		snap.Raw["subscription"] = "active"
+		// plan_type is a derived hint for the cost-visibility policy.
+		// Stripe-billed subscriptions are typically Claude Pro; other
+		// active subscriptions (e.g. SSO/enterprise-managed) get a
+		// generic "subscription" label which still triggers fixed-rate
+		// behavior in cost gating.
+		if acct.OAuthAccount != nil && acct.OAuthAccount.BillingType == "stripe" {
+			snap.Raw["plan_type"] = "pro"
+		} else {
+			snap.Raw["plan_type"] = "subscription"
+		}
 	} else {
 		snap.Raw["subscription"] = "none"
 	}
