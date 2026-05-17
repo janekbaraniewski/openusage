@@ -22,7 +22,7 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	candidates := make(map[core.DetailStandardSection][]detailSection)
 
 	// 1. Usage Overview — gauges and key metrics (NO summary/detail text — that's in compact header).
-	if usageLines := buildDetailUsageSection(snap, widget, innerW, warnThresh, critThresh); len(usageLines) > 0 {
+	if usageLines := buildDetailUsageSection(snap, widget, innerW, warnThresh, critThresh, hideCosts); len(usageLines) > 0 {
 		candidates[core.DetailSectionUsage] = append(candidates[core.DetailSectionUsage],
 			detailSection{id: "Usage", title: "Usage", icon: "⚡", color: colorYellow, lines: usageLines})
 	}
@@ -140,7 +140,7 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	}
 
 	// 14. Other metrics as dot-leader rows.
-	if otherLines := buildDetailOtherMetrics(snap, widget, innerW); len(otherLines) > 0 {
+	if otherLines := buildDetailOtherMetrics(snap, widget, innerW, hideCosts); len(otherLines) > 0 {
 		candidates[core.DetailSectionOtherData] = append(candidates[core.DetailSectionOtherData],
 			detailSection{id: "Usage", title: "Other Data", icon: "›", color: colorDim, lines: otherLines})
 	}
@@ -181,7 +181,7 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 
 // buildDetailUsageSection builds the usage overview — gauges + compact metrics.
 // Does NOT include summary/detail text (that's in the compact header now).
-func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64) []string {
+func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, hideCosts bool) []string {
 	var lines []string
 
 	// Usage gauge bars.
@@ -189,7 +189,7 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 	lines = append(lines, gaugeLines...)
 
 	// Compact metric summary rows (credits, messages, sessions, etc.).
-	compactLines, _ := buildTileCompactMetricSummaryLines(snap, widget, innerW)
+	compactLines, _ := buildTileCompactMetricSummaryLinesWithHide(snap, widget, innerW, hideCosts)
 	if len(compactLines) > 0 {
 		if len(lines) > 0 {
 			lines = append(lines, "")
@@ -443,7 +443,7 @@ func buildDetailLanguageLines(snap core.UsageSnapshot, innerW int) []string {
 }
 
 // buildDetailOtherMetrics renders remaining metrics not covered by other sections.
-func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
+func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, hideCosts bool) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -463,7 +463,7 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 		skipKeys[ck] = true
 	}
 
-	_, compactKeys := buildTileCompactMetricSummaryLines(snap, widget, innerW)
+	_, compactKeys := buildTileCompactMetricSummaryLinesWithHide(snap, widget, innerW, hideCosts)
 	for k := range compactKeys {
 		skipKeys[k] = true
 	}
@@ -495,6 +495,9 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 			continue
 		}
 		met := snap.Metrics[key]
+		if hideCosts && isMonetaryMetricKey(key, met) {
+			continue
+		}
 		if !core.IncludeDetailMetricKey(key) {
 			continue
 		}

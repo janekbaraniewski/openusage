@@ -17,6 +17,14 @@ type compactMetricRowSpec struct {
 }
 
 func buildTileCompactMetricSummaryLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) ([]string, map[string]bool) {
+	return buildTileCompactMetricSummaryLinesWithHide(snap, widget, innerW, false)
+}
+
+// buildTileCompactMetricSummaryLinesWithHide is the hide-costs-aware variant.
+// When hideCosts is true, monetary keys (USD-valued, burn rate, anything that
+// would render dollars) are dropped from both row collection and segment
+// emission so $-amounts never reach the screen.
+func buildTileCompactMetricSummaryLinesWithHide(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, hideCosts bool) ([]string, map[string]bool) {
 	if len(snap.Metrics) == 0 || len(widget.CompactRows) == 0 {
 		return nil, nil
 	}
@@ -47,7 +55,7 @@ func buildTileCompactMetricSummaryLines(snap core.UsageSnapshot, widget core.Das
 	consumed := make(map[string]bool)
 	var lines []string
 	for _, spec := range specs {
-		segments, usedKeys := collectCompactMetricSegments(spec, widget, snap.Metrics, consumed)
+		segments, usedKeys := collectCompactMetricSegments(spec, widget, snap.Metrics, consumed, hideCosts)
 		if len(segments) == 0 {
 			continue
 		}
@@ -71,7 +79,26 @@ func buildTileCompactMetricSummaryLines(snap core.UsageSnapshot, widget core.Das
 	return lines, consumed
 }
 
-func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.DashboardWidget, metrics map[string]core.Metric, consumed map[string]bool) ([]string, []string) {
+// isMonetaryMetricKey reports whether a metric key/value would render a dollar
+// amount in the TUI. Used by hide-costs filters at every call site that emits
+// USD-formatted text.
+func isMonetaryMetricKey(key string, met core.Metric) bool {
+	if key == "burn_rate" {
+		return true
+	}
+	if met.Unit == "USD" {
+		return true
+	}
+	if strings.HasSuffix(key, "_usd") || strings.HasSuffix(key, "_cost") {
+		return true
+	}
+	if strings.Contains(key, "cost") || strings.Contains(key, "spend") || strings.Contains(key, "price") {
+		return true
+	}
+	return false
+}
+
+func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.DashboardWidget, metrics map[string]core.Metric, consumed map[string]bool, hideCosts bool) ([]string, []string) {
 	maxSegments := spec.maxSegments
 	if maxSegments <= 0 {
 		maxSegments = 4
@@ -110,6 +137,9 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 		if !ok {
 			continue
 		}
+		if hideCosts && isMonetaryMetricKey(key, met) {
+			continue
+		}
 		add(key, met)
 	}
 
@@ -124,6 +154,9 @@ func collectCompactMetricSegments(spec compactMetricRowSpec, widget core.Dashboa
 			}
 			met := metrics[key]
 			if !spec.match(key, met) {
+				continue
+			}
+			if hideCosts && isMonetaryMetricKey(key, met) {
 				continue
 			}
 			add(key, met)
