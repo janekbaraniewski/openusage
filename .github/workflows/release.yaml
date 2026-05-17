@@ -113,8 +113,7 @@ jobs:
           for arch in amd64 arm64; do
             archive="openusage_${VERSION}_darwin_${arch}.tar.gz"
             cosign sign-blob --yes \
-              --output-signature   "${archive}.sig" \
-              --output-certificate "${archive}.pem" \
+              --bundle "${archive}.sigstore.json" \
               "${archive}"
           done
 
@@ -126,11 +125,9 @@ jobs:
           chmod +x scripts/install.sh
           gh release upload "${GITHUB_REF_NAME}" \
             dist/openusage_${VERSION}_darwin_amd64.tar.gz \
-            dist/openusage_${VERSION}_darwin_amd64.tar.gz.sig \
-            dist/openusage_${VERSION}_darwin_amd64.tar.gz.pem \
+            dist/openusage_${VERSION}_darwin_amd64.tar.gz.sigstore.json \
             dist/openusage_${VERSION}_darwin_arm64.tar.gz \
-            dist/openusage_${VERSION}_darwin_arm64.tar.gz.sig \
-            dist/openusage_${VERSION}_darwin_arm64.tar.gz.pem \
+            dist/openusage_${VERSION}_darwin_arm64.tar.gz.sigstore.json \
             scripts/install.sh \
             --clobber
 
