@@ -105,7 +105,7 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	done()
 
 	done = trace("applyCanonicalUsageViewWithDB")
-	result, err := applyCanonicalUsageViewWithDB(ctx, db, merged, links, options.Since, options.TodaySince, options.TimeWindow)
+	result, err := applyCanonicalUsageViewWithDB(ctx, db, usageViewCacheNamespace(dbPath), merged, links, options.Since, options.TodaySince, options.TimeWindow)
 	done()
 	return result, err
 }
