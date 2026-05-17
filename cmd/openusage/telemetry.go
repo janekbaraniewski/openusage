@@ -234,19 +234,35 @@ func newTelemetryDaemonCommand() *cobra.Command {
 	defaultSpoolDir, _ := telemetry.DefaultSpoolDir()
 
 	cmd.PersistentFlags().StringVar(&socketPath, "socket-path", defaultSocketPath, "path to telemetry daemon unix socket")
-	cmd.Flags().StringVar(&dbPath, "db-path", defaultDBPath, "path to telemetry sqlite database")
-	cmd.Flags().StringVar(&spoolDir, "spool-dir", defaultSpoolDir, "path to telemetry spool directory")
-	cmd.Flags().DurationVar(&interval, "interval", 0, "default collector/poller interval (0 uses config or 30s)")
-	cmd.Flags().DurationVar(&collectInterval, "collect-interval", 0, "collector interval override (0 uses --interval)")
-	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 0, "provider poll interval override (0 uses --interval)")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "enable daemon logs")
+	addDaemonRunFlags(cmd, &dbPath, &spoolDir, &interval, &collectInterval, &pollInterval, &verbose, defaultDBPath, defaultSpoolDir)
 
-	cmd.AddCommand(newDaemonRunCommand(runDaemon))
+	runCmd := newDaemonRunCommand(runDaemon)
+	addDaemonRunFlags(runCmd, &dbPath, &spoolDir, &interval, &collectInterval, &pollInterval, &verbose, defaultDBPath, defaultSpoolDir)
+	cmd.AddCommand(runCmd)
 	cmd.AddCommand(newDaemonInstallCommand())
 	cmd.AddCommand(newDaemonUninstallCommand())
 	cmd.AddCommand(newDaemonStatusCommand())
 
 	return cmd
+}
+
+func addDaemonRunFlags(
+	cmd *cobra.Command,
+	dbPath *string,
+	spoolDir *string,
+	interval *time.Duration,
+	collectInterval *time.Duration,
+	pollInterval *time.Duration,
+	verbose *bool,
+	defaultDBPath string,
+	defaultSpoolDir string,
+) {
+	cmd.Flags().StringVar(dbPath, "db-path", defaultDBPath, "path to telemetry sqlite database")
+	cmd.Flags().StringVar(spoolDir, "spool-dir", defaultSpoolDir, "path to telemetry spool directory")
+	cmd.Flags().DurationVar(interval, "interval", 0, "default collector/poller interval (0 uses config or 30s)")
+	cmd.Flags().DurationVar(collectInterval, "collect-interval", 0, "collector interval override (0 uses --interval)")
+	cmd.Flags().DurationVar(pollInterval, "poll-interval", 0, "provider poll interval override (0 uses --interval)")
+	cmd.Flags().BoolVar(verbose, "verbose", false, "enable daemon logs")
 }
 
 func newDaemonRunCommand(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {

@@ -232,6 +232,7 @@ type Model struct {
 
 	providerOrder    []string
 	providerEnabled  map[string]bool
+	providerHideCost map[string]bool
 	accountProviders map[string]string
 
 	settings               settingsState
@@ -262,6 +263,7 @@ func NewModel(
 		critThreshold:         critThresh,
 		experimentalAnalytics: experimentalAnalytics,
 		providerEnabled:       make(map[string]bool),
+		providerHideCost:      make(map[string]bool),
 		accountProviders:      make(map[string]string),
 		expandedModelMixTiles: make(map[string]bool),
 		tileBodyCache:         make(map[string][]string),
@@ -288,6 +290,9 @@ func (m *Model) SetServices(services Services) {
 func (m *Model) ensureProviderTracking() {
 	if m.providerEnabled == nil {
 		m.providerEnabled = make(map[string]bool)
+	}
+	if m.providerHideCost == nil {
+		m.providerHideCost = make(map[string]bool)
 	}
 	if m.accountProviders == nil {
 		m.accountProviders = make(map[string]string)
@@ -525,6 +530,7 @@ func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accoun
 		}
 		seen[id] = true
 		m.providerEnabled[id] = pref.Enabled
+		m.providerHideCost[id] = pref.HideCosts
 		order = append(order, id)
 	}
 
@@ -876,6 +882,7 @@ func (m Model) dashboardConfigProviders() []config.DashboardProviderConfig {
 		out = append(out, config.DashboardProviderConfig{
 			AccountID: id,
 			Enabled:   m.isProviderEnabled(id),
+			HideCosts: m.providerHideCost[id],
 		})
 	}
 	return out
@@ -894,16 +901,51 @@ func (m Model) isProviderEnabled(id string) bool {
 // enabled", which we fast-path by returning m.snapshots directly — saves
 // a per-frame map clone in the most common state.
 func (m Model) visibleSnapshots() map[string]core.UsageSnapshot {
-	if m.allProvidersEnabled() {
+	if m.allProvidersEnabled() && !m.anyProviderCostsHidden() {
 		return m.snapshots
 	}
 	out := make(map[string]core.UsageSnapshot, len(m.snapshots))
 	for id, snap := range m.snapshots {
 		if m.isProviderEnabled(id) {
+			if m.providerHideCost[id] {
+				snap = hideSnapshotCosts(snap)
+			}
 			out[id] = snap
 		}
 	}
 	return out
+}
+
+func (m Model) applySnapshotVisibility(snaps map[string]core.UsageSnapshot) map[string]core.UsageSnapshot {
+	if len(snaps) == 0 || !m.hasHiddenCostProviderIn(snaps) {
+		return snaps
+	}
+	out := make(map[string]core.UsageSnapshot, len(snaps))
+	for id, snap := range snaps {
+		if m.providerHideCost[id] {
+			snap = hideSnapshotCosts(snap)
+		}
+		out[id] = snap
+	}
+	return out
+}
+
+func (m Model) anyProviderCostsHidden() bool {
+	for id := range m.snapshots {
+		if m.providerHideCost[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) hasHiddenCostProviderIn(snaps map[string]core.UsageSnapshot) bool {
+	for id := range snaps {
+		if m.providerHideCost[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // viewNow returns the wall-clock time pinned at the start of the current

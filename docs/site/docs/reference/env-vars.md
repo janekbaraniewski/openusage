@@ -24,7 +24,7 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 
 ## API key environment variables
 
-Each provider's account references its key via `api_key_env` — the name of the variable, not its value. Below are the conventional names used in [`configs/example_settings.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/example_settings.json). You may override these; just keep `api_key_env` in sync.
+Each provider's account references its key via `api_key_env` — the name of the variable, not its value. Below are the conventional names used by auto-detection and [`configs/example_settings.json`](https://github.com/janekbaraniewski/openusage/blob/main/configs/example_settings.json). You may override these; just keep `api_key_env` in sync.
 
 | Provider | Default env var |
 |---|---|
@@ -39,6 +39,7 @@ Each provider's account references its key via `api_key_env` — the name of the
 | Z.AI | `ZAI_API_KEY` |
 | Gemini API | `GEMINI_API_KEY` (also detects `GOOGLE_API_KEY` as an alias) |
 | Alibaba Cloud | `ALIBABA_CLOUD_API_KEY` |
+| OpenCode | `OPENCODE_API_KEY` (also detects `ZEN_API_KEY` as an alias) |
 | Ollama (cloud) | `OLLAMA_API_KEY` |
 
 :::tip Adding a key without restarting
@@ -61,7 +62,8 @@ Some providers don't use API keys; they read local files or shell out to a tool 
 | `gemini_cli` | Gemini CLI's session files | `binary` field (default `gemini`) |
 | `copilot` | `gh copilot` subcommands | `binary` field (default `gh`) |
 | `ollama` (local) | `http://127.0.0.1:11434` | `base_url` field |
-| `opencode` | OpenCode session data | `binary` field |
+
+OpenCode activity and per-session usage are collected by the daemon integration, not by shelling out to an `opencode` binary. The OpenCode provider account itself is still API-key detected via `OPENCODE_API_KEY` / `ZEN_API_KEY`, and OpenCode `auth.json` API-key entries can also be adopted by auto-detection.
 
 ## Setting variables
 

@@ -23,7 +23,29 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 	cte := fmt.Sprintf(`
 		WITH scoped_usage AS (
 			SELECT
-				e.*,
+				e.event_id,
+				e.occurred_at,
+				e.provider_id,
+				e.account_id,
+				e.workspace_id,
+				e.session_id,
+				e.turn_id,
+				e.message_id,
+				e.tool_call_id,
+				e.event_type,
+				e.model_raw,
+				e.model_canonical,
+				e.input_tokens,
+				e.output_tokens,
+				e.reasoning_tokens,
+				e.cache_read_tokens,
+				e.cache_write_tokens,
+				e.total_tokens,
+				e.cost_usd,
+				e.requests,
+				e.tool_name,
+				e.status,
+				e.dedup_key,
 				COALESCE(r.source_system, '') AS source_system,
 				COALESCE(r.source_channel, '') AS source_channel,
 				COALESCE(r.source_payload, '{}') AS source_payload
@@ -67,7 +89,33 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 			FROM scoped_usage
 		),
 		deduped_usage AS (
-			SELECT *
+			SELECT
+				event_id,
+				occurred_at,
+				provider_id,
+				account_id,
+				workspace_id,
+				session_id,
+				turn_id,
+				message_id,
+				tool_call_id,
+				event_type,
+				model_raw,
+				model_canonical,
+				input_tokens,
+				output_tokens,
+				reasoning_tokens,
+				cache_read_tokens,
+				cache_write_tokens,
+				total_tokens,
+				cost_usd,
+				requests,
+				tool_name,
+				status,
+				dedup_key,
+				source_system,
+				source_channel,
+				source_payload
 			FROM (
 				SELECT
 					ranked_usage.*,

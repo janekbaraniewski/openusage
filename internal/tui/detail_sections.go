@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -219,6 +221,7 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 	}
 
 	var lines []string
+	gaugeCount := 0
 	for _, key := range keys {
 		if gaugeAllowSet != nil && !gaugeAllowSet[key] {
 			continue
@@ -235,11 +238,73 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		gauge := RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
 		lines = append(lines, labelR+" "+gauge)
-		if len(lines) >= maxLines {
+		if forecast := usageGaugeForecastLine(key, met, usedPct, snap.Resets); forecast != "" {
+			lines = append(lines, strings.Repeat(" ", maxLabelW+1)+dimStyle.Render(forecast))
+		}
+		gaugeCount++
+		if gaugeCount >= maxLines {
 			break
 		}
 	}
 	return lines
+}
+
+func usageGaugeForecastLine(key string, met core.Metric, usedPct float64, resets map[string]time.Time) string {
+	if usedPct <= 0 || usedPct >= 100 || len(resets) == 0 {
+		return ""
+	}
+	resetAt, ok := resets[key]
+	if !ok {
+		resetAt, ok = resets[key+"_reset"]
+	}
+	if !ok || resetAt.IsZero() {
+		return ""
+	}
+	windowDur, ok := usageWindowDuration(met.Window)
+	if !ok {
+		return ""
+	}
+	now := time.Now()
+	if !resetAt.After(now) {
+		return ""
+	}
+	startAt := resetAt.Add(-windowDur)
+	elapsed := now.Sub(startAt)
+	if elapsed < time.Minute {
+		return ""
+	}
+	burnPctPerHour := usedPct / elapsed.Hours()
+	if burnPctPerHour <= 0 {
+		return ""
+	}
+	hitIn := time.Duration(((100 - usedPct) / burnPctPerHour) * float64(time.Hour))
+	if hitIn <= 0 {
+		return ""
+	}
+	if now.Add(hitIn).After(resetAt) {
+		return "Forecast: below 100% before reset at current pace"
+	}
+	return fmt.Sprintf("Forecast: 100%% in %s at current pace", formatDuration(hitIn))
+}
+
+func usageWindowDuration(window string) (time.Duration, bool) {
+	w := strings.ToLower(strings.TrimSpace(window))
+	if len(w) < 2 {
+		return 0, false
+	}
+	unit := w[len(w)-1]
+	value, err := strconv.Atoi(w[:len(w)-1])
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	switch unit {
+	case 'h':
+		return time.Duration(value) * time.Hour, true
+	case 'd':
+		return time.Duration(value) * 24 * time.Hour, true
+	default:
+		return 0, false
+	}
 }
 
 // buildDetailCostSection builds spending/credit summary with projections.

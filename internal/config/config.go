@@ -37,6 +37,7 @@ type DataConfig struct {
 type DashboardProviderConfig struct {
 	AccountID string `json:"account_id"`
 	Enabled   bool   `json:"enabled"`
+	HideCosts bool   `json:"hide_costs,omitempty"`
 }
 
 type DashboardWidgetSection struct {
@@ -57,6 +58,7 @@ func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
 	type rawDashboardProviderConfig struct {
 		AccountID string `json:"account_id"`
 		Enabled   *bool  `json:"enabled"`
+		HideCosts bool   `json:"hide_costs,omitempty"`
 	}
 
 	var raw rawDashboardProviderConfig
@@ -69,6 +71,7 @@ func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
 	if raw.Enabled != nil {
 		p.Enabled = *raw.Enabled
 	}
+	p.HideCosts = raw.HideCosts
 	return nil
 }
 
@@ -334,6 +337,7 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 		return DashboardProviderConfig{
 			AccountID: normalizeAccountID(entry.AccountID),
 			Enabled:   entry.Enabled,
+			HideCosts: entry.HideCosts,
 		}
 	})
 	filtered := lo.Filter(normalized, func(entry DashboardProviderConfig, _ int) bool { return entry.AccountID != "" })

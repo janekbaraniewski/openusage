@@ -249,7 +249,7 @@ func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
 	if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {
 		return m, nil
 	}
-	m.snapshots = msg.Snapshots
+	m.snapshots = m.applySnapshotVisibility(msg.Snapshots)
 	m.refreshing = false
 	m.lastDataUpdate = time.Now()
 	m.invalidateRenderCaches()
