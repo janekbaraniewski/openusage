@@ -336,6 +336,10 @@ func compactMetricAmount(v float64, unit string) string {
 }
 
 func (m Model) buildTileMetricLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, skipKeys map[string]bool) []string {
+	return m.buildTileMetricLinesWithHide(snap, widget, innerW, skipKeys, false)
+}
+
+func (m Model) buildTileMetricLinesWithHide(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, skipKeys map[string]bool, hideCosts bool) []string {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -360,6 +364,9 @@ func (m Model) buildTileMetricLines(snap core.UsageSnapshot, widget core.Dashboa
 			continue
 		}
 		if metricHasGauge(key, met) {
+			continue
+		}
+		if hideCosts && isMonetaryMetricKey(key, met) {
 			continue
 		}
 		value := formatTileMetricValue(key, met)

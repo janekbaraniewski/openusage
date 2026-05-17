@@ -16,12 +16,13 @@ func (m *Model) cachedTileBodyLines(
 	innerW int,
 	modelMixExpanded bool,
 ) []string {
-	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData)
+	hideCosts := m.resolveHideCosts(snap)
+	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData, hideCosts)
 	if lines, ok := m.tileBodyCache[key]; ok {
 		return lines
 	}
 
-	lines := m.buildTileBodyLines(snap, widget, di, innerW, modelMixExpanded)
+	lines := m.buildTileBodyLines(snap, widget, di, innerW, modelMixExpanded, hideCosts)
 	if m.tileBodyCache == nil {
 		m.tileBodyCache = make(map[string][]string)
 	}
@@ -36,6 +37,7 @@ func tileBodyCacheKey(
 	innerW int,
 	modelMixExpanded bool,
 	hideEmpty bool,
+	hideCosts bool,
 ) string {
 	return strings.Join([]string{
 		snap.ProviderID,
@@ -50,6 +52,7 @@ func tileBodyCacheKey(
 		strconv.Itoa(innerW),
 		strconv.FormatBool(modelMixExpanded),
 		strconv.FormatBool(hideEmpty),
+		strconv.FormatBool(hideCosts),
 		tileWidgetCacheKey(widget),
 	}, "|")
 }
@@ -80,6 +83,7 @@ func (m *Model) buildTileBodyLines(
 	di providerDisplayInfo,
 	innerW int,
 	modelMixExpanded bool,
+	hideCosts bool,
 ) []string {
 	truncate := func(s string) string {
 		if lipglossWidth := len([]rune(s)); lipglossWidth > innerW {
@@ -130,16 +134,16 @@ func (m *Model) buildTileBodyLines(
 	if di.detail != "" {
 		topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
 	}
-	if wl := windowActivityLine(snap, m.timeWindow); wl != "" {
+	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
 		topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
 	}
 	if len(topUsageLines) > 0 {
 		sectionsByID[core.DashboardSectionTopUsageProgress] = section{withSectionPadding(topUsageLines)}
 	}
 
-	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLines(snap, widget, innerW)
+	compactMetricLines, compactMetricKeys := buildTileCompactMetricSummaryLinesWithHide(snap, widget, innerW, hideCosts)
 
-	modelBurnLines, modelBurnKeys := buildProviderModelCompositionLines(snap, innerW, modelMixExpanded)
+	modelBurnLines, modelBurnKeys := buildProviderModelCompositionLinesWithHide(snap, innerW, modelMixExpanded, hideCosts)
 	if len(modelBurnLines) > 0 {
 		sectionsByID[core.DashboardSectionModelBurn] = section{withSectionPadding(modelBurnLines)}
 	}
@@ -198,18 +202,18 @@ func (m *Model) buildTileBodyLines(
 		compactMetricKeys = addUsedKeys(compactMetricKeys, codeStatsKeys)
 	}
 
-	dailyUsageLines := buildProviderDailyTrendLines(snap, innerW)
+	dailyUsageLines := buildProviderDailyTrendLinesWithHide(snap, innerW, hideCosts)
 	if len(dailyUsageLines) > 0 {
 		sectionsByID[core.DashboardSectionDailyUsage] = section{withSectionPadding(dailyUsageLines)}
 	}
 
-	upstreamProviderLines, upstreamProviderKeys := buildUpstreamProviderCompositionLines(snap, innerW, modelMixExpanded)
+	upstreamProviderLines, upstreamProviderKeys := buildUpstreamProviderCompositionLinesWithHide(snap, innerW, modelMixExpanded, hideCosts)
 	if len(upstreamProviderLines) > 0 {
 		sectionsByID[core.DashboardSectionUpstreamProviders] = section{withSectionPadding(upstreamProviderLines)}
 	}
 	compactMetricKeys = addUsedKeys(compactMetricKeys, upstreamProviderKeys)
 
-	providerBurnLines, providerBurnKeys := buildProviderVendorCompositionLines(snap, innerW, modelMixExpanded)
+	providerBurnLines, providerBurnKeys := buildProviderVendorCompositionLinesWithHide(snap, innerW, modelMixExpanded, hideCosts)
 	if len(providerBurnLines) > 0 {
 		sectionsByID[core.DashboardSectionProviderBurn] = section{withSectionPadding(providerBurnLines)}
 	}
@@ -222,7 +226,7 @@ func (m *Model) buildTileBodyLines(
 	otherLines = appendOtherGroup(otherLines, geminiQuotaLines)
 	compactMetricKeys = addUsedKeys(compactMetricKeys, geminiQuotaKeys)
 
-	metricLines := m.buildTileMetricLines(snap, widget, innerW, compactMetricKeys)
+	metricLines := m.buildTileMetricLinesWithHide(snap, widget, innerW, compactMetricKeys, hideCosts)
 	otherLines = appendOtherGroup(otherLines, metricLines)
 
 	if snap.Message != "" && snap.Status != core.StatusError {

@@ -575,12 +575,21 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 }
 
 func windowActivityLine(snap core.UsageSnapshot, tw core.TimeWindow) string {
+	return windowActivityLineWithHide(snap, tw, false)
+}
+
+// windowActivityLineWithHide is the hide-costs-aware variant. When hideCosts
+// is true the $ segment is dropped so the line reads "1889 reqs · 5.3M tok in
+// 3 Days" rather than including a dollar figure.
+func windowActivityLineWithHide(snap core.UsageSnapshot, tw core.TimeWindow, hideCosts bool) string {
 	var parts []string
 	if m, ok := snap.Metrics["window_requests"]; ok && m.Used != nil && *m.Used > 0 {
 		parts = append(parts, fmt.Sprintf("%.0f reqs", *m.Used))
 	}
-	if m, ok := snap.Metrics["window_cost"]; ok && m.Used != nil && *m.Used > 0.001 {
-		parts = append(parts, fmt.Sprintf("$%.2f", *m.Used))
+	if !hideCosts {
+		if m, ok := snap.Metrics["window_cost"]; ok && m.Used != nil && *m.Used > 0.001 {
+			parts = append(parts, fmt.Sprintf("$%.2f", *m.Used))
+		}
 	}
 	if m, ok := snap.Metrics["window_tokens"]; ok && m.Used != nil && *m.Used > 0 {
 		parts = append(parts, shortCompact(*m.Used)+" tok")

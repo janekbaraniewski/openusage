@@ -69,6 +69,14 @@ type toolMixEntry struct {
 }
 
 func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	return buildProviderModelCompositionLinesWithHide(snap, innerW, expanded, false)
+}
+
+// buildProviderModelCompositionLinesWithHide is the hide-costs-aware variant.
+// When hideCosts is true: when burn mode would be "cost", we fall back to
+// "tokens" or "requests" so the section no longer summarises dollars; the
+// heading is rebranded "Model Usage" and per-model rows drop their $ suffix.
+func buildProviderModelCompositionLinesWithHide(snap core.UsageSnapshot, innerW int, expanded bool, hideCosts bool) ([]string, map[string]bool) {
 	allModels, usedKeys := collectProviderModelMix(snap)
 	if len(allModels) == 0 {
 		return nil, nil
@@ -86,6 +94,18 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 	}
 
 	mode, total := selectBurnMode(totalTokens, totalCost, totalRequests)
+	if hideCosts && mode == "cost" {
+		// Re-pick a non-cost mode so the heading and bar are denominated in
+		// something we're willing to show. Prefer tokens, then requests.
+		switch {
+		case totalTokens > 0:
+			mode, total = "tokens", totalTokens
+		case totalRequests > 0:
+			mode, total = "requests", totalRequests
+		default:
+			return nil, nil
+		}
+	}
 	if total <= 0 {
 		return nil, nil
 	}
@@ -108,6 +128,12 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 		headerSuffix = fmt.Sprintf("$%.2f", total)
 	default:
 		headerSuffix = shortCompact(total) + " tok"
+	}
+	if hideCosts {
+		// The whole section is no longer about cost, so the "Burn" naming
+		// reads as a stale dollar reference. Rebrand to "Model Usage" — token
+		// volume is what's actually being summarised.
+		headingName = "Model Usage"
 	}
 
 	lines := []string{
@@ -133,7 +159,7 @@ func buildProviderModelCompositionLines(snap core.UsageSnapshot, innerW int, exp
 		switch mode {
 		case "tokens":
 			valueStr = fmt.Sprintf("%2.0f%% %s tok", pct, shortCompact(model.totalTokens()))
-			if model.cost > 0 {
+			if model.cost > 0 && !hideCosts {
 				valueStr += fmt.Sprintf(" · %s", formatUSD(model.cost))
 			}
 		case "cost":

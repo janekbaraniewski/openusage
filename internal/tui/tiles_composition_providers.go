@@ -8,6 +8,13 @@ import (
 )
 
 func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	return buildProviderVendorCompositionLinesWithHide(snap, innerW, expanded, false)
+}
+
+// buildProviderVendorCompositionLinesWithHide is the hide-costs-aware variant.
+// When hideCosts is true and burn mode resolves to "cost", we fall back to
+// tokens/requests so the section never renders dollar segments.
+func buildProviderVendorCompositionLinesWithHide(snap core.UsageSnapshot, innerW int, expanded bool, hideCosts bool) ([]string, map[string]bool) {
 	allProviders, usedKeys := collectProviderVendorMix(snap)
 	if len(allProviders) == 0 {
 		return nil, nil
@@ -25,6 +32,16 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 	}
 
 	mode, total := selectBurnMode(totalTokens, totalCost, totalRequests)
+	if hideCosts && mode == "cost" {
+		switch {
+		case totalTokens > 0:
+			mode, total = "tokens", totalTokens
+		case totalRequests > 0:
+			mode, total = "requests", totalRequests
+		default:
+			return nil, nil
+		}
+	}
 	if total <= 0 {
 		return nil, nil
 	}
@@ -42,6 +59,16 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		heading = "Provider Burn (credits)"
 	} else if mode == "requests" {
 		heading = "Provider Activity (requests)"
+	}
+	if hideCosts {
+		// Rebrand away from "Burn" which connotes spend. Section is now token
+		// or request flow only.
+		switch mode {
+		case "requests":
+			heading = "Provider Activity (requests)"
+		default:
+			heading = "Provider Usage (tokens)"
+		}
 	}
 
 	providerClients := make([]clientMixEntry, 0, len(allProviders))
@@ -86,7 +113,7 @@ func buildProviderVendorCompositionLines(snap core.UsageSnapshot, innerW int, ex
 		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(provider.requests))
 		if mode == "tokens" {
 			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req", pct, shortCompact(provider.input+provider.output), shortCompact(provider.requests))
-			if provider.cost > 0 {
+			if provider.cost > 0 && !hideCosts {
 				valueStr += fmt.Sprintf(" · %s", formatUSD(provider.cost))
 			}
 		} else if mode == "cost" {
@@ -116,6 +143,11 @@ func collectProviderVendorMix(snap core.UsageSnapshot) ([]providerMixEntry, map[
 }
 
 func buildUpstreamProviderCompositionLines(snap core.UsageSnapshot, innerW int, expanded bool) ([]string, map[string]bool) {
+	return buildUpstreamProviderCompositionLinesWithHide(snap, innerW, expanded, false)
+}
+
+// buildUpstreamProviderCompositionLinesWithHide is the hide-costs-aware variant.
+func buildUpstreamProviderCompositionLinesWithHide(snap core.UsageSnapshot, innerW int, expanded bool, hideCosts bool) ([]string, map[string]bool) {
 	allProviders, usedKeys := collectUpstreamProviderMix(snap)
 	if len(allProviders) == 0 {
 		return nil, nil
@@ -133,6 +165,16 @@ func buildUpstreamProviderCompositionLines(snap core.UsageSnapshot, innerW int, 
 	}
 
 	mode, total := selectBurnMode(totalTokens, totalCost, totalRequests)
+	if hideCosts && mode == "cost" {
+		switch {
+		case totalTokens > 0:
+			mode, total = "tokens", totalTokens
+		case totalRequests > 0:
+			mode, total = "requests", totalRequests
+		default:
+			return nil, nil
+		}
+	}
 	if total <= 0 {
 		return nil, nil
 	}
@@ -194,7 +236,7 @@ func buildUpstreamProviderCompositionLines(snap core.UsageSnapshot, innerW int, 
 		valueStr := fmt.Sprintf("%2.0f%% %s req", pct, shortCompact(provider.requests))
 		if mode == "tokens" {
 			valueStr = fmt.Sprintf("%2.0f%% %s tok · %s req", pct, shortCompact(provider.input+provider.output), shortCompact(provider.requests))
-			if provider.cost > 0 {
+			if provider.cost > 0 && !hideCosts {
 				valueStr += fmt.Sprintf(" · %s", formatUSD(provider.cost))
 			}
 		} else if mode == "cost" {
@@ -243,6 +285,10 @@ func buildProviderColorMap(providers []providerMixEntry, providerID string) map[
 }
 
 func buildProviderDailyTrendLines(snap core.UsageSnapshot, innerW int) []string {
+	return buildProviderDailyTrendLinesWithHide(snap, innerW, false)
+}
+
+func buildProviderDailyTrendLinesWithHide(snap core.UsageSnapshot, innerW int, hideCosts bool) []string {
 	type trendDef struct {
 		label string
 		keys  []string
@@ -253,6 +299,11 @@ func buildProviderDailyTrendLines(snap core.UsageSnapshot, innerW int) []string 
 		{label: "Cost", keys: []string{"analytics_cost", "cost"}, color: colorTeal, unit: "USD"},
 		{label: "Req", keys: []string{"analytics_requests", "requests"}, color: colorYellow, unit: "requests"},
 		{label: "Tokens", keys: []string{"analytics_tokens"}, color: colorSapphire, unit: "tokens"},
+	}
+	if hideCosts {
+		// Strip the Cost row outright — the rendered "last" label is a $ value
+		// and the sparkline's only context is monetary.
+		defs = defs[1:]
 	}
 
 	lines := []string{}

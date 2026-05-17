@@ -39,7 +39,7 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	}
 
 	// 3. Model Burn — composition bar with per-model breakdown + token detail.
-	if modelLines, _ := buildProviderModelCompositionLines(snap, innerW, true); len(modelLines) > 0 {
+	if modelLines, _ := buildProviderModelCompositionLinesWithHide(snap, innerW, true, hideCosts); len(modelLines) > 0 {
 		// Add per-model token breakdown if available.
 		models := core.ExtractAnalyticsModelUsage(snap)
 		for _, model := range models {
@@ -102,15 +102,18 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	}
 
 	// 10. Daily Usage & Trends (with zoom support).
-	if trendLines := buildDetailTrendsSection(snap, widget, innerW, timeWindow); len(trendLines) > 0 {
+	if trendLines := buildDetailTrendsSectionWithHide(snap, widget, innerW, timeWindow, hideCosts); len(trendLines) > 0 {
 		candidates[core.DetailSectionTrends] = append(candidates[core.DetailSectionTrends],
 			detailSection{id: "Trends", title: "Trends", lines: trendLines, hasOwnHeader: true})
 	}
 
-	// 10b. Dual-axis cost + requests overlay (detail-only).
-	if dualLines := buildDetailDualAxisChart(snap, widget, innerW, timeWindow); len(dualLines) > 0 {
-		candidates[core.DetailSectionCostRequests] = append(candidates[core.DetailSectionCostRequests],
-			detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
+	// 10b. Dual-axis cost + requests overlay (detail-only). Skipped entirely
+	// when hide-costs is on — the cost axis is the whole point.
+	if !hideCosts {
+		if dualLines := buildDetailDualAxisChart(snap, widget, innerW, timeWindow); len(dualLines) > 0 {
+			candidates[core.DetailSectionCostRequests] = append(candidates[core.DetailSectionCostRequests],
+				detailSection{id: "Trends", title: "Overview", lines: dualLines, hasOwnHeader: true})
+		}
 	}
 
 	// 10c. Activity Heatmap.
@@ -120,13 +123,13 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 	}
 
 	// 11. Upstream / Hosting Providers.
-	if upstreamLines, _ := buildUpstreamProviderCompositionLines(snap, innerW, true); len(upstreamLines) > 0 {
+	if upstreamLines, _ := buildUpstreamProviderCompositionLinesWithHide(snap, innerW, true, hideCosts); len(upstreamLines) > 0 {
 		candidates[core.DetailSectionUpstream] = append(candidates[core.DetailSectionUpstream],
 			detailSection{id: "Cost", title: "Hosting", lines: upstreamLines, hasOwnHeader: true})
 	}
 
 	// 12. Provider Burn (vendor breakdown).
-	if vendorLines, _ := buildProviderVendorCompositionLines(snap, innerW, true); len(vendorLines) > 0 {
+	if vendorLines, _ := buildProviderVendorCompositionLinesWithHide(snap, innerW, true, hideCosts); len(vendorLines) > 0 {
 		candidates[core.DetailSectionProviderBurn] = append(candidates[core.DetailSectionProviderBurn],
 			detailSection{id: "Cost", title: "Providers", lines: vendorLines, hasOwnHeader: true})
 	}
@@ -508,7 +511,7 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 	for k := range compactKeys {
 		skipKeys[k] = true
 	}
-	_, modelKeys := buildProviderModelCompositionLines(snap, innerW, true)
+	_, modelKeys := buildProviderModelCompositionLinesWithHide(snap, innerW, true, hideCosts)
 	for k := range modelKeys {
 		skipKeys[k] = true
 	}

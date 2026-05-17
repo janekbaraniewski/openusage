@@ -22,10 +22,16 @@ func cropSeriesToWindow(pts []core.TimePoint, window core.TimeWindow) []core.Tim
 // Unlike the tile view which shows one chart + sparklines, the detail view
 // renders a full Braille chart for EACH available data series.
 func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, timeWindow core.TimeWindow) []string {
+	return buildDetailTrendsSectionWithHide(snap, widget, innerW, timeWindow, false)
+}
+
+// buildDetailTrendsSectionWithHide is the hide-costs-aware variant. The Cost
+// sparkline and Cost full chart are suppressed when hideCosts is true.
+func buildDetailTrendsSectionWithHide(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, timeWindow core.TimeWindow, hideCosts bool) []string {
 	var lines []string
 
 	// Daily usage sparkline summary (compact overview).
-	dailyLines := buildProviderDailyTrendLines(snap, innerW)
+	dailyLines := buildProviderDailyTrendLinesWithHide(snap, innerW, hideCosts)
 	lines = append(lines, dailyLines...)
 
 	// Render a separate chart for each available series.
@@ -40,6 +46,10 @@ func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidg
 		{keys: []string{"analytics_tokens", "tokens_total"}, label: "Tokens", yFmt: formatChartValue, color: colorSapphire},
 		{keys: []string{"messages"}, label: "Messages", yFmt: formatChartValue, color: colorGreen},
 		{keys: []string{"sessions"}, label: "Sessions", yFmt: formatChartValue, color: colorPeach},
+	}
+	if hideCosts {
+		// Drop the cost chart entirely — yFmt renders $-prefixed Y-axis ticks.
+		seriesCandidates = seriesCandidates[1:]
 	}
 
 	chartW := innerW - 4
