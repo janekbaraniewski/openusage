@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/janekbaraniewski/openusage/compare/v0.11.0...v0.11.1) (2026-05-18)
+
+
+### Dependencies
+
+* **docs:** bump ws 8.20.0 → 8.20.1 (CVE-2026-45736) ([1f06c00](https://github.com/janekbaraniewski/openusage/commit/1f06c00d3e50024c807e4ebd8d76526dd7ebf407))
+
 ## [0.11.0](https://github.com/janekbaraniewski/openusage/compare/v0.10.6...v0.11.0) (2026-05-18)
 
 
