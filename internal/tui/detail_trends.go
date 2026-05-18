@@ -25,8 +25,7 @@ func buildDetailTrendsSection(snap core.UsageSnapshot, widget core.DashboardWidg
 	return buildDetailTrendsSectionWithHide(snap, widget, innerW, timeWindow, false)
 }
 
-// buildDetailTrendsSectionWithHide is the hide-costs-aware variant. The Cost
-// sparkline and Cost full chart are suppressed when hideCosts is true.
+// The Cost sparkline and Cost full chart are suppressed when hideCosts is true.
 func buildDetailTrendsSectionWithHide(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, timeWindow core.TimeWindow, hideCosts bool) []string {
 	var lines []string
 

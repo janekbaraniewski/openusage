@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/samber/lo"
 )
 
 var blockChars = []string{" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
@@ -147,21 +148,35 @@ func RenderUsageGaugeWithProjection(usedPercent float64, width int, warnThresh, 
 		}
 	}
 
-	if resetPart == "" && projPart == "" {
+	annotation := joinAnnotationParts(resetPart, projPart)
+	if annotation == "" {
 		return gauge
 	}
-
-	var annotation string
-	switch {
-	case resetPart != "" && projPart != "":
-		annotation = resetPart + " · " + projPart
-	case resetPart != "":
-		annotation = resetPart
-	default:
-		annotation = projPart
-	}
-
 	return gauge + "\n" + dimStyle.Render(annotation)
+}
+
+// joinAnnotationParts joins non-empty annotation fragments with " · ", dropping
+// any empty entries. Used by gauge renderers that compose a dim
+// "resets … · projected …" line from independently-computed parts.
+func joinAnnotationParts(parts ...string) string {
+	return strings.Join(lo.Compact(parts), " · ")
+}
+
+// gaugeWindowDuration returns the duration of a windowed metric (5h / 7d / 1d
+// / 30d) so projection math can compute elapsed time. Returns (0, false) when
+// the window string isn't recognized — in that case we render the plain gauge.
+func gaugeWindowDuration(window string) (time.Duration, bool) {
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "5h":
+		return 5 * time.Hour, true
+	case "1d", "24h", "today":
+		return 24 * time.Hour, true
+	case "7d":
+		return 7 * 24 * time.Hour, true
+	case "30d":
+		return 30 * 24 * time.Hour, true
+	}
+	return 0, false
 }
 
 // formatDurationShort renders a duration as a compact human string like

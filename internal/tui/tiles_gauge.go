@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
@@ -33,10 +34,9 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 	// metrics are eligible for gauge rendering.
 	var gaugeAllowSet map[string]bool
 	if len(widget.GaugePriority) > 0 {
-		gaugeAllowSet = make(map[string]bool, len(widget.GaugePriority))
-		for _, k := range widget.GaugePriority {
-			gaugeAllowSet[k] = true
-		}
+		gaugeAllowSet = lo.SliceToMap(widget.GaugePriority, func(k string) (string, bool) {
+			return k, true
+		})
 	}
 
 	now := m.viewNow()
@@ -271,13 +271,5 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 		}
 	}
 
-	switch {
-	case resetPart != "" && projPart != "":
-		return resetPart + " · " + projPart
-	case resetPart != "":
-		return resetPart
-	case projPart != "":
-		return projPart
-	}
-	return ""
+	return joinAnnotationParts(resetPart, projPart)
 }

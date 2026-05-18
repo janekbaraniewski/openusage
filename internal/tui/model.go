@@ -872,18 +872,10 @@ func (m Model) telemetryUnmappedDetails() []TelemetryUnmappedDetail {
 			}
 		}
 	}
-	keys := core.SortedStringKeys(boolKeys(seen))
+	keys := core.SortedStringKeys(seen)
 	out := make([]TelemetryUnmappedDetail, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, seen[k])
-	}
-	return out
-}
-
-func boolKeys[V any](m map[string]V) map[string]bool {
-	out := make(map[string]bool, len(m))
-	for k := range m {
-		out[k] = true
 	}
 	return out
 }
