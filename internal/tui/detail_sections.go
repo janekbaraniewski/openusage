@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/samber/lo"
 )
 
 // buildDetailSections constructs all dashboard-style sections for the detail view.
@@ -225,10 +226,9 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 
 	var gaugeAllowSet map[string]bool
 	if len(widget.GaugePriority) > 0 {
-		gaugeAllowSet = make(map[string]bool, len(widget.GaugePriority))
-		for _, k := range widget.GaugePriority {
-			gaugeAllowSet[k] = true
-		}
+		gaugeAllowSet = lo.SliceToMap(widget.GaugePriority, func(k string) (string, bool) {
+			return k, true
+		})
 	}
 
 	var lines []string
@@ -246,27 +246,23 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 			label = label[:maxLabelW-1] + "…"
 		}
 
-		// Compute optional projection annotation for windowed usage gauges
-		// (5h / 7d / similar). pace = current% / elapsed_minutes / 100.
-		var gauge string
-		if windowDur, ok := gaugeWindowDuration(met.Window); ok {
-			if resetAt, hasReset := snap.Resets[key]; hasReset {
-				resetIn := resetAt.Sub(now)
-				elapsed := windowDur - resetIn
-				var paceFraction float64
-				if elapsed > 0 && usedPct > 0 {
-					elapsedMin := elapsed.Minutes()
-					if elapsedMin > 0 {
-						// fraction-of-window per minute
-						paceFraction = (usedPct / 100) / elapsedMin
-					}
+		// Render the projection variant only when the metric has a recognized
+		// window AND a reset timestamp; otherwise fall back to the plain
+		// gauge. Pace = current% / elapsed_minutes / 100.
+		gauge := RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
+		windowDur, hasWindow := gaugeWindowDuration(met.Window)
+		resetAt, hasReset := snap.Resets[key]
+		if hasWindow && hasReset {
+			resetIn := resetAt.Sub(now)
+			elapsed := windowDur - resetIn
+			var paceFraction float64
+			if elapsed > 0 && usedPct > 0 {
+				if elapsedMin := elapsed.Minutes(); elapsedMin > 0 {
+					// fraction-of-window per minute
+					paceFraction = (usedPct / 100) / elapsedMin
 				}
-				gauge = RenderUsageGaugeWithProjection(usedPct, gaugeW, warnThresh, critThresh, paceFraction, resetIn)
-			} else {
-				gauge = RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
 			}
-		} else {
-			gauge = RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
+			gauge = RenderUsageGaugeWithProjection(usedPct, gaugeW, warnThresh, critThresh, paceFraction, resetIn)
 		}
 
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
@@ -276,23 +272,6 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		}
 	}
 	return lines
-}
-
-// gaugeWindowDuration returns the duration of a windowed metric (5h / 7d / 1d
-// / 30d) so projection math can compute elapsed time. Returns (0, false) when
-// the window string isn't recognized — in that case we render the plain gauge.
-func gaugeWindowDuration(window string) (time.Duration, bool) {
-	switch strings.ToLower(strings.TrimSpace(window)) {
-	case "5h":
-		return 5 * time.Hour, true
-	case "1d", "24h", "today":
-		return 24 * time.Hour, true
-	case "7d":
-		return 7 * 24 * time.Hour, true
-	case "30d":
-		return 30 * 24 * time.Hour, true
-	}
-	return 0, false
 }
 
 // buildDetailCostSection builds spending/credit summary with projections.
