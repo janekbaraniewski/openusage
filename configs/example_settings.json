@@ -168,13 +168,11 @@
   "export": {
     "target": "",
     "interval_seconds": 60,
-    "machine_name": "",
-    "auth_token": ""
+    "machine_name": ""
   },
   "hub": {
     "listen_addr": ":9190",
-    "stale_timeout_seconds": 300,
-    "auth_token": ""
+    "stale_timeout_seconds": 300
   },
   "integrations": {
     "claude-code-hooks": {

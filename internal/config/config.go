@@ -137,13 +137,19 @@ type ExportConfig struct {
 	Target          string `json:"target"`           // HTTP URL of hub; empty disables export
 	IntervalSeconds int    `json:"interval_seconds"` // push interval; default 60
 	MachineName     string `json:"machine_name"`     // override hostname; empty uses os.Hostname()
-	AuthToken       string `json:"auth_token"`       // optional Bearer token sent with each push; falls back to OPENUSAGE_HUB_TOKEN env var
+	// AuthToken is the optional Bearer token sent with each push. It must NOT
+	// be persisted to settings.json — supply it via OPENUSAGE_HUB_TOKEN env var
+	// at runtime. Mirrors AccountConfig.Token's `json:"-"` posture.
+	AuthToken string `json:"-"`
 }
 
 type HubConfig struct {
 	ListenAddr          string `json:"listen_addr"`           // TCP address to listen on; default ":9190"
 	StaleTimeoutSeconds int    `json:"stale_timeout_seconds"` // seconds before a machine entry is pruned; default 300
-	AuthToken           string `json:"auth_token"`            // optional Bearer token required on /v1/push and /v1/snapshots; falls back to OPENUSAGE_HUB_TOKEN env var; empty disables auth
+	// AuthToken is the optional Bearer token required on /v1/push and
+	// /v1/snapshots. It must NOT be persisted to settings.json — supply it via
+	// OPENUSAGE_HUB_TOKEN env var at runtime. Empty disables auth.
+	AuthToken string `json:"-"`
 }
 
 type IntegrationState struct {

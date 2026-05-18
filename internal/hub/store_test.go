@@ -34,23 +34,49 @@ func TestStore_IngestAndSnapshots(t *testing.T) {
 		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
 	}
 
-	snap, ok := snaps["work-mac:personal"]
+	snap, ok := snaps["work-mac:openai:personal"]
 	if !ok {
-		t.Fatal("expected key 'work-mac:personal'")
+		t.Fatal("expected key 'work-mac:openai:personal'")
 	}
-	if snap.AccountID != "work-mac:personal" {
-		t.Errorf("AccountID = %q, want work-mac:personal", snap.AccountID)
+	if snap.AccountID != "work-mac:openai:personal" {
+		t.Errorf("AccountID = %q, want work-mac:openai:personal", snap.AccountID)
 	}
 	if snap.ProviderID != "openai" {
 		t.Errorf("ProviderID = %q, want openai (must be unchanged)", snap.ProviderID)
 	}
 
-	snap2, ok := snaps["home-linux:default"]
+	snap2, ok := snaps["home-linux:claude_code:default"]
 	if !ok {
-		t.Fatal("expected key 'home-linux:default'")
+		t.Fatal("expected key 'home-linux:claude_code:default'")
 	}
 	if snap2.ProviderID != "claude_code" {
 		t.Errorf("ProviderID = %q, want claude_code", snap2.ProviderID)
+	}
+}
+
+// TestStore_NoCollisionAcrossProviders verifies the regression fix from PR #139
+// review: two providers on the same machine sharing an AccountID must not
+// overwrite each other in the flat Snapshots map.
+func TestStore_NoCollisionAcrossProviders(t *testing.T) {
+	store := NewStore(5 * time.Minute)
+	store.Ingest(core.RemoteEnvelope{
+		Machine: "work-mac",
+		SentAt:  time.Now(),
+		Snapshots: []core.UsageSnapshot{
+			makeSnap("openai", "default"),
+			makeSnap("anthropic", "default"),
+		},
+	})
+
+	snaps := store.Snapshots()
+	if len(snaps) != 2 {
+		t.Fatalf("expected 2 snapshots (one per provider), got %d", len(snaps))
+	}
+	if _, ok := snaps["work-mac:openai:default"]; !ok {
+		t.Error("missing key 'work-mac:openai:default'")
+	}
+	if _, ok := snaps["work-mac:anthropic:default"]; !ok {
+		t.Error("missing key 'work-mac:anthropic:default'")
 	}
 }
 

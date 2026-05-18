@@ -40,8 +40,8 @@ func TestHandlePush_Valid(t *testing.T) {
 	if len(snaps) != 1 {
 		t.Fatalf("expected 1 snapshot ingested, got %d", len(snaps))
 	}
-	if _, ok := snaps["test-box:default"]; !ok {
-		t.Error("expected key 'test-box:default'")
+	if _, ok := snaps["test-box:openai:default"]; !ok {
+		t.Error("expected key 'test-box:openai:default'")
 	}
 }
 
@@ -127,7 +127,7 @@ func TestHandleSnapshots_WithData(t *testing.T) {
 	if len(snaps) != 2 {
 		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
 	}
-	for _, key := range []string{"laptop:acct1", "laptop:acct2"} {
+	for _, key := range []string{"laptop:anthropic:acct1", "laptop:openai:acct2"} {
 		if _, ok := snaps[key]; !ok {
 			t.Errorf("missing key %q in response", key)
 		}

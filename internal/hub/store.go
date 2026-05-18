@@ -35,8 +35,11 @@ func (s *Store) Ingest(env core.RemoteEnvelope) {
 }
 
 // Snapshots returns a flat map of UsageSnapshots from all non-stale machines.
-// Each snapshot's AccountID is rewritten to "{machine}:{originalAccountID}" and
-// used as the map key, keeping ProviderID intact for TUI widget rendering.
+// Each snapshot's AccountID is rewritten to "{machine}:{providerID}:{originalAccountID}"
+// and used as the map key. ProviderID is part of the key (not just AccountID)
+// because two providers on the same machine can share an AccountID (e.g. both
+// using "default") and would otherwise collide and silently overwrite each
+// other. The original snap.ProviderID is preserved for TUI widget rendering.
 //
 // Stale machine entries (older than staleTimeout) are pruned in the same
 // critical section that constructs the result, so callers observe a consistent
@@ -53,7 +56,7 @@ func (s *Store) Snapshots() map[string]core.UsageSnapshot {
 			continue
 		}
 		for _, snap := range entry.envelope.Snapshots {
-			key := fmt.Sprintf("%s:%s", machine, snap.AccountID)
+			key := fmt.Sprintf("%s:%s:%s", machine, snap.ProviderID, snap.AccountID)
 			clone := snap.DeepClone()
 			clone.AccountID = key
 			out[key] = clone

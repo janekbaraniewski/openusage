@@ -121,7 +121,7 @@ func runHubView(cfg config.Config, hubURL, token string) {
 		}
 
 		fetch := func() {
-			snaps, err := fetchHubSnapshots(client, snapshotsURL, token)
+			snaps, err := fetchHubSnapshots(ctx, client, snapshotsURL, token)
 			if err != nil {
 				if verbose {
 					log.Printf("hub-view: fetch %s: %v", snapshotsURL, err)
@@ -163,8 +163,8 @@ func runHubView(cfg config.Config, hubURL, token string) {
 	}
 }
 
-func fetchHubSnapshots(client *http.Client, url, token string) (map[string]core.UsageSnapshot, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func fetchHubSnapshots(ctx context.Context, client *http.Client, url, token string) (map[string]core.UsageSnapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
