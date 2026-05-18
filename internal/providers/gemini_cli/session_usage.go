@@ -3,6 +3,7 @@ package gemini_cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/samber/lo"
@@ -76,6 +77,11 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	dailyCachedTokens := make(map[string]float64)
 	dailyReasoningTokens := make(map[string]float64)
 	dailyToolTokens := make(map[string]float64)
+	modelCost := make(map[string]float64)
+	dailyCost := make(map[string]float64)
+	var totalCostUSD float64
+	var todayCostUSD float64
+	today := time.Now().UTC().Format("2006-01-02")
 
 	sessionIDs := make(map[string]bool)
 	sessionCount := 0
@@ -271,6 +277,18 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 				dailyToolTokens[day] += float64(delta.ToolTokens)
 			}
 
+			cost := estimateUsageCost(msg.Model, delta)
+			if cost > 0 {
+				modelCost[modelName] += cost
+				totalCostUSD += cost
+				if day != "" {
+					dailyCost[day] += cost
+				}
+				if day == today {
+					todayCostUSD += cost
+				}
+			}
+
 			totalTurns++
 		}
 
@@ -307,6 +325,7 @@ func (p *Provider) readSessionUsageBreakdowns(tmpDir string, snap *core.UsageSna
 	emitClientSessionMetrics(clientSessions, snap)
 	emitModelRequestMetrics(modelRequests, modelSessions, snap)
 	emitToolMetrics(toolTotals, snap)
+	emitCostMetrics(modelCost, dailyCost, totalCostUSD, todayCostUSD, snap)
 	if languageSummary := formatNamedCountMap(languageUsageCounts, "req"); languageSummary != "" {
 		snap.Raw["language_usage"] = languageSummary
 	}
