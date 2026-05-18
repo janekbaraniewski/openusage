@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/pricing"
 )
 
 func TestSanitizeModelName(t *testing.T) {
@@ -160,6 +161,61 @@ func TestEstimateCost_Haiku(t *testing.T) {
 	expected := 4.8
 	if math.Abs(cost-expected) > 0.01 {
 		t.Errorf("estimateCost haiku = %.4f, want %.4f", cost, expected)
+	}
+}
+
+func TestEstimateCost_PricingResolverUsed(t *testing.T) {
+	prev := priceLookup
+	priceLookup = func(_ context.Context, _ string, _ int) (*pricing.Price, error) {
+		return &pricing.Price{
+			ModelID:                  "stub-model",
+			Source:                   pricing.SourceHardcoded,
+			InputCostPerMillion:      10.0,
+			OutputCostPerMillion:     20.0,
+			CacheReadCostPerMillion:  1.0,
+			CacheWriteCostPerMillion: 5.0,
+		}, nil
+	}
+	t.Cleanup(func() { priceLookup = prev })
+
+	u := &jsonlUsage{
+		InputTokens:              1_000_000,
+		OutputTokens:             500_000,
+		CacheReadInputTokens:     100_000,
+		CacheCreationInputTokens: 200_000,
+	}
+	// 10 + 10 + 0.1 + 1.0 = 21.1
+	cost := estimateCost("anything", u)
+	expected := 21.1
+	if math.Abs(cost-expected) > 0.01 {
+		t.Errorf("estimateCost via resolver = %.4f, want %.4f", cost, expected)
+	}
+}
+
+func TestEstimateCost_ResolverErrorFallsBackToLocalMap(t *testing.T) {
+	// TestMain already stubs priceLookup to always error, so this re-verifies
+	// that the local-map fallback covers all three Anthropic families.
+	cases := []struct {
+		model string
+		want  float64
+	}{
+		{"claude-opus-4-6", 27.0},
+		{"claude-sonnet-4-5-20250929", 4.5},
+		{"claude-haiku-3-5-20241022", 4.8},
+	}
+	for _, tc := range cases {
+		u := &jsonlUsage{InputTokens: 1_000_000, OutputTokens: 100_000}
+		if strings.Contains(tc.model, "opus") {
+			u.CacheReadInputTokens = 500_000
+			u.CacheCreationInputTokens = 200_000
+		}
+		if strings.Contains(tc.model, "haiku") {
+			u.OutputTokens = 1_000_000
+		}
+		got := estimateCost(tc.model, u)
+		if math.Abs(got-tc.want) > 0.01 {
+			t.Errorf("fallback estimateCost(%s) = %.4f, want %.4f", tc.model, got, tc.want)
+		}
 	}
 }
 

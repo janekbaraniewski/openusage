@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/pricing"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
@@ -215,14 +216,16 @@ type serverToolUsage struct {
 	WebFetchRequests  int `json:"web_fetch_requests"`
 }
 
-type pricing struct {
+// localPricing is the offline-fallback rate sheet used when the dynamic
+// pricing package cannot resolve a model (offline, all upstreams down).
+type localPricing struct {
 	InputPerMillion       float64
 	OutputPerMillion      float64
 	CacheReadPerMillion   float64
 	CacheCreatePerMillion float64
 }
 
-var modelPricing = map[string]pricing{
+var modelPricing = map[string]localPricing{
 	"opus": {
 		InputPerMillion:       15.0,
 		OutputPerMillion:      75.0,
@@ -243,7 +246,7 @@ var modelPricing = map[string]pricing{
 	},
 }
 
-func findPricing(model string) pricing {
+func findPricing(model string) localPricing {
 	lower := strings.ToLower(model)
 	for _, family := range []string{"opus", "haiku", "sonnet"} {
 		if strings.Contains(lower, family) {
@@ -253,10 +256,34 @@ func findPricing(model string) pricing {
 	return modelPricing["sonnet"]
 }
 
+// priceLookup is the indirection used by estimateCost to query the dynamic
+// pricing package. Tests override this to inject fixtures or force the
+// hardcoded-family fallback path.
+var priceLookup = func(ctx context.Context, model string, ctxLen int) (*pricing.Price, error) {
+	return pricing.DefaultResolver().Lookup(ctx, model, ctxLen)
+}
+
+// priceLookupTimeout bounds the dynamic pricing query so a slow or hung
+// upstream cannot stall a Fetch.
+const priceLookupTimeout = 2 * time.Second
+
 func estimateCost(model string, u *jsonlUsage) float64 {
 	if u == nil {
 		return 0
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), priceLookupTimeout)
+	defer cancel()
+	if p, err := priceLookup(ctx, model, 0); err == nil && p != nil {
+		return pricing.Estimate(p, 0, pricing.Usage{
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadInputTokens,
+			CacheWriteTokens: u.CacheCreationInputTokens,
+			ReasoningTokens:  u.ReasoningTokens,
+		})
+	}
+	// Fallback: dynamic pricing unavailable, use the hardcoded Anthropic
+	// family rates so the cost number stays useful when offline.
 	p := findPricing(model)
 	cost := float64(u.InputTokens) * p.InputPerMillion / 1_000_000
 	cost += float64(u.OutputTokens) * p.OutputPerMillion / 1_000_000
