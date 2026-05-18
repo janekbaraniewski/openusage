@@ -456,12 +456,22 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 
 	for _, key := range core.FallbackDisplayMetricKeys(snap.Metrics) {
 		m := snap.Metrics[key]
-		if m.Used != nil {
-			info.tagEmoji = "⚡"
-			info.tagLabel = "Usage"
-			info.summary = fmt.Sprintf("%s: %s %s", metricLabel(widget, key), formatNumber(*m.Used), m.Unit)
-			return info
+		if m.Used == nil {
+			continue
 		}
+		// Skip monetary metrics when hide-costs is on. Without this guard,
+		// snapshots whose only Used-valued metrics are dollar amounts (e.g.
+		// claude_code with 5h_block_cost / today_api_cost / 7d_api_cost) fall
+		// through every earlier branch — all of which already gate on
+		// !hideCosts — and leak a "5h Cost: 667.60 USD" summary into the
+		// compact header.
+		if hideCosts && isMonetaryMetricKey(key, m) {
+			continue
+		}
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.summary = fmt.Sprintf("%s: %s %s", metricLabel(widget, key), formatNumber(*m.Used), m.Unit)
+		return info
 	}
 
 	if snap.Message != "" {
