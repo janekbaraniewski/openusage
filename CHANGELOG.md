@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.10.7](https://github.com/janekbaraniewski/openusage/compare/v0.10.6...v0.10.7) (2026-05-18)
+
+
+### Features
+
+* **claude_code:** emit plan_type from subscription state ([05faf67](https://github.com/janekbaraniewski/openusage/commit/05faf6701b5af9d595655b02e3c1a7505d882d9b))
+* **config:** add hide_costs to dashboard config (both levels) ([1fcd595](https://github.com/janekbaraniewski/openusage/commit/1fcd5950b010cefe364469699b00fc64fd5560e3))
+* **core:** cost-visibility policy with plan-aware auto ([9d3f342](https://github.com/janekbaraniewski/openusage/commit/9d3f342c50c1d125d3b42b7281427447225dde6f))
+* **tui:** burn-rate projection and reset countdown on usage gauges ([f7ed801](https://github.com/janekbaraniewski/openusage/commit/f7ed801bf8e47854cc0199922ac07750fc9a78a2))
+* **tui:** burn-rate projection on dashboard tile gauges ([d3670ee](https://github.com/janekbaraniewski/openusage/commit/d3670ee9575a4a5a2a648102fb94ccdaf88e2322))
+* **tui:** c keystroke toggles hide_costs (cycles nil → true → false → nil) ([08a2b13](https://github.com/janekbaraniewski/openusage/commit/08a2b1303abb13ba7125eabd586a6a2574794ecf))
+* **tui:** gate cost rendering on resolved hide_costs ([f7c5acf](https://github.com/janekbaraniewski/openusage/commit/f7c5acfff4abbf941900dba4553fc7d9bd23e477))
+* **tui:** plug remaining cost-rendering leaks for hide_costs ([31681e0](https://github.com/janekbaraniewski/openusage/commit/31681e0b0741d7b4c86fa57ddd76ce35fad1c126))
+* **tui:** show projected percent at reset when 100% projection exceeds window ([328b80b](https://github.com/janekbaraniewski/openusage/commit/328b80bddc743dbfce00b65979d45a4b195a342b))
+
+
+### Bug Fixes
+
+* **ci:** gofmt-align gauge_test.go happy_path case ([04862a0](https://github.com/janekbaraniewski/openusage/commit/04862a06cd1b22410ede51709b15e7e5536c3070))
+* **ci:** restore permissions on refresh-release-prs job ([#157](https://github.com/janekbaraniewski/openusage/issues/157)) ([9ed0cad](https://github.com/janekbaraniewski/openusage/commit/9ed0cadef72fb406ed02101bde2954d50348cb68))
+* **security:** address code-scanning alerts ([#148](https://github.com/janekbaraniewski/openusage/issues/148)) ([62e0b5b](https://github.com/janekbaraniewski/openusage/commit/62e0b5b897a14ab2eb4a2e66e77ca2ff4b47c650))
+* **security:** scope workflow GITHUB_TOKEN permissions to job level ([62e0b5b](https://github.com/janekbaraniewski/openusage/commit/62e0b5b897a14ab2eb4a2e66e77ca2ff4b47c650))
+* **tui:** comprehensive cost suppression when hide_costs is true ([981cb88](https://github.com/janekbaraniewski/openusage/commit/981cb88be523c6f4f9753439283979be9a707c50))
+* **tui:** hide_costs fallback was leaking monetary metrics in detail summary ([9301ea0](https://github.com/janekbaraniewski/openusage/commit/9301ea01877ba208bba11462898dd3b6816dda6b))
+
+
+### Dependencies
+
+* **docs:** bump posthog-js from 1.372.10 to 1.374.1 in /docs/site in the docs-minor-and-patch group ([#153](https://github.com/janekbaraniewski/openusage/issues/153)) ([d49a468](https://github.com/janekbaraniewski/openusage/commit/d49a468461ca74decc18afd64131f43506e5f62a))
+* **docs:** bump webpack-dev-server from 5.2.3 to 5.2.4 in /docs/site ([#156](https://github.com/janekbaraniewski/openusage/issues/156)) ([fdd2cee](https://github.com/janekbaraniewski/openusage/commit/fdd2ceea697a600442bfa5a407f4655f8e3340ac))
+* **website:** bump puppeteer from 24.43.1 to 25.0.4 in /website ([#154](https://github.com/janekbaraniewski/openusage/issues/154)) ([ebde3f8](https://github.com/janekbaraniewski/openusage/commit/ebde3f874b98b04f6587514445c31a0889cc6143))
+* **website:** bump the website-minor-and-patch group in /website with 3 updates ([#152](https://github.com/janekbaraniewski/openusage/issues/152)) ([3a110e7](https://github.com/janekbaraniewski/openusage/commit/3a110e7d5ab41d1f91c6085d0b5c5067988279a0))
+
+
+### Refactoring
+
+* **tui:** apply PR [#155](https://github.com/janekbaraniewski/openusage/issues/155) review cleanups ([b44f0b4](https://github.com/janekbaraniewski/openusage/commit/b44f0b4cec02706d265fdca45c9742a636b6dba9))
+
 ## [0.10.6](https://github.com/janekbaraniewski/openusage/compare/v0.10.5...v0.10.6) (2026-05-17)
 
 
