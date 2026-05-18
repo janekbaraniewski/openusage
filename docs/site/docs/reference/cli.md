@@ -16,6 +16,8 @@ openusage detect [--all]                        # print credential auto-detectio
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle
 openusage integrations <subcommand> [flags]     # tool integration management
+openusage hub [flags]                           # aggregate snapshots from multiple machines
+openusage hub-view <url> [flags]                # read-only TUI over a remote hub
 ```
 
 ## `openusage`
@@ -177,6 +179,87 @@ openusage integrations upgrade --all
 
 Reinstalls integrations whose embedded version is newer than the installed version.
 
+## `openusage hub`
+
+Runs an HTTP server that aggregates `UsageSnapshot` batches pushed from one or more worker machines, then renders the merged view in the same TUI as the local dashboard. See [Multi-machine aggregation](../guides/multi-machine.md) for the end-to-end setup.
+
+```
+openusage hub [--listen ADDR] [--headless] [--allow-public]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--listen ADDR` | `:9190` (or `hub.listen_addr`) | TCP address to bind. `:9190` listens on all interfaces; `127.0.0.1:9190` is loopback-only. |
+| `--headless` | off | Run the HTTP server without the TUI. Use this in containers or background services. |
+| `--allow-public` | off | Opt-in to bind a non-loopback interface without an auth token. Without this flag, the hub refuses to start in that configuration. |
+
+### Endpoints
+
+| Endpoint | Method | Auth required |
+|---|---|---|
+| `/v1/push` | POST | Bearer (if auth_token set) |
+| `/v1/snapshots` | GET | Bearer (if auth_token set) |
+| `/healthz` | GET | never (liveness probe) |
+
+### Auth posture
+
+- Set `OPENUSAGE_HUB_TOKEN` (or `hub.auth_token` in `settings.json`) to require `Authorization: Bearer <token>` on `/v1/push` and `/v1/snapshots`. `/healthz` stays unauthenticated for liveness probes.
+- The auth token is **never persisted** to `settings.json` — supply it via the env var at runtime.
+
+### Unsafe-default guard
+
+Without an auth token, the hub refuses to bind to a non-loopback interface. The startup message points to three fixes:
+
+```
+hub: refusing to listen on ":9190" without auth_token.
+  Choose one:
+    1. export OPENUSAGE_HUB_TOKEN=<secret> to enable Bearer auth, OR
+    2. bind to loopback only:  --listen 127.0.0.1:9190, OR
+    3. pass --allow-public if you have a network-level firewall in place
+```
+
+Loopback (`127.0.0.1`, `localhost`, `[::1]`) is always allowed; the guard only triggers for `:port` (all-interfaces) and explicit non-loopback IPs/hostnames.
+
+### Examples
+
+```bash
+openusage hub                                        # TUI on 127.0.0.1:9190
+openusage hub --listen 127.0.0.1:9190                # explicit loopback bind
+openusage hub --listen :9190 --allow-public          # bind 0.0.0.0 without auth (trusted LAN)
+OPENUSAGE_HUB_TOKEN=s3cret openusage hub --headless  # bind 0.0.0.0 with Bearer auth
+```
+
+## `openusage hub-view`
+
+Connects to a remote hub, polls `GET /v1/snapshots`, and renders the result in a read-only dashboard. No local providers or daemon are needed.
+
+```
+openusage hub-view <url> [--interval DURATION] [--token TOKEN]
+```
+
+Argument:
+
+- `<url>` — base URL of the hub, e.g. `http://hub.lan:9190` or `https://openusage.example.com`. The trailing slash is trimmed.
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--interval DURATION` | `30s` (or `ui.refresh_interval_seconds`) | Poll interval for `/v1/snapshots`. |
+| `--token TOKEN` | (none) | Bearer token sent in `Authorization`. Falls back to `OPENUSAGE_HUB_TOKEN`. |
+
+### Examples
+
+```bash
+openusage hub-view http://192.168.1.10:9190
+openusage hub-view https://openusage.example.com --interval 10s
+OPENUSAGE_HUB_TOKEN=s3cret openusage hub-view http://hub:9190
+```
+
+The TUI shows `hub <url> · N machine snapshots` in its status line, and switches to an error state if the hub becomes unreachable.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -192,6 +275,7 @@ The CLI honors the following — see [environment variables](./env-vars.md) for 
 - `OPENUSAGE_DEBUG` — verbose stderr logging
 - `OPENUSAGE_BIN` — override the binary path used by hook scripts
 - `OPENUSAGE_TELEMETRY_SOCKET` — override socket path
+- `OPENUSAGE_HUB_TOKEN` — Bearer token shared by `hub`, `hub-view`, and the daemon exporter
 - `OPENUSAGE_THEME_DIR` — extra theme search paths
 - `XDG_CONFIG_HOME`, `XDG_STATE_HOME` — base directories
 - `CLAUDE_SETTINGS_FILE`, `CODEX_CONFIG_DIR` — tool-specific overrides
@@ -201,3 +285,4 @@ The CLI honors the following — see [environment variables](./env-vars.md) for 
 - [Paths reference](./paths.md) — every file path the CLI reads or writes
 - [Configuration reference](./configuration.md) — `settings.json` schema
 - [Daemon overview](../daemon/overview.md) — what the daemon does
+- [Multi-machine aggregation](../guides/multi-machine.md) — `hub` and `hub-view` setup walkthrough
