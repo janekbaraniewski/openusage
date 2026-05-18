@@ -1,7 +1,19 @@
 # syntax=docker/dockerfile:1
+#
+# Dockerfile.hub — image for the `openusage hub` aggregation server.
+#
+# Scope: this image is intentionally narrow. It bundles the binary with
+# `hub --headless` as its entrypoint, suitable for `docker run` or a
+# self-hosted multi-machine deployment. The TUI dashboard is not designed
+# to run inside a container.
+#
+# See docs/site/docs/guides/multi-machine.md for the end-to-end flow.
+# Base images pin minor versions so security patches auto-flow; apk
+# packages stay unpinned because the alpine index moves frequently and
+# strict pins would break CI without bringing a real security win.
 
 # ── builder ──────────────────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25-alpine3.21 AS builder
 
 # CGO is required for mattn/go-sqlite3 (Cursor provider + telemetry store).
 RUN apk add --no-cache gcc musl-dev
@@ -26,11 +38,36 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 # ── runtime ───────────────────────────────────────────────────────────────────
 FROM alpine:3.21
 
-# ca-certificates: needed for HTTPS calls to provider APIs from worker mode.
-RUN apk add --no-cache ca-certificates
+# ca-certificates: HTTPS calls to provider APIs (worker mode reuse).
+# wget: minimal HTTP client for HEALTHCHECK.
+RUN apk add --no-cache ca-certificates wget
 
 COPY --from=builder /openusage /usr/local/bin/openusage
 
+# OCI image labels. Values are filled by the release pipeline build args.
+ARG VERSION=dev
+ARG COMMIT_HASH=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="openusage-hub" \
+      org.opencontainers.image.description="OpenUsage hub server for multi-machine usage aggregation." \
+      org.opencontainers.image.source="https://github.com/janekbaraniewski/openusage" \
+      org.opencontainers.image.url="https://github.com/janekbaraniewski/openusage" \
+      org.opencontainers.image.documentation="https://janekbaraniewski.github.io/openusage/guides/multi-machine" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_HASH}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# Run as the alpine `nobody` user (UID 65534) — no shell, no home, no
+# privileges. The hub only needs to bind a port and keep state in memory.
+USER 65534:65534
+
 EXPOSE 9190
+
+# HEALTHCHECK exercises the public /healthz endpoint (always unauthenticated).
+# A failing healthcheck on a running container typically means port binding
+# failed or the process crashed.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:9190/healthz || exit 1
 
 ENTRYPOINT ["openusage", "hub", "--headless"]

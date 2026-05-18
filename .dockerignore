@@ -1,0 +1,37 @@
+# Build artifacts and metadata that don't belong in the container build context.
+.git
+.github
+.idea
+.vscode
+.claude
+*.swp
+*.swo
+
+# Pre-built binaries (the image rebuilds from source).
+bin/
+dist/
+build/
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Node / docs site — not used by the Go build.
+docs/site/node_modules
+docs/site/build
+docs/site/.docusaurus
+website/node_modules
+website/build
+website/.docusaurus
+
+# Misc large assets that bloat the context.
+screenshots/
+demo/
+docs/assets/screenshots/
+
+# Local-only files.
+.env
+.env.*
+*.local
+TODO.md
+notes/
