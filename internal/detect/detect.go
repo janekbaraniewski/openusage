@@ -57,6 +57,7 @@ func AutoDetect() Result {
 	detectCrush(&result)
 	detectRooCode(&result)
 	detectKiloCode(&result)
+	detectZed(&result)
 
 	// Phase 2: process env vars. Most authoritative; runs before any
 	// file-based credential adoption so a freshly-set env var always

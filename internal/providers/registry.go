@@ -32,6 +32,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
 	"github.com/janekbaraniewski/openusage/internal/providers/zai"
+	"github.com/janekbaraniewski/openusage/internal/providers/zed"
 )
 
 func AllProviders() []core.UsageProvider {
@@ -63,6 +64,7 @@ func AllProviders() []core.UsageProvider {
 		crush.New(),
 		roocode.New(),
 		kilocode.New(),
+		zed.New(),
 	}
 }
 
