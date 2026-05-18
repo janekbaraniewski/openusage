@@ -41,6 +41,7 @@ OpenUsage's keymap is grouped by **context** — global keys are always live, wh
 | <kbd>t</kbd> | Cycle theme |
 | <kbd>w</kbd> | Cycle time window (`1d`, `3d`, `7d`, `30d`, `all`) |
 | <kbd>Ctrl+O</kbd> | Expand model breakdown |
+| <kbd>c</kbd> | Cycle cost visibility for the focused account (auto → hide → show → auto); persists to config |
 
 ## Detail pane highlights
 
