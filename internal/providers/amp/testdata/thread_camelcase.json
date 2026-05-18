@@ -1,0 +1,18 @@
+{
+  "id": "thread-cc-001",
+  "createdAt": "2026-05-11T12:00:00Z",
+  "messages": [
+    {
+      "messageId": "msg-cc-1",
+      "role": "assistant",
+      "model": "gpt-4o",
+      "createdAt": "2026-05-11T12:00:30Z",
+      "usage": {
+        "inputTokens": 500,
+        "outputTokens": 100,
+        "cacheReadInputTokens": -50,
+        "cacheCreationInputTokens": 25
+      }
+    }
+  ]
+}

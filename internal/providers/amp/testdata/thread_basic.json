@@ -1,0 +1,54 @@
+{
+  "id": "thread-basic-001",
+  "title": "Refactor pipeline",
+  "created_at": "2026-05-10T09:00:00Z",
+  "ledger_path": "ledger.jsonl",
+  "messages": [
+    {
+      "id": "msg-user-1",
+      "role": "user",
+      "timestamp": "2026-05-10T09:00:01Z"
+    },
+    {
+      "id": "msg-asst-1",
+      "role": "assistant",
+      "model": "sonnet-4.5",
+      "timestamp": "2026-05-10T09:00:05Z",
+      "usage": {
+        "input": 1200,
+        "output": 350,
+        "cache_read": 800,
+        "cache_write": 200
+      }
+    },
+    {
+      "id": "msg-user-2",
+      "role": "user",
+      "timestamp": "2026-05-10T09:01:00Z"
+    },
+    {
+      "id": "msg-asst-2",
+      "role": "assistant",
+      "model": "sonnet-4.5",
+      "timestamp": "2026-05-10T09:01:05Z",
+      "usage": {
+        "input": 1500,
+        "output": 420,
+        "cache_read": 1000,
+        "cache_write": 0
+      }
+    },
+    {
+      "id": "msg-asst-empty",
+      "role": "assistant",
+      "model": "sonnet-4.5",
+      "timestamp": "2026-05-10T09:02:00Z",
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_write": 0
+      }
+    }
+  ]
+}

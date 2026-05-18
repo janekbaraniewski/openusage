@@ -1,0 +1,5 @@
+{"to_message_id":"msg-asst-1","model":"sonnet-4.5","credits":0.025,"timestamp":"2026-05-10T09:00:06Z","tokens":{"input":1200,"output":400,"cache_read":850,"cache_write":210}}
+{"to_message_id":"msg-asst-2","model":"sonnet-4.5","credits":0.031,"timestamp":"2026-05-10T09:01:06Z","tokens":{"input":1500,"output":420,"cache_read":1000,"cache_write":0}}
+{"to_message_id":"msg-orphan-1","model":"sonnet-4.5","credits":0.011,"timestamp":"2026-05-12T08:00:00Z","tokens":{"input":300,"output":80}}
+this is not json and should be skipped
+{"to_message_id":"","model":"junk","credits":99}
