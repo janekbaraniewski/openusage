@@ -46,6 +46,7 @@ func main() {
 	root.AddCommand(newIntegrationsCommand())
 	root.AddCommand(newDetectCommand())
 	root.AddCommand(newPricingCommand())
+	root.AddCommand(newExportCommand())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
