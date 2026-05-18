@@ -16,6 +16,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/goose"
 	"github.com/janekbaraniewski/openusage/internal/providers/groq"
+	"github.com/janekbaraniewski/openusage/internal/providers/kilocode"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
 	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
 	"github.com/janekbaraniewski/openusage/internal/providers/ollama"
@@ -53,6 +54,7 @@ func AllProviders() []core.UsageProvider {
 		amp.New(),
 		goose.New(),
 		roocode.New(),
+		kilocode.New(),
 	}
 }
 
