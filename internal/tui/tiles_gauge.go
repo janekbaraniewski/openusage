@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -36,7 +39,11 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		}
 	}
 
+	now := m.viewNow()
+	annotationIndent := strings.Repeat(" ", maxLabelW+1)
+
 	var lines []string
+	renderedGauges := 0
 	for _, key := range keys {
 		if gaugeAllowSet != nil && !gaugeAllowSet[key] {
 			continue
@@ -64,7 +71,16 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
 		lines = append(lines, labelR+" "+gauge)
-		if maxLines > 0 && len(lines) >= maxLines {
+
+		// Append a dim projection annotation when the metric has a
+		// recognized window + a reset timestamp. Pace mirrors the detail
+		// view computation (current% / elapsed minutes / 100).
+		if annot := tileGaugeProjectionAnnotation(snap, key, met, usedPct, now); annot != "" {
+			lines = append(lines, annotationIndent+dimStyle.Render(annot))
+		}
+
+		renderedGauges++
+		if maxLines > 0 && renderedGauges >= maxLines {
 			break
 		}
 	}
@@ -190,4 +206,78 @@ func metricUsedPercent(key string, met core.Metric) float64 {
 
 func metricHasGauge(key string, met core.Metric) bool {
 	return metricUsedPercent(key, met) >= 0
+}
+
+// tileGaugeProjectionAnnotation returns a compact annotation string suitable
+// for the dashboard tile gauge (no leading indent or styling applied). It
+// returns "" when neither a reset countdown nor a meaningful pace projection
+// is available, so the caller can skip the line entirely.
+//
+// Returned forms (always dim-styled by caller):
+//   - "resets 1h 23m · 100% in 42m"     (pace lands inside the window)
+//   - "resets 3h 42m · ~85% by reset"   (pace would overshoot the window)
+//   - "resets 1h 23m"                   (no pace yet, e.g. usedPct == 0 or no elapsed time)
+//   - "100% in 42m"                     (pace known but no reset timestamp)
+//   - ""                                 (nothing meaningful to show)
+func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core.Metric, usedPct float64, now time.Time) string {
+	windowDur, ok := gaugeWindowDuration(met.Window)
+	if !ok {
+		return ""
+	}
+	resetAt, hasReset := snap.Resets[key]
+	if !hasReset {
+		return ""
+	}
+	resetIn := resetAt.Sub(now)
+
+	var resetPart string
+	if resetIn > 0 {
+		resetPart = "resets " + formatDurationShort(resetIn)
+	}
+
+	var projPart string
+	if usedPct > 0 && usedPct < 100 {
+		elapsed := windowDur - resetIn
+		if elapsed > 0 {
+			elapsedMin := elapsed.Minutes()
+			if elapsedMin > 0 {
+				paceFraction := (usedPct / 100) / elapsedMin
+				if !math.IsNaN(paceFraction) && !math.IsInf(paceFraction, 0) && paceFraction > 0 {
+					pctPerMinute := paceFraction * 100
+					if pctPerMinute > 0 {
+						remainingPct := 100 - usedPct
+						minutesTo100 := remainingPct / pctPerMinute
+						d := time.Duration(minutesTo100 * float64(time.Minute))
+						if d > 0 {
+							// If we would not reach 100% before reset,
+							// surface the projected % at reset instead.
+							if resetIn > 0 && d > resetIn {
+								projectedPct := usedPct + pctPerMinute*resetIn.Minutes()
+								n := int(math.Round(projectedPct))
+								if n < 0 {
+									n = 0
+								}
+								if n >= 100 {
+									n = 99
+								}
+								projPart = fmt.Sprintf("~%d%% by reset", n)
+							} else {
+								projPart = "100% in " + formatDurationShort(d)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	switch {
+	case resetPart != "" && projPart != "":
+		return resetPart + " · " + projPart
+	case resetPart != "":
+		return resetPart
+	case projPart != "":
+		return projPart
+	}
+	return ""
 }
