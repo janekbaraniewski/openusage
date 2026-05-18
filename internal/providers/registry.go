@@ -10,6 +10,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/codex"
 	"github.com/janekbaraniewski/openusage/internal/providers/copilot"
+	"github.com/janekbaraniewski/openusage/internal/providers/crush"
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/providers/deepseek"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_api"
@@ -53,6 +54,7 @@ func AllProviders() []core.UsageProvider {
 		codex.New(),
 		amp.New(),
 		goose.New(),
+		crush.New(),
 		roocode.New(),
 		kilocode.New(),
 	}
