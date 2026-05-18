@@ -26,10 +26,10 @@ func TestRenderUsageGaugeWithProjection(t *testing.T) {
 		wantNotContain []string
 	}{
 		{
-			name:         "happy_path",
-			usedPercent:  usedPercent,
-			paceFraction: 0.05, // 5%/min → 100% in 10m, well inside the 30m window
-			resetIn:      resetIn,
+			name:           "happy_path",
+			usedPercent:    usedPercent,
+			paceFraction:   0.05, // 5%/min → 100% in 10m, well inside the 30m window
+			resetIn:        resetIn,
 			wantContains:   []string{"resets in", "projected 100% in"},
 			wantNotContain: []string{"by reset"},
 		},
