@@ -205,7 +205,7 @@ openusage hub [--listen ADDR] [--headless] [--allow-public]
 
 ### Auth posture
 
-- Set `OPENUSAGE_HUB_TOKEN` (or `hub.auth_token` in `settings.json`) to require `Authorization: Bearer <token>` on `/v1/push` and `/v1/snapshots`. `/healthz` stays unauthenticated for liveness probes.
+- Export `OPENUSAGE_HUB_TOKEN` to require `Authorization: Bearer <token>` on `/v1/push` and `/v1/snapshots`. `/healthz` stays unauthenticated for liveness probes.
 - The auth token is **never persisted** to `settings.json` — supply it via the env var at runtime.
 
 ### Unsafe-default guard

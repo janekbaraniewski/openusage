@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,12 @@ import (
 // envHubToken is shared with the hub server + exporter: if --token is not
 // provided, this env var is used as a Bearer token fallback.
 const envHubToken = "OPENUSAGE_HUB_TOKEN"
+
+// maxFetchBodyBytes caps /v1/snapshots responses. Sized for the aggregate
+// of hundreds of workers near the per-push cap, not just one worker. On
+// overflow io.LimitReader truncates silently — surfaces as a JSON decode
+// error, not a clean "too large" message, but the goal here is OOM bound.
+const maxFetchBodyBytes = 256 << 20
 
 func newHubViewCommand() *cobra.Command {
 	var interval time.Duration
@@ -185,7 +192,7 @@ func fetchHubSnapshots(ctx context.Context, client *http.Client, url, token stri
 	}
 
 	var snaps map[string]core.UsageSnapshot
-	if err := json.NewDecoder(resp.Body).Decode(&snaps); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxFetchBodyBytes)).Decode(&snaps); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return snaps, nil

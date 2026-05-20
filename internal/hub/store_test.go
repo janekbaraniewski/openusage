@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -34,23 +35,51 @@ func TestStore_IngestAndSnapshots(t *testing.T) {
 		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
 	}
 
-	snap, ok := snaps["work-mac:openai:personal"]
+	wantKey1 := "work-mac:openai:personal"
+	snap, ok := snaps[wantKey1]
 	if !ok {
-		t.Fatal("expected key 'work-mac:openai:personal'")
+		t.Fatalf("expected key %q", wantKey1)
 	}
-	if snap.AccountID != "work-mac:openai:personal" {
-		t.Errorf("AccountID = %q, want work-mac:openai:personal", snap.AccountID)
+	if snap.AccountID != wantKey1 {
+		t.Errorf("AccountID = %q, want %q (map key and AccountID must match)", snap.AccountID, wantKey1)
 	}
 	if snap.ProviderID != "openai" {
 		t.Errorf("ProviderID = %q, want openai (must be unchanged)", snap.ProviderID)
 	}
 
-	snap2, ok := snaps["home-linux:claude_code:default"]
+	wantKey2 := "home-linux:claude_code:default"
+	snap2, ok := snaps[wantKey2]
 	if !ok {
-		t.Fatal("expected key 'home-linux:claude_code:default'")
+		t.Fatalf("expected key %q", wantKey2)
+	}
+	if snap2.AccountID != wantKey2 {
+		t.Errorf("AccountID = %q, want %q", snap2.AccountID, wantKey2)
 	}
 	if snap2.ProviderID != "claude_code" {
 		t.Errorf("ProviderID = %q, want claude_code", snap2.ProviderID)
+	}
+}
+
+// TestStore_KeysAreReadable pins the invariant that nothing returned by
+// Snapshots() leaks the internal \x1f separator. Without this guard the
+// hub keys would surface in the HTTP JSON response, m.providerOrder, and
+// (transitively) settings.json — collapsing in terminals and producing
+// unusable persisted account IDs.
+func TestStore_KeysAreReadable(t *testing.T) {
+	store := NewStore(5 * time.Minute)
+	store.Ingest(core.RemoteEnvelope{
+		Machine:   "work-mac",
+		SentAt:    time.Now(),
+		Snapshots: []core.UsageSnapshot{makeSnap("openai", "personal")},
+	})
+	isControl := func(r rune) bool { return r < 0x20 }
+	for key, snap := range store.Snapshots() {
+		if strings.IndexFunc(key, isControl) >= 0 {
+			t.Errorf("map key %q contains control char — leaks to JSON/TUI/config", key)
+		}
+		if strings.IndexFunc(snap.AccountID, isControl) >= 0 {
+			t.Errorf("snap.AccountID %q contains control char", snap.AccountID)
+		}
 	}
 }
 
@@ -77,6 +106,39 @@ func TestStore_NoCollisionAcrossProviders(t *testing.T) {
 	}
 	if _, ok := snaps["work-mac:anthropic:default"]; !ok {
 		t.Error("missing key 'work-mac:anthropic:default'")
+	}
+}
+
+// TestStore_DisplayKeyCollision documents the known trade-off of using
+// ":" as the public separator: two distinct (machine, providerID,
+// accountID) triples whose ":" joins happen to coincide produce one entry
+// in the output, because the second write lands at the same map key. The
+// contrived example below relies on a provider literally named "mac" —
+// providers are a fixed snake_case set in this codebase, so this case is
+// not reachable today, but the test pins the documented behaviour for
+// anyone considering loosening the provider naming rule.
+func TestStore_DisplayKeyCollision(t *testing.T) {
+	store := NewStore(5 * time.Minute)
+	store.Ingest(core.RemoteEnvelope{
+		Machine:   "work:mac",
+		SentAt:    time.Now(),
+		Snapshots: []core.UsageSnapshot{makeSnap("openai", "default")},
+	})
+	store.Ingest(core.RemoteEnvelope{
+		Machine:   "work",
+		SentAt:    time.Now(),
+		Snapshots: []core.UsageSnapshot{makeSnap("mac", "openai:default")},
+	})
+
+	snaps := store.Snapshots()
+	// Both rows join to "work:mac:openai:default". Go map iteration is
+	// non-deterministic, so whichever machine is visited last overwrites
+	// the other in out[]. The net result is always exactly 1 entry.
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot after printable-key collision, got %d", len(snaps))
+	}
+	if _, ok := snaps["work:mac:openai:default"]; !ok {
+		t.Error("missing colliding key 'work:mac:openai:default'")
 	}
 }
 

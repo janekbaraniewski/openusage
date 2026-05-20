@@ -73,7 +73,7 @@ func newHubCommand() *cobra.Command {
 			"",
 			"Security: by default the hub has NO authentication. Without an auth token, the hub refuses to bind to a",
 			"non-loopback interface unless you pass --allow-public to explicitly opt in.",
-			"To require a Bearer token, set OPENUSAGE_HUB_TOKEN or hub.auth_token in settings.json.",
+			"To require a Bearer token, export OPENUSAGE_HUB_TOKEN.",
 			"Do not expose the hub to untrusted networks without enabling auth.",
 		}, "\n"),
 		Example: strings.Join([]string{

@@ -2,12 +2,12 @@ package hub
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -19,9 +19,6 @@ const (
 	// misbehaving or malicious worker exhausting hub memory. 4 MiB is
 	// comfortably larger than any realistic snapshot batch.
 	maxPushBodyBytes = 4 << 20
-
-	// envAuthToken is the environment variable fallback for HubConfig.AuthToken.
-	envAuthToken = "OPENUSAGE_HUB_TOKEN"
 )
 
 // Server receives RemoteEnvelope pushes from worker machines over TCP HTTP.
@@ -41,15 +38,12 @@ func NewServer(addr string, store *Store) *Server {
 }
 
 // NewServerWithAuth creates a Server that requires Bearer token auth on
-// mutating / data endpoints when authToken is non-empty. If authToken is
-// empty and the OPENUSAGE_HUB_TOKEN env var is set, the env var value is
-// used — this mirrors the exporter-side convention.
+// mutating / data endpoints when authToken is non-empty. The caller is
+// expected to have resolved any environment-variable fallback (e.g.
+// OPENUSAGE_HUB_TOKEN) before invoking this — see cmd/openusage/hub.go's
+// resolveHubRuntime for the canonical resolution path.
 func NewServerWithAuth(addr string, store *Store, authToken string) *Server {
-	token := strings.TrimSpace(authToken)
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv(envAuthToken))
-	}
-	return &Server{addr: addr, store: store, authToken: token}
+	return &Server{addr: addr, store: store, authToken: strings.TrimSpace(authToken)}
 }
 
 // AuthEnabled reports whether the server requires a Bearer token.
@@ -104,7 +98,9 @@ func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
-	if got != s.authToken {
+	// Constant-time compare so an attacker can't enumerate the token
+	// byte-by-byte via response-timing differences.
+	if subtle.ConstantTimeCompare([]byte(got), []byte(s.authToken)) != 1 {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="openusage-hub", error="invalid_token"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
 		return false

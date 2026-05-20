@@ -266,6 +266,10 @@ var daemonInstallEnvVars = []string{
 	"OLLAMA_HOST",
 	"ALIBABA_CLOUD_API_KEY",
 	"OPENUSAGE_DEBUG",
+	// Hub exporter Bearer token. Captured at install time so the daemon's
+	// exporter can authenticate to a remote hub without the operator having
+	// to hand-edit the platform service file.
+	"OPENUSAGE_HUB_TOKEN",
 }
 
 func currentServiceEnvSnapshot() map[string]string {

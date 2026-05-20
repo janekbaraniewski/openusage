@@ -105,7 +105,20 @@ On every machine you want feeding the hub, edit `~/.config/openusage/settings.js
 }
 ```
 
-If the hub requires auth, export `OPENUSAGE_HUB_TOKEN` in the **daemon's** environment — not yours interactively. On Linux that means the systemd unit's `Environment=`; on macOS, the launchd plist's `EnvironmentVariables`. Reinstall with `openusage telemetry daemon install` to pick up the new env block.
+If the hub requires auth, `OPENUSAGE_HUB_TOKEN` needs to live in the daemon's environment — not your interactive shell. The easiest path is to export it once and (re)install the daemon service:
+
+```bash
+export OPENUSAGE_HUB_TOKEN=<secret>
+openusage telemetry daemon install   # rewrites the platform service file
+                                     # with a snapshot of relevant env vars
+```
+
+`daemon install` captures a whitelisted snapshot of your current environment (`OPENAI_API_KEY`, `OPENUSAGE_HUB_TOKEN`, etc.) and writes it into:
+
+- Linux — `~/.local/state/openusage/daemon.env` (loaded via `EnvironmentFile=` in `~/.config/systemd/user/openusage-telemetry.service`)
+- macOS — the `EnvironmentVariables` dict inside `~/Library/LaunchAgents/com.openusage.telemetryd.plist`
+
+If you'd rather edit those files by hand, append `OPENUSAGE_HUB_TOKEN="<secret>"` to `~/.local/state/openusage/daemon.env` on Linux or add it to the `EnvironmentVariables` dict in the plist on macOS, then reload the service (`systemctl --user restart openusage-telemetry` / `launchctl kickstart -k gui/$UID/com.openusage.telemetryd`). Note that the next `daemon install` overwrites these files with a fresh snapshot of your current shell environment, so prefer the `export + install` path unless you're already managing the unit by other means.
 
 The exporter pushes immediately on startup and then every `interval_seconds`. Best-effort: errors are logged and swallowed; the daemon never stops over an exporter failure.
 
@@ -132,7 +145,7 @@ OPENUSAGE_HUB_TOKEN=s3cret openusage hub-view https://openusage.example.com
 
 - **Stale eviction.** A machine entry is pruned after `hub.stale_timeout_seconds` (default 300s). Stop a worker and within 5 min its tiles disappear from the aggregated view.
 - **Snapshot is the latest, not a stream.** The hub holds only the newest batch per machine. If you want historical aggregates, query each daemon's SQLite separately.
-- **`/healthz` is unauthenticated by design.** Liveness probes work without secrets; the response leaks only the list of machine names (not snapshot data).
+- **`/healthz` is unauthenticated by design.** Liveness probes work without secrets; the response only lists machine names — no snapshot data. On a trusted LAN this is fine, but on an internet-facing hub the machine list leaks topology. If you care, bind the hub loopback-only and reverse-proxy `/v1/push` and `/v1/snapshots` via your existing TLS terminator, or firewall `/healthz` at the network layer.
 - **Bind address matters.** `127.0.0.1:9190` is loopback-only and safe even without auth; `:9190` or `0.0.0.0:9190` is all-interfaces and requires either auth or `--allow-public`.
 
 ## See also

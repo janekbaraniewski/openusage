@@ -264,27 +264,6 @@ func TestAuth_HealthNeverRequiresToken(t *testing.T) {
 	}
 }
 
-func TestAuth_EnvFallback(t *testing.T) {
-	t.Setenv("OPENUSAGE_HUB_TOKEN", "env-token")
-	store := NewStore(time.Minute)
-	// Explicit token is empty → env var picked up.
-	srv := NewServerWithAuth(":0", store, "")
-	if !srv.AuthEnabled() {
-		t.Fatal("expected auth enabled via env fallback")
-	}
-
-	env := core.RemoteEnvelope{Machine: "m", Snapshots: []core.UsageSnapshot{makeSnap("openai", "a")}}
-	body, _ := json.Marshal(env)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/push", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer env-token")
-	w := httptest.NewRecorder()
-	srv.handlePush(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("env-token auth: status = %d, want 200", w.Code)
-	}
-}
-
 func TestPush_BodyTooLarge(t *testing.T) {
 	srv, _ := newTestServer(t)
 	// Craft a body >4 MiB with a tiny, valid-looking prefix. MaxBytesReader
