@@ -24,7 +24,7 @@
     "@easyops-cn/docusaurus-search-local": "^0.55.1",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
-    "posthog-js": "^1.374.1",
+    "posthog-js": "^1.376.0",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -33,7 +33,7 @@
     "@docusaurus/module-type-aliases": "3.10.1",
     "@docusaurus/tsconfig": "3.10.1",
     "@docusaurus/types": "3.10.1",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.2.15",
     "typescript": "~6.0.2"
   },
   "browserslist": {
