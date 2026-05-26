@@ -199,8 +199,8 @@ openusage hub [--listen ADDR] [--headless] [--allow-public]
 
 | Endpoint | Method | Auth required |
 |---|---|---|
-| `/v1/push` | POST | Bearer (if auth_token set) |
-| `/v1/snapshots` | GET | Bearer (if auth_token set) |
+| `/v1/push` | POST | Bearer (if a token is configured) |
+| `/v1/snapshots` | GET | Bearer (if a token is configured) |
 | `/healthz` | GET | never (liveness probe) |
 
 ### Auth posture
