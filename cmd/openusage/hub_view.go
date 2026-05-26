@@ -25,11 +25,9 @@ import (
 // provided, this env var is used as a Bearer token fallback.
 const envHubToken = "OPENUSAGE_HUB_TOKEN"
 
-// maxFetchBodyBytes caps /v1/snapshots responses. Sized for the aggregate
-// of hundreds of workers near the per-push cap, not just one worker. On
-// overflow io.LimitReader truncates silently — surfaces as a JSON decode
-// error, not a clean "too large" message, but the goal here is OOM bound.
-const maxFetchBodyBytes = 256 << 20
+// maxFetchBodyBytes caps /v1/snapshots responses from a remote hub so a
+// misbehaving endpoint cannot force the viewer to decode an unbounded body.
+const maxFetchBodyBytes = 16 << 20
 
 func newHubViewCommand() *cobra.Command {
 	var interval time.Duration
@@ -42,7 +40,7 @@ func newHubViewCommand() *cobra.Command {
 			"Connect to a remote OpenUsage hub and display its aggregated snapshot data in a read-only TUI.",
 			"No local providers or daemon required.",
 			"",
-			"If the target hub has auth_token set, pass --token or export OPENUSAGE_HUB_TOKEN to authenticate.",
+			"If the target hub requires auth, pass --token or export OPENUSAGE_HUB_TOKEN to authenticate.",
 		}, "\n"),
 		Example: strings.Join([]string{
 			"  openusage hub-view https://openusage.gameapp.club",

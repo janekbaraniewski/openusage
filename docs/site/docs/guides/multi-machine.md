@@ -18,8 +18,8 @@ Every worker still runs the normal `openusage telemetry` daemon — collection l
 
 | Endpoint | Method | Auth required |
 |---|---|---|
-| `/v1/push` | POST | Bearer (if auth_token set) |
-| `/v1/snapshots` | GET | Bearer (if auth_token set) |
+| `/v1/push` | POST | Bearer (if a token is configured) |
+| `/v1/snapshots` | GET | Bearer (if a token is configured) |
 | `/healthz` | GET | never (liveness probe) |
 
 `openusage hub` provides a built-in TUI for the aggregated view. `openusage hub-view <url>` is a read-only client suitable for a laptop that doesn't need its own daemon.
@@ -105,20 +105,17 @@ On every machine you want feeding the hub, edit `~/.config/openusage/settings.js
 }
 ```
 
-If the hub requires auth, `OPENUSAGE_HUB_TOKEN` needs to live in the daemon's environment — not your interactive shell. The easiest path is to export it once and (re)install the daemon service:
+If the hub requires auth, `OPENUSAGE_HUB_TOKEN` needs to live in the daemon's environment — not just your interactive shell. How you set it depends on how you run the daemon.
 
 ```bash
-export OPENUSAGE_HUB_TOKEN=<secret>
-openusage telemetry daemon install   # rewrites the platform service file
-                                     # with a snapshot of relevant env vars
+# Foreground daemon
+OPENUSAGE_HUB_TOKEN=<secret> openusage telemetry daemon
 ```
 
-`daemon install` captures a whitelisted snapshot of your current environment (`OPENAI_API_KEY`, `OPENUSAGE_HUB_TOKEN`, etc.) and writes it into:
+For a user-managed service, put the token in the service environment:
 
-- Linux — `~/.local/state/openusage/daemon.env` (loaded via `EnvironmentFile=` in `~/.config/systemd/user/openusage-telemetry.service`)
-- macOS — the `EnvironmentVariables` dict inside `~/Library/LaunchAgents/com.openusage.telemetryd.plist`
-
-If you'd rather edit those files by hand, append `OPENUSAGE_HUB_TOKEN="<secret>"` to `~/.local/state/openusage/daemon.env` on Linux or add it to the `EnvironmentVariables` dict in the plist on macOS, then reload the service (`systemctl --user restart openusage-telemetry` / `launchctl kickstart -k gui/$UID/com.openusage.telemetryd`). Note that the next `daemon install` overwrites these files with a fresh snapshot of your current shell environment, so prefer the `export + install` path unless you're already managing the unit by other means.
+- Linux/systemd user service — add `OPENUSAGE_HUB_TOKEN="<secret>"` to the unit's `EnvironmentFile=` or add `Environment=OPENUSAGE_HUB_TOKEN=<secret>` under `[Service]`, then run `systemctl --user daemon-reload && systemctl --user restart openusage-telemetry`.
+- macOS/launchd — add `OPENUSAGE_HUB_TOKEN` to the plist's `EnvironmentVariables` dictionary, then reload with `launchctl unload ~/Library/LaunchAgents/com.openusage.telemetryd.plist && launchctl load ~/Library/LaunchAgents/com.openusage.telemetryd.plist`.
 
 The exporter pushes immediately on startup and then every `interval_seconds`. Best-effort: errors are logged and swallowed; the daemon never stops over an exporter failure.
 
