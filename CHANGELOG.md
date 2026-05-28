@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.12.0](https://github.com/janekbaraniewski/openusage/compare/v0.11.1...v0.12.0) (2026-05-28)
+
+
+### Features
+
+* amp provider ([ec92735](https://github.com/janekbaraniewski/openusage/commit/ec92735b83c1ad1c37e91a937fbd925627c7cdb7))
+* claude code agent attribution ([1457e7f](https://github.com/janekbaraniewski/openusage/commit/1457e7fc3dc873949ec7aa42bc362e7875a424c3))
+* codebuff provider ([af52e2d](https://github.com/janekbaraniewski/openusage/commit/af52e2d1fc39c3d13edf0c18c1b76829038f04c5))
+* codex cost estimation ([67e0541](https://github.com/janekbaraniewski/openusage/commit/67e0541b3b5cd5b1ad4cd370bb95e5511dd3745a))
+* codex model id resolution ([313fe6a](https://github.com/janekbaraniewski/openusage/commit/313fe6a789c1bb500704782b7aa226123ec006b2))
+* copilot otel record dedup ([261d320](https://github.com/janekbaraniewski/openusage/commit/261d3208f87d6dce71a08fbd4fac04aef32e56a9))
+* crush provider ([e5d9604](https://github.com/janekbaraniewski/openusage/commit/e5d9604d5387f5cd05fb546ba23b403426bd0eef))
+* cursor csv export parser ([d9c15a2](https://github.com/janekbaraniewski/openusage/commit/d9c15a21459d62d69b6b239deb2cb8e71f76c274))
+* droid provider ([629eaa7](https://github.com/janekbaraniewski/openusage/commit/629eaa71c4eeb0926da3f2fece291ee59dd1f260))
+* gemini cli cost estimation ([e79fbc1](https://github.com/janekbaraniewski/openusage/commit/e79fbc11060bc5183f4db5746360c1219c5fcc64))
+* gemini cli layout variants ([26fd594](https://github.com/janekbaraniewski/openusage/commit/26fd59435612a2abc23b5e3d131c2b03afdad3f6))
+* goose provider ([9b94dcb](https://github.com/janekbaraniewski/openusage/commit/9b94dcbd7151715dab3b9949c5097048aea4ba70))
+* hermes provider ([657dc49](https://github.com/janekbaraniewski/openusage/commit/657dc497253ef58873e8f419244b96d19c1ad1ee))
+* json export command ([c5a599b](https://github.com/janekbaraniewski/openusage/commit/c5a599b37430057f37948517de8cac4ca1c30773))
+* kilo provider ([98af01e](https://github.com/janekbaraniewski/openusage/commit/98af01e47e4c683cbf4d019aef7c00413e5fdd0d))
+* kimi cli provider ([6f1d233](https://github.com/janekbaraniewski/openusage/commit/6f1d233dbc33c8529fc62c99ea04e638a0e0672c))
+* mux provider ([0cd7d75](https://github.com/janekbaraniewski/openusage/commit/0cd7d752631fbb794c87bcc6582f87c72761eabd))
+* openclaw provider ([860b23d](https://github.com/janekbaraniewski/openusage/commit/860b23d22562a76f08ddab423755f9bdb2cf40b1))
+* opencode legacy and multi channel ([e04cbbf](https://github.com/janekbaraniewski/openusage/commit/e04cbbf7aa4dd2d822478a937edc5f48a0843377))
+* pi provider ([dc3b01b](https://github.com/janekbaraniewski/openusage/commit/dc3b01b0d9c6ea990ad26a7f7a1c4a718f498d47))
+* pricing pipeline ([c28f27e](https://github.com/janekbaraniewski/openusage/commit/c28f27e823ed923006ab2dcb419455986ee524c9))
+* **pricing:** custom overrides and provider-preference ranking ([617f205](https://github.com/janekbaraniewski/openusage/commit/617f2051cbf3a760f39724ca0e52b6f37c9d41e8))
+* qwen cli provider ([6253a10](https://github.com/janekbaraniewski/openusage/commit/6253a1066cb71e7dfef92c548a997807b18d9618))
+* register pi, qwen_cli, openclaw, codebuff, kimi_cli ([5b3a24a](https://github.com/janekbaraniewski/openusage/commit/5b3a24af09d10be63fbfea8f23c2557d40a3eb20))
+* roo code provider ([881a4a2](https://github.com/janekbaraniewski/openusage/commit/881a4a2247f26935b3002d19b6fa2c97ca34052a))
+* zed provider ([bc550a9](https://github.com/janekbaraniewski/openusage/commit/bc550a994965d363f68e76da2de22879d6f46c06))
+
+
+### Bug Fixes
+
+* **#90:** detect opencode-go credentials in auth.json ([#162](https://github.com/janekbaraniewski/openusage/issues/162)) ([528559d](https://github.com/janekbaraniewski/openusage/commit/528559d0a80dea43c91c118cc1b01fe77cd9c375))
+* **copilot,gemini_cli:** "today" metrics no longer mislabel last-active day ([45cc58e](https://github.com/janekbaraniewski/openusage/commit/45cc58e7fe9c6716ae9c6015f1979217dc281dd5))
+* **crush:** replace speculative filesystem walk with project registry ([5a18c61](https://github.com/janekbaraniewski/openusage/commit/5a18c614763116c6271be2d0c966694fba1a77b8))
+* **crush:** stop walking macOS-protected directories on first launch ([e725348](https://github.com/janekbaraniewski/openusage/commit/e725348117b44d27faacfbbfa293b9712c8665e5))
+* path & session-id corrections across pi, openclaw, kimi_cli, kiro ([f81b629](https://github.com/janekbaraniewski/openusage/commit/f81b62953f6431def5777b3b2b50e691259f1730))
+* surface parse-error & skipped-row diagnostics; clean crush Raw ([19850f9](https://github.com/janekbaraniewski/openusage/commit/19850f9f93a7d9b08ea49e1d00341bf60904801e))
+* VS Code Server detection, dedup variant list, codebuff prefix ([92944f6](https://github.com/janekbaraniewski/openusage/commit/92944f648d64af7f3fc2e52c4d0711cbbae298f7))
+
+
+### Performance
+
+* **pricing:** cache normalized-key index and memoize Lookup results ([931b465](https://github.com/janekbaraniewski/openusage/commit/931b465c4dbf271c4273c901f76d0f600e8d6215))
+
+
+### Dependencies
+
+* **deps:** bump golang.org/x/crypto from 0.51.0 to 0.52.0 in the go-minor-and-patch group ([#166](https://github.com/janekbaraniewski/openusage/issues/166)) ([30d0246](https://github.com/janekbaraniewski/openusage/commit/30d02464a8311dbe69fa545ea1073ed818d64d8b))
+* **docs:** bump protobufjs from 7.5.7 to 7.6.1 in /docs/site ([#171](https://github.com/janekbaraniewski/openusage/issues/171)) ([b643418](https://github.com/janekbaraniewski/openusage/commit/b6434184b18927ce0227d8bd6ae203e154b4e060))
+* **docs:** bump qs and express in /docs/site ([#170](https://github.com/janekbaraniewski/openusage/issues/170)) ([934bb4e](https://github.com/janekbaraniewski/openusage/commit/934bb4e3055fd20a3fc831e628d48f52b7d95758))
+* **docs:** bump the docs-minor-and-patch group across 1 directory with 2 updates ([#169](https://github.com/janekbaraniewski/openusage/issues/169)) ([0713928](https://github.com/janekbaraniewski/openusage/commit/07139286a8a61cff3c031afbbcf67f4771f21447))
+* **website:** bump the website-minor-and-patch group across 1 directory with 4 updates ([#173](https://github.com/janekbaraniewski/openusage/issues/173)) ([5b7b7d2](https://github.com/janekbaraniewski/openusage/commit/5b7b7d274c5df19f0dd15e5965b20a99aad4338b))
+
+
+### Refactoring
+
+* claude_code dynamic pricing ([75ad528](https://github.com/janekbaraniewski/openusage/commit/75ad528daf8019654ac199f7c41287c028646e93))
+* dedup crush walker, rename hermes CacheWriteTok ([c71ea19](https://github.com/janekbaraniewski/openusage/commit/c71ea192c6241017a732ff9ebd8e54cb81b8f36f))
+
 ## [0.11.1](https://github.com/janekbaraniewski/openusage/compare/v0.11.0...v0.11.1) (2026-05-18)
 
 
