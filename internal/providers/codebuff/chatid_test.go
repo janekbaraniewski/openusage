@@ -7,10 +7,10 @@ import (
 
 func TestParseChatIDTimestamp(t *testing.T) {
 	cases := []struct {
-		name    string
-		in      string
-		want    time.Time
-		wantOK  bool
+		name   string
+		in     string
+		want   time.Time
+		wantOK bool
 	}{
 		{
 			name:   "regular date only",

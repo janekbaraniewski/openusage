@@ -21,12 +21,12 @@ type openClawIndexEntry struct {
 // openClawTranscriptLine is the union of fields we extract from each JSONL
 // record. Upstream uses camelCase.
 type openClawTranscriptLine struct {
-	Type       string                `json:"type"`
-	CustomType string                `json:"customType,omitempty"`
-	Data       *openClawModelDecl    `json:"data,omitempty"`
-	Message    *openClawMessage      `json:"message,omitempty"`
-	ModelID    string                `json:"modelId,omitempty"`
-	Provider   string                `json:"provider,omitempty"`
+	Type       string             `json:"type"`
+	CustomType string             `json:"customType,omitempty"`
+	Data       *openClawModelDecl `json:"data,omitempty"`
+	Message    *openClawMessage   `json:"message,omitempty"`
+	ModelID    string             `json:"modelId,omitempty"`
+	Provider   string             `json:"provider,omitempty"`
 }
 
 type openClawModelDecl struct {
@@ -35,22 +35,22 @@ type openClawModelDecl struct {
 }
 
 type openClawMessage struct {
-	Role      string                 `json:"role,omitempty"`
-	Timestamp json.RawMessage        `json:"timestamp,omitempty"`
-	Provider  string                 `json:"provider,omitempty"`
-	Model     string                 `json:"model,omitempty"`
-	ModelID   string                 `json:"modelId,omitempty"`
-	Usage     *openClawUsage         `json:"usage,omitempty"`
-	Cost      *openClawCost          `json:"cost,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Timestamp json.RawMessage `json:"timestamp,omitempty"`
+	Provider  string          `json:"provider,omitempty"`
+	Model     string          `json:"model,omitempty"`
+	ModelID   string          `json:"modelId,omitempty"`
+	Usage     *openClawUsage  `json:"usage,omitempty"`
+	Cost      *openClawCost   `json:"cost,omitempty"`
 }
 
 type openClawUsage struct {
-	Input        int64         `json:"input,omitempty"`
-	Output       int64         `json:"output,omitempty"`
-	CacheRead    int64         `json:"cacheRead,omitempty"`
-	CacheWrite   int64         `json:"cacheWrite,omitempty"`
-	TotalTokens  int64         `json:"totalTokens,omitempty"`
-	Cost         *openClawCost `json:"cost,omitempty"`
+	Input       int64         `json:"input,omitempty"`
+	Output      int64         `json:"output,omitempty"`
+	CacheRead   int64         `json:"cacheRead,omitempty"`
+	CacheWrite  int64         `json:"cacheWrite,omitempty"`
+	TotalTokens int64         `json:"totalTokens,omitempty"`
+	Cost        *openClawCost `json:"cost,omitempty"`
 }
 
 type openClawCost struct {

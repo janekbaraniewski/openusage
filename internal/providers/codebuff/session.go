@@ -13,19 +13,19 @@ import (
 )
 
 type codebuffUsage struct {
-	InputTokens             *int64   `json:"input_tokens,omitempty"`
-	OutputTokens            *int64   `json:"output_tokens,omitempty"`
-	CacheReadInputTokens    *int64   `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens *int64  `json:"cache_creation_input_tokens,omitempty"`
-	Credits                 *float64 `json:"credits,omitempty"`
-	Model                   string   `json:"model,omitempty"`
+	InputTokens              *int64   `json:"input_tokens,omitempty"`
+	OutputTokens             *int64   `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     *int64   `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens *int64   `json:"cache_creation_input_tokens,omitempty"`
+	Credits                  *float64 `json:"credits,omitempty"`
+	Model                    string   `json:"model,omitempty"`
 }
 
 type codebuffMetadata struct {
-	Usage     *codebuffUsage           `json:"usage,omitempty"`
-	Codebuff  *codebuffMetadataInner   `json:"codebuff,omitempty"`
-	RunState  *codebuffRunState        `json:"runState,omitempty"`
-	Timestamp string                   `json:"timestamp,omitempty"`
+	Usage     *codebuffUsage         `json:"usage,omitempty"`
+	Codebuff  *codebuffMetadataInner `json:"codebuff,omitempty"`
+	RunState  *codebuffRunState      `json:"runState,omitempty"`
+	Timestamp string                 `json:"timestamp,omitempty"`
 }
 
 type codebuffMetadataInner struct {
@@ -60,19 +60,19 @@ type codebuffMessage struct {
 }
 
 type codebuffEntry struct {
-	DedupKey  string
-	Channel   string
-	Project   string
-	ChatID    string
-	Model     string
-	Provider  string
-	Input     int64
-	Output    int64
-	CacheRead int64
+	DedupKey   string
+	Channel    string
+	Project    string
+	ChatID     string
+	Model      string
+	Provider   string
+	Input      int64
+	Output     int64
+	CacheRead  int64
 	CacheWrite int64
-	Credits   float64
+	Credits    float64
 	HasCredits bool
-	Timestamp time.Time
+	Timestamp  time.Time
 }
 
 func readAllChats(ctx context.Context, dataDirs []string) ([]codebuffEntry, error) {

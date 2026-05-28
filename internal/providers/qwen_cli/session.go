@@ -11,10 +11,10 @@ import (
 )
 
 type qwenLine struct {
-	Type          string            `json:"type,omitempty"`
-	Model         string            `json:"model,omitempty"`
-	Timestamp     string            `json:"timestamp,omitempty"`
-	SessionID     string            `json:"sessionId,omitempty"`
+	Type          string             `json:"type,omitempty"`
+	Model         string             `json:"model,omitempty"`
+	Timestamp     string             `json:"timestamp,omitempty"`
+	SessionID     string             `json:"sessionId,omitempty"`
 	UsageMetadata *qwenUsageMetadata `json:"usageMetadata,omitempty"`
 }
 
