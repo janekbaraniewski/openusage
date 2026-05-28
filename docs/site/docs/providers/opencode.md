@@ -11,7 +11,7 @@ Tracks the OpenCode tool's auth status and available models. Spend and per-sessi
 ## At a glance
 
 - **Provider ID** — `opencode`
-- **Detection** — `OPENCODE_API_KEY` or `ZEN_API_KEY` environment variable (`OPENCODE_API_KEY` is the primary env var; `ZEN_API_KEY` is an alias)
+- **Detection** — `OPENCODE_API_KEY` or `ZEN_API_KEY` environment variable (`OPENCODE_API_KEY` is the primary env var; `ZEN_API_KEY` is an alias). Also adopts API keys written to OpenCode's `auth.json` (both `opencode`/Zen and `opencode-go`/Go catalog entries land on the same `opencode` tile).
 - **Auth** — API key
 - **Type** — coding agent
 - **Tracks**:
