@@ -66,7 +66,7 @@ Some providers don't use API keys; they read local files or shell out to a tool 
 | `opencode` | OpenCode session data | `binary` field |
 | `amp` | Amp threads + ledger under `~/.local/share/amp/` | `binary` field |
 | `codebuff` | `~/.config/manicode/`, `manicode-dev/`, `manicode-staging/` | `CODEBUFF_DATA_DIR`, `data_dir` path hint |
-| `crush` | Per-project SQLite under Crush's data dir | `binary` field |
+| `crush` | Crush's project registry at `$XDG_DATA_HOME/crush/projects.json`, plus each project's `crush.db` referenced there | `OPENUSAGE_CRUSH_REGISTRY`, `registry_path` / `db_paths` / `db_path` path hints |
 | `droid` | Factory Droid's settings directory | `binary` field |
 | `goose` | Goose's session SQLite store | `binary` field |
 | `hermes` | `$HERMES_HOME/state.db` (fallback `~/.hermes/state.db`) | `HERMES_HOME`, `binary` field |

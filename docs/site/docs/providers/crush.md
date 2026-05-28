@@ -6,12 +6,12 @@ sidebar_label: Crush
 
 # Crush
 
-Local-data provider for the Charmbracelet Crush CLI agent. Crush stores its usage data **per project** in a SQLite file at `<project>/.crush/crush.db`. OpenUsage walks a configurable set of search roots, finds every project DB, and aggregates session-level totals across them.
+Local-data provider for the Charmbracelet Crush CLI agent. Crush stores its usage data **per project** in a SQLite file at `<project>/.crush/crush.db`, and maintains a registry of every project it knows about at `$XDG_DATA_HOME/crush/projects.json`. OpenUsage reads that registry, resolves the DB path for each listed project, and aggregates session-level totals across them. **No directory walking is performed** — the only file read for discovery is Crush's own projects.json.
 
 ## At a glance
 
 - **Provider ID** — `crush`
-- **Detection** — `crush` binary on `PATH` or at least one `.crush/crush.db` under a default search root
+- **Detection** — `crush` binary on `PATH` or at least one project listed in Crush's `projects.json` with a present `crush.db`
 - **Auth** — none (local SQLite reads only)
 - **Type** — coding agent
 - **Tracks**:
@@ -25,14 +25,18 @@ Local-data provider for the Charmbracelet Crush CLI agent. Crush stores its usag
 
 ### Auto-detection
 
-Two signals trigger registration: the `crush` binary on `PATH`, or the existence of `<root>/.crush/crush.db` under any of the default search roots:
+Two signals trigger registration: the `crush` binary on `PATH`, or at least one project listed in Crush's project registry whose `crush.db` exists on disk.
 
-- `~/code`, `~/src`, `~/workspace`, `~/dev`
-- `~/Projects`, `~/projects`, `~/Workspace`
+The registry is the JSON file Crush itself writes whenever you run `crush` in a project. Default location:
 
-`$HOME` and `~/Documents` are intentionally excluded. Walking either triggers macOS TCC permission prompts (Photo Library when `~/Pictures/Photos Library.photoslibrary` is reached, iCloud Drive when `~/Desktop` / `~/Documents` are iCloud-synced). If your project trees live in one of those locations, point `$OPENUSAGE_CRUSH_ROOTS` (or the per-account `search_roots`) at the specific subdirectory instead.
+- Linux / macOS: `$XDG_DATA_HOME/crush/projects.json`, falling back to `~/.local/share/crush/projects.json`.
+- Windows: `%LOCALAPPDATA%\crush\projects.json` (or `$XDG_DATA_HOME` if set).
 
-The walker descends up to 4 levels under each root and skips well-known noise directories (`.git`, `node_modules`, `.venv`, `vendor`, `target`, `build`, `dist`, `.idea`, `.vscode`, `__pycache__`, `.cache`, `.direnv`, `.terraform`), plus macOS-protected directories as a defense-in-depth when users override `search_roots` (`Library`, `Pictures`, `Movies`, `Music`, `Desktop`, `Public`, `Applications`, `.Trash`, and any `*.photoslibrary` bundle). Discovered DB paths are stored on the account so subsequent polls skip the walk.
+Each registry entry has a `path` (project root) and a `data_dir` (defaults to `.crush`, may be absolute). The DB lives at `<path>/<data_dir>/crush.db`. Entries whose declared DB file is missing on disk are skipped, so a stale registry doesn't surface phantom projects.
+
+:::tip Why a registry instead of a filesystem walk
+Earlier builds discovered crush projects by walking `$HOME` and conventional code directories looking for `.crush/crush.db`. That trips macOS TCC permission prompts when the walk crosses into `~/Pictures/Photos Library.photoslibrary` or iCloud-synced `~/Desktop` / `~/Documents`. Reading Crush's own registry avoids the prompts entirely and is faster (one file read instead of an O(N) descent).
+:::
 
 ### Manual configuration
 
@@ -43,7 +47,7 @@ The walker descends up to 4 levels under each root and skips well-known noise di
       "id": "crush",
       "provider": "crush",
       "extra": {
-        "search_roots": "/Users/me/code:/Users/me/work",
+        "registry_path": "/custom/path/projects.json",
         "db_paths": "/Users/me/code/foo/.crush/crush.db:/Users/me/code/bar/.crush/crush.db",
         "db_path": "/Users/me/code/foo/.crush/crush.db"
       }
@@ -54,12 +58,12 @@ The walker descends up to 4 levels under each root and skips well-known noise di
 
 Path-hint key precedence:
 
-1. `db_paths` — an explicit colon-separated list of DBs (skips the walk entirely)
-2. `db_path` — a single DB override
-3. `search_roots` — a colon-separated list of roots to walk
-4. Default search roots above
+1. `db_paths` — an explicit list of DBs (skips the registry entirely). Joined with the OS path-list separator (`:` on Unix, `;` on Windows).
+2. `db_path` — a single DB override.
+3. `registry_path` — override the projects.json location for this account.
+4. Platform-default registry path.
 
-`$OPENUSAGE_CRUSH_ROOTS` overrides the default search roots without editing `settings.json`. All path-list values use the OS path-list separator (`:` on Unix, `;` on Windows).
+`$OPENUSAGE_CRUSH_REGISTRY` overrides the registry path across every account without editing `settings.json`.
 
 ## Data sources & how each metric is computed
 

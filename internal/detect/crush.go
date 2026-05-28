@@ -11,8 +11,8 @@ import (
 )
 
 // detectCrush registers a local Crush account when either the CLI
-// binary is on PATH or at least one project-level `.crush/crush.db`
-// exists in one of the default search roots.
+// binary is on PATH or Crush's own projects.json registry lists at
+// least one project with a present crush.db.
 func detectCrush(result *Result) {
 	bin := findBinary("crush")
 	dbPaths := crush.DiscoverDBPaths()

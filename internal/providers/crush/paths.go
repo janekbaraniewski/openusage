@@ -1,92 +1,88 @@
 package crush
 
 import (
-	"io/fs"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-// PathHintRootsKey is the AccountConfig path hint used to override the
-// list of project roots to walk for `.crush/crush.db` files. Values are
-// colon-separated (matching $PATH-style env vars).
-const PathHintRootsKey = "search_roots"
-
 // PathHintDBsKey is the AccountConfig path hint used to inject an
 // already-resolved list of DB paths. Detectors set this so the provider
-// doesn't have to repeat the walk at Fetch time. Values are colon
-// separated absolute paths.
+// doesn't have to repeat the registry lookup at Fetch time. Values are
+// joined with the OS path-list separator.
 const PathHintDBsKey = "db_paths"
 
 // PathHintSingleDBKey is a per-account override for a single Crush DB
 // path. Useful when a user wants to point openusage at one specific
-// project DB and skip the auto-walk.
+// project DB.
 const PathHintSingleDBKey = "db_path"
 
-// EnvSearchRoots is the env var users may set to override the default
-// list of search roots without editing settings.json. Colon-separated.
-const EnvSearchRoots = "OPENUSAGE_CRUSH_ROOTS"
+// PathHintRegistryKey overrides the Crush project-registry location for
+// a single account. Falls through to $XDG_DATA_HOME and the platform
+// default when unset.
+const PathHintRegistryKey = "registry_path"
 
-// defaultMaxDepth caps how deep we descend under each search root looking
-// for `.crush/crush.db`. The vast majority of project layouts have the
-// DB within 3-4 levels of $HOME (e.g. `~/code/<org>/<repo>/.crush/crush.db`).
-const defaultMaxDepth = 4
+// EnvRegistry overrides the registry path across all accounts. Useful
+// for sandboxed installs.
+const EnvRegistry = "OPENUSAGE_CRUSH_REGISTRY"
 
 // projectDBName is the basename of the per-project Crush SQLite store.
-// See upstream `internal/db/connect.go` (the binary calls
-// `filepath.Join(dataDir, "crush.db")`) and `internal/config/config.go`
-// where `defaultDataDirectory = ".crush"`.
 const projectDBName = "crush.db"
 
-// projectDataDirName is the per-project Crush data-directory name. Same
-// upstream reference as projectDBName.
+// projectDataDirName is the per-project Crush data-directory name,
+// used when the registry entry declares a relative data_dir.
 const projectDataDirName = ".crush"
 
-// defaultSearchRoots returns the candidate directories we walk when no
-// per-account override is set. We bias towards "directories developers
-// commonly check out project trees into". Missing directories are
-// silently skipped at walk time.
-//
-// $HOME and $HOME/Documents are intentionally excluded. Walking either
-// crosses into macOS-protected locations (~/Pictures/Photos Library,
-// and ~/Documents/~/Desktop under iCloud Drive sync) which triggers
-// TCC permission prompts on every launch. Users who keep crush
-// projects in $HOME or ~/Documents should set OPENUSAGE_CRUSH_ROOTS or
-// the per-account `search_roots` override.
-func defaultSearchRoots() []string {
+// crushRegistry mirrors the on-disk shape of Crush's projects.json.
+// Crush writes this file itself; we never produce it.
+type crushRegistry struct {
+	Projects []crushProject `json:"projects"`
+}
+
+type crushProject struct {
+	Path    string `json:"path"`
+	DataDir string `json:"data_dir"`
+}
+
+// defaultRegistryPath returns the canonical location of Crush's project
+// registry on this platform. Crush follows XDG on every OS (including
+// macOS), so $XDG_DATA_HOME wins when set and ~/.local/share is the
+// fallback. Windows uses %LOCALAPPDATA% when XDG isn't set.
+func defaultRegistryPath() string {
+	if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
+		return filepath.Join(xdg, "crush", "projects.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return nil
+		return ""
 	}
-	return []string{
-		filepath.Join(home, "code"),
-		filepath.Join(home, "src"),
-		filepath.Join(home, "workspace"),
-		filepath.Join(home, "dev"),
-		filepath.Join(home, "Projects"),
-		filepath.Join(home, "projects"),
-		filepath.Join(home, "Workspace"),
+	if runtime.GOOS == "windows" {
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, "crush", "projects.json")
+		}
 	}
+	return filepath.Join(home, ".local", "share", "crush", "projects.json")
 }
 
-// resolveSearchRoots returns the effective list of project-tree roots to
-// scan, in priority order: explicit per-account hint, env override,
-// then defaults. Results are deduplicated and stripped of empties.
-func resolveSearchRoots(acct core.AccountConfig) []string {
-	if override := acct.Path(PathHintRootsKey, ""); override != "" {
-		return splitPathList(override)
+// resolveRegistryPath returns the effective registry path for the
+// account, honoring (in order): per-account override, env override,
+// platform default.
+func resolveRegistryPath(acct core.AccountConfig) string {
+	if override := strings.TrimSpace(acct.Path(PathHintRegistryKey, "")); override != "" {
+		return override
 	}
-	if env := strings.TrimSpace(os.Getenv(EnvSearchRoots)); env != "" {
-		return splitPathList(env)
+	if env := strings.TrimSpace(os.Getenv(EnvRegistry)); env != "" {
+		return env
 	}
-	return defaultSearchRoots()
+	return defaultRegistryPath()
 }
 
-// splitPathList splits a colon/path-list separator string into a
-// deduplicated, trimmed slice. We accept ':' on Unix and ';' on Windows
-// — Go's `os.PathListSeparator` switches accordingly so we use it here.
+// splitPathList splits a path-list-separator string into a deduplicated,
+// trimmed slice. Used for the db_paths hint.
 func splitPathList(value string) []string {
 	parts := strings.Split(value, string(os.PathListSeparator))
 	seen := make(map[string]struct{}, len(parts))
@@ -105,20 +101,19 @@ func splitPathList(value string) []string {
 	return out
 }
 
-// resolveDBPaths returns the list of discovered Crush DBs for the
-// account. Order of precedence:
+// resolveDBPaths returns the list of Crush DBs for the account. Order
+// of precedence:
 //
-//  1. An explicit list pre-resolved by the detector via PathHintDBsKey.
-//  2. A single explicit override via PathHintSingleDBKey.
-//  3. Walking each search root with discoverDBs.
+//  1. Explicit list pre-resolved by the detector via PathHintDBsKey.
+//  2. Single explicit override via PathHintSingleDBKey.
+//  3. Crush's own project registry (registry_path / OPENUSAGE_CRUSH_REGISTRY
+//     / platform default).
 //
-// The result is deduplicated by absolute path. Non-existent paths from
-// (1) and (2) are filtered out so a stale settings.json doesn't blow up
-// the dashboard.
+// Non-existent paths are filtered out so a stale settings.json or a
+// stale registry entry doesn't blow up the dashboard.
 func resolveDBPaths(acct core.AccountConfig) []string {
 	if list := acct.Path(PathHintDBsKey, ""); list != "" {
-		paths := splitPathList(list)
-		return filterExistingFiles(paths)
+		return filterExistingFiles(splitPathList(list))
 	}
 	if single := strings.TrimSpace(acct.Path(PathHintSingleDBKey, "")); single != "" {
 		if fileExists(single) {
@@ -126,130 +121,79 @@ func resolveDBPaths(acct core.AccountConfig) []string {
 		}
 		return nil
 	}
-	roots := resolveSearchRoots(acct)
-	return discoverDBs(roots, defaultMaxDepth)
+	return readRegistryDBs(resolveRegistryPath(acct))
 }
 
-// DiscoverDBPaths walks the default search roots (or the override in
-// $OPENUSAGE_CRUSH_ROOTS) and returns every `.crush/crush.db` it finds.
-// Exported so the detect package can seed `db_paths` on the auto-detected
-// account without duplicating the walker.
-func DiscoverDBPaths() []string {
-	if env := strings.TrimSpace(os.Getenv(EnvSearchRoots)); env != "" {
-		return discoverDBs(splitPathList(env), defaultMaxDepth)
-	}
-	return discoverDBs(defaultSearchRoots(), defaultMaxDepth)
-}
-
-// discoverDBs walks each root with WalkDir bounded to maxDepth, looking
-// for files at `<dir>/.crush/crush.db`. Directories we know never hold
-// project trees (node_modules, .git, etc.) are skipped to keep walks
-// cheap on $HOME-rooted scans.
+// DiscoverDBPaths reads Crush's project registry (using the platform
+// default location, or the OPENUSAGE_CRUSH_REGISTRY override) and
+// returns every `crush.db` Crush itself has registered. Exported so
+// the detect package can seed `db_paths` on the auto-detected account
+// without re-reading the registry at Fetch time.
 //
-// The walk is best-effort: a permission-denied or vanishing directory
-// is silently skipped (fs.SkipDir) rather than aborting the whole scan.
-func discoverDBs(roots []string, maxDepth int) []string {
-	seen := make(map[string]struct{})
-	var out []string
+// No directory walking is performed: only one JSON file is read, and
+// the file paths returned are taken verbatim from Crush's own state.
+// This avoids the macOS TCC prompts that would otherwise fire when a
+// generic filesystem walk crossed into ~/Pictures, ~/Documents under
+// iCloud Drive sync, or any *.photoslibrary bundle.
+func DiscoverDBPaths() []string {
+	return readRegistryDBs(defaultRegistryPath())
+}
 
-	for _, root := range roots {
-		root = strings.TrimSpace(root)
-		if root == "" {
+// readRegistryDBs parses Crush's projects.json and returns the
+// resolved absolute crush.db path for every project the registry
+// lists. Projects whose declared DB doesn't exist on disk are skipped.
+func readRegistryDBs(registryPath string) []string {
+	registryPath = strings.TrimSpace(registryPath)
+	if registryPath == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(registryPath)
+	if err != nil {
+		return nil
+	}
+	var reg crushRegistry
+	if err := json.Unmarshal(raw, &reg); err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(reg.Projects))
+	out := make([]string, 0, len(reg.Projects))
+	for _, project := range reg.Projects {
+		db := resolveProjectDB(project)
+		if db == "" || !fileExists(db) {
 			continue
 		}
-		info, err := os.Stat(root)
-		if err != nil || !info.IsDir() {
+		abs, err := filepath.Abs(db)
+		if err != nil {
+			abs = db
+		}
+		if _, dup := seen[abs]; dup {
 			continue
 		}
-		rootDepth := strings.Count(filepath.Clean(root), string(filepath.Separator))
-
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				// Permission or vanished — skip this subtree but keep walking.
-				if d != nil && d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d == nil || !d.IsDir() {
-				return nil
-			}
-
-			depth := strings.Count(filepath.Clean(path), string(filepath.Separator)) - rootDepth
-			if depth > maxDepth {
-				return fs.SkipDir
-			}
-
-			name := d.Name()
-			if depth > 0 && isSkippableDirName(name) {
-				return fs.SkipDir
-			}
-
-			if name == projectDataDirName {
-				candidate := filepath.Join(path, projectDBName)
-				if fileExists(candidate) {
-					abs, err := filepath.Abs(candidate)
-					if err != nil {
-						abs = candidate
-					}
-					if _, dup := seen[abs]; !dup {
-						seen[abs] = struct{}{}
-						out = append(out, abs)
-					}
-				}
-				// `.crush` is always a leaf for our purposes; do not
-				// descend into it.
-				return fs.SkipDir
-			}
-			return nil
-		})
+		seen[abs] = struct{}{}
+		out = append(out, abs)
 	}
 	return out
 }
 
-// isSkippableDirName returns true for directory basenames we never want
-// to descend into when scanning for Crush DBs.
-//
-// The macOS user-data directories (Library, Pictures, Movies, Music,
-// Desktop, Public, Applications, .Trash) are listed because descending
-// into them is what triggers TCC permission prompts (Photo Library,
-// iCloud Drive). They are guaranteed never to hold a project clone, so
-// skipping them is purely a safety net for users who override
-// `search_roots` with $HOME.
-//
-// .photoslibrary directories are skipped because they are Photos.app
-// bundle directories; descending into them on macOS pops a Photo
-// Library access prompt regardless of where they live.
-func isSkippableDirName(name string) bool {
-	switch name {
-	case ".git",
-		"node_modules",
-		".venv",
-		"venv",
-		"__pycache__",
-		".cache",
-		"vendor",
-		".direnv",
-		".terraform",
-		"target",
-		"build",
-		"dist",
-		".idea",
-		".vscode",
-		"Library",
-		"Pictures",
-		"Movies",
-		"Music",
-		"Desktop",
-		"Public",
-		"Applications",
-		".Trash":
-		return true
+// resolveProjectDB builds the absolute crush.db path for a single
+// registry entry. A relative data_dir is joined onto the project path;
+// an absolute one is used verbatim. Empty inputs return "".
+func resolveProjectDB(p crushProject) string {
+	projectPath := strings.TrimSpace(p.Path)
+	dataDir := strings.TrimSpace(p.DataDir)
+	if dataDir == "" {
+		dataDir = projectDataDirName
 	}
-	if strings.HasSuffix(name, ".photoslibrary") {
-		return true
+	var resolved string
+	switch {
+	case filepath.IsAbs(dataDir):
+		resolved = dataDir
+	case projectPath == "":
+		return ""
+	default:
+		resolved = filepath.Join(projectPath, dataDir)
 	}
-	return false
+	return filepath.Join(resolved, projectDBName)
 }
 
 func filterExistingFiles(paths []string) []string {
