@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -26,6 +27,13 @@ type opencodeAuthEntry struct {
 // detectEnvKeys produces — addAccount() de-dupes by id, so when the user
 // has both an env var and an OpenCode-stored key the env-var path wins
 // (it runs first in AutoDetect).
+//
+// Both "opencode" (the Zen catalog) and "opencode-go" (the lower-cost Go
+// subscription) land on the same openusage account id because they share the
+// OPENCODE_API_KEY env var upstream and there's no operational benefit to
+// representing them as two separate tiles — they hit the same Zen models
+// endpoint with the same key (see github.com/anomalyco/opencode dialog-
+// provider.tsx and our provider.go).
 var opencodeAuthMapping = map[string]struct {
 	Provider  string
 	AccountID string
@@ -34,29 +42,80 @@ var opencodeAuthMapping = map[string]struct {
 	"openrouter":   {"openrouter", "openrouter"},
 	"zai":          {"zai", "zai"},
 	"opencode":     {"opencode", "opencode"},
+	"opencode-go":  {"opencode", "opencode"},
 	"ollama-cloud": {"ollama", "ollama-cloud"},
 }
 
-// opencodeAuthPath returns the platform-appropriate path to OpenCode's
-// auth.json. macOS and Linux use ~/.local/share/opencode/auth.json (the
-// XDG state path OpenCode picks regardless of XDG_DATA_HOME on darwin).
-// Windows isn't supported by OpenCode officially yet but if the file exists
-// at %APPDATA%/opencode/auth.json we'll read it.
-func opencodeAuthPath() string {
+// opencodeAuthPaths returns every platform-appropriate candidate path for
+// OpenCode's auth.json, in priority order. Detection short-circuits on the
+// first one that exists.
+//
+// Resolution follows the upstream `xdg-basedir` JS package that OpenCode uses:
+//
+//   - XDG_DATA_HOME, if set, wins on every platform.
+//   - Otherwise we fall back to ~/.local/share/opencode/auth.json on Linux
+//     AND macOS (upstream defaults to the XDG path on darwin too — verified
+//     against sindresorhus/xdg-basedir).
+//   - On macOS we additionally probe ~/Library/Application Support/opencode/
+//     auth.json so users who explicitly pinned to the Apple-native location
+//     still get auto-detected.
+//   - On Windows we honour %APPDATA%/opencode/auth.json.
+func opencodeAuthPaths() []string {
 	home := homeDir()
 	if home == "" {
-		return ""
+		return nil
 	}
+
+	var paths []string
+	if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
+		paths = append(paths, filepath.Join(xdg, "opencode", "auth.json"))
+	}
+
 	switch runtime.GOOS {
 	case "windows":
-		appData := os.Getenv("APPDATA")
+		appData := strings.TrimSpace(os.Getenv("APPDATA"))
 		if appData != "" {
-			return filepath.Join(appData, "opencode", "auth.json")
+			paths = append(paths, filepath.Join(appData, "opencode", "auth.json"))
+		} else {
+			paths = append(paths, filepath.Join(home, "AppData", "Roaming", "opencode", "auth.json"))
 		}
-		return filepath.Join(home, "AppData", "Roaming", "opencode", "auth.json")
 	default:
-		return filepath.Join(home, ".local", "share", "opencode", "auth.json")
+		paths = append(paths, filepath.Join(home, ".local", "share", "opencode", "auth.json"))
+		if runtime.GOOS == "darwin" {
+			paths = append(paths, filepath.Join(home, "Library", "Application Support", "opencode", "auth.json"))
+		}
 	}
+
+	// Deduplicate while preserving order (XDG_DATA_HOME may resolve to the
+	// same path as the default).
+	seen := make(map[string]struct{}, len(paths))
+	out := paths[:0]
+	for _, p := range paths {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+// opencodeAuthPath returns the first existing candidate from
+// opencodeAuthPaths(). Kept for backward compatibility with call sites and
+// tests that wanted a single "the path" string; callers wanting fallback
+// behaviour should iterate opencodeAuthPaths() directly.
+func opencodeAuthPath() string {
+	for _, p := range opencodeAuthPaths() {
+		if fileExists(p) {
+			return p
+		}
+	}
+	// Nothing on disk — return the first candidate so callers that surface
+	// "expected here" diagnostics have something to show.
+	if paths := opencodeAuthPaths(); len(paths) > 0 {
+		return paths[0]
+	}
+	return ""
 }
 
 // detectOpenCodeAuth reads OpenCode's auth.json and registers an account for
