@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0](https://github.com/janekbaraniewski/openusage/compare/v0.12.0...v0.13.0) (2026-05-28)
+
+
+### Features
+
+* **cli:** add hub-view command with Bearer token auth and status-aware TUI ([930cc3c](https://github.com/janekbaraniewski/openusage/commit/930cc3c14d452c3231e85899a207d68002e1b8a7))
+* **hub,exporter:** add hub server, exporter, and RemoteEnvelope for multi-machine aggregation ([8ce5e48](https://github.com/janekbaraniewski/openusage/commit/8ce5e48d562c6a50c75a42cada0ceb162a5e2417))
+* **hub:** add /v1/snapshots endpoint, headless mode, daemon push integration, and Dockerfile ([1e3620a](https://github.com/janekbaraniewski/openusage/commit/1e3620acc9657cdeba479bbb46594c43ab55a2f8))
+
+
+### Bug Fixes
+
+* **hub:** address PR [#139](https://github.com/janekbaraniewski/openusage/issues/139) review comments + --allow-public guard ([93d90cb](https://github.com/janekbaraniewski/openusage/commit/93d90cbf5940accb42a215eeacc6b060fb4e2891))
+* **hub:** printable snapshot keys, constant-time auth, 256 MiB fetch cap ([3986160](https://github.com/janekbaraniewski/openusage/commit/39861607013ea345f4456cc50e0dd7dcd1f9fb88))
+
 ## [0.12.0](https://github.com/janekbaraniewski/openusage/compare/v0.11.1...v0.12.0) (2026-05-28)
 
 
