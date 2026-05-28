@@ -112,7 +112,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	snap.Raw["db_path"] = dbPath
 
-	sessions, err := queryGooseSessions(ctx, dbPath)
+	queryResult, err := queryGooseSessions(ctx, dbPath)
 	if err != nil {
 		// Surface as a diagnostic so the UI doesn't blank out on a
 		// transient locking error; preserve OK status if we have nothing
@@ -122,14 +122,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Message = "Failed to read Goose sessions.db"
 		return snap, err
 	}
+	if queryResult.SkippedRows > 0 {
+		snap.SetDiagnostic("skipped_rows", fmt.Sprintf("%d", queryResult.SkippedRows))
+	}
 
-	if len(sessions) == 0 {
+	if len(queryResult.Sessions) == 0 {
 		snap.Status = core.StatusOK
 		snap.Message = "No Goose sessions recorded"
 		return snap, nil
 	}
 
-	populateSnapshot(&snap, sessions, p.now())
+	populateSnapshot(&snap, queryResult.Sessions, p.now())
 	snap.Status = core.StatusOK
 	snap.Message = buildStatusMessage(snap)
 	return snap, nil

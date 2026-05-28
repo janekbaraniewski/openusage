@@ -10,6 +10,8 @@ package droid
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,12 +104,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	snap.Raw["sessions_dir"] = dir
 
-	sessions, err := readAllSessions(ctx, dir)
+	sessions, parseErrors, err := readAllSessions(ctx, dir)
 	if err != nil {
 		snap.SetDiagnostic("walk_error", err.Error())
 		snap.Status = core.StatusError
 		snap.Message = "Failed to read Droid sessions directory"
 		return snap, err
+	}
+	if parseErrors > 0 {
+		snap.SetDiagnostic("parse_errors", fmt.Sprintf("%d", parseErrors))
 	}
 	if len(sessions) == 0 {
 		snap.Status = core.StatusOK
@@ -122,9 +127,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 // readAllSessions walks the sessions directory and parses every
-// *.settings.json file it finds.
-func readAllSessions(ctx context.Context, dir string) ([]droidSession, error) {
-	var out []droidSession
+// *.settings.json file it finds. The returned parseErrors count covers
+// files that failed JSON unmarshalling.
+func readAllSessions(ctx context.Context, dir string) ([]droidSession, int, error) {
+	var (
+		out         []droidSession
+		parseErrors int
+	)
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -139,16 +148,22 @@ func readAllSessions(ctx context.Context, dir string) ([]droidSession, error) {
 			return ctx.Err()
 		}
 		sess, perFileErr := parseDroidSession(path)
-		if perFileErr != nil || sess == nil {
+		if perFileErr != nil {
+			if errors.Is(perFileErr, errDroidParse) {
+				parseErrors++
+			}
+			return nil
+		}
+		if sess == nil {
 			return nil
 		}
 		out = append(out, *sess)
 		return nil
 	})
 	if walkErr != nil {
-		return out, walkErr
+		return out, parseErrors, walkErr
 	}
-	return out, nil
+	return out, parseErrors, nil
 }
 
 // populateSnapshot folds per-session records into the snapshot.

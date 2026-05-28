@@ -186,6 +186,53 @@ func TestProvider_Fetch_HappyPath(t *testing.T) {
 	}
 }
 
+func TestProvider_Fetch_SkippedRowsDiagnostic(t *testing.T) {
+	opts := schemaOpts{}
+	dbPath := makeTempDB(t, opts)
+
+	insertRow(t, dbPath, opts, rowValues{
+		ID:             "good",
+		CreatedAt:      "2025-05-18T10:00:00Z",
+		ModelConfigCol: `{"model_name": "claude-opus-4-7"}`,
+		ProviderName:   "anthropic",
+		AccInput:       1000,
+		AccOutput:      500,
+		AccTotal:       1500,
+	})
+	insertRow(t, dbPath, opts, rowValues{
+		ID:             "bad_ts",
+		CreatedAt:      "definitely not a date",
+		ModelConfigCol: `{"model_name": "claude-opus-4-7"}`,
+		ProviderName:   "anthropic",
+		AccInput:       100,
+		AccOutput:      50,
+		AccTotal:       150,
+	})
+
+	p := New()
+	p.clock = fixedClock{t: time.Date(2025, 5, 18, 12, 0, 0, 0, time.UTC)}
+	acct := core.AccountConfig{ID: "goose", Provider: "goose", Auth: "local"}
+	acct.SetPath("db_path", dbPath)
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("status = %v, want OK; message=%q", snap.Status, snap.Message)
+	}
+	if got := snap.Diagnostics["skipped_rows"]; got != "1" {
+		t.Errorf("skipped_rows diagnostic = %q, want %q", got, "1")
+	}
+	if m, ok := snap.Metrics["total_sessions"]; !ok || m.Used == nil || *m.Used != 1 {
+		got := -1.0
+		if ok && m.Used != nil {
+			got = *m.Used
+		}
+		t.Errorf("total_sessions = %v, want 1", got)
+	}
+}
+
 func TestProvider_HasChanged(t *testing.T) {
 	opts := schemaOpts{}
 	dbPath := makeTempDB(t, opts)

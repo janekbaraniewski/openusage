@@ -82,6 +82,14 @@ func detectColumns(ctx context.Context, db *sql.DB) (columnPresence, error) {
 	}, nil
 }
 
+// gooseQueryResult bundles the parsed sessions with diagnostic counters
+// (e.g. rows skipped due to an unparseable timestamp) so the caller can
+// surface them on the snapshot.
+type gooseQueryResult struct {
+	Sessions    []gooseSession
+	SkippedRows int
+}
+
 // queryGooseSessions returns all non-empty sessions in the database. A
 // session is considered "empty" when every available token column is zero
 // or NULL, and it's filtered out.
@@ -90,25 +98,26 @@ func detectColumns(ctx context.Context, db *sql.DB) (columnPresence, error) {
 // preferred when present but the function falls back to plain *_tokens
 // columns and finally to a degenerate "no tokens at all" select that still
 // returns session IDs (useful for showing session counts).
-func queryGooseSessions(ctx context.Context, dbPath string) ([]gooseSession, error) {
+func queryGooseSessions(ctx context.Context, dbPath string) (gooseQueryResult, error) {
+	var result gooseQueryResult
 	db, err := openReadOnly(dbPath)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	defer db.Close()
 
 	if err := pingContext(ctx, db); err != nil {
-		return nil, err
+		return result, err
 	}
 
 	cols, err := detectColumns(ctx, db)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	if !cols.HasModelConfigJSON {
 		// Without model_config_json we can't recover model name; nothing
 		// useful to surface. Treat as empty (graceful) rather than error.
-		return nil, nil
+		return result, nil
 	}
 
 	selectParts := []string{
@@ -138,11 +147,10 @@ func queryGooseSessions(ctx context.Context, dbPath string) ([]gooseSession, err
 
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("goose: querying sessions: %w", err)
+		return result, fmt.Errorf("goose: querying sessions: %w", err)
 	}
 	defer rows.Close()
 
-	var sessions []gooseSession
 	for rows.Next() {
 		var (
 			id          string
@@ -170,7 +178,7 @@ func queryGooseSessions(ctx context.Context, dbPath string) ([]gooseSession, err
 			&rawTotal,
 			&accCost,
 		); err != nil {
-			return nil, fmt.Errorf("goose: scanning session row: %w", err)
+			return result, fmt.Errorf("goose: scanning session row: %w", err)
 		}
 
 		model := strings.TrimSpace(extractModelName(modelCfgRaw))
@@ -180,7 +188,7 @@ func queryGooseSessions(ctx context.Context, dbPath string) ([]gooseSession, err
 
 		ts, ok := parseTimestamp(createdAt.String)
 		if !ok {
-			// Row has unparseable timestamp; skip silently.
+			result.SkippedRows++
 			continue
 		}
 
@@ -214,13 +222,13 @@ func queryGooseSessions(ctx context.Context, dbPath string) ([]gooseSession, err
 			sess.AccumulatedCost = accCost.Float64
 			sess.HasCost = true
 		}
-		sessions = append(sessions, sess)
+		result.Sessions = append(result.Sessions, sess)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("goose: iterating session rows: %w", err)
+		return result, fmt.Errorf("goose: iterating session rows: %w", err)
 	}
 
-	return sessions, nil
+	return result, nil
 }
 
 // columnOrNull returns either the literal column name (when present) or a

@@ -161,6 +161,51 @@ func TestNormalizeDroidModel(t *testing.T) {
 	}
 }
 
+func TestProvider_Fetch_CountsParseErrors(t *testing.T) {
+	dir := t.TempDir()
+	goodUUID := "33333333-3333-3333-3333-333333333333"
+	badUUID := "44444444-4444-4444-4444-444444444444"
+
+	goodJSON := `{
+		"model": "gemini-2.5-pro",
+		"providerLock": "google",
+		"providerLockTimestamp": "2026-05-17T15:00:00Z",
+		"tokenUsage": {
+			"inputTokens": 800,
+			"outputTokens": 400
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, goodUUID+".settings.json"), []byte(goodJSON), 0o600); err != nil {
+		t.Fatalf("write good: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, badUUID+".settings.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write bad: %v", err)
+	}
+
+	p := New()
+	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
+	acct := core.AccountConfig{ID: "droid", Provider: "droid", Auth: "local"}
+	acct.SetPath("sessions_dir", dir)
+
+	snap, err := p.Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("status = %v want OK; msg=%q", snap.Status, snap.Message)
+	}
+	if got := snap.Diagnostics["parse_errors"]; got != "1" {
+		t.Errorf("parse_errors diagnostic = %q, want %q", got, "1")
+	}
+	if m, ok := snap.Metrics["total_sessions"]; !ok || m.Used == nil || *m.Used != 1 {
+		got := -1.0
+		if ok && m.Used != nil {
+			got = *m.Used
+		}
+		t.Errorf("total_sessions = %v, want 1 (good file should still surface)", got)
+	}
+}
+
 func TestParseDroidSession_ZeroTokens(t *testing.T) {
 	dir := t.TempDir()
 	body := `{

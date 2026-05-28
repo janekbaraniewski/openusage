@@ -170,10 +170,11 @@ func TestQueryGooseSessions_AccumulatedSchema(t *testing.T) {
 		AccCost:        0.04,
 	})
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
+	sessions := result.Sessions
 	if len(sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(sessions))
 	}
@@ -215,10 +216,11 @@ func TestQueryGooseSessions_PlainTokensFallback(t *testing.T) {
 		Total:          150,
 	})
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
+	sessions := result.Sessions
 	if len(sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(sessions))
 	}
@@ -264,19 +266,26 @@ func TestQueryGooseSessions_TimestampVariants(t *testing.T) {
 		})
 	}
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
+	sessions := result.Sessions
 
 	wantValidCount := 0
+	wantSkipped := 0
 	for _, tc := range tests {
 		if tc.wantValid {
 			wantValidCount++
+		} else {
+			wantSkipped++
 		}
 	}
 	if len(sessions) != wantValidCount {
 		t.Fatalf("got %d sessions, want %d valid", len(sessions), wantValidCount)
+	}
+	if result.SkippedRows != wantSkipped {
+		t.Errorf("SkippedRows = %d, want %d", result.SkippedRows, wantSkipped)
 	}
 	// Verify each timestamp round-trips correctly.
 	byID := make(map[string]gooseSession)
@@ -347,10 +356,11 @@ func TestQueryGooseSessions_FiltersZeroTokenRows(t *testing.T) {
 		AccTotal:       150,
 	})
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
+	sessions := result.Sessions
 	if len(sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1 (only the healthy row)", len(sessions))
 	}
@@ -375,12 +385,12 @@ func TestQueryGooseSessions_EmptyDB(t *testing.T) {
 	opts := schemaOpts{}
 	dbPath := makeTempDB(t, opts)
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions on empty db: %v", err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("got %d sessions on empty db, want 0", len(sessions))
+	if len(result.Sessions) != 0 {
+		t.Fatalf("got %d sessions on empty db, want 0", len(result.Sessions))
 	}
 }
 
@@ -399,12 +409,12 @@ func TestQueryGooseSessions_MissingModelConfigColumn(t *testing.T) {
 		AccTotal:  150,
 	})
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("got %d sessions, want 0 when model_config_json missing", len(sessions))
+	if len(result.Sessions) != 0 {
+		t.Fatalf("got %d sessions, want 0 when model_config_json missing", len(result.Sessions))
 	}
 }
 
@@ -492,10 +502,11 @@ func TestQueryGooseSessions_OlderSchemaNoProviderName(t *testing.T) {
 		AccTotal:       1500,
 	})
 
-	sessions, err := queryGooseSessions(context.Background(), dbPath)
+	result, err := queryGooseSessions(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("queryGooseSessions: %v", err)
 	}
+	sessions := result.Sessions
 	if len(sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(sessions))
 	}

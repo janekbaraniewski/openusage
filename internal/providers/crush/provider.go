@@ -120,7 +120,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Message = "No Crush project databases found"
 		return snap, nil
 	}
-	snap.Raw["db_paths"] = strings.Join(dbPaths, string(byte(0x1F))) // unit-separator; debug-only
+	for i, p := range dbPaths {
+		snap.Raw[fmt.Sprintf("db_paths.%d", i)] = p
+	}
 	snap.Raw["db_count"] = fmt.Sprintf("%d", len(dbPaths))
 
 	allSessions := make([]crushSession, 0, 64)

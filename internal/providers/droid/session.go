@@ -3,12 +3,17 @@ package droid
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// errDroidParse marks a settings.json file that could not be JSON-decoded.
+// The walker counts these so we can surface a parse_errors diagnostic.
+var errDroidParse = errors.New("droid: settings.json parse error")
 
 // droidSettings mirrors the JSON shape of Droid's per-session settings file
 // at ~/.factory/sessions/<uuid>.settings.json. Upstream uses camelCase keys.
@@ -54,8 +59,7 @@ func parseDroidSession(settingsPath string) (*droidSession, error) {
 
 	var settings droidSettings
 	if err := json.Unmarshal(data, &settings); err != nil {
-		// Malformed JSON is non-fatal.
-		return nil, nil
+		return nil, errDroidParse
 	}
 	if settings.TokenUsage == nil {
 		return nil, nil
