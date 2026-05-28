@@ -147,6 +147,38 @@ func fuzzyCandidates(model string) []string {
 	return out
 }
 
+// fuzzyKeyIndex is the normalised-key view of an upstream pricing table.
+// Building it walks the entire key set (regex normalisation + family
+// bucketing), so callers that share a key set across many lookups
+// should cache the index rather than rebuild it per call.
+type fuzzyKeyIndex struct {
+	sourceLen int
+
+	// byNorm maps a normalised key to every raw upstream key that
+	// normalised to it. Used for exact-candidate hits.
+	byNorm map[string][]string
+
+	// byFamily groups normalised keys by their family token so the
+	// prefix-walk only inspects keys in the same family.
+	byFamily map[string][]string
+}
+
+func buildFuzzyKeyIndex(table map[string]Price) *fuzzyKeyIndex {
+	idx := &fuzzyKeyIndex{
+		sourceLen: len(table),
+		byNorm:    make(map[string][]string, len(table)),
+		byFamily:  make(map[string][]string, 32),
+	}
+	for k := range table {
+		nk := normalizeModelKey(k)
+		if _, seen := idx.byNorm[nk]; !seen {
+			idx.byFamily[familyToken(nk)] = append(idx.byFamily[familyToken(nk)], nk)
+		}
+		idx.byNorm[nk] = append(idx.byNorm[nk], k)
+	}
+	return idx
+}
+
 // bestFuzzyMatch picks the closest key in `keys` (a flat list of canonical
 // model identifiers from an upstream) for the supplied raw model name. It
 // returns the matched key and true on success.
@@ -160,18 +192,27 @@ func fuzzyCandidates(model string) []string {
 // upstream namespace prefix wins (e.g. "anthropic/claude-..." beats
 // "bedrock/claude-...") so reseller listings don't override the original
 // creator's published rates.
+//
+// This is the slow path for ad-hoc lookups (notably tests). Hot callers
+// should construct a fuzzyKeyIndex once and call bestFuzzyMatchIndexed.
 func bestFuzzyMatch(model string, keys []string) (string, bool) {
 	if len(keys) == 0 {
 		return "", false
 	}
-	normIdx := make(map[string][]string, len(keys))
+	table := make(map[string]Price, len(keys))
 	for _, k := range keys {
-		nk := normalizeModelKey(k)
-		normIdx[nk] = append(normIdx[nk], k)
+		table[k] = Price{}
+	}
+	return bestFuzzyMatchIndexed(model, buildFuzzyKeyIndex(table))
+}
+
+func bestFuzzyMatchIndexed(model string, idx *fuzzyKeyIndex) (string, bool) {
+	if idx == nil || idx.sourceLen == 0 {
+		return "", false
 	}
 
 	for _, cand := range fuzzyCandidates(model) {
-		if hits, ok := normIdx[cand]; ok {
+		if hits, ok := idx.byNorm[cand]; ok {
 			return pickPreferred(hits), true
 		}
 	}
@@ -187,15 +228,12 @@ func bestFuzzyMatch(model string, keys []string) (string, bool) {
 	family := familyToken(target)
 	bestScore := 0
 	bestKey := ""
-	for normKey, raws := range normIdx {
-		if familyToken(normKey) != family {
-			continue
-		}
+	for _, normKey := range idx.byFamily[family] {
 		score := sharedPrefixLen(target, normKey)
 		if score < bestScore {
 			continue
 		}
-		candidate := pickPreferred(raws)
+		candidate := pickPreferred(idx.byNorm[normKey])
 		if score > bestScore {
 			bestScore = score
 			bestKey = candidate

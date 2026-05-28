@@ -32,6 +32,25 @@ type Resolver struct {
 	openRouter     map[string]Price
 	liteLLMLoaded  bool
 	openRouterDone bool
+
+	// liteLLMKeysCache and openRouterKeysCache hold the (model-key list,
+	// normalized-key index) pair for each upstream so bestFuzzyMatch does
+	// not rebuild the index on every Lookup. A typical hot caller burns
+	// thousands of Lookups per Fetch over the same key set; rebuilding the
+	// regex-normalised index each time made claude_code's per-fetch cost
+	// estimation dominate Fetch wall time.
+	liteLLMKeysCache    *fuzzyKeyIndex
+	openRouterKeysCache *fuzzyKeyIndex
+
+	// lookupCache memoises full Lookup results keyed by (model, contextLen)
+	// so repeated cost estimation for the same model on the same Fetch is
+	// a single map probe instead of a fuzzy walk.
+	lookupCache map[lookupCacheKey]*Price
+}
+
+type lookupCacheKey struct {
+	model      string
+	contextLen int
 }
 
 // WithCustomOverrides seeds the resolver with a pre-loaded overrides table.
@@ -92,6 +111,33 @@ func (r *Resolver) Lookup(ctx context.Context, model string, contextLen int) (*P
 		return nil, errors.New("pricing: empty model id")
 	}
 
+	key := lookupCacheKey{model: model, contextLen: contextLen}
+	r.mu.Lock()
+	if cached, ok := r.lookupCache[key]; ok {
+		r.mu.Unlock()
+		if cached == nil {
+			return nil, fmt.Errorf("pricing: no price for model %q", model)
+		}
+		return cached, nil
+	}
+	r.mu.Unlock()
+
+	result, err := r.resolve(ctx, model, contextLen)
+
+	r.mu.Lock()
+	if r.lookupCache == nil {
+		r.lookupCache = make(map[lookupCacheKey]*Price, 16)
+	}
+	r.lookupCache[key] = result
+	r.mu.Unlock()
+
+	if result == nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *Resolver) resolve(ctx context.Context, model string, contextLen int) (*Price, error) {
 	if p, ok := lookupCustomOverride(r.overrides.get(), model); ok {
 		out := ApplyTier(p, contextLen)
 		return &out, nil
@@ -117,11 +163,8 @@ func (r *Resolver) tryLiteLLM(ctx context.Context, model string) (Price, bool) {
 	if err != nil || len(table) == 0 {
 		return Price{}, false
 	}
-	keys := make([]string, 0, len(table))
-	for k := range table {
-		keys = append(keys, k)
-	}
-	hit, ok := bestFuzzyMatch(model, keys)
+	idx := r.fuzzyIndexFor(table, &r.liteLLMKeysCache)
+	hit, ok := bestFuzzyMatchIndexed(model, idx)
 	if !ok {
 		return Price{}, false
 	}
@@ -133,15 +176,27 @@ func (r *Resolver) tryOpenRouter(ctx context.Context, model string) (Price, bool
 	if err != nil || len(table) == 0 {
 		return Price{}, false
 	}
-	keys := make([]string, 0, len(table))
-	for k := range table {
-		keys = append(keys, k)
-	}
-	hit, ok := bestFuzzyMatch(model, keys)
+	idx := r.fuzzyIndexFor(table, &r.openRouterKeysCache)
+	hit, ok := bestFuzzyMatchIndexed(model, idx)
 	if !ok {
 		return Price{}, false
 	}
 	return table[hit], true
+}
+
+// fuzzyIndexFor returns the cached normalized-key index for `table`,
+// rebuilding it only when the table identity has changed. The slot
+// pointer-of-pointer means the same Resolver can independently cache
+// LiteLLM and OpenRouter indices.
+func (r *Resolver) fuzzyIndexFor(table map[string]Price, slot **fuzzyKeyIndex) *fuzzyKeyIndex {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if *slot != nil && (*slot).sourceLen == len(table) {
+		return *slot
+	}
+	idx := buildFuzzyKeyIndex(table)
+	*slot = idx
+	return idx
 }
 
 func (r *Resolver) loadLiteLLM(ctx context.Context) (map[string]Price, error) {
@@ -221,6 +276,8 @@ func (r *Resolver) storeLiteLLM(t map[string]Price, mtime time.Time) {
 	defer r.mu.Unlock()
 	r.liteLLMTable = t
 	r.liteLLMLoaded = true
+	r.liteLLMKeysCache = nil
+	r.lookupCache = nil
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime
@@ -234,6 +291,8 @@ func (r *Resolver) storeOpenRouter(t map[string]Price, mtime time.Time) {
 	defer r.mu.Unlock()
 	r.openRouter = t
 	r.openRouterDone = true
+	r.openRouterKeysCache = nil
+	r.lookupCache = nil
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime
