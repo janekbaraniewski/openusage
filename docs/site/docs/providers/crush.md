@@ -27,11 +27,12 @@ Local-data provider for the Charmbracelet Crush CLI agent. Crush stores its usag
 
 Two signals trigger registration: the `crush` binary on `PATH`, or the existence of `<root>/.crush/crush.db` under any of the default search roots:
 
-- `~`
 - `~/code`, `~/src`, `~/workspace`, `~/dev`
-- `~/Projects`, `~/projects`, `~/Workspace`, `~/Documents`
+- `~/Projects`, `~/projects`, `~/Workspace`
 
-The walker descends up to 4 levels under each root and skips well-known noise directories (`.git`, `node_modules`, `.venv`, `vendor`, `target`, `build`, `dist`, `.idea`, `.vscode`, `__pycache__`, `.cache`, `.direnv`, `.terraform`). Discovered DB paths are stored on the account so subsequent polls skip the walk.
+`$HOME` and `~/Documents` are intentionally excluded. Walking either triggers macOS TCC permission prompts (Photo Library when `~/Pictures/Photos Library.photoslibrary` is reached, iCloud Drive when `~/Desktop` / `~/Documents` are iCloud-synced). If your project trees live in one of those locations, point `$OPENUSAGE_CRUSH_ROOTS` (or the per-account `search_roots`) at the specific subdirectory instead.
+
+The walker descends up to 4 levels under each root and skips well-known noise directories (`.git`, `node_modules`, `.venv`, `vendor`, `target`, `build`, `dist`, `.idea`, `.vscode`, `__pycache__`, `.cache`, `.direnv`, `.terraform`), plus macOS-protected directories as a defense-in-depth when users override `search_roots` (`Library`, `Pictures`, `Movies`, `Music`, `Desktop`, `Public`, `Applications`, `.Trash`, and any `*.photoslibrary` bundle). Discovered DB paths are stored on the account so subsequent polls skip the walk.
 
 ### Manual configuration
 

@@ -48,13 +48,19 @@ const projectDataDirName = ".crush"
 // per-account override is set. We bias towards "directories developers
 // commonly check out project trees into". Missing directories are
 // silently skipped at walk time.
+//
+// $HOME and $HOME/Documents are intentionally excluded. Walking either
+// crosses into macOS-protected locations (~/Pictures/Photos Library,
+// and ~/Documents/~/Desktop under iCloud Drive sync) which triggers
+// TCC permission prompts on every launch. Users who keep crush
+// projects in $HOME or ~/Documents should set OPENUSAGE_CRUSH_ROOTS or
+// the per-account `search_roots` override.
 func defaultSearchRoots() []string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return nil
 	}
 	return []string{
-		home,
 		filepath.Join(home, "code"),
 		filepath.Join(home, "src"),
 		filepath.Join(home, "workspace"),
@@ -62,7 +68,6 @@ func defaultSearchRoots() []string {
 		filepath.Join(home, "Projects"),
 		filepath.Join(home, "projects"),
 		filepath.Join(home, "Workspace"),
-		filepath.Join(home, "Documents"),
 	}
 }
 
@@ -203,10 +208,18 @@ func discoverDBs(roots []string, maxDepth int) []string {
 }
 
 // isSkippableDirName returns true for directory basenames we never want
-// to descend into when scanning for Crush DBs. The list is intentionally
-// short — anything that could plausibly contain a project clone (`code`,
-// `projects`, even `Library` on macOS for some setups) is NOT skipped.
-// We keep only directories that are guaranteed never to hold a project.
+// to descend into when scanning for Crush DBs.
+//
+// The macOS user-data directories (Library, Pictures, Movies, Music,
+// Desktop, Public, Applications, .Trash) are listed because descending
+// into them is what triggers TCC permission prompts (Photo Library,
+// iCloud Drive). They are guaranteed never to hold a project clone, so
+// skipping them is purely a safety net for users who override
+// `search_roots` with $HOME.
+//
+// .photoslibrary directories are skipped because they are Photos.app
+// bundle directories; descending into them on macOS pops a Photo
+// Library access prompt regardless of where they live.
 func isSkippableDirName(name string) bool {
 	switch name {
 	case ".git",
@@ -222,7 +235,18 @@ func isSkippableDirName(name string) bool {
 		"build",
 		"dist",
 		".idea",
-		".vscode":
+		".vscode",
+		"Library",
+		"Pictures",
+		"Movies",
+		"Music",
+		"Desktop",
+		"Public",
+		"Applications",
+		".Trash":
+		return true
+	}
+	if strings.HasSuffix(name, ".photoslibrary") {
 		return true
 	}
 	return false
