@@ -59,6 +59,11 @@ func AutoDetect() Result {
 	detectKiloCode(&result)
 	detectKiro(&result)
 	detectZed(&result)
+	detectCodebuff(&result)
+	detectKimiCLI(&result)
+	detectOpenClaw(&result)
+	detectPi(&result)
+	detectQwenCLI(&result)
 
 	// Phase 2: process env vars. Most authoritative; runs before any
 	// file-based credential adoption so a freshly-set env var always

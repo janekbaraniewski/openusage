@@ -8,6 +8,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/amp"
 	"github.com/janekbaraniewski/openusage/internal/providers/anthropic"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
+	"github.com/janekbaraniewski/openusage/internal/providers/codebuff"
 	"github.com/janekbaraniewski/openusage/internal/providers/codex"
 	"github.com/janekbaraniewski/openusage/internal/providers/copilot"
 	"github.com/janekbaraniewski/openusage/internal/providers/crush"
@@ -20,15 +21,19 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/groq"
 	"github.com/janekbaraniewski/openusage/internal/providers/hermes"
 	"github.com/janekbaraniewski/openusage/internal/providers/kilocode"
+	"github.com/janekbaraniewski/openusage/internal/providers/kimi_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/kiro"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
 	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
 	"github.com/janekbaraniewski/openusage/internal/providers/mux"
 	"github.com/janekbaraniewski/openusage/internal/providers/ollama"
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
+	"github.com/janekbaraniewski/openusage/internal/providers/openclaw"
 	"github.com/janekbaraniewski/openusage/internal/providers/opencode"
 	"github.com/janekbaraniewski/openusage/internal/providers/openrouter"
 	"github.com/janekbaraniewski/openusage/internal/providers/perplexity"
+	"github.com/janekbaraniewski/openusage/internal/providers/pi"
+	"github.com/janekbaraniewski/openusage/internal/providers/qwen_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/roocode"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
@@ -67,6 +72,11 @@ func AllProviders() []core.UsageProvider {
 		kilocode.New(),
 		kiro.New(),
 		zed.New(),
+		codebuff.New(),
+		kimi_cli.New(),
+		openclaw.New(),
+		pi.New(),
+		qwen_cli.New(),
 	}
 }
 
