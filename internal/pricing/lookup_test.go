@@ -166,3 +166,37 @@ func TestEstimate(t *testing.T) {
 		t.Errorf("nil price should yield zero cost")
 	}
 }
+
+func TestLookup_RepeatedQueriesAreCached(t *testing.T) {
+	r, litellmHits, _ := newTestResolver(t, "litellm_subset.json", "openrouter_subset.json")
+
+	for i := 0; i < 100; i++ {
+		if _, err := r.Lookup(context.Background(), "claude-3-5-sonnet-20251101", 0); err != nil {
+			t.Fatalf("Lookup #%d: %v", i, err)
+		}
+	}
+	if got := atomic.LoadInt32(litellmHits); got != 1 {
+		t.Errorf("repeated lookups should hit upstream once, got %d hits", got)
+	}
+}
+
+func TestFuzzyIndexFor_RebuildsOnTableChange(t *testing.T) {
+	r := &Resolver{}
+	tableA := map[string]Price{"claude-3-5-sonnet-20241022": {}}
+	idxA := r.fuzzyIndexFor(tableA, &r.liteLLMKeysCache)
+	if idxA == nil || idxA.sourceLen != 1 {
+		t.Fatalf("first index = %v", idxA)
+	}
+	idxA2 := r.fuzzyIndexFor(tableA, &r.liteLLMKeysCache)
+	if idxA2 != idxA {
+		t.Errorf("same table should reuse cached index")
+	}
+	tableB := map[string]Price{"a": {}, "b": {}}
+	idxB := r.fuzzyIndexFor(tableB, &r.liteLLMKeysCache)
+	if idxB == idxA {
+		t.Errorf("different table should produce different index")
+	}
+	if idxB.sourceLen != 2 {
+		t.Errorf("rebuilt index source len = %d, want 2", idxB.sourceLen)
+	}
+}
