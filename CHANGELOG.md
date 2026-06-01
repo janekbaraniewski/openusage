@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/janekbaraniewski/openusage/compare/v0.13.0...v0.14.0) (2026-06-01)
+
+
+### Features
+
+* **telemetry:** derive true windowed credit spend from observed balance series ([b3a0fc5](https://github.com/janekbaraniewski/openusage/commit/b3a0fc5ea01a3c86afed561525216779dfc40b9e))
+
+
+### Refactoring
+
+* **credits:** show one windowed-spend figure for the active window ([4357caf](https://github.com/janekbaraniewski/openusage/commit/4357cafdd82190d480ff5dc86474d17651759916))
+
 ## [0.13.0](https://github.com/janekbaraniewski/openusage/compare/v0.12.0...v0.13.0) (2026-05-28)
 
 
