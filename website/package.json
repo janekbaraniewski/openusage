@@ -10,14 +10,14 @@
   },
   "dependencies": {
     "@lobehub/icons-static-svg": "^1.91.0",
-    "posthog-js": "^1.376.3",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "posthog-js": "^1.378.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.2",
     "puppeteer": "^25.1.0",
     "serve-handler": "^6.1.7",
-    "vite": "^8.0.14"
+    "vite": "^8.0.16"
   }
 }
