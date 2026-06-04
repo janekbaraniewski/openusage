@@ -113,6 +113,44 @@ openusage statusline --color=false             # plain output
 The context indicator turns yellow past `--context-medium` and red past
 `--context-high`.
 
+## Provider coverage
+
+What each report can show depends on the data a provider keeps on disk. The
+periodic reports need any cost or token signal; `session` and `blocks` need
+per-turn (or per-session) timestamps; `statusline` needs the Claude Code
+status-bar hook.
+
+Legend: ✅ full · ▪ session-level (blocks bucket per session, not per turn) ·
+✗ no data substrate.
+
+| Provider | daily/weekly/monthly | session | blocks | statusline |
+|---|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ | ✅ |
+| Codex | ✅ | ✅ | ✅ | ✗ |
+| Gemini CLI | ✅ | ✅ | ✅ | ✗ |
+| Copilot | ✅ | ✅ | ✅ | ✗ |
+| Cursor | ✅ | ✅ | ✅ | ✗ |
+| OpenCode | ✅ | ✅ | ✅ | ✗ |
+| Ollama | ✅ | ✅ | ✅ | ✗ |
+| Amp | ✅ | ✅ | ✅ | ✗ |
+| Codebuff | ✅ | ✅ | ✅ | ✗ |
+| OpenClaw | ✅ | ✅ | ✅ | ✗ |
+| Roo Code | ✅ | ✅ | ✅ | ✗ |
+| Kilo Code | ✅ | ✅ | ✅ | ✗ |
+| Crush | ✅ | ✅ | ▪ | ✗ |
+| Goose | ✅ | ✅ | ▪ | ✗ |
+| Hermes | ✅ | ✅ | ▪ | ✗ |
+| Zed | ✅ | ✅ | ▪ | ✗ |
+| Droid | ✅ | ✅ | ▪ | ✗ |
+| Kiro | ✅ | ✅ | ▪ | ✗ |
+| OpenRouter, Z.AI | ✅ | ✗ | ✗ | ✗ |
+| Mistral, DeepSeek, Moonshot, Perplexity, Alibaba Cloud | ✅ (current total) | ✗ | ✗ | ✗ |
+| OpenAI, Anthropic, Groq, xAI, Gemini API | ✗ (rate-limit only) | ✗ | ✗ | ✗ |
+
+Tools that record tokens but no cost (for example Copilot, Gemini CLI, Zed,
+Droid, Kiro) have their cost computed from token counts via the pricing layer
+when online; pass `--offline` to skip that.
+
 ## See also
 
 - [CLI reference](../reference/cli.md) — every flag for these commands

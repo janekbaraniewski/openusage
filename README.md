@@ -56,6 +56,28 @@ openusage
 
 Auto-detection picks up local tools and common API key env vars. No config needed.
 
+## Command-line reports & statusline
+
+Besides the live dashboard, OpenUsage has headless subcommands that reuse the same parsing and pricing — handy for scripts, CI, and quick checks:
+
+```bash
+openusage daily                # usage & cost by day (also: weekly, monthly)
+openusage session              # grouped by session
+openusage blocks               # by 5-hour billing block, with burn rate + projection
+openusage daily --json         # machine-readable output for scripts/CI
+openusage statusline --install # one-line status bar for Claude Code
+```
+
+What each report can show, by provider:
+
+| Report | Providers |
+|---|---|
+| `daily` / `weekly` / `monthly` | every provider that reports cost or tokens |
+| `session` / `blocks` | Claude Code, Codex, Gemini CLI, Copilot, Cursor, OpenCode, Ollama, Amp, Codebuff, OpenClaw, Roo Code, Kilo Code, Crush, Goose, Hermes, Zed, Droid, Kiro |
+| `statusline` | Claude Code |
+
+Remote API platforms (OpenAI, Anthropic, OpenRouter, …) appear in the periodic reports only — they expose no per-turn data. See the [headless reports & statusline guide](docs/site/docs/guides/cli-reports.md) for the full matrix and flags.
+
 ## Track coding agent usage across multiple platforms
 
 Native dashboards show one provider at a time. OpenUsage gives you one local-first view across coding agents, API platforms, and local runtimes so you can answer:
