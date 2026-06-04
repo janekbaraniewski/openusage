@@ -29,6 +29,12 @@ type copilotTelemetrySessionState struct {
 func parseCopilotTelemetrySessionFile(path, sessionID string) ([]shared.TelemetryEvent, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// Copilot rotates session-state aggressively, so a session directory
+		// can outlive its events.jsonl. A missing file is not an error — the
+		// session-store fallback covers these sessions; just skip it.
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

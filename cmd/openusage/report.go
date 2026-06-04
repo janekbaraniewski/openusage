@@ -120,7 +120,9 @@ func runReport(kind report.Kind, f *reportFlags) error {
 		return fmt.Errorf("invalid --until: %w", err)
 	}
 
+	sp := startSpinner(fmt.Sprintf("collecting %s usage…", kind))
 	events, note, err := gatherReportEvents(kind, f)
+	sp.stop()
 	if err != nil {
 		return err
 	}
