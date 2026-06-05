@@ -1,0 +1,336 @@
+package tmux
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// Sentinel markers bracket the openusage-managed snippet inside tmux.conf so
+// install/uninstall can find and rewrite it in place without disturbing
+// adjacent user config. The markers also let the doctor command verify that
+// the snippet is still installed.
+const (
+	sentinelStart = "# >>> openusage tmux >>> (managed; do not edit between sentinels)"
+	sentinelEnd   = "# <<< openusage tmux <<<"
+)
+
+// InstallOptions configures the tmux.conf snippet emitted by Install. Each
+// field maps to a CLI flag; zero/empty values fall back to sensible defaults.
+type InstallOptions struct {
+	// Position is "left", "right", or "both". Empty means "right".
+	Position string
+	// Preset is the named preset embedded in the snippet's status line
+	// command. Empty means DefaultPreset.
+	Preset string
+	// Interval is the tmux status-interval written to the snippet. Zero
+	// means 5.
+	Interval int
+	// RightLength sets status-right-length. Zero means 200.
+	RightLength int
+	// LeftLength sets status-left-length. Zero means 80.
+	LeftLength int
+	// BindPopup, when non-empty, is a key letter (e.g. "u") that gets
+	// bound to a display-popup running `openusage`. Requires tmux 3.2+.
+	BindPopup string
+	// BindRefresh, when non-empty, is a key letter that triggers a
+	// status-bar refresh on demand.
+	BindRefresh string
+	// Write controls whether Install applies the snippet to tmux.conf
+	// (true) or only prints it to the writer (false).
+	Write bool
+	// Binary overrides the openusage binary path used in the snippet's
+	// status-line command. Empty means `openusage`.
+	Binary string
+	// ConfPath overrides the auto-detected tmux.conf location. Tests use
+	// it to point at a temp file.
+	ConfPath string
+	// Version is recorded in the IntegrationState entry after a successful
+	// write. Callers pass the binary's version string.
+	Version string
+	// Now is injected by tests; zero means time.Now().
+	Now time.Time
+}
+
+// DetectTmuxConf returns the tmux.conf path to use, following the documented
+// preference order:
+//
+//  1. `$XDG_CONFIG_HOME/tmux/tmux.conf` if XDG_CONFIG_HOME is set
+//  2. `~/.config/tmux/tmux.conf`
+//  3. `~/.tmux.conf`
+//
+// When none exists the XDG path is returned so callers can create it.
+// Multiple existing candidates emit a warning to warnOut (when non-nil) and
+// the most-preferred one wins.
+func DetectTmuxConf(warnOut io.Writer) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("tmux: resolving home directory: %w", err)
+	}
+	if strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("tmux: no home directory")
+	}
+
+	candidates := []string{}
+	if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
+		candidates = append(candidates, filepath.Join(xdg, "tmux", "tmux.conf"))
+	}
+	candidates = append(candidates,
+		filepath.Join(home, ".config", "tmux", "tmux.conf"),
+		filepath.Join(home, ".tmux.conf"),
+	)
+
+	existing := []string{}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			existing = append(existing, c)
+		}
+	}
+
+	if len(existing) == 0 {
+		// No conf yet: prefer the XDG-style path.
+		return candidates[0], nil
+	}
+	if len(existing) > 1 && warnOut != nil {
+		fmt.Fprintf(warnOut, "tmux: multiple tmux configs found (%s); using %s\n",
+			strings.Join(existing, ", "), existing[0])
+	}
+	return existing[0], nil
+}
+
+// BuildSnippet returns the sentinel-bracketed tmux.conf snippet for opts. It
+// is pure (no I/O), used by Install (which appends/replaces in place) and by
+// the print mode (which only writes to stdout).
+func BuildSnippet(opts InstallOptions) string {
+	opts = withInstallDefaults(opts)
+	binary := strings.TrimSpace(opts.Binary)
+	if binary == "" {
+		binary = "openusage"
+	}
+
+	var b strings.Builder
+	b.WriteString(sentinelStart)
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "set -g status-interval %d\n", opts.Interval)
+	fmt.Fprintf(&b, "set -g status-right-length %d\n", opts.RightLength)
+	fmt.Fprintf(&b, "set -g status-left-length %d\n", opts.LeftLength)
+
+	cmd := fmt.Sprintf("#(%s tmux --preset %s)", binary, opts.Preset)
+	switch opts.Position {
+	case "left":
+		fmt.Fprintf(&b, "set -ga status-left %q\n", cmd)
+	case "both":
+		fmt.Fprintf(&b, "set -ga status-left %q\n", fmt.Sprintf("#(%s tmux --preset compact --segment tool)", binary))
+		fmt.Fprintf(&b, "set -ga status-right %q\n", cmd)
+	default: // right
+		fmt.Fprintf(&b, "set -ga status-right %q\n", cmd)
+	}
+
+	if key := strings.TrimSpace(opts.BindPopup); key != "" {
+		fmt.Fprintf(&b, "bind-key %s display-popup -E -w 90%% -h 90%% -T \" openusage \" %s\n", key, binary)
+	}
+	if key := strings.TrimSpace(opts.BindRefresh); key != "" {
+		fmt.Fprintf(&b, "bind-key %s run-shell '%s tmux preview' \\; refresh-client -S\n", key, binary)
+	}
+
+	b.WriteString(sentinelEnd)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// withInstallDefaults fills the zero/empty fields of opts with defaults so
+// callers can pass partial structs. Returned opts is a copy; the caller's
+// struct is not mutated.
+func withInstallDefaults(opts InstallOptions) InstallOptions {
+	if strings.TrimSpace(opts.Position) == "" {
+		opts.Position = "right"
+	}
+	if strings.TrimSpace(opts.Preset) == "" {
+		opts.Preset = DefaultPreset
+	}
+	if opts.Interval <= 0 {
+		opts.Interval = 5
+	}
+	if opts.RightLength <= 0 {
+		opts.RightLength = 200
+	}
+	if opts.LeftLength <= 0 {
+		opts.LeftLength = 80
+	}
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	return opts
+}
+
+// Install either prints the snippet to out (when opts.Write is false) or
+// writes it into tmux.conf, with a `.bak` backup of any pre-existing
+// non-empty file. If sentinels already exist in the conf the block is
+// replaced in place; otherwise the snippet is appended after a blank line.
+//
+// Returns the path that was written (or would have been) and a non-nil error
+// only on real I/O failures.
+func Install(out io.Writer, opts InstallOptions) (string, error) {
+	opts = withInstallDefaults(opts)
+	snippet := BuildSnippet(opts)
+
+	if !opts.Write {
+		if _, err := io.WriteString(out, snippet); err != nil {
+			return "", fmt.Errorf("tmux: writing snippet: %w", err)
+		}
+		if _, err := fmt.Fprintf(out, "\nTo apply, paste this into your tmux.conf and run: tmux source-file <path>\n"+
+			"Or re-run with --write to install automatically.\n"); err != nil {
+			return "", fmt.Errorf("tmux: writing instructions: %w", err)
+		}
+		return "", nil
+	}
+
+	path := strings.TrimSpace(opts.ConfPath)
+	if path == "" {
+		detected, err := DetectTmuxConf(out)
+		if err != nil {
+			return "", err
+		}
+		path = detected
+	}
+
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("tmux: reading %s: %w", path, err)
+	}
+
+	if len(existing) > 0 {
+		backupPath := path + ".bak"
+		if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
+			return "", fmt.Errorf("tmux: writing backup: %w", err)
+		}
+	}
+
+	updated := replaceOrAppendSnippet(existing, snippet)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("tmux: creating conf dir: %w", err)
+	}
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		return "", fmt.Errorf("tmux: writing %s: %w", path, err)
+	}
+
+	fmt.Fprintf(out, "installed tmux snippet at %s\n", path)
+	fmt.Fprintf(out, "  reload with: tmux source-file %s\n", path)
+	return path, nil
+}
+
+// Uninstall removes the sentinel block from tmux.conf, creating a `.bak`
+// backup first. When the file has no sentinel block it is left untouched and
+// an informational note is written to out.
+func Uninstall(out io.Writer, confPath string) error {
+	path := strings.TrimSpace(confPath)
+	if path == "" {
+		detected, err := DetectTmuxConf(out)
+		if err != nil {
+			return err
+		}
+		path = detected
+	}
+
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(out, "no tmux.conf found at %s; nothing to uninstall\n", path)
+			return nil
+		}
+		return fmt.Errorf("tmux: reading %s: %w", path, err)
+	}
+
+	if !bytes.Contains(existing, []byte(sentinelStart)) {
+		fmt.Fprintf(out, "no openusage block in %s; nothing to uninstall\n", path)
+		return nil
+	}
+
+	backupPath := path + ".bak"
+	if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
+		return fmt.Errorf("tmux: writing backup: %w", err)
+	}
+
+	cleaned := removeSentinelBlock(existing)
+	if err := os.WriteFile(path, cleaned, 0o644); err != nil {
+		return fmt.Errorf("tmux: writing %s: %w", path, err)
+	}
+
+	fmt.Fprintf(out, "removed openusage block from %s\n", path)
+	return nil
+}
+
+// replaceOrAppendSnippet returns the contents of tmux.conf with the
+// openusage-managed sentinel block either replaced in place (when present)
+// or appended (separated by a blank line) when absent.
+func replaceOrAppendSnippet(existing []byte, snippet string) []byte {
+	if !bytes.Contains(existing, []byte(sentinelStart)) {
+		var out bytes.Buffer
+		if len(existing) > 0 {
+			out.Write(existing)
+			if !bytes.HasSuffix(existing, []byte("\n")) {
+				out.WriteByte('\n')
+			}
+			out.WriteByte('\n')
+		}
+		out.WriteString(snippet)
+		return out.Bytes()
+	}
+	cleaned := removeSentinelBlock(existing)
+	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n")) {
+		cleaned = append(cleaned, '\n')
+	}
+	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n\n")) {
+		cleaned = append(cleaned, '\n')
+	}
+	return append(cleaned, []byte(snippet)...)
+}
+
+// removeSentinelBlock returns existing with everything between (and
+// including) the sentinel markers stripped. When the markers are unbalanced
+// (start without matching end) we conservatively leave the input unchanged.
+func removeSentinelBlock(existing []byte) []byte {
+	startIdx := bytes.Index(existing, []byte(sentinelStart))
+	if startIdx < 0 {
+		return existing
+	}
+	endIdx := bytes.Index(existing[startIdx:], []byte(sentinelEnd))
+	if endIdx < 0 {
+		return existing
+	}
+	endIdx += startIdx + len(sentinelEnd)
+	// Consume the trailing newline so we do not leave an orphan blank line.
+	if endIdx < len(existing) && existing[endIdx] == '\n' {
+		endIdx++
+	}
+	// Also trim any blank line directly before the block.
+	leading := startIdx
+	for leading > 0 && existing[leading-1] == '\n' {
+		leading--
+		if startIdx-leading >= 2 {
+			break
+		}
+	}
+	var out bytes.Buffer
+	out.Write(existing[:leading])
+	out.Write(existing[endIdx:])
+	return out.Bytes()
+}
+
+// SentinelPresent reports whether path contains the openusage-managed
+// snippet. Used by the doctor command to verify install state.
+func SentinelPresent(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("tmux: reading %s: %w", path, err)
+	}
+	return bytes.Contains(data, []byte(sentinelStart)), nil
+}

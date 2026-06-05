@@ -64,9 +64,10 @@ func resolveAlias(name, provider string) string {
 	return ""
 }
 
-// aliasNames returns the list of all known semantic alias names. Used by the
-// `openusage tmux variables` command.
-func aliasNames() []string {
+// AliasNames returns the list of all known semantic alias names. Used by the
+// `openusage tmux variables` command to enumerate user-facing template
+// variables.
+func AliasNames() []string {
 	out := make([]string, 0, len(semanticAliases))
 	for k := range semanticAliases {
 		out = append(out, k)
