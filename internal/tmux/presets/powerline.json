@@ -1,0 +1,7 @@
+{
+  "name": "powerline",
+  "description": "Powerline-style segmented bar with theme background swaps.",
+  "format": "#[fg=$accent,bg=$base] {tool:icon} #[fg=$base,bg=$accent] {today_cost:money} #[fg=$accent,bg=$peach] {burn_rate:money}/hr #[default]",
+  "glyphs": "nerdfont",
+  "sample": " 🤖  $4.21  $1.20/hr "
+}

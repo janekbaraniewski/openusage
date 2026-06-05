@@ -1,0 +1,7 @@
+{
+  "name": "cost-only",
+  "description": "Just today's spend. The minimum-noise option.",
+  "format": "{today_cost:money}",
+  "glyphs": "ascii",
+  "sample": "$4.21"
+}

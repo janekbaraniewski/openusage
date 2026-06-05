@@ -1,0 +1,7 @@
+{
+  "name": "claude-focused",
+  "description": "Claude Code workflow: model, active block cost and remaining, burn rate, context.",
+  "format": "🤖 {model:trunc:14} #[fg=$peach]{block_cost:money}#[default] block ({block_remaining:duration}) 🔥 {burn_rate:money}/hr 🧠 {context_pct:pct:color}",
+  "glyphs": "unicode",
+  "sample": "🤖 Opus 4.7 $3.40 block (2h17m) 🔥 $1.20/hr 🧠 42%"
+}

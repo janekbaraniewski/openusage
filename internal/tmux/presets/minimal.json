@@ -1,0 +1,7 @@
+{
+  "name": "minimal",
+  "description": "Bare tool name and today cost. No icons.",
+  "format": "{tool} {today_cost:money}",
+  "glyphs": "ascii",
+  "sample": "claude_code $4.21"
+}

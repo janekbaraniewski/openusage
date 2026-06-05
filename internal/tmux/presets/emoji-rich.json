@@ -1,0 +1,7 @@
+{
+  "name": "emoji-rich",
+  "description": "Everything plus emoji labels: tool, cost, requests, burn rate, context.",
+  "format": "🤖 {tool:upper} | 💰 {today_cost:money} | 📅 {requests_today:default:0} req | 🔥 {burn_rate:money}/hr | 🧠 {context_pct:pct:color}",
+  "glyphs": "unicode",
+  "sample": "🤖 CLAUDE_CODE | 💰 $4.21 | 📅 42 req | 🔥 $1.20/hr | 🧠 42%"
+}

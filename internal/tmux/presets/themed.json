@@ -1,0 +1,7 @@
+{
+  "name": "themed",
+  "description": "Uses the active OpenUsage theme palette for tool icon, today cost, and burn rate.",
+  "format": "#[fg=$accent]{tool:icon}#[default] #[fg=$green]{today_cost:money}#[default] #[fg=$peach]{burn_rate:money}/hr#[default]",
+  "glyphs": "unicode",
+  "sample": "🤖 $4.21 $1.20/hr"
+}

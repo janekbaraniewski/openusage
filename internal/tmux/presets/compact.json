@@ -1,0 +1,7 @@
+{
+  "name": "compact",
+  "description": "Provider icon, block percent, today cost. Default preset.",
+  "format": "{tool:icon} {block_pct:pct:color} {today_cost:money}",
+  "glyphs": "unicode",
+  "sample": "🤖 47% $4.21"
+}

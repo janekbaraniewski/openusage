@@ -1,0 +1,7 @@
+{
+  "name": "verbose",
+  "description": "Wide bar: tool, model, today/block cost, burn rate, context.",
+  "format": "{tool:icon} {model:trunc:12} | 💰 {today_cost:money} today / {block_cost:money} block | 🔥 {burn_rate:money}/hr | 🧠 {context_tokens:tokens} ({context_pct:pct})",
+  "glyphs": "unicode",
+  "sample": "🤖 Opus 4.7 | 💰 $4.21 today / $3.40 block | 🔥 $1.20/hr | 🧠 84k (42%)"
+}

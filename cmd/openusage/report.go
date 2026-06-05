@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/janekbaraniewski/openusage/internal/ccevents"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -240,31 +241,10 @@ func gatherReportEvents(kind report.Kind, f *reportFlags) ([]report.Event, strin
 
 // claudeCodeConversationEvents maps Claude Code's per-turn usage stats into the
 // report event stream. Shared by the report subcommands and the statusline.
+// The real implementation lives in internal/ccevents so internal/tmux and other
+// callers can use it without depending on cmd/openusage.
 func claudeCodeConversationEvents(mode claude_code.CostMode, offline bool) ([]report.Event, error) {
-	stats, err := claude_code.AggregateConversations(claude_code.AggregateOptions{
-		Mode:    mode,
-		Offline: offline,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]report.Event, 0, len(stats))
-	for _, s := range stats {
-		out = append(out, report.Event{
-			Time:        s.Time,
-			Provider:    "claude_code",
-			Model:       s.Model,
-			Project:     s.Project,
-			Session:     s.Session,
-			Input:       s.Input,
-			Output:      s.Output,
-			CacheRead:   s.CacheRead,
-			CacheCreate: s.CacheCreate,
-			Reasoning:   s.Reasoning,
-			Cost:        s.Cost,
-		})
-	}
-	return out, nil
+	return ccevents.Conversations(mode, offline)
 }
 
 // parseReportDate parses a YYYY-MM-DD bound in the local timezone. For the

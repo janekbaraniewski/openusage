@@ -1,0 +1,7 @@
+{
+  "name": "multi-tool",
+  "description": "Render the top active tools side by side. Uses the active_tools segment driven by the multi detection strategy.",
+  "format": "{active_tools}",
+  "glyphs": "unicode",
+  "sample": "claude_code | cursor | codex"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "nerdfont",
+  "description": "Nerd Font glyphs for tool, money, and burn-rate icons. Requires a Nerd Font in your terminal.",
+  "format": " {tool}  {today_cost:money}  {burn_rate:money}",
+  "glyphs": "nerdfont",
+  "sample": " claude_code  $4.21  $1.20"
+}

@@ -159,6 +159,47 @@ type IntegrationState struct {
 	Declined    bool   `json:"declined,omitempty"`
 }
 
+// TmuxConfig holds user-tunable settings for the `openusage tmux` subcommand.
+// All fields are optional; unset values fall through to preset defaults and
+// then to hardcoded defaults inside internal/tmux.
+type TmuxConfig struct {
+	Preset         string               `json:"preset,omitempty"`
+	Format         string               `json:"format,omitempty"`          // overrides preset
+	Provider       string               `json:"provider,omitempty"`        // pin a provider; skips auto-detection
+	ActiveStrategy string               `json:"active_strategy,omitempty"` // comma-separated list; default "recency,priority"
+	PriorityOrder  []string             `json:"priority_order,omitempty"`
+	RecencyWindow  string               `json:"recency_window,omitempty"` // Go duration string, default "4h"
+	ColorMode      string               `json:"color_mode,omitempty"`     // truecolor|256|ansi|none; default truecolor
+	Glyphs         string               `json:"glyphs,omitempty"`         // ascii|unicode|nerdfont
+	Theme          string               `json:"theme,omitempty"`          // empty = inherit Config.Theme
+	Source         string               `json:"source,omitempty"`         // auto|daemon|direct
+	Interval       int                  `json:"interval,omitempty"`       // suggested tmux status-interval; default 5
+	MaxRuntimeMS   int                  `json:"max_runtime_ms,omitempty"` // self-kill budget; default 800
+	Variables      map[string]string    `json:"variables,omitempty"`      // user-defined template variables
+	Segments       map[string]string    `json:"segments,omitempty"`       // user-defined named segments
+	ColorRules     map[string]ColorRule `json:"color_rules,omitempty"`    // threshold-based coloring keyed by variable name
+	Alerts         TmuxAlerts           `json:"alerts,omitempty"`
+}
+
+// ColorRule defines a threshold-based color mapping for the `:color` modifier.
+// Color fields accept theme refs (e.g. "$accent") or hex (e.g. "#FF6600").
+type ColorRule struct {
+	LowAt       float64 `json:"low_at,omitempty"`
+	MediumAt    float64 `json:"medium_at,omitempty"`
+	HighAt      float64 `json:"high_at,omitempty"`
+	LowColor    string  `json:"low_color,omitempty"`
+	MediumColor string  `json:"medium_color,omitempty"`
+	HighColor   string  `json:"high_color,omitempty"`
+}
+
+// TmuxAlerts configures push-alert thresholds for `openusage tmux watch`.
+type TmuxAlerts struct {
+	BurnRatePerHour       float64 `json:"burn_rate_per_hour,omitempty"`
+	BlockMinutesRemaining int     `json:"block_minutes_remaining,omitempty"`
+	CooldownMinutes       int     `json:"cooldown_minutes,omitempty"`
+	Mode                  string  `json:"mode,omitempty"` // message|bell|both|none
+}
+
 type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
@@ -173,6 +214,7 @@ type Config struct {
 	Integrations         map[string]IntegrationState   `json:"integrations,omitempty"`
 	Export               ExportConfig                  `json:"export,omitempty"`
 	Hub                  HubConfig                     `json:"hub,omitempty"`
+	Tmux                 TmuxConfig                    `json:"tmux,omitempty"`
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
