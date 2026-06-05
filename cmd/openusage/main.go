@@ -50,6 +50,7 @@ func main() {
 	root.AddCommand(newHubCommand())
 	root.AddCommand(newHubViewCommand())
 	root.AddCommand(newStatuslineCommand())
+	root.AddCommand(newTmuxCommand())
 	for _, c := range newReportCommands() {
 		root.AddCommand(c)
 	}
