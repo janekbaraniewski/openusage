@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.15.0](https://github.com/janekbaraniewski/openusage/compare/v0.14.0...v0.15.0) (2026-06-06)
+
+
+### Features
+
+* **cli:** add headless reports, statusline, and long-context cost accuracy ([e83c373](https://github.com/janekbaraniewski/openusage/commit/e83c37397d54a1e41b61c39b2b1203ddb5a1cf10))
+* **report:** add a loading spinner; fix(copilot): tolerate rotated session logs ([be820fa](https://github.com/janekbaraniewski/openusage/commit/be820fa4ec17f44add0fafc5fa618fc17c8055c8))
+* **report:** add itemized usage for file-based providers (session/blocks) ([e7cdac2](https://github.com/janekbaraniewski/openusage/commit/e7cdac2c8458c2b536465e336d1632a60a22c442))
+* **report:** extend session/blocks/daily to all telemetry-source providers ([b1c6071](https://github.com/janekbaraniewski/openusage/commit/b1c60717b1d1dcf583d6abc4c7ad484d96bd5cea))
+* **tmux:** active-tool detection, install/uninstall, doctor, preview, watch, json ([6293d9c](https://github.com/janekbaraniewski/openusage/commit/6293d9cfede67d2ea6bb204402f6fd3b1b830fe4))
+* **tmux:** formatter, presets, config, ccevents extraction ([f30f00b](https://github.com/janekbaraniewski/openusage/commit/f30f00bbba299b2d47ce53083c6299ddfb868aae))
+
+
+### Dependencies
+
+* **docs:** bump the docs-minor-and-patch group in /docs/site with 5 updates ([#179](https://github.com/janekbaraniewski/openusage/issues/179)) ([fd6aaf3](https://github.com/janekbaraniewski/openusage/commit/fd6aaf363821de99379637fee902e10710c9f8f2))
+* **website:** bump the website-minor-and-patch group in /website with 4 updates ([#178](https://github.com/janekbaraniewski/openusage/issues/178)) ([9f8f068](https://github.com/janekbaraniewski/openusage/commit/9f8f0683f490caa9fccbad799463aa005cc556d9))
+
 ## [0.14.0](https://github.com/janekbaraniewski/openusage/compare/v0.13.0...v0.14.0) (2026-06-01)
 
 
