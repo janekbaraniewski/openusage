@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.0](https://github.com/janekbaraniewski/openusage/compare/v0.17.0...v0.18.0) (2026-06-08)
+
+
+### Features
+
+* **tmux:** add provider logos for 10 more tools, distinct emoji for the rest ([4f6cea8](https://github.com/janekbaraniewski/openusage/commit/4f6cea8c81d51048dfeac4e5344b9b968243fb41))
+* **tmux:** redesign custom step as a component builder with live preview ([02f6800](https://github.com/janekbaraniewski/openusage/commit/02f68003b613658133c4671f84a21fa1ab87f838))
+* **tmux:** single-screen live-preview install configurator ([745ac98](https://github.com/janekbaraniewski/openusage/commit/745ac988ef0c4d4af85c14e9ae5e4c1b08896d8d))
+* **tmux:** wizard can customize the template interactively ([51ee71f](https://github.com/janekbaraniewski/openusage/commit/51ee71fd2dac5e472fb76fe20fe93d6c1b98f9f8))
+* **tmux:** wizard configures dynamic / pinned / multiple providers ([86a728f](https://github.com/janekbaraniewski/openusage/commit/86a728fe147363a5d0e3df3adafbafb1ba57272c))
+
+
+### Bug Fixes
+
+* **tmux:** configurator preview honors the icons choice ([bac38a5](https://github.com/janekbaraniewski/openusage/commit/bac38a527d6e5e68cc4950c99f3616380a686e05))
+* **tmux:** go.mod tidy + bigger, centered provider icons ([d4f4983](https://github.com/janekbaraniewski/openusage/commit/d4f49835732227aa421f9d7f8028e30dd671cf4d))
+* **tmux:** reserve a trailing column after custom-font logos ([a3e69d4](https://github.com/janekbaraniewski/openusage/commit/a3e69d486b2cdd4bfe71cde5ae085bd018f762d0))
+
 ## [0.17.0](https://github.com/janekbaraniewski/openusage/compare/v0.16.0...v0.17.0) (2026-06-08)
 
 
