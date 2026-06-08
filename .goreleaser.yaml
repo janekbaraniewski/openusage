@@ -141,6 +141,8 @@ release:
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
+  extra_files:
+    - glob: ./internal/tmux/assets/openusage-icons.ttf
   header: |
     ## Changelog
   footer: |

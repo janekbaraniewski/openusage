@@ -75,6 +75,12 @@ demo: deps ## Build and run the demo with dummy data (for screenshots)
 sync-tools: ## Regenerate all AI tool config files from canonical template
 	@./scripts/sync-tool-configs.sh
 
+.PHONY: icon-font
+icon-font: ## Regenerate the provider icon font (internal/tmux/assets/openusage-icons.ttf)
+	@python3 -m venv .venv-font 2>/dev/null || true
+	@.venv-font/bin/pip install --quiet --upgrade fonttools
+	@.venv-font/bin/python scripts/gen-icon-font.py
+
 .PHONY: docs-install
 docs-install: ## Install the docs site dependencies
 	cd docs/site && npm install
