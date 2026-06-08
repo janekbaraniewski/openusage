@@ -333,7 +333,8 @@ func queryProviderAgg(ctx context.Context, db *sql.DB, filter usageFilter) ([]te
 
 func queryActivityAgg(ctx context.Context, db *sql.DB, filter usageFilter) (telemetryActivityAgg, error) {
 	usageCTE, whereArgs := dedupedUsageCTE(filter)
-	query := usageCTE + `
+	todayExpr := filter.todayExpr("occurred_at")
+	query := usageCTE + fmt.Sprintf(`
 		SELECT
 			COUNT(DISTINCT CASE WHEN event_type = 'message_usage' AND status != 'error' THEN
 				COALESCE(NULLIF(TRIM(message_id), ''), COALESCE(NULLIF(TRIM(turn_id), ''), dedup_key))
@@ -347,15 +348,16 @@ func queryActivityAgg(ctx context.Context, db *sql.DB, filter usageFilter) (tele
 			SUM(CASE WHEN event_type = 'message_usage' AND status != 'error' THEN COALESCE(cache_read_tokens, 0) ELSE 0 END) AS cached_tokens,
 			SUM(CASE WHEN event_type = 'message_usage' AND status != 'error' THEN COALESCE(reasoning_tokens, 0) ELSE 0 END) AS reasoning_tokens,
 			SUM(CASE WHEN event_type = 'message_usage' AND status != 'error' THEN COALESCE(total_tokens, 0) ELSE 0 END) AS total_tokens,
-			SUM(CASE WHEN event_type = 'message_usage' AND status != 'error' THEN COALESCE(cost_usd, 0) ELSE 0 END) AS total_cost
+			SUM(CASE WHEN event_type = 'message_usage' AND status != 'error' THEN COALESCE(cost_usd, 0) ELSE 0 END) AS total_cost,
+			SUM(CASE WHEN %s AND event_type = 'message_usage' AND status != 'error' THEN COALESCE(cost_usd, 0) ELSE 0 END) AS total_cost_today
 		FROM deduped_usage
 		WHERE 1=1
-	`
+	`, todayExpr)
 	var out telemetryActivityAgg
 	err := db.QueryRowContext(ctx, query, whereArgs...).Scan(
 		&out.Messages, &out.Sessions, &out.ToolCalls,
 		&out.InputTokens, &out.OutputTokens, &out.CachedTokens,
-		&out.ReasonTokens, &out.TotalTokens, &out.TotalCost,
+		&out.ReasonTokens, &out.TotalTokens, &out.TotalCost, &out.TotalCostToday,
 	)
 	if err != nil {
 		return out, fmt.Errorf("canonical usage activity query: %w", err)

@@ -106,6 +106,10 @@ type telemetryActivityAgg struct {
 	ReasonTokens float64
 	TotalTokens  float64
 	TotalCost    float64
+	// TotalCostToday is the cost incurred today (since the local day boundary),
+	// regardless of the view window. today_api_cost is derived from this so a
+	// wide view window does not report its window total as "today".
+	TotalCostToday float64
 }
 
 type telemetryCodeStatsAgg struct {

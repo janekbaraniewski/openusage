@@ -232,8 +232,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	if act.OutputTokens > 0 {
 		snap.Metrics["today_output_tokens"] = core.Metric{Used: core.Float64Ptr(act.OutputTokens), Unit: "tokens", Window: windowLabel}
 	}
-	if act.TotalCost > 0 {
-		snap.Metrics["today_api_cost"] = core.Metric{Used: core.Float64Ptr(act.TotalCost), Unit: "USD", Window: windowLabel}
+	// today_api_cost must mean TODAY, not the view-window total — the latter is
+	// window_cost (set below). act.TotalCostToday is scoped to today regardless
+	// of the view window, so a 30-day view no longer reports its 30-day total
+	// as "today".
+	if act.TotalCostToday > 0 {
+		snap.Metrics["today_api_cost"] = core.Metric{Used: core.Float64Ptr(act.TotalCostToday), Unit: "USD", Window: "1d"}
 	}
 
 	codeStats := agg.CodeStats

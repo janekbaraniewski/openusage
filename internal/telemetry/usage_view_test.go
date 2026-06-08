@@ -1183,6 +1183,30 @@ func TestApplyUsageViewToSnapshot_DoesNotRestoreRootModelBreakdownForEmptyWindow
 	}
 }
 
+// TestApplyUsageViewToSnapshot_TodayCostScopedToToday guards against the bug
+// where today_api_cost was set to the view-window total — so a 30-day view
+// reported the 30-day total as "today". today_api_cost must come from the
+// today-scoped aggregate (TotalCostToday) regardless of the view window, while
+// window_cost carries the window total.
+func TestApplyUsageViewToSnapshot_TodayCostScopedToToday(t *testing.T) {
+	const todayCost = 216.0
+	const windowTotal = 6990.0
+
+	for _, tw := range []core.TimeWindow{core.TimeWindow1d, core.TimeWindow7d, core.TimeWindow30d} {
+		snap := core.UsageSnapshot{ProviderID: "claude_code", AccountID: "claude-code", Metrics: map[string]core.Metric{}}
+		applyUsageViewToSnapshot(&snap, &telemetryUsageAgg{
+			Activity: telemetryActivityAgg{TotalCost: windowTotal, TotalCostToday: todayCost},
+			Models:   []telemetryModelAgg{{Model: "claude-opus-4-8", CostUSD: windowTotal, Requests: 1}},
+		}, tw)
+		if got := metricUsed(snap.Metrics["today_api_cost"]); got != todayCost {
+			t.Fatalf("today_api_cost over %s = %v, want today-scoped %v (not the window total %v)", tw, got, todayCost, windowTotal)
+		}
+		if got := metricUsed(snap.Metrics["window_cost"]); got != windowTotal {
+			t.Fatalf("window_cost over %s = %v, want window total %v", tw, got, windowTotal)
+		}
+	}
+}
+
 func metricUsed(m core.Metric) float64 {
 	if m.Used == nil {
 		return 0
