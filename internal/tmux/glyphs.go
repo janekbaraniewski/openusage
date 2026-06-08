@@ -144,6 +144,8 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"xai":           "[xai]",
 		"perplexity":    "[pplx]",
 		"alibaba_cloud": "[qwen]",
+		"zai":           "[zai]",
+		"moonshot":      "[kimi]",
 	},
 	GlyphTierUnicode: {
 		"*":             "✨", // sparkles
@@ -165,6 +167,8 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"xai":           "✖",
 		"perplexity":    "❔",
 		"alibaba_cloud": "云",
+		"zai":           "✦",
+		"moonshot":      "\U0001F319", // crescent moon
 	},
 	GlyphTierNerdfont: {
 		"*":             "", // nf-fa-rocket

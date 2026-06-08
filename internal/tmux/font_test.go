@@ -50,6 +50,22 @@ func TestCustomFontMapMatchesManifest(t *testing.T) {
 	}
 }
 
+// TestEveryManifestProviderHasStaticFallback guards against drift between
+// assets/icons.json and the static glyph tiers: every provider that has a
+// bundled-font glyph must also have a provider-specific ascii and unicode glyph
+// (not the generic "*" fallback), so it renders sensibly when the font is not
+// installed.
+func TestEveryManifestProviderHasStaticFallback(t *testing.T) {
+	for _, p := range CustomFontProviders() {
+		for _, tier := range []GlyphTier{GlyphTierASCII, GlyphTierUnicode} {
+			g := ProviderIcon(p, tier)
+			if g == "" || g == providerIcons[tier]["*"] {
+				t.Errorf("provider %q has no provider-specific %s glyph (got generic %q); add it to providerIcons", p, tier, g)
+			}
+		}
+	}
+}
+
 func TestEmbeddedFontPresent(t *testing.T) {
 	if len(EmbeddedIconFont()) == 0 {
 		t.Fatal("embedded icon font is empty — was scripts/gen-icon-font.py run?")
