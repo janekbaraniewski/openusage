@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/janekbaraniewski/openusage/compare/v0.19.0...v0.19.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **icons:** real logos for droid/mux/pi; drop crush/codebuff tiles ([15019bd](https://github.com/janekbaraniewski/openusage/commit/15019bd88f167e3a24c2d9476e303111f6ddb405))
+
 ## [0.19.0](https://github.com/janekbaraniewski/openusage/compare/v0.18.0...v0.19.0) (2026-06-08)
 
 
