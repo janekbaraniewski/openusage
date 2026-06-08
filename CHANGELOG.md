@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/janekbaraniewski/openusage/compare/v0.18.0...v0.19.0) (2026-06-08)
+
+
+### Features
+
+* **seo:** advertise all 34 providers and every feature across site, docs, llms ([0ad1253](https://github.com/janekbaraniewski/openusage/commit/0ad12538d94e892759825adb58f1af2a2a51c395))
+* **web:** add "in your status bar" section to the landing page ([a91f6d9](https://github.com/janekbaraniewski/openusage/commit/a91f6d90a50ba2b06733d1d5e36863a9b5b613c3))
+
 ## [0.18.0](https://github.com/janekbaraniewski/openusage/compare/v0.17.0...v0.18.0) (2026-06-08)
 
 
