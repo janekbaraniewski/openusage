@@ -73,4 +73,8 @@ Allow: /
 # Machine-readable resources for AI agents and crawlers:
 #   LLM-friendly index:   https://openusage.sh/llms.txt
 #   Full content as text: https://openusage.sh/llms-full.txt
+# Two sitemaps: the marketing/landing pages live at the root sitemap; the full
+# documentation corpus (Docusaurus, ~60+ pages) has its own sitemap under /docs.
+# Crawlers only fetch robots.txt from the host root, so both are listed here.
 Sitemap: https://openusage.sh/sitemap.xml
+Sitemap: https://openusage.sh/docs/sitemap.xml
