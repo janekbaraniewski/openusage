@@ -2,6 +2,7 @@
 title: DeepSeek
 description: Track DeepSeek balance breakdown and rate limits in OpenUsage.
 sidebar_label: DeepSeek
+keywords: [deepseek usage tracker, deepseek quota tracking, deepseek cost tracking, deepseek token usage, track deepseek spend locally]
 ---
 
 # DeepSeek

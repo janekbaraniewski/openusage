@@ -2,6 +2,7 @@
 title: Crush
 description: Track Crush coding-agent sessions, per-project usage, and model token counts in OpenUsage.
 sidebar_label: Crush
+keywords: [crush usage tracker, crush quota tracking, crush cost tracking, crush token usage, track crush spend locally]
 ---
 
 # Crush

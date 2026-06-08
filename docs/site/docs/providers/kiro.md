@@ -2,6 +2,7 @@
 title: Kiro CLI
 description: Track Kiro CLI (renamed Amazon Q Developer CLI) conversations and token estimates in OpenUsage.
 sidebar_label: Kiro
+keywords: [kiro cli usage tracker, kiro cli quota tracking, kiro cli cost tracking, kiro cli token usage, track kiro cli spend locally]
 ---
 
 # Kiro CLI

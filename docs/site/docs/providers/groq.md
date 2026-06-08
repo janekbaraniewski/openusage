@@ -2,6 +2,7 @@
 title: Groq
 description: Track Groq API rate limits (RPM, TPM, RPD, TPD) in OpenUsage.
 sidebar_label: Groq
+keywords: [groq usage tracker, groq quota tracking, groq cost tracking, groq token usage, track groq spend locally]
 ---
 
 # Groq

@@ -2,6 +2,7 @@
 title: Codex CLI
 description: Track OpenAI Codex CLI sessions, rate limits, and credit balance in OpenUsage.
 sidebar_label: Codex
+keywords: [codex cli usage tracker, codex cli quota tracking, codex cli cost tracking, codex cli token usage, track codex cli spend locally]
 ---
 
 # Codex CLI

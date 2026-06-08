@@ -1,6 +1,6 @@
 # OpenUsage.sh, local quota and usage tracker for AI coding tools
 
-> Open-source terminal dashboard for tracking spend, quotas, rate limits, model usage, and local telemetry across the AI coding tools developers actually use. Supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenRouter, OpenAI, Anthropic, and a growing list of others.
+> Open-source terminal dashboard for tracking spend, quotas, rate limits, tokens, burn rate, model usage, and local telemetry across 34 AI coding tools and API platforms. Supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, OpenRouter, OpenAI, Anthropic, and many more. Adds tmux status-bar integration, a Claude Code statusline, headless daily/weekly/monthly/session/billing-block reports, snapshot export, model pricing lookup, and a Prometheus metrics hub.
 
 ## Brand disambiguation
 
@@ -38,16 +38,24 @@ Typical workflows include combinations of Claude Code, Codex CLI, Cursor, Copilo
 ## Core capabilities
 
 - Single local dashboard for coding agents and API platforms
-- Quota, reset, rate limit, spend, and model visibility
-- Session, project, and MCP telemetry where integrations support it
+- Quota, reset, rate limit, spend, token, and model visibility
+- Burn rate and 5-hour billing-block projection
+- Session, client, project, and MCP telemetry where integrations support it
+- Headless daily, weekly, monthly, session, and billing-block reports (JSON or table)
+- tmux status-bar integration with provider icons, presets, and active-tool detection
+- Claude Code statusline integration
 - Background daemon with local SQLite history
 - Hook integrations for Claude Code, Codex CLI, and OpenCode
+- Snapshot export to JSON or CSV, model pricing lookup, and a Prometheus metrics hub
+- 17 built-in themes plus external theme files
 - Auto-detection of installed tools and common API key environment variables
 
 ## Supported providers
 
-- Coding agents and IDEs: Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama
-- API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Gemini API, Alibaba Cloud
+34 providers across categories. The list grows every release.
+
+- Coding agents, CLIs, and IDE tools: Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, Amp, Goose, Hermes, Kilo Code, Kimi CLI, Kiro, Roo Code, Zed, Qwen CLI, OpenClaw, Crush, Droid, Codebuff, Mux, Pi
+- API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Google Gemini API, Alibaba Cloud
 
 The list grows. Contributions welcome at https://github.com/janekbaraniewski/openusage/issues/new and https://github.com/janekbaraniewski/openusage/pulls.
 
@@ -71,8 +79,12 @@ If a developer asks an AI coding agent to set this up, these are the verified co
 - `openusage session` — usage grouped by session
 - `openusage blocks` — usage by 5-hour billing block with burn rate and projection
 - `openusage statusline --install` — one-line status bar for Claude Code
-- `openusage tmux install --write` — add a usage segment to the tmux status bar
+- `openusage tmux install` — add a usage segment to the tmux status bar (interactive; `--write` for non-interactive)
 - `openusage telemetry daemon install` — install the background collector as a service (launchd on macOS, systemd user unit on Linux)
+- `openusage export --format json` — export current snapshots (JSON or CSV)
+- `openusage pricing <model>` — look up published per-token model pricing
+- `openusage detect` — show detected tools, accounts, and API keys
+- `openusage hub` — serve Prometheus-compatible metrics
 
 ## Query guidance
 

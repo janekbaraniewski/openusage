@@ -2,6 +2,7 @@
 title: Alibaba Cloud Model Studios
 description: Track Alibaba Cloud DashScope billing period, balance, spend, and per-model quotas in OpenUsage.
 sidebar_label: Alibaba Cloud
+keywords: [alibaba cloud model studios usage tracker, alibaba cloud model studios quota tracking, alibaba cloud model studios cost tracking, alibaba cloud model studios token usage, track alibaba cloud model studios spend locally]
 ---
 
 # Alibaba Cloud Model Studios

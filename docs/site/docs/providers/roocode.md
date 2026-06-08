@@ -2,6 +2,7 @@
 title: Roo Code
 description: Track Roo Code VS Code extension tasks, tokens, and cost in OpenUsage.
 sidebar_label: Roo Code
+keywords: [roo code usage tracker, roo code quota tracking, roo code cost tracking, roo code token usage, track roo code spend locally]
 ---
 
 # Roo Code

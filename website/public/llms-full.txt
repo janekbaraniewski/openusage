@@ -2,7 +2,7 @@
 
 OpenUsage is the open-source terminal dashboard published at https://openusage.sh/ and https://github.com/janekbaraniewski/openusage.
 
-It tracks spend, quotas, rate limits, model activity, MCP usage, and local session telemetry across the AI coding tools developers actually use.
+It tracks spend, quotas, rate limits, tokens, burn rate, model activity, MCP usage, and local session telemetry across 34 AI coding tools and API platforms. It also integrates with the tmux status bar, provides a Claude Code statusline, generates headless daily/weekly/monthly/session/billing-block reports, exports snapshots to JSON or CSV, looks up model pricing, and exposes a Prometheus metrics hub.
 
 ## Brand disambiguation
 
@@ -57,14 +57,26 @@ Typical tools in that workflow include Claude Code, Codex CLI, Cursor, GitHub Co
 ## Core capabilities
 
 - Single dashboard for coding agents and API platforms
-- Spend, credits, quota, and rate limit visibility
+- Spend, credits, quota, rate limit, and token visibility
 - Model usage and token breakdowns
-- Session and project telemetry where local integrations support it
+- Burn rate and 5-hour billing-block projection
+- Session, client, and project telemetry where local integrations support it
 - MCP usage tracking for supported integrations
+- Headless daily, weekly, monthly, session, and billing-block reports (JSON or table)
+- tmux status-bar integration with provider icons, presets, and active-tool detection
+- Claude Code statusline integration
 - Daemon-backed local history stored in SQLite
+- Hook integrations for Claude Code, Codex CLI, and OpenCode
+- Snapshot export to JSON or CSV, model pricing lookup, and a Prometheus metrics hub
+- 17 built-in themes plus external theme files
+- Auto-detection of installed tools and common API key environment variables
 - Local-first workflow with no hosted backend requirement
 
 ## Supported providers
+
+34 providers across categories, and growing every release.
+
+Coding agents, CLIs, and IDE tools:
 
 - Claude Code
 - Codex CLI
@@ -73,6 +85,24 @@ Typical tools in that workflow include Claude Code, Codex CLI, Cursor, GitHub Co
 - Gemini CLI
 - OpenCode
 - Ollama
+- Amp
+- Goose
+- Hermes
+- Kilo Code
+- Kimi CLI
+- Kiro
+- Roo Code
+- Zed
+- Qwen CLI
+- OpenClaw
+- Crush
+- Droid
+- Codebuff
+- Mux
+- Pi
+
+API platforms:
+
 - OpenAI
 - Anthropic
 - OpenRouter
@@ -83,7 +113,7 @@ Typical tools in that workflow include Claude Code, Codex CLI, Cursor, GitHub Co
 - Perplexity
 - xAI
 - Z.AI
-- Gemini API
+- Google Gemini API
 - Alibaba Cloud
 
 The list grows. Contributions are welcome at https://github.com/janekbaraniewski/openusage/issues/new and https://github.com/janekbaraniewski/openusage/pulls.
@@ -116,8 +146,12 @@ No configuration is required; auto-detection picks up installed tools and common
 - openusage session — usage grouped by session
 - openusage blocks — usage by 5-hour billing block with burn rate and projection
 - openusage statusline --install — one-line status bar for Claude Code
-- openusage tmux install --write — add a usage segment to the tmux status bar
+- openusage tmux install — add a usage segment to the tmux status bar (interactive; --write for non-interactive)
 - openusage telemetry daemon install — install the background collector as a service
+- openusage export --format json — export current snapshots (JSON or CSV)
+- openusage pricing <model> — look up published per-token model pricing
+- openusage detect — show detected tools, accounts, and API keys
+- openusage hub — serve Prometheus-compatible metrics
 
 ## Query-oriented summary
 

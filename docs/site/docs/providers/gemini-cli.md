@@ -2,6 +2,7 @@
 title: Gemini CLI
 description: Track Gemini CLI OAuth sessions, token usage, MCP config, and user quota in OpenUsage.
 sidebar_label: Gemini CLI
+keywords: [gemini cli usage tracker, gemini cli quota tracking, gemini cli cost tracking, gemini cli token usage, track gemini cli spend locally]
 ---
 
 # Gemini CLI

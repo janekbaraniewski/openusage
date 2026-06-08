@@ -120,17 +120,21 @@ If the question is whether this is the right fit versus a simpler local limits t
 ## Features
 
 - **Cross-provider tracking** — compare coding agents, API platforms, and local runtimes in one local dashboard
+- **34 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
 - **Zero config** — auto-detects your AI tools and API keys, just run it
-- **Live dashboard** — see spend, quotas, rate limits, and per-model usage at a glance
-- **17 providers** — covers coding agents (Claude Code, Cursor, Copilot, Codex, Gemini CLI), API platforms (OpenAI, Anthropic, OpenRouter, and more), and local tools (Ollama)
-- **Background tracking** — collects data continuously, even when the dashboard is closed
-- **Deep cost insights** — combine providers like OpenCode + OpenRouter for breakdowns by model, tool, and hosting provider
+- **Live dashboard** — see spend, quotas, rate limits, tokens, burn rate, and per-model usage at a glance
+- **tmux integration** — show the active tool's usage in your tmux status bar, with provider icons, presets, and active-tool detection
+- **Claude Code statusline** — one-line session cost, today's cost, burn rate, and context usage in Claude Code
+- **Headless reports** — `daily`, `weekly`, `monthly`, `session`, and `blocks` reports in table or JSON
+- **Background tracking** — a daemon collects data continuously, even when the dashboard is closed, into a local SQLite database you own
+- **Deep cost insights** — model, tool, project, MCP, and session breakdowns; combine providers like OpenCode + OpenRouter
 - **Tool integrations** — optional hooks for Claude Code, Codex CLI, and OpenCode provide richer, real-time usage data
-- **Customizable** — 15+ built-in themes, adjustable time windows, configurable thresholds, provider reordering, plus external theme files
+- **Export & metrics** — export snapshots to JSON or CSV, look up model pricing, or serve Prometheus metrics from the built-in hub
+- **Customizable** — 17 built-in themes, adjustable time windows, configurable thresholds, provider reordering, plus external theme files
 
 ## Supported providers
 
-17 provider integrations covering coding agents, API platforms, and local tools. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
+34 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
 
 ### Claude Code
 

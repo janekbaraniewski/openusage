@@ -2,6 +2,7 @@
 title: Kilo Code
 description: Track Kilo Code VS Code extension tasks, tokens, and cost in OpenUsage.
 sidebar_label: Kilo Code
+keywords: [kilo code usage tracker, kilo code quota tracking, kilo code cost tracking, kilo code token usage, track kilo code spend locally]
 ---
 
 # Kilo Code

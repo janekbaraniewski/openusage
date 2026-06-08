@@ -2,6 +2,7 @@
 title: Z.AI
 description: Track Z.AI 5-hour window, monthly usage, credit grants, and tool usage in OpenUsage.
 sidebar_label: Z.AI
+keywords: [z.ai usage tracker, z.ai quota tracking, z.ai cost tracking, z.ai token usage, track z.ai spend locally]
 ---
 
 # Z.AI

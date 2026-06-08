@@ -2,6 +2,7 @@
 title: OpenRouter
 description: Track OpenRouter credits, daily/weekly/monthly usage, generation analytics, and BYOK breakdown in OpenUsage.
 sidebar_label: OpenRouter
+keywords: [openrouter usage tracker, openrouter quota tracking, openrouter cost tracking, openrouter token usage, track openrouter spend locally]
 ---
 
 # OpenRouter

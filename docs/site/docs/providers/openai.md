@@ -2,6 +2,7 @@
 title: OpenAI
 description: Track OpenAI API rate limits and quotas in OpenUsage.
 sidebar_label: OpenAI
+keywords: [openai usage tracker, openai quota tracking, openai cost tracking, openai token usage, track openai spend locally]
 ---
 
 # OpenAI

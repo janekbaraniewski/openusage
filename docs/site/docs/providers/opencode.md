@@ -2,6 +2,7 @@
 title: OpenCode
 description: Track OpenCode auth, available zen models, and spend via the telemetry plugin in OpenUsage.
 sidebar_label: OpenCode
+keywords: [opencode usage tracker, opencode quota tracking, opencode cost tracking, opencode token usage, track opencode spend locally]
 ---
 
 # OpenCode

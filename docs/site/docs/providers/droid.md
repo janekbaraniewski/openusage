@@ -2,6 +2,7 @@
 title: Droid
 description: Track Factory Droid sessions and per-model token usage in OpenUsage.
 sidebar_label: Droid
+keywords: [droid usage tracker, droid quota tracking, droid cost tracking, droid token usage, track droid spend locally]
 ---
 
 # Droid

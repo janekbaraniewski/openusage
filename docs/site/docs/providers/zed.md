@@ -2,6 +2,7 @@
 title: Zed
 description: Track Zed Agent threads on the hosted zed.dev provider, with token totals and per-model breakdowns in OpenUsage.
 sidebar_label: Zed
+keywords: [zed usage tracker, zed quota tracking, zed cost tracking, zed token usage, track zed spend locally]
 ---
 
 # Zed

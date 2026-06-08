@@ -2,6 +2,7 @@
 title: OpenClaw
 description: Track local OpenClaw agent sessions, per-model tokens, and vendor-reported cost in OpenUsage.
 sidebar_label: OpenClaw
+keywords: [openclaw usage tracker, openclaw quota tracking, openclaw cost tracking, openclaw token usage, track openclaw spend locally]
 ---
 
 # OpenClaw

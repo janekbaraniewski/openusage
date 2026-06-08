@@ -2,6 +2,7 @@
 title: Amp
 description: Track Amp / AmpCode threads, credits, and per-model token usage in OpenUsage.
 sidebar_label: Amp
+keywords: [amp usage tracker, amp quota tracking, amp cost tracking, amp token usage, track amp spend locally]
 ---
 
 # Amp

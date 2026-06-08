@@ -2,6 +2,7 @@
 title: Perplexity
 description: Track Perplexity Pro/Max usage in OpenUsage via browser-session auth.
 sidebar_label: Perplexity
+keywords: [perplexity usage tracker, perplexity quota tracking, perplexity cost tracking, perplexity token usage, track perplexity spend locally]
 ---
 
 # Perplexity

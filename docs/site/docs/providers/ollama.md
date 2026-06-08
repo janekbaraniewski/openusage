@@ -2,6 +2,7 @@
 title: Ollama
 description: Track local Ollama models, VRAM, request log analytics, and cloud credits in OpenUsage.
 sidebar_label: Ollama
+keywords: [ollama usage tracker, ollama quota tracking, ollama cost tracking, ollama token usage, track ollama spend locally]
 ---
 
 # Ollama

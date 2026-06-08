@@ -2,6 +2,7 @@
 title: Kimi CLI
 description: Track local Kimi CLI sessions, per-model tokens, and cache usage in OpenUsage.
 sidebar_label: Kimi CLI
+keywords: [kimi cli usage tracker, kimi cli quota tracking, kimi cli cost tracking, kimi cli token usage, track kimi cli spend locally]
 ---
 
 # Kimi CLI

@@ -2,6 +2,7 @@
 title: Claude Code
 description: Track Claude Code CLI sessions, billing blocks, burn rate, and per-model token usage in OpenUsage.
 sidebar_label: Claude Code
+keywords: [claude code usage tracker, claude code quota tracking, claude code cost tracking, claude code token usage, track claude code spend locally]
 ---
 
 # Claude Code

@@ -2,6 +2,7 @@
 title: Mistral AI
 description: Track Mistral monthly budget, credit balance, spend, and tokens in OpenUsage.
 sidebar_label: Mistral AI
+keywords: [mistral ai usage tracker, mistral ai quota tracking, mistral ai cost tracking, mistral ai token usage, track mistral ai spend locally]
 ---
 
 # Mistral AI

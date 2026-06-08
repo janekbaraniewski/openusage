@@ -2,6 +2,7 @@
 title: Anthropic
 description: Track Anthropic API rate limits in OpenUsage.
 sidebar_label: Anthropic
+keywords: [anthropic usage tracker, anthropic quota tracking, anthropic cost tracking, anthropic token usage, track anthropic spend locally]
 ---
 
 # Anthropic

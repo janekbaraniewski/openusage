@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>OpenUsage — The dashboard your AI tools forgot to build</title>
+    <title>OpenUsage — local terminal dashboard for AI coding tool usage, spend &amp; quotas</title>
     <meta
       name="description"
-      content="Track spend, quotas, and rate limits across the AI coding tools you actually use. Open source, runs locally in your terminal. Supports Claude Code, Codex, Cursor, Copilot, OpenRouter, and a growing list of others."
+      content="Track spend, quotas, rate limits, tokens, and burn rate across 34 AI coding tools and API platforms — Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenRouter, and more. Open source, runs locally in your terminal, with tmux integration, a Claude Code statusline, and headless daily/weekly/monthly reports."
     />
     <link rel="canonical" href="https://openusage.sh/" />
 
@@ -85,9 +85,9 @@
       "alternateName": "OpenUsage.sh",
       "publisher": { "@id": "https://openusage.sh/#organization" },
       "isPartOf": { "@id": "https://openusage.sh/#website" },
-      "description": "OpenUsage is an open-source terminal dashboard that tracks spend, quotas, rate limits, model usage, and local telemetry across the AI coding tools you actually use. Supports Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, and a growing list of other providers.",
+      "description": "OpenUsage is an open-source terminal dashboard that tracks spend, quotas, rate limits, tokens, burn rate, model usage, and local telemetry across 34 AI coding tools and API platforms. Supports Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, Ollama, OpenRouter, OpenAI, Anthropic, and more. Includes tmux status-bar integration, a Claude Code statusline, headless daily/weekly/monthly/session/billing-block reports, snapshot export, model pricing lookup, and a Prometheus metrics hub.",
       "applicationSubCategory": "Quota tracker and usage dashboard for coding agents",
-      "keywords": "local quota tracker, coding agent usage tracker, claude code quota tracker, codex cli quota tracker, cursor usage tracker, copilot quota tracker, openrouter spend tracker, terminal ai dashboard",
+      "keywords": "local quota tracker, coding agent usage tracker, claude code quota tracker, claude code statusline, codex cli quota tracker, cursor usage tracker, copilot quota tracker, openrouter spend tracker, terminal ai dashboard, tmux ai usage status bar, ai coding cost tracker, llm token usage tracker, ai burn rate monitor",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux, Windows",
       "isAccessibleForFree": true,
@@ -113,14 +113,69 @@
         "https://github.com/janekbaraniewski/openusage"
       ],
       "featureList": [
-        "Spend, credits, and quota visibility across many AI coding tools and APIs",
+        "Spend, credits, quota, and rate-limit visibility across 34 AI coding tools, CLIs, and API platforms",
         "Model and token breakdowns when telemetry supports them",
         "Session, client, project, and MCP activity views",
+        "Burn rate and 5-hour billing-block projection",
+        "Headless daily, weekly, monthly, session, and billing-block reports in JSON or table form",
+        "tmux status-bar integration with provider icons, presets, and active-tool detection",
+        "Claude Code statusline integration",
         "Background daemon with local SQLite history",
         "Hook integrations for Claude Code, Codex, and OpenCode",
+        "Snapshot export to JSON or CSV",
+        "Model pricing lookup",
+        "Prometheus metrics hub",
+        "Auto-detection of installed tools and API key environment variables",
+        "17 built-in themes plus external theme files",
         "Detail, compare, and analytics views in the terminal",
         "Dashboard section, graph, and time-window configuration",
-        "Keyboard-driven local-first workflow"
+        "Keyboard-driven, local-first workflow"
+      ]
+      },
+      {
+      "@type": "FAQPage",
+      "@id": "https://openusage.sh/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is OpenUsage?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage is a free, open-source terminal dashboard that tracks usage, spend, quotas, rate limits, tokens, and burn rate across 34 AI coding tools and API platforms. It runs locally on your machine and stores history in a SQLite file you own."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which AI coding tools and providers does OpenUsage support?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Coding agents and CLIs include Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, Amp, Goose, Hermes, Kilo Code, Kimi CLI, Kiro, Roo Code, Zed, Qwen CLI, OpenClaw, Crush, Droid, Codebuff, Mux, and Pi. API platforms include OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Google Gemini API, and Alibaba Cloud."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is OpenUsage free and does my data leave my machine?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage is free and open source under the MIT license. It runs entirely locally with no hosted backend; usage history lives in a local SQLite database you control."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can OpenUsage show AI usage in my tmux status bar or a Claude Code statusline?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Run 'openusage tmux install' to add a tmux status segment with provider icons, presets, and active-tool detection, and 'openusage statusline --install' to add a Claude Code statusline showing session cost, today's cost, burn rate, and context usage."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I install OpenUsage?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "On macOS use Homebrew: 'brew install janekbaraniewski/tap/openusage'. On any platform use the install script from the GitHub releases, or 'go install github.com/janekbaraniewski/openusage/cmd/openusage@latest'. Binaries are published for macOS, Linux, and Windows."
+          }
+        }
       ]
       }
       ]
@@ -132,13 +187,15 @@
   <body>
     <noscript>
       <h1>OpenUsage. The dashboard your AI tools forgot to build.</h1>
-      <p>An open-source terminal dashboard for tracking spend, quotas, and rate limits across the AI coding tools you actually use.</p>
+      <p>An open-source terminal dashboard for tracking usage, spend, quotas, rate limits, tokens, and burn rate across 34 AI coding tools and API platforms. Runs locally on your machine.</p>
       <h2>Why it exists</h2>
       <p>Provider dashboards show you one tool at a time. OpenUsage shows them all at once. Data stays on your machine. History lives in a local SQLite database.</p>
-      <h2>Supported providers</h2>
-      <p>Coding agents: Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, Ollama. API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Gemini API, Alibaba Cloud. More every release. Missing yours? <a href="https://github.com/janekbaraniewski/openusage/issues/new">Open an issue</a> or <a href="https://github.com/janekbaraniewski/openusage/pulls">send a PR</a>.</p>
+      <h2>Supported providers (34)</h2>
+      <p>Coding agents, CLIs, and IDE tools: Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, Amp, Goose, Hermes, Kilo Code, Kimi CLI, Kiro, Roo Code, Zed, Qwen CLI, OpenClaw, Crush, Droid, Codebuff, Mux, Pi. API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Google Gemini API, Alibaba Cloud. More every release. Missing yours? <a href="https://github.com/janekbaraniewski/openusage/issues/new">Open an issue</a> or <a href="https://github.com/janekbaraniewski/openusage/pulls">send a PR</a>.</p>
+      <h2>Features</h2>
+      <p>Live quota, spend, and rate-limit monitoring; model and token breakdowns; burn rate and 5-hour billing-block projection; headless daily, weekly, monthly, session, and billing-block reports (JSON or table); tmux status-bar integration with provider icons and active-tool detection; Claude Code statusline; background daemon with local SQLite history; hook integrations for Claude Code, Codex, and OpenCode; snapshot export to JSON or CSV; model pricing lookup; Prometheus metrics hub; auto-detection of installed tools and API keys; 17 built-in themes; detail, compare, and analytics views.</p>
       <h2>Install</h2>
-      <p>brew install janekbaraniewski/tap/openusage</p>
+      <p>brew install janekbaraniewski/tap/openusage (macOS). Cross-platform install script and binaries for macOS, Linux, and Windows on GitHub releases.</p>
       <p>Source: <a href="https://github.com/janekbaraniewski/openusage">github.com/janekbaraniewski/openusage</a></p>
     </noscript>
     <div id="root"></div>

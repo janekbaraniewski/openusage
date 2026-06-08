@@ -2,6 +2,7 @@
 title: Moonshot
 description: Track Moonshot organization, balance breakdown, quotas, and peak usage in OpenUsage.
 sidebar_label: Moonshot
+keywords: [moonshot usage tracker, moonshot quota tracking, moonshot cost tracking, moonshot token usage, track moonshot spend locally]
 ---
 
 # Moonshot

@@ -2,6 +2,7 @@
 title: Pi
 description: Track local Pi / Oh My Pi agent sessions, per-model tokens, and daily activity in OpenUsage.
 sidebar_label: Pi
+keywords: [pi usage tracker, pi quota tracking, pi cost tracking, pi token usage, track pi spend locally]
 ---
 
 # Pi

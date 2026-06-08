@@ -125,14 +125,33 @@ function NavLogo() {
 
 const icon = (name) => `${base}icons/${name}.svg`;
 
+// Coding agents, CLIs, and IDE tools OpenUsage tracks locally. Providers
+// without a bundled logo (icon: null) render a monogram tile. Keep this list in
+// sync with internal/providers AllProviders() and the provider count used
+// across the page, JSON-LD, and llms.txt.
 const codingAgents = [
   { name: "Claude Code",    icon: icon("claudecode") },
+  { name: "Codex CLI",      icon: icon("codex") },
   { name: "Cursor",         icon: icon("cursor") },
   { name: "GitHub Copilot", icon: icon("copilot") },
-  { name: "Codex CLI",      icon: icon("codex") },
   { name: "Gemini CLI",     icon: icon("geminicli") },
   { name: "OpenCode",       icon: icon("opencode") },
   { name: "Ollama",         icon: icon("ollama") },
+  { name: "Amp",            icon: icon("amp") },
+  { name: "Goose",          icon: icon("goose") },
+  { name: "Hermes",         icon: icon("hermes") },
+  { name: "Kilo Code",      icon: icon("kilocode") },
+  { name: "Kimi CLI",       icon: icon("kimi") },
+  { name: "Kiro",           icon: icon("kiro") },
+  { name: "Roo Code",       icon: icon("roocode") },
+  { name: "Zed",            icon: icon("zed") },
+  { name: "Qwen CLI",       icon: icon("qwen") },
+  { name: "OpenClaw",       icon: icon("openclaw") },
+  { name: "Crush",          icon: null },
+  { name: "Droid",          icon: null },
+  { name: "Codebuff",       icon: null },
+  { name: "Mux",            icon: null },
+  { name: "Pi",             icon: null },
 ];
 
 const apiPlatforms = [
@@ -147,8 +166,11 @@ const apiPlatforms = [
   { name: "xAI",               icon: icon("xai") },
   { name: "Z.AI",              icon: icon("zai") },
   { name: "Google Gemini API", icon: icon("gemini") },
-  { name: "Alibaba Cloud",    icon: icon("alibabacloud") },
+  { name: "Alibaba Cloud",     icon: icon("alibabacloud") },
 ];
+
+// Total provider count, derived so copy/headings never drift from the lists.
+const providerCount = codingAgents.length + apiPlatforms.length;
 
 const installData = [
   { label: "Brew",   cmd: "brew install janekbaraniewski/tap/openusage" },
@@ -286,7 +308,7 @@ export default function App() {
         <div className="w" style={{ textAlign: 'left' }}>
           <R><Banner className="banner" /></R>
           <R delay={0.15}>
-            <p className="hero__eyebrow">Open source · Runs locally · Sixteen-ish providers and counting</p>
+            <p className="hero__eyebrow">Open source · Runs locally · {providerCount} providers and counting</p>
           </R>
           <R delay={0.2}>
             <h1 className="hero__title">
@@ -346,7 +368,7 @@ export default function App() {
         <div className="w">
           <R>
             <div className="prov-header">
-              <h2 className="prov-header__title">Providers, and counting</h2>
+              <h2 className="prov-header__title">{providerCount} providers, and counting</h2>
               <p className="prov-header__sub">
                 Coding agents, API platforms, local runtimes. All in one place.
               </p>
@@ -359,7 +381,11 @@ export default function App() {
               {codingAgents.map((p, i) => (
                 <R key={p.name} delay={i * 0.04}>
                   <div className="prov-item">
-                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    {p.icon ? (
+                      <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    ) : (
+                      <span className="prov-logo prov-logo--mono" aria-hidden="true">{p.name[0]}</span>
+                    )}
                     <span className="prov-name">{p.name}</span>
                   </div>
                 </R>
@@ -371,7 +397,11 @@ export default function App() {
               {apiPlatforms.map((p, i) => (
                 <R key={p.name} delay={i * 0.03}>
                   <div className="prov-item">
-                    <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    {p.icon ? (
+                      <img className="prov-logo" src={p.icon} alt="" aria-hidden="true" loading="lazy" />
+                    ) : (
+                      <span className="prov-logo prov-logo--mono" aria-hidden="true">{p.name[0]}</span>
+                    )}
                     <span className="prov-name">{p.name}</span>
                   </div>
                 </R>

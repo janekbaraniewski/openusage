@@ -2,6 +2,7 @@
 title: Codebuff
 description: Track local Codebuff (Manicode) chats, per-model tokens, and credit usage in OpenUsage.
 sidebar_label: Codebuff
+keywords: [codebuff usage tracker, codebuff quota tracking, codebuff cost tracking, codebuff token usage, track codebuff spend locally]
 ---
 
 # Codebuff

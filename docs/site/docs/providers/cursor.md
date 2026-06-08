@@ -2,6 +2,7 @@
 title: Cursor IDE
 description: Track Cursor IDE plan spend, billing cycle, composer sessions, and per-model usage in OpenUsage.
 sidebar_label: Cursor
+keywords: [cursor ide usage tracker, cursor ide quota tracking, cursor ide cost tracking, cursor ide token usage, track cursor ide spend locally]
 ---
 
 # Cursor IDE

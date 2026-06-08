@@ -2,6 +2,7 @@
 title: Gemini API
 description: Track Google Gemini API model catalog and per-model token limits in OpenUsage.
 sidebar_label: Gemini API
+keywords: [gemini api usage tracker, gemini api quota tracking, gemini api cost tracking, gemini api token usage, track gemini api spend locally]
 ---
 
 # Gemini API

@@ -530,6 +530,24 @@ button { font: inherit; cursor: pointer; }
   filter: brightness(0) invert(1);
 }
 
+/* Monogram tile for providers without a bundled logo. Matches .prov-logo box. */
+.prov-logo--mono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.06));
+  color: var(--text-2, #b4b6bd);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  filter: none;
+}
+.prov-item:hover .prov-logo--mono {
+  filter: none;
+  color: var(--text-1, #fff);
+}
+
 .prov-name {
   font-weight: 500;
   font-size: 0.88rem;

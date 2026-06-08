@@ -2,6 +2,7 @@
 title: xAI (Grok)
 description: Track xAI Grok credits, rate limits, and allowed models in OpenUsage.
 sidebar_label: xAI
+keywords: [xai (grok) usage tracker, xai (grok) quota tracking, xai (grok) cost tracking, xai (grok) token usage, track xai (grok) spend locally]
 ---
 
 # xAI (Grok)

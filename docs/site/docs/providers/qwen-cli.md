@@ -2,6 +2,7 @@
 title: Qwen CLI
 description: Track local Qwen CLI chat transcripts, per-model tokens, and reasoning usage in OpenUsage.
 sidebar_label: Qwen CLI
+keywords: [qwen cli usage tracker, qwen cli quota tracking, qwen cli cost tracking, qwen cli token usage, track qwen cli spend locally]
 ---
 
 # Qwen CLI

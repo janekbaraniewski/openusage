@@ -2,6 +2,7 @@
 title: Mux
 description: Track Mux per-workspace session usage, model spend, and tokens in OpenUsage.
 sidebar_label: Mux
+keywords: [mux usage tracker, mux quota tracking, mux cost tracking, mux token usage, track mux spend locally]
 ---
 
 # Mux

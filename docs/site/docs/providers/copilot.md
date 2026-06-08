@@ -2,6 +2,7 @@
 title: GitHub Copilot
 description: Track GitHub Copilot quotas, org seats, and rate limits in OpenUsage via the gh CLI.
 sidebar_label: Copilot
+keywords: [github copilot usage tracker, github copilot quota tracking, github copilot cost tracking, github copilot token usage, track github copilot spend locally]
 ---
 
 # GitHub Copilot

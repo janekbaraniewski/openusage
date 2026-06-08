@@ -2,6 +2,7 @@
 title: Goose
 description: Track Goose agent sessions, per-model token usage, and accumulated cost in OpenUsage.
 sidebar_label: Goose
+keywords: [goose usage tracker, goose quota tracking, goose cost tracking, goose token usage, track goose spend locally]
 ---
 
 # Goose

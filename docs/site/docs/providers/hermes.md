@@ -2,6 +2,7 @@
 title: Hermes
 description: Track Hermes Agent sessions, per-model token usage, and cost in OpenUsage.
 sidebar_label: Hermes
+keywords: [hermes usage tracker, hermes quota tracking, hermes cost tracking, hermes token usage, track hermes spend locally]
 ---
 
 # Hermes
