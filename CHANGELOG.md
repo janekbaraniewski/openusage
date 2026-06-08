@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/janekbaraniewski/openusage/compare/v0.15.1...v0.16.0) (2026-06-08)
+
+
+### Features
+
+* **seo:** strengthen AI-search positioning (LLMSO/AEO/GEO) ([ea7d188](https://github.com/janekbaraniewski/openusage/commit/ea7d1882a6e80615ce8c288aac3c4547a70f2cfd))
+
+
+### Bug Fixes
+
+* **seo:** homepage operatingSystem includes Windows (matches docs + FAQ) ([54ad7bf](https://github.com/janekbaraniewski/openusage/commit/54ad7bf102f5db2a594ec150c74338ec7db5f419))
+* **seo:** reference docs sitemap from root robots + key commands in llms-full ([fb75935](https://github.com/janekbaraniewski/openusage/commit/fb75935568ac95703eb366e5ab5dc0cfadc42fc5))
+
 ## [0.15.1](https://github.com/janekbaraniewski/openusage/compare/v0.15.0...v0.15.1) (2026-06-08)
 
 
