@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 )
@@ -191,20 +193,13 @@ func Detect(opts DetectOptions) DetectResult {
 // ignoring blanks. Unknown strategy names are kept so the Detect loop can
 // no-op them (lets users freely add experimental names without errors).
 func parseStrategies(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if strings.TrimSpace(s) == "" {
 		return nil
 	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
+	return lo.FilterMap(strings.Split(s, ","), func(p string, _ int) (string, bool) {
 		name := strings.ToLower(strings.TrimSpace(p))
-		if name == "" {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
+		return name, name != ""
+	})
 }
 
 // localSourceIndex builds a map of provider ID to its LocalSourceProvider

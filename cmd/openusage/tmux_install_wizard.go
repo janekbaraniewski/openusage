@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/samber/lo"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/tmux"
@@ -27,14 +28,13 @@ func runTmuxInstallWizard(version string) error {
 		icons = "real"
 	}
 
-	presetOpts := make([]huh.Option[string], 0)
-	for _, p := range tmux.Presets() {
+	presetOpts := lo.Map(tmux.Presets(), func(p tmux.Preset, _ int) huh.Option[string] {
 		label := p.Name
 		if p.Sample != "" {
 			label = fmt.Sprintf("%-16s %s", p.Name, p.Sample)
 		}
-		presetOpts = append(presetOpts, huh.NewOption(label, p.Name))
-	}
+		return huh.NewOption(label, p.Name)
+	})
 
 	form := huh.NewForm(
 		huh.NewGroup(

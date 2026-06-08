@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/samber/lo"
 )
 
 // GlyphTier selects the icon set used by `:icon` and preset glyph references.
@@ -114,34 +116,25 @@ func IconFontVersion() string {
 // Exposed for tests and the `tmux font status` command.
 func CustomFontProviders() []string {
 	customFontOnce.Do(loadCustomFontMap)
-	out := make([]string, 0, len(customFontMap))
-	for k := range customFontMap {
-		out = append(out, k)
-	}
-	return out
+	return lo.Keys(customFontMap)
 }
 
 // IconCodepointRange returns the lowest and highest Private Use Area codepoints
 // used by the bundled icon font. Terminal fallback config (e.g. kitty's
 // symbol_map) needs this range. Returns (0,0) if the manifest is empty.
-func IconCodepointRange() (lo, hi rune) {
+func IconCodepointRange() (low, high rune) {
 	customFontOnce.Do(loadCustomFontMap)
-	first := true
-	for _, g := range customFontMap {
+	runes := lo.FilterMap(lo.Values(customFontMap), func(g string, _ int) (rune, bool) {
 		rs := []rune(g)
 		if len(rs) == 0 {
-			continue
+			return 0, false
 		}
-		r := rs[0]
-		if first || r < lo {
-			lo = r
-		}
-		if first || r > hi {
-			hi = r
-		}
-		first = false
+		return rs[0], true
+	})
+	if len(runes) == 0 {
+		return 0, 0
 	}
-	return lo, hi
+	return lo.Min(runes), lo.Max(runes)
 }
 
 // providerIcons maps provider IDs to their per-tier glyph. The fallback in

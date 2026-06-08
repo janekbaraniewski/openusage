@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/janekbaraniewski/openusage/internal/ccevents"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
@@ -76,16 +78,14 @@ func snapshotHasPrimaryMetric(snap core.UsageSnapshot) bool {
 		return false
 	}
 	provider := strings.ToLower(snap.ProviderID)
-	for _, alias := range []string{"today_cost", "block_pct", "plan_pct", "block_cost"} {
+	return lo.SomeBy([]string{"today_cost", "block_pct", "plan_pct", "block_cost"}, func(alias string) bool {
 		key := resolveAlias(alias, provider)
 		if key == "" || strings.HasPrefix(key, "_") {
-			continue
+			return false
 		}
-		if _, ok := metricUsedString(snap, key); ok {
-			return true
-		}
-	}
-	return false
+		_, ok := metricUsedString(snap, key)
+		return ok
+	})
 }
 
 // BuildOptions configures BuildContext. Source and Provider mirror the user
@@ -159,47 +159,35 @@ func BuildContext(ctx context.Context, opts BuildOptions) (Context, error) {
 	//     "most recent" and render an icon with blank numbers.
 	//   - Falls back to any snapshot with a primary metric, then the first
 	//     candidate present at all, then the first snapshot.
+	// byCandidate finds the first snapshot, in detection (recency) order, whose
+	// provider matches a candidate id and satisfies pred.
+	byCandidate := func(pred func(core.UsageSnapshot) bool) (core.UsageSnapshot, bool) {
+		for _, cand := range opts.Candidates {
+			if s, ok := lo.Find(snaps, func(s core.UsageSnapshot) bool {
+				return strings.EqualFold(s.ProviderID, cand) && pred(s)
+			}); ok {
+				return s, true
+			}
+		}
+		return core.UsageSnapshot{}, false
+	}
+	always := func(core.UsageSnapshot) bool { return true }
+
 	pinned := strings.ToLower(strings.TrimSpace(opts.Provider))
 	switch {
 	case pinned != "":
-		for _, s := range snaps {
-			if strings.EqualFold(s.ProviderID, pinned) {
-				c.setActive(s)
-				break
-			}
+		if s, ok := lo.Find(snaps, func(s core.UsageSnapshot) bool { return strings.EqualFold(s.ProviderID, pinned) }); ok {
+			c.setActive(s)
 		}
 	default:
-		for _, cand := range opts.Candidates {
-			if c.Provider != "" {
-				break
-			}
-			for _, s := range snaps {
-				if strings.EqualFold(s.ProviderID, cand) && snapshotHasPrimaryMetric(s) {
-					c.setActive(s)
-					break
-				}
-			}
-		}
-		if c.Provider == "" {
-			for _, s := range snaps {
-				if snapshotHasPrimaryMetric(s) {
-					c.setActive(s)
-					break
-				}
-			}
-		}
-		if c.Provider == "" {
-			for _, cand := range opts.Candidates {
-				if c.Provider != "" {
-					break
-				}
-				for _, s := range snaps {
-					if strings.EqualFold(s.ProviderID, cand) {
-						c.setActive(s)
-						break
-					}
-				}
-			}
+		// Priority: a candidate with data → any snapshot with data → a
+		// candidate present at all → the first snapshot.
+		if s, ok := byCandidate(snapshotHasPrimaryMetric); ok {
+			c.setActive(s)
+		} else if s, ok := lo.Find(snaps, snapshotHasPrimaryMetric); ok {
+			c.setActive(s)
+		} else if s, ok := byCandidate(always); ok {
+			c.setActive(s)
 		}
 	}
 	if c.Provider == "" && len(snaps) > 0 {
