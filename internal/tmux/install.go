@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 // Sentinel markers bracket the openusage-managed snippet inside tmux.conf so
@@ -27,6 +29,10 @@ type InstallOptions struct {
 	// Preset is the named preset embedded in the snippet's status line
 	// command. Empty means DefaultPreset.
 	Preset string
+	// Providers pins one segment per provider id (e.g. show Claude Code and
+	// Cursor side by side, each with its own metrics). Empty means a single
+	// segment with auto-detection (the active tool).
+	Providers []string
 	// Interval is the tmux status-interval written to the snippet. Zero
 	// means 5.
 	Interval int
@@ -121,15 +127,16 @@ func BuildSnippet(opts InstallOptions) string {
 
 	switch opts.Position {
 	case "left":
-		// Append to status-left so the segment sits at the inner (right)
+		// Append to status-left so the segment(s) sit at the inner (right)
 		// edge of the left side, next to the window list.
-		cmd := fmt.Sprintf("#(%s tmux --preset %s)", binary, opts.Preset)
+		inners := segmentInners(binary, opts.Preset, opts.Providers)
+		cmd := strings.Join(lo.Map(inners, func(i string, _ int) string { return "#" + i }), " │ ")
 		fmt.Fprintf(&b, "set -ga status-left %q\n", cmd)
 	case "both":
 		fmt.Fprintf(&b, "set -ga status-left %q\n", fmt.Sprintf("#(%s tmux --preset compact --segment tool)", binary))
-		b.WriteString(prependStatusRight(binary, opts.Preset))
+		b.WriteString(prependStatusRight(binary, opts.Preset, opts.Providers))
 	default: // right
-		b.WriteString(prependStatusRight(binary, opts.Preset))
+		b.WriteString(prependStatusRight(binary, opts.Preset, opts.Providers))
 	}
 
 	if key := strings.TrimSpace(opts.BindPopup); key != "" {
@@ -160,15 +167,36 @@ func BuildSnippet(opts InstallOptions) string {
 // command substitution to expand) and `tmux set` (no -F) stores the segment
 // unexpanded, preserving both our segment and the user's existing #(...)
 // segments for live rendering.
-func prependStatusRight(binary, preset string) string {
-	inner := fmt.Sprintf("(%s tmux --preset %s)", binary, preset)
-	// A separator visually divides the openusage segment from the user's
-	// existing right-side segments (clock, battery, …). " │ " is a plain
-	// box-drawing bar — no "#[" styling, so it carries no tmux-format meaning
-	// and inherits the surrounding colors.
+// segmentInners returns the inner `(openusage tmux …)` command(s) — WITHOUT the
+// leading `#` — for the configured providers. With no providers it is a single
+// auto-detecting segment; with providers it is one pinned segment each, so
+// multiple tools show side by side, each with its own metrics.
+func segmentInners(binary, preset string, providers []string) []string {
+	if len(providers) == 0 {
+		return []string{fmt.Sprintf("(%s tmux --preset %s)", binary, preset)}
+	}
+	return lo.Map(providers, func(p string, _ int) string {
+		return fmt.Sprintf("(%s tmux --provider %s --preset %s)", binary, p, preset)
+	})
+}
+
+func prependStatusRight(binary, preset string, providers []string) string {
+	// Quote each inner command as a shell word for the for-loop. A " │ "
+	// separator divides the openusage segment(s) from the user's existing
+	// right-side segments (clock, battery, …) and from each other; it is a
+	// plain box-drawing bar (no "#[" styling) so it inherits surrounding colors.
+	items := strings.Join(lo.Map(segmentInners(binary, preset, providers), func(i string, _ int) string {
+		return fmt.Sprintf("%q", i)
+	}), " ")
+	// We deliberately keep a literal "#(" out of the conf: tmux expands #(...)
+	// inside run-shell arguments at parse time, which would run openusage
+	// immediately and freeze its output. The shell rebuilds the leading "#" per
+	// segment at runtime via printf, joins them with the separator, and
+	// `tmux set` (no -F) stores everything unexpanded for live rendering. The
+	// case guard makes re-sourcing idempotent.
 	return fmt.Sprintf(
-		`run-shell -b 'seg="$(printf "#%%s" "%s")"; cur="$(tmux show -gqv status-right)"; case "$cur" in *"$seg"*) exit 0 ;; *) tmux set -g status-right "$seg │ $cur" ;; esac'`+"\n",
-		inner,
+		`run-shell -b 'seg=""; for c in %s; do seg="${seg:+$seg │ }$(printf "#%%s" "$c")"; done; cur="$(tmux show -gqv status-right)"; case "$cur" in *"$seg"*) exit 0 ;; *) tmux set -g status-right "$seg │ $cur" ;; esac'`+"\n",
+		items,
 	)
 }
 

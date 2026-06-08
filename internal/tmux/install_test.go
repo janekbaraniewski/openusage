@@ -202,6 +202,33 @@ func TestSentinelPresent(t *testing.T) {
 	}
 }
 
+func TestBuildSnippetMultipleProviders(t *testing.T) {
+	snip := BuildSnippet(InstallOptions{
+		Position:  "right",
+		Preset:    "compact",
+		Providers: []string{"claude_code", "cursor"},
+	})
+	// One pinned segment per provider, each with --provider.
+	for _, want := range []string{"--provider claude_code --preset compact", "--provider cursor --preset compact"} {
+		if !strings.Contains(snip, want) {
+			t.Fatalf("multi-provider snippet missing %q:\n%s", want, snip)
+		}
+	}
+	// Still the safe prepend shape: a run-shell loop, no literal "#(" that tmux
+	// would expand at parse time, and the idempotency guard.
+	if strings.Contains(snip, "#(") {
+		t.Fatalf("snippet has a literal #( that tmux would expand:\n%s", snip)
+	}
+	if !strings.Contains(snip, "for c in") || !strings.Contains(snip, `printf "#%s"`) {
+		t.Fatalf("snippet not using the runtime printf loop:\n%s", snip)
+	}
+	// No providers → a single auto-detecting segment (no --provider).
+	single := BuildSnippet(InstallOptions{Position: "right", Preset: "compact"})
+	if strings.Contains(single, "--provider") {
+		t.Fatalf("dynamic snippet should not pin a provider:\n%s", single)
+	}
+}
+
 func TestBuildSnippetPositionVariants(t *testing.T) {
 	right := BuildSnippet(InstallOptions{Position: "right"})
 	if !strings.Contains(right, "status-right") || strings.Contains(right, "status-left ") {

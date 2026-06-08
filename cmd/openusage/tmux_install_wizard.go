@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/tmux"
 )
 
@@ -110,8 +112,17 @@ func runTmuxInstallWizard(version string) error {
 		}
 		return huh.NewOption(label, p.Name)
 	})
-	// Let power users start from a preset and edit the template interactively.
-	presetOpts = append(presetOpts, huh.NewOption("Custom — edit a template", customPresetSentinel))
+	// Let power users build their own segment with a live preview.
+	presetOpts = append(presetOpts, huh.NewOption("Custom — build your own", customPresetSentinel))
+
+	// Provider selection: auto-detect (dynamic), pin one, or several side by
+	// side (one pinned segment each).
+	providerMode := "dynamic"
+	pinnedProvider := "claude_code"
+	multiProviders := []string{}
+	providerIDs := lo.Map(providers.AllProviders(), func(p core.UsageProvider, _ int) string { return p.ID() })
+	sort.Strings(providerIDs)
+	providerOpts := lo.Map(providerIDs, func(id string, _ int) huh.Option[string] { return huh.NewOption(id, id) })
 
 	// Custom builder: toggle components, see a live preview. Defaults to the
 	// compact shape (icon + 5h block + today cost).
@@ -143,10 +154,14 @@ func runTmuxInstallWizard(version string) error {
 				).
 				Value(&position),
 			huh.NewSelect[string]().
-				Title("Preset").
-				Description("The look of the segment. compact is the default; pick Custom to edit a template.").
-				Options(presetOpts...).
-				Value(&preset),
+				Title("Which tool(s) to show").
+				Description("Auto-detect the most recently used tool, pin one, or show several side by side.").
+				Options(
+					huh.NewOption("Active tool — auto-detect (dynamic)", "dynamic"),
+					huh.NewOption("Pin one specific tool", "static"),
+					huh.NewOption("Several tools, side by side", "multi"),
+				).
+				Value(&providerMode),
 			huh.NewSelect[string]().
 				Title("Provider icons").
 				Description("Emoji works everywhere with no setup. Real icons install a font and configure your terminal.").
@@ -156,8 +171,31 @@ func runTmuxInstallWizard(version string) error {
 				).
 				Value(&icons),
 		),
-		// Shown only when "Custom" is selected above: a component builder with a
-		// live preview that updates as you toggle pieces on and off.
+		// Pin one tool (static mode only).
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Pin which tool?").
+				Options(providerOpts...).
+				Value(&pinnedProvider),
+		).WithHideFunc(func() bool { return providerMode != "static" }),
+		// Pick several tools — one pinned segment each (multi mode only).
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title("Which tools? (one segment each)").
+				Filterable(true).
+				Options(providerOpts...).
+				Value(&multiProviders),
+		).WithHideFunc(func() bool { return providerMode != "multi" }),
+		// The look of each segment.
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Preset").
+				Description("The look of each segment. compact is the default; pick Custom to build your own.").
+				Options(presetOpts...).
+				Value(&preset),
+		),
+		// Shown only when "Custom" is selected: a component builder with a live
+		// preview that updates as you toggle pieces on and off.
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Build your segment").
@@ -170,12 +208,27 @@ func runTmuxInstallWizard(version string) error {
 		return err
 	}
 
+	// Resolve which providers get a pinned segment. Dynamic → none (one
+	// auto-detecting segment); static → the one pinned tool; multi → each
+	// selected tool. The snippet encodes these via --provider, so we also clear
+	// any global settings.tmux.provider pin below.
+	var providersList []string
+	switch providerMode {
+	case "static":
+		if pinnedProvider != "" {
+			providersList = []string{pinnedProvider}
+		}
+	case "multi":
+		providersList = multiProviders
+	}
+
 	// Persist the template choice. A custom template is saved to
 	// settings.tmux.format, which overrides the preset at render time, so the
 	// installed snippet can keep using --preset. Choosing a named preset clears
 	// any previously-saved custom format so it actually takes effect.
 	chosenPreset := preset
 	if cfg, err := config.Load(); err == nil {
+		cfg.Tmux.Provider = "" // the snippet encodes providers via --provider
 		if preset == customPresetSentinel {
 			tmpl := assembleTemplate(selected)
 			if err := validateTemplate(tmpl); err != nil {
@@ -198,7 +251,7 @@ func runTmuxInstallWizard(version string) error {
 	}
 
 	// Apply: write the tmux.conf snippet.
-	opts := tmux.InstallOptions{Write: true, Position: position, Preset: chosenPreset, Version: version}
+	opts := tmux.InstallOptions{Write: true, Position: position, Preset: chosenPreset, Providers: providersList, Version: version}
 	path, err := tmux.Install(os.Stdout, opts)
 	if err != nil {
 		return err
