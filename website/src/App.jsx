@@ -147,11 +147,9 @@ const codingAgents = [
   { name: "Zed",            icon: icon("zed") },
   { name: "Qwen CLI",       icon: icon("qwen") },
   { name: "OpenClaw",       icon: icon("openclaw") },
-  { name: "Crush",          icon: null },
-  { name: "Droid",          icon: null },
-  { name: "Codebuff",       icon: null },
-  { name: "Mux",            icon: null },
-  { name: "Pi",             icon: null },
+  { name: "Droid",          icon: icon("droid") },
+  { name: "Mux",            icon: icon("mux") },
+  { name: "Pi",             icon: icon("pi") },
 ];
 
 const apiPlatforms = [
@@ -169,8 +167,10 @@ const apiPlatforms = [
   { name: "Alibaba Cloud",     icon: icon("alibabacloud") },
 ];
 
-// Total provider count, derived so copy/headings never drift from the lists.
-const providerCount = codingAgents.length + apiPlatforms.length;
+// Total supported providers (internal/providers AllProviders()). The grid
+// showcases the ones with a brand logo; Crush and Codebuff are supported and
+// documented but have no public vector logo yet, so they aren't shown as tiles.
+const providerCount = 34;
 
 const installData = [
   { label: "Brew",   cmd: "brew install janekbaraniewski/tap/openusage" },
