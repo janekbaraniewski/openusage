@@ -24,12 +24,27 @@ It is meant to live in `status-right` or `status-left` and update every few seco
 
 ## Quick install
 
+Just run the wizard — it's the one-stop setup:
+
 ```bash
-openusage tmux install --write
+openusage tmux install
+```
+
+On an interactive terminal this opens a small form to choose your **status bar
+position**, **preset**, and whether to use **emoji or real provider icons**. It
+then does everything for you: writes the tmux.conf snippet, and (if you pick
+real icons) installs the icon font and configures your terminal. Reload tmux
+with the printed `tmux source-file` command and you're done.
+
+For scripting, pass flags (or run with a non-interactive stdin) to skip the
+wizard and apply directly:
+
+```bash
+openusage tmux install --write            # write the snippet, no prompts
 tmux source-file ~/.config/tmux/tmux.conf
 ```
 
-That writes a sentinel-bracketed block to your tmux configuration, takes a `.bak` of any prior content, and prints the path you need to reload. Re-running `install --write` replaces the block in place. To remove it cleanly:
+`--write` writes a sentinel-bracketed block to your tmux configuration, takes a `.bak` of any prior content, and prints the path you need to reload. Re-running it replaces the block in place. To remove it cleanly:
 
 ```bash
 openusage tmux uninstall
@@ -214,30 +229,46 @@ tiers, picked best-to-safest:
 | `unicode` (default) | emoji (`🤖`, `▸`, `🦙`) | any modern terminal |
 | `ascii` | bracketed labels (`[claude]`) | nothing |
 
-### Install the icon font
+### The easy way: the install wizard
 
-OpenUsage ships an icon font built from its own SVG provider icons. Your
-terminal falls back to it for the font's Private Use Area codepoints once it is
-installed system-wide.
+`openusage tmux install` (run it with no flags on a terminal) asks whether you
+want real icons and sets up everything for your terminal automatically. That's
+all most people need. The rest of this section is the detail behind it.
+
+OpenUsage ships an icon font built from its own SVG provider icons. The icons
+are sized to fill the cell height.
+
+### How a terminal actually renders the icons
+
+The glyphs live at Private Use Area codepoints (U+E900–U+E912). A terminal only
+shows them if it is told to use the icon font for those codepoints — and how you
+do that depends on the terminal:
+
+| Terminal | Mechanism | Automated by |
+| --- | --- | --- |
+| kitty, Ghostty, WezTerm | per-range font **fallback** — your main font is left untouched | `openusage tmux font setup` (kitty/Ghostty written automatically; WezTerm prints a snippet) |
+| iTerm2, Terminal.app, Alacritty | **no** per-range fallback — the glyphs must be *in* the font you use | `openusage tmux font patch` — copies your terminal font, adds the 19 glyphs under a new name, installs it; you select the `… +OpenUsage` family (your original font is never modified) |
+
+The preferred path is per-range fallback (no font modification). Patching is the
+only option for terminals without it.
+
+### Commands
 
 ```bash
-openusage tmux font install     # installs into your user font dir + refreshes fontconfig
-openusage tmux font status      # shows install state and whether it is up to date
-openusage tmux font uninstall   # removes it
+openusage tmux font setup       # auto-configure detected terminals (preferred)
+openusage tmux font install     # install the standalone icon font (used by the fallback path)
+openusage tmux font status      # install state + whether it is up to date
+openusage tmux font uninstall   # remove the standalone font
 ```
 
-`openusage tmux install` also offers to install the font (the prompt defaults to
-yes). Use `--with-font` to install it without prompting, or `--no-font` to skip.
-
-After installing, **restart your terminal and tmux**. From then on the default
-preset auto-upgrades from emoji to the real provider icons — no config change
-needed. Force the tier explicitly with `--glyphs customfont` (or
-`settings.tmux.glyphs`), and providers without a bundled glyph fall back to the
+After setup, **restart your terminal and tmux**. The default preset then
+auto-upgrades from emoji to real icons; force it with `--glyphs customfont` (or
+`settings.tmux.glyphs`). Providers without a bundled glyph fall back to the
 unicode emoji automatically.
 
 `font status` compares the installed font against the version embedded in your
-`openusage` binary (by content hash), so after you upgrade `openusage` it will
-tell you when the font is **outdated** and should be reinstalled.
+`openusage` binary (by content hash), so after you upgrade `openusage` it tells
+you when the font is **outdated** and should be reinstalled.
 
 ## Power-user recipes
 

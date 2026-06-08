@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,32 +123,60 @@ func applyRealIcons() {
 	}
 }
 
-// tryPatchTerminalFont attempts to build and install an augmented copy of the
-// terminal's current font (original untouched). Returns the new family name on
-// success. Best effort: needs a source checkout (the patch script + SVGs),
-// Python 3 with fonttools, and fontconfig to resolve the font file.
+// tryPatchTerminalFont is the best-effort wrapper used by the wizard.
 func tryPatchTerminalFont() (string, bool) {
-	if runtime.GOOS != "darwin" {
+	fam, err := patchTerminalFontAuto("")
+	if err != nil {
 		return "", false
 	}
+	return fam, true
+}
+
+// patchTerminalFontAuto builds and installs an augmented copy of a terminal font
+// (the original is never modified) and returns the new family name. base is the
+// font file to patch; when empty it is auto-detected from iTerm2. It needs a
+// source checkout (the patch script + SVGs), Python 3 with fonttools, and — for
+// auto-detection — fontconfig. Errors explain what is missing.
+func patchTerminalFontAuto(base string) (string, error) {
 	script := locatePatchScript()
+	if script == "" {
+		return "", fmt.Errorf("patch script not found — run from a source checkout (scripts/patch-terminal-font.py)")
+	}
 	py := findFontPython()
-	base := detectITermFontFile()
-	if script == "" || py == "" || base == "" {
-		return "", false
+	if py == "" {
+		return "", fmt.Errorf("need Python 3 with fonttools (pip3 install fonttools)")
+	}
+	if base == "" {
+		if runtime.GOOS != "darwin" {
+			return "", fmt.Errorf("auto-detect only supports iTerm2 on macOS; pass --base <font file>")
+		}
+		ps := itermNormalFontPSName()
+		if ps == "" {
+			return "", fmt.Errorf("could not read iTerm2's configured font; pass --base <font file>")
+		}
+		if strings.Contains(strings.ToLower(ps), "openusage") {
+			return "", fmt.Errorf("iTerm2 already uses an augmented font (%s) — nothing to do", ps)
+		}
+		base = resolveFontFileByPSName(ps)
+		if base == "" {
+			return "", fmt.Errorf("could not locate the file for iTerm2's font %q; pass --base <font file>", ps)
+		}
+	}
+	if _, err := os.Stat(base); err != nil {
+		return "", fmt.Errorf("base font not found: %s", base)
 	}
 	dir := tmux.FontInstallDir()
 	if dir == "" {
-		return "", false
+		return "", fmt.Errorf("could not resolve a font directory")
 	}
 	stem := strings.TrimSuffix(filepath.Base(base), filepath.Ext(base))
 	out := filepath.Join(dir, stem+"-OpenUsage"+filepath.Ext(base))
 	cmd := exec.Command(py, script, "--base", base, "--out", out, "--name-suffix", " +OpenUsage")
-	if err := cmd.Run(); err != nil {
-		return "", false
+	if combined, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("patch failed: %v\n%s", err, strings.TrimSpace(string(combined)))
 	}
 	_ = exec.Command("fc-cache", "-f", dir).Run()
-	return resolveFamilyName(out), true
+	return resolveFamilyName(out), nil
 }
 
 // locatePatchScript finds scripts/patch-terminal-font.py relative to the working
@@ -191,9 +220,9 @@ func findFontPython() string {
 
 var itermNormalFontRe = regexp.MustCompile(`"Normal Font"\s*=\s*"([^"]+)"`)
 
-// detectITermFontFile reads iTerm2's configured Normal Font and resolves it to a
-// file path via fontconfig. Returns "" when iTerm2/fontconfig are unavailable.
-func detectITermFontFile() string {
+// itermNormalFontPSName returns the PostScript name of iTerm2's configured
+// Normal Font (the value is "<postscript-name> <size>"), or "".
+func itermNormalFontPSName() string {
 	out, err := exec.Command("defaults", "read", "com.googlecode.iterm2", "New Bookmarks").Output()
 	if err != nil {
 		return ""
@@ -202,19 +231,40 @@ func detectITermFontFile() string {
 	if m == nil {
 		return ""
 	}
-	ps := strings.Fields(m[1]) // "<postscript-name> <size>"
-	if len(ps) == 0 {
+	fields := strings.Fields(m[1])
+	if len(fields) == 0 {
 		return ""
 	}
-	f, err := exec.Command("fc-match", "-f", "%{file}", "postscriptname="+ps[0]).Output()
+	return fields[0]
+}
+
+// resolveFontFileByPSName maps a PostScript name to its file path using macOS's
+// system_profiler (reliable, unlike fontconfig which may not index PostScript
+// names and falls back to a default). Returns "" when not found.
+func resolveFontFileByPSName(ps string) string {
+	out, err := exec.Command("system_profiler", "-json", "SPFontsDataType").Output()
 	if err != nil {
 		return ""
 	}
-	file := strings.TrimSpace(string(f))
-	if file == "" {
+	var data struct {
+		Fonts []struct {
+			Path      string `json:"path"`
+			Typefaces []struct {
+				Name string `json:"_name"`
+			} `json:"typefaces"`
+		} `json:"SPFontsDataType"`
+	}
+	if json.Unmarshal(out, &data) != nil {
 		return ""
 	}
-	return file
+	for _, f := range data.Fonts {
+		for _, tf := range f.Typefaces {
+			if tf.Name == ps {
+				return f.Path
+			}
+		}
+	}
+	return ""
 }
 
 // resolveFamilyName returns the family (name ID 1) of a font file via

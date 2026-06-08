@@ -221,7 +221,12 @@ openusage tmux install --write --position both --bind-popup u
 | `--with-font` | off | Install the bundled provider-icon font without prompting (requires `--write`). |
 | `--no-font` | off | Skip the provider-icon font prompt entirely. |
 
-Re-running `install --write` replaces the existing sentinel block in place; nothing outside the block is changed. With `--write` on an interactive terminal, the command also offers to install the provider-icon font (prompt defaults to yes).
+Re-running `install --write` replaces the existing sentinel block in place; nothing outside the block is changed.
+
+Run **bare `openusage tmux install` on an interactive terminal** to get the
+one-stop **wizard**: it asks for position, preset, and emoji-vs-real-icons, then
+writes the snippet, installs the icon font, and configures your terminal. Pass
+any flag (or use a non-interactive stdin) to skip the wizard.
 
 ### `tmux font`
 
@@ -229,15 +234,24 @@ Manages the bundled provider-icon font, which lets the status bar render real
 provider logos instead of emoji. See [Provider icons](../guides/tmux-integration.md#provider-icons-custom-font).
 
 ```
-openusage tmux font install      # install into your user font dir (+ fc-cache refresh)
+openusage tmux font setup        # auto-configure detected terminals (preferred path)
+openusage tmux font patch        # iTerm2/Terminal.app: install an augmented copy of your font
+openusage tmux font install      # install the standalone icon font (used by the fallback path)
 openusage tmux font status       # family, version, path, and whether it is up to date
-openusage tmux font uninstall    # remove it
+openusage tmux font uninstall    # remove the standalone font
 ```
+
+`setup` writes per-range font fallback for kitty/Ghostty (and prints a snippet
+for WezTerm) — your main font is untouched. `patch` is for terminals without
+per-range fallback (iTerm2, Terminal.app): it copies your terminal font, adds
+the glyphs under a new `… +OpenUsage` family, and installs it (original
+untouched); pass `--base <file>` to patch a specific font. `patch` needs a
+source checkout and Python 3 with fonttools.
 
 `status` compares the installed font against the version embedded in the binary
 by content hash, so it reports when an installed font is **outdated** after you
-upgrade `openusage`. After installing, restart your terminal and tmux; the
-default preset then auto-upgrades to `customfont` glyphs.
+upgrade `openusage`. After setup, restart your terminal and tmux; the default
+preset then auto-upgrades to `customfont` glyphs.
 
 ### `tmux uninstall`
 

@@ -148,6 +148,29 @@ the unicode emoji, and providers fall back further to ASCII labels with
 			return nil
 		},
 	})
+	var patchBase string
+	patchCmd := &cobra.Command{
+		Use:   "patch",
+		Short: "Augment your terminal font with the provider icons (for iTerm2/Terminal.app)",
+		Long: `Copy your terminal font, add the 19 provider-icon glyphs to the copy under a
+new family name (" +OpenUsage"), and install it. Your original font is never
+modified. Use this for terminals without per-range font fallback (iTerm2,
+Terminal.app); then select the "… +OpenUsage" family in your terminal settings.
+
+Requires a source checkout (the patch script), Python 3 with fonttools, and —
+for auto-detecting your iTerm2 font — fontconfig. Pass --base to patch a
+specific font file.`,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			fam, err := patchTerminalFontAuto(patchBase)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "installed augmented font. Select \"%s\" in your terminal font settings, then restart it.\n", fam)
+			return nil
+		},
+	}
+	patchCmd.Flags().StringVar(&patchBase, "base", "", "font file to patch (default: auto-detect iTerm2's font)")
+	cmd.AddCommand(patchCmd)
 	cmd.AddCommand(&cobra.Command{
 		Use:   "setup",
 		Short: "Auto-configure your terminal(s) to render the provider icons",
