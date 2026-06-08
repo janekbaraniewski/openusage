@@ -255,8 +255,17 @@ func (m configuratorModel) preview() string {
 	if len(provs) == 0 {
 		return m.dim.Render("(select at least one tool)")
 	}
+	// Render with the glyph tier matching the icons choice, so the preview shows
+	// real provider logos when "real logos (font)" is selected (requires the icon
+	// font to be installed and configured in this terminal) and emoji otherwise.
+	glyphs := tmux.GlyphTierUnicode
+	if cfgIcons[m.iconsIdx] == "real" {
+		glyphs = tmux.GlyphTierCustomFont
+	}
 	segs := lo.FilterMap(provs, func(p string, _ int) (string, bool) {
-		out, err := tmux.Render(tmpl, sampleTemplateContextFor(p))
+		ctx := sampleTemplateContextFor(p)
+		ctx.Glyphs = glyphs
+		out, err := tmux.Render(tmpl, ctx)
 		if err != nil {
 			return "", false
 		}
