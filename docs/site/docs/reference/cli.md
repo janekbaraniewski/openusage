@@ -210,7 +210,7 @@ openusage tmux install --write --position both --bind-popup u
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--write` | off | Apply to tmux.conf. Creates a `.bak` of any existing content. |
-| `--position SIDE` | `right` | `left`, `right`, or `both`. |
+| `--position SIDE` | `right` | `left`, `right`, or `both`. `right` prepends the segment to the inner (left) edge of `status-right` so it sits ahead of your existing segments rather than at the far-right edge. |
 | `--preset NAME` | `compact` | Embedded preset to wire in. |
 | `--interval N` | 5 | Sets `status-interval`. |
 | `--right-length N` | 200 | Sets `status-right-length`. |
