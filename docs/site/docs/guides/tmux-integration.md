@@ -40,13 +40,13 @@ openusage tmux install
 ```
 
 On an interactive terminal this opens a small form to choose your **status bar
-position**, **preset** (or **Custom**, which opens an inline editor to tweak the
-template, prefilled from `compact` and validated as you type), and whether to use
-**emoji or real provider icons**. It then does everything for you: writes the
-tmux.conf snippet, saves a custom template to `settings.tmux.format` if you
-edited one, and (if you pick real icons) installs the icon font and configures
-your terminal. Reload tmux with the printed `tmux source-file` command and
-you're done.
+position**, **preset** (or **Custom**, which opens a component builder — toggle
+the pieces you want, with a live preview that updates as you go), and whether to
+use **emoji or real provider icons**. It then does everything for you: writes the
+tmux.conf snippet, saves a custom template to `settings.tmux.format` if you built
+one, and (if you pick real icons) installs the icon font and configures your
+terminal. Reload tmux with the printed `tmux source-file` command and you're
+done.
 
 For scripting, pass flags (or run with a non-interactive stdin) to skip the
 wizard and apply directly:

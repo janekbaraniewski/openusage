@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+func TestAssembleTemplate(t *testing.T) {
+	// Pieces render in canonical palette order regardless of selection order,
+	// and the result is a valid template.
+	tmpl := assembleTemplate([]string{"today", "icon", "block"})
+	if !strings.HasPrefix(tmpl, "{tool:icon:brand}") {
+		t.Fatalf("icon should render first, got %q", tmpl)
+	}
+	if err := validateTemplate(tmpl); err != nil {
+		t.Fatalf("assembled template should be valid: %v (%q)", err, tmpl)
+	}
+	// Empty selection and unknown keys yield an empty template (caller falls back).
+	if got := assembleTemplate(nil); got != "" {
+		t.Fatalf("empty selection = %q, want empty", got)
+	}
+	if got := assembleTemplate([]string{"not-a-component"}); got != "" {
+		t.Fatalf("unknown key = %q, want empty", got)
+	}
+}
+
 func TestValidateTemplate(t *testing.T) {
 	// Valid templates pass.
 	for _, ok := range []string{

@@ -12,15 +12,74 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/tmux"
 )
 
-// customPresetSentinel is the Preset-select value meaning "edit a template"
-// rather than use a named preset.
+// customPresetSentinel is the Preset-select value meaning "build a custom
+// segment" rather than use a named preset.
 const customPresetSentinel = "__custom__"
 
-// validateTemplate ensures a custom tmux format string parses, so the wizard
-// never saves a template that would break the status bar.
+// templateComponent is one toggleable piece of the custom segment builder. The
+// fragment is a self-contained format snippet (with its own leading space and
+// `{?…}` guard) so fragments concatenate in canonical order into a valid,
+// gap-free template.
+type templateComponent struct {
+	key      string
+	label    string
+	fragment string
+}
+
+// templateComponents is the ordered palette shown in the builder. Order here is
+// the order pieces render in, independent of the order the user toggles them.
+var templateComponents = []templateComponent{
+	{"icon", "Provider icon (brand-colored)", "{tool:icon:brand}"},
+	{"model", "Model name", "{?model: {model:trunc:14}}"},
+	{"block", "5h block %", "{?block_pct: 5h {block_pct:pct:color}}"},
+	{"plan", "Plan % (Cursor/Codex)", "{?plan_pct: plan {plan_pct:pct:color}}"},
+	{"context", "Context %", "{?context_pct: 🧠 {context_pct}%}"},
+	{"today", "Today's cost", "{?today_cost: {today_cost:money}/today}"},
+	{"blockcost", "Block cost", "{?block_cost: {block_cost:money} block}"},
+	{"burn", "Burn rate", "{?burn_rate: 🔥 {burn_rate:money}/hr}"},
+}
+
+// assembleTemplate builds a format string from the selected component keys, in
+// the palette's canonical order.
+func assembleTemplate(selected []string) string {
+	var b strings.Builder
+	for _, c := range templateComponents {
+		if lo.Contains(selected, c.key) {
+			b.WriteString(c.fragment)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// sampleTemplateContext is a representative claude_code context used to render
+// the builder's live preview (real numbers, brand-colored icon).
+func sampleTemplateContext() tmux.Context {
+	f := func(v float64) *float64 { return &v }
+	return tmux.Context{
+		Provider: "claude_code",
+		Snapshot: core.UsageSnapshot{
+			ProviderID: "claude_code",
+			Metrics: map[string]core.Metric{
+				"usage_five_hour": {Used: f(15)},
+				"today_api_cost":  {Used: f(6.79)},
+				"5h_block_cost":   {Used: f(3.40)},
+			},
+			Attributes: map[string]string{"model": "Opus 4.8"},
+		},
+		Synthetic: map[string]string{"_block_burn_rate": "1.20", "_context_pct": "42"},
+		Theme:     tmux.ThemeColors{Green: "#59D4A0", Yellow: "#F0C75E", Red: "#F06A7A", Accent: "#FF6600"},
+		ColorMode: tmux.ColorModeTruecolor,
+		Glyphs:    tmux.GlyphTierUnicode,
+		Now:       time.Now(),
+	}
+}
+
+// validateTemplate ensures a tmux format string parses, so the wizard never
+// saves a template that would break the status bar.
 func validateTemplate(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return fmt.Errorf("template cannot be empty")
@@ -54,11 +113,22 @@ func runTmuxInstallWizard(version string) error {
 	// Let power users start from a preset and edit the template interactively.
 	presetOpts = append(presetOpts, huh.NewOption("Custom — edit a template", customPresetSentinel))
 
-	// Prefill the custom editor with the default preset's format as a starting
-	// point so it is never an empty box.
-	customFormat := ""
-	if p, err := tmux.SamplePreset(tmux.DefaultPreset); err == nil {
-		customFormat = p.Format
+	// Custom builder: toggle components, see a live preview. Defaults to the
+	// compact shape (icon + 5h block + today cost).
+	selected := []string{"icon", "block", "today"}
+	componentOpts := lo.Map(templateComponents, func(c templateComponent, _ int) huh.Option[string] {
+		return huh.NewOption(c.label, c.key)
+	})
+	previewFn := func() string {
+		tmpl := assembleTemplate(selected)
+		if strings.TrimSpace(tmpl) == "" {
+			return "  (select at least one component)"
+		}
+		out, err := tmux.Render(tmpl, sampleTemplateContext())
+		if err != nil {
+			return "  invalid: " + err.Error()
+		}
+		return "  " + tmux.Preview(out)
 	}
 
 	form := huh.NewForm(
@@ -86,14 +156,14 @@ func runTmuxInstallWizard(version string) error {
 				).
 				Value(&icons),
 		),
-		// Shown only when "Custom" is selected above.
+		// Shown only when "Custom" is selected above: a component builder with a
+		// live preview that updates as you toggle pieces on and off.
 		huh.NewGroup(
-			huh.NewText().
-				Title("Custom template").
-				Description("Edit the format string. Variables: `openusage tmux variables`. Example: {tool:icon:brand} 5h {block_pct:pct:color} {today_cost:money}/today").
-				Lines(3).
-				Value(&customFormat).
-				Validate(validateTemplate),
+			huh.NewMultiSelect[string]().
+				Title("Build your segment").
+				DescriptionFunc(previewFn, &selected).
+				Options(componentOpts...).
+				Value(&selected),
 		).WithHideFunc(func() bool { return preset != customPresetSentinel }),
 	)
 	if err := form.Run(); err != nil {
@@ -107,15 +177,22 @@ func runTmuxInstallWizard(version string) error {
 	chosenPreset := preset
 	if cfg, err := config.Load(); err == nil {
 		if preset == customPresetSentinel {
-			cfg.Tmux.Format = strings.TrimSpace(customFormat)
+			tmpl := assembleTemplate(selected)
+			if err := validateTemplate(tmpl); err != nil {
+				// Empty/invalid selection: fall back to the compact preset
+				// rather than saving a broken or empty template.
+				cfg.Tmux.Format = ""
+			} else {
+				cfg.Tmux.Format = tmpl
+			}
 			chosenPreset = tmux.DefaultPreset
 		} else {
 			cfg.Tmux.Format = ""
 		}
 		_ = config.Save(cfg)
 	} else if preset == customPresetSentinel {
-		// Could not persist the custom format; fall back to the default preset
-		// rather than silently writing a snippet that ignores the user's edit.
+		// Could not persist the custom template; fall back to the default preset
+		// rather than silently writing a snippet that ignores the user's choice.
 		fmt.Fprintln(os.Stderr, "tmux: could not save the custom template; using the compact preset")
 		chosenPreset = tmux.DefaultPreset
 	}
