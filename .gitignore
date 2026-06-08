@@ -28,6 +28,7 @@ Thumbs.db
 *.har
 *.prof
 .aider/
+.venv-font/
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .tmp/

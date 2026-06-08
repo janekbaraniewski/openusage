@@ -1,0 +1,28 @@
+{
+  "family": "OpenUsage Icons",
+  "fileName": "openusage-icons.ttf",
+  "version": "1.0",
+  "upem": 1000,
+  "comment": "Source of truth for the custom provider-icon font. Both the Go renderer (customfont glyph tier) and scripts/gen-icon-font.py read this file. 'svg' is the basename under website/public/icons/<svg>.svg (monochrome variant). 'codepoint' is a Private Use Area hex codepoint. Providers without an entry fall back to the unicode glyph tier.",
+  "glyphs": [
+    { "provider": "claude_code",   "svg": "claudecode",   "codepoint": "E900" },
+    { "provider": "anthropic",     "svg": "anthropic",     "codepoint": "E901" },
+    { "provider": "codex",         "svg": "codex",         "codepoint": "E902" },
+    { "provider": "openai",        "svg": "openai",        "codepoint": "E903" },
+    { "provider": "cursor",        "svg": "cursor",        "codepoint": "E904" },
+    { "provider": "copilot",       "svg": "copilot",       "codepoint": "E905" },
+    { "provider": "gemini_cli",    "svg": "geminicli",     "codepoint": "E906" },
+    { "provider": "gemini_api",    "svg": "gemini",        "codepoint": "E907" },
+    { "provider": "openrouter",    "svg": "openrouter",    "codepoint": "E908" },
+    { "provider": "ollama",        "svg": "ollama",        "codepoint": "E909" },
+    { "provider": "opencode",      "svg": "opencode",      "codepoint": "E90A" },
+    { "provider": "groq",          "svg": "groq",          "codepoint": "E90B" },
+    { "provider": "mistral",       "svg": "mistral",       "codepoint": "E90C" },
+    { "provider": "deepseek",      "svg": "deepseek",      "codepoint": "E90D" },
+    { "provider": "xai",           "svg": "xai",           "codepoint": "E90E" },
+    { "provider": "perplexity",    "svg": "perplexity",    "codepoint": "E90F" },
+    { "provider": "alibaba_cloud", "svg": "alibabacloud",  "codepoint": "E910" },
+    { "provider": "zai",           "svg": "zai",           "codepoint": "E911" },
+    { "provider": "moonshot",      "svg": "moonshot",      "codepoint": "E912" }
+  ]
+}

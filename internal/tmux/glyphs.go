@@ -1,16 +1,33 @@
 package tmux
 
-import "strings"
+import (
+	_ "embed"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"sync"
+)
 
 // GlyphTier selects the icon set used by `:icon` and preset glyph references.
-// ascii is the always-safe fallback; unicode is the default for most presets;
-// nerdfont assumes a Nerd Font is installed.
+// The ladder (best to safest) is:
+//
+//	customfont — OpenUsage's bundled provider-icon font (real brand glyphs at
+//	             Private Use Area codepoints). Requires the font to be installed
+//	             so the terminal can fall back to it for those codepoints
+//	             (`openusage tmux font install`).
+//	nerdfont   — assumes a Nerd Font is installed.
+//	unicode    — emoji/symbols, the default; works in most terminals.
+//	ascii      — always-safe bracketed labels, e.g. [claude].
+//
+// Providers without a glyph in a given tier fall back to the next-safest tier
+// (customfont → unicode) or to the tier's "*" entry.
 type GlyphTier string
 
 const (
-	GlyphTierASCII    GlyphTier = "ascii"
-	GlyphTierUnicode  GlyphTier = "unicode"
-	GlyphTierNerdfont GlyphTier = "nerdfont"
+	GlyphTierASCII      GlyphTier = "ascii"
+	GlyphTierUnicode    GlyphTier = "unicode"
+	GlyphTierNerdfont   GlyphTier = "nerdfont"
+	GlyphTierCustomFont GlyphTier = "customfont"
 )
 
 // ParseGlyphTier resolves a tier string. Empty/unknown defaults to unicode.
@@ -20,11 +37,88 @@ func ParseGlyphTier(s string) GlyphTier {
 		return GlyphTierASCII
 	case "nerdfont", "nerd", "nf":
 		return GlyphTierNerdfont
+	case "customfont", "custom", "openusage":
+		return GlyphTierCustomFont
 	case "unicode", "":
 		return GlyphTierUnicode
 	default:
 		return GlyphTierUnicode
 	}
+}
+
+//go:embed assets/icons.json
+var iconManifestJSON []byte
+
+// iconManifest is the parsed form of assets/icons.json — the single source of
+// truth shared with scripts/gen-icon-font.py. Keeping the provider→codepoint
+// mapping in one file guarantees the renderer and the generated font agree.
+type iconManifest struct {
+	Family  string `json:"family"`
+	Version string `json:"version"`
+	Glyphs  []struct {
+		Provider  string `json:"provider"`
+		SVG       string `json:"svg"`
+		Codepoint string `json:"codepoint"`
+	} `json:"glyphs"`
+}
+
+var (
+	customFontOnce  sync.Once
+	customFontMap   map[string]string
+	iconFamilyName  = "OpenUsage Icons"
+	iconFontVersion = "0"
+)
+
+func loadCustomFontMap() {
+	customFontMap = map[string]string{}
+	var m iconManifest
+	if err := json.Unmarshal(iconManifestJSON, &m); err != nil {
+		return
+	}
+	if strings.TrimSpace(m.Family) != "" {
+		iconFamilyName = m.Family
+	}
+	if strings.TrimSpace(m.Version) != "" {
+		iconFontVersion = m.Version
+	}
+	for _, g := range m.Glyphs {
+		cp, err := strconv.ParseInt(strings.TrimSpace(g.Codepoint), 16, 32)
+		if err != nil {
+			continue
+		}
+		customFontMap[strings.ToLower(g.Provider)] = string(rune(cp))
+	}
+}
+
+// customFontIcon returns the bundled-font glyph (a PUA rune) for a provider, or
+// "" if the provider has no bundled glyph.
+func customFontIcon(provider string) string {
+	customFontOnce.Do(loadCustomFontMap)
+	return customFontMap[provider]
+}
+
+// IconFontFamily returns the family name of the bundled icon font (from the
+// manifest). Used by the font install/detect helpers.
+func IconFontFamily() string {
+	customFontOnce.Do(loadCustomFontMap)
+	return iconFamilyName
+}
+
+// IconFontVersion returns the manifest version of the bundled icon font.
+func IconFontVersion() string {
+	customFontOnce.Do(loadCustomFontMap)
+	return iconFontVersion
+}
+
+// CustomFontProviders returns the provider IDs that have a bundled glyph.
+// Exposed for tests and the `tmux font status` command.
+func CustomFontProviders() []string {
+	customFontOnce.Do(loadCustomFontMap)
+	out := make([]string, 0, len(customFontMap))
+	for k := range customFontMap {
+		out = append(out, k)
+	}
+	return out
 }
 
 // providerIcons maps provider IDs to their per-tier glyph. The fallback in
@@ -95,11 +189,21 @@ var providerIcons = map[GlyphTier]map[string]string{
 	},
 }
 
-// ProviderIcon returns the glyph for a provider in the given tier. Unknown
-// providers fall back to the tier's "*" entry. Unknown tiers fall back to
-// unicode.
+// ProviderIcon returns the glyph for a provider in the given tier. The custom
+// font is a partial overlay: providers with a bundled glyph use it, and any
+// provider without one falls back to the unicode tier so the segment is never
+// blank. Unknown providers fall back to the tier's "*" entry; unknown tiers
+// fall back to unicode.
 func ProviderIcon(provider string, tier GlyphTier) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
+	if tier == GlyphTierCustomFont {
+		if g := customFontIcon(p); g != "" {
+			return g
+		}
+		// No bundled glyph for this provider: degrade to the unicode emoji
+		// rather than emit nothing.
+		tier = GlyphTierUnicode
+	}
 	tbl, ok := providerIcons[tier]
 	if !ok {
 		tbl = providerIcons[GlyphTierUnicode]
