@@ -187,13 +187,13 @@ See the [tmux integration guide](../guides/tmux-integration.md) for the full tem
 | `--color-mode MODE` | `truecolor` | `truecolor`, `256`, `ansi`, or `none`. |
 | `--no-color` | off | Equivalent to `--color-mode none`. |
 | `--no-truecolor` | off | Downgrade to 256-color output. |
-| `--glyphs TIER` | per preset | `ascii`, `unicode`, or `nerdfont`. |
+| `--glyphs TIER` | per preset | `ascii`, `unicode`, `nerdfont`, or `customfont`. With the bundled font installed, the default auto-upgrades to `customfont`. |
 | `--theme NAME` | (inherits) | Override the configured theme for this invocation. |
 | `--source MODE` | `auto` | Snapshot source: `auto`, `daemon`, `direct`. |
 | `--max-runtime DURATION` | `800ms` | Self-kill budget so tmux never blocks. |
 | `--raw` | off | Force tmux-format output even when stdout is a TTY. |
 | `--json` | off | Emit structured JSON. |
-| `--no-cache` | off | Bypass the active-tool detection cache (2s TTL). |
+| `--no-cache` | off | Bypass the active-tool detection cache (~15s TTL). |
 
 `--preset`, `--format`, `--segment`, and `--json` are mutually exclusive.
 
@@ -218,8 +218,26 @@ openusage tmux install --write --position both --bind-popup u
 | `--bind-popup KEY` | (none) | Bind a key to `display-popup -E openusage` (tmux 3.2+). |
 | `--bind-refresh KEY` | (none) | Bind a key to refresh the status bar on demand. |
 | `--binary PATH` | (auto) | Override the openusage binary path in the snippet. |
+| `--with-font` | off | Install the bundled provider-icon font without prompting (requires `--write`). |
+| `--no-font` | off | Skip the provider-icon font prompt entirely. |
 
-Re-running `install --write` replaces the existing sentinel block in place; nothing outside the block is changed.
+Re-running `install --write` replaces the existing sentinel block in place; nothing outside the block is changed. With `--write` on an interactive terminal, the command also offers to install the provider-icon font (prompt defaults to yes).
+
+### `tmux font`
+
+Manages the bundled provider-icon font, which lets the status bar render real
+provider logos instead of emoji. See [Provider icons](../guides/tmux-integration.md#provider-icons-custom-font).
+
+```
+openusage tmux font install      # install into your user font dir (+ fc-cache refresh)
+openusage tmux font status       # family, version, path, and whether it is up to date
+openusage tmux font uninstall    # remove it
+```
+
+`status` compares the installed font against the version embedded in the binary
+by content hash, so it reports when an installed font is **outdated** after you
+upgrade `openusage`. After installing, restart your terminal and tmux; the
+default preset then auto-upgrades to `customfont` glyphs.
 
 ### `tmux uninstall`
 

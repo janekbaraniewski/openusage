@@ -202,6 +202,43 @@ Override per variable via `settings.tmux.color_rules`:
 }
 ```
 
+## Provider icons (custom font)
+
+The `:icon` modifier renders a glyph for the active tool. There are four glyph
+tiers, picked best-to-safest:
+
+| Tier | Looks like | Needs |
+| --- | --- | --- |
+| `customfont` | real provider logos (Claude, Cursor, Codex, …) | the bundled OpenUsage icon font installed |
+| `nerdfont` | Nerd Font brand glyphs | a Nerd Font as your terminal font |
+| `unicode` (default) | emoji (`🤖`, `▸`, `🦙`) | any modern terminal |
+| `ascii` | bracketed labels (`[claude]`) | nothing |
+
+### Install the icon font
+
+OpenUsage ships an icon font built from its own SVG provider icons. Your
+terminal falls back to it for the font's Private Use Area codepoints once it is
+installed system-wide.
+
+```bash
+openusage tmux font install     # installs into your user font dir + refreshes fontconfig
+openusage tmux font status      # shows install state and whether it is up to date
+openusage tmux font uninstall   # removes it
+```
+
+`openusage tmux install` also offers to install the font (the prompt defaults to
+yes). Use `--with-font` to install it without prompting, or `--no-font` to skip.
+
+After installing, **restart your terminal and tmux**. From then on the default
+preset auto-upgrades from emoji to the real provider icons — no config change
+needed. Force the tier explicitly with `--glyphs customfont` (or
+`settings.tmux.glyphs`), and providers without a bundled glyph fall back to the
+unicode emoji automatically.
+
+`font status` compares the installed font against the version embedded in your
+`openusage` binary (by content hash), so after you upgrade `openusage` it will
+tell you when the font is **outdated** and should be reinstalled.
+
 ## Power-user recipes
 
 ### Multi-segment status bar
@@ -378,7 +415,7 @@ The full TmuxConfig surface in `~/.config/openusage/settings.json`:
 | `priority_order` | string[] | `["claude_code","cursor","codex","aider","copilot","gemini_cli","ollama"]` | Order used by the `priority` strategy. |
 | `recency_window` | duration string | `4h` | mtime window for the `recency` strategy. |
 | `color_mode` | string | `truecolor` | `truecolor`, `256`, `ansi`, or `none`. |
-| `glyphs` | string | per-preset | `ascii`, `unicode`, or `nerdfont`. |
+| `glyphs` | string | per-preset | `ascii`, `unicode`, `nerdfont`, or `customfont` (the bundled provider-icon font; see [Provider icons](#provider-icons-custom-font)). |
 | `theme` | string | (inherits `theme`) | Theme name. |
 | `source` | string | `auto` | Snapshot source: `auto`, `daemon`, `direct`. |
 | `interval` | int | 5 | Suggested `status-interval`. |
