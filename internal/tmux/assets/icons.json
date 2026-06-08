@@ -1,7 +1,7 @@
 {
   "family": "OpenUsage Icons",
   "fileName": "openusage-icons.ttf",
-  "version": "1.1",
+  "version": "1.2",
   "upem": 1000,
   "comment": "Source of truth for the custom provider-icon font. Both the Go renderer (customfont glyph tier) and scripts/gen-icon-font.py read this file. 'svg' is the basename under website/public/icons/<svg>.svg (monochrome variant). 'codepoint' is a Private Use Area hex codepoint. Providers without an entry fall back to the unicode glyph tier.",
   "glyphs": [
@@ -33,6 +33,9 @@
     { "provider": "openclaw",      "svg": "openclaw",      "codepoint": "E919" },
     { "provider": "qwen_cli",      "svg": "qwen",          "codepoint": "E91A" },
     { "provider": "roocode",       "svg": "roocode",       "codepoint": "E91B" },
-    { "provider": "zed",           "svg": "zed",           "codepoint": "E91C" }
+    { "provider": "zed",           "svg": "zed",           "codepoint": "E91C" },
+    { "provider": "droid",         "svg": "droid",         "codepoint": "E91D" },
+    { "provider": "mux",           "svg": "mux",           "codepoint": "E91E" },
+    { "provider": "pi",            "svg": "pi",            "codepoint": "E91F" }
   ]
 }

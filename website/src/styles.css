@@ -591,6 +591,7 @@ button { font: inherit; cursor: pointer; }
 .prov-logo {
   width: 24px; height: 24px;
   flex-shrink: 0;
+  object-fit: contain;
   filter: brightness(0) invert(0.85);
   transition: filter 0.2s;
 }
