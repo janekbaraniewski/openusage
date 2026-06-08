@@ -1,7 +1,6 @@
 package tmux
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -167,43 +166,26 @@ func iterm2Guidance() []TermSetupResult {
 	return out
 }
 
-// --- shared managed-block writer --------------------------------------------
+// --- managed-block writer ---------------------------------------------------
 
 // writeManagedBlock appends or replaces the openusage sentinel block in a
-// config file, creating the file and parent dir if needed. A .bak of prior
-// non-empty content is written on first change.
+// config file, creating the file and parent dir if needed, with a .bak of any
+// prior non-empty content. The block edit itself uses the shared helper in
+// managed.go (same semantics as the tmux.conf install).
 func writeManagedBlock(path, block string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-	if bytes.Contains(existing, []byte(termSentinelStart)) {
-		// Replace in place.
-		start := bytes.Index(existing, []byte(termSentinelStart))
-		end := bytes.Index(existing[start:], []byte(termSentinelEnd))
-		if end >= 0 {
-			end += start + len(termSentinelEnd)
-			if end < len(existing) && existing[end] == '\n' {
-				end++
-			}
-			updated := append(append(append([]byte{}, existing[:start]...), []byte(block)...), existing[end:]...)
-			return os.WriteFile(path, updated, 0o644)
-		}
+		return fmt.Errorf("tmux: reading %s: %w", path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("creating dir: %w", err)
+		return fmt.Errorf("tmux: creating %s: %w", filepath.Dir(path), err)
 	}
 	if len(existing) > 0 {
 		_ = os.WriteFile(path+".bak", existing, 0o600)
 	}
-	var buf bytes.Buffer
-	buf.Write(existing)
-	if len(existing) > 0 && !bytes.HasSuffix(existing, []byte("\n")) {
-		buf.WriteByte('\n')
+	updated := replaceOrAppendBlock(existing, termSentinelStart, termSentinelEnd, block)
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		return fmt.Errorf("tmux: writing %s: %w", path, err)
 	}
-	if len(existing) > 0 {
-		buf.WriteByte('\n')
-	}
-	buf.WriteString(block)
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	return nil
 }

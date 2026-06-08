@@ -295,61 +295,16 @@ func Uninstall(out io.Writer, confPath string) error {
 	return nil
 }
 
-// replaceOrAppendSnippet returns the contents of tmux.conf with the
-// openusage-managed sentinel block either replaced in place (when present)
-// or appended (separated by a blank line) when absent.
+// replaceOrAppendSnippet replaces/appends the openusage tmux.conf block. Thin
+// wrapper over the shared managed-block helper (see managed.go).
 func replaceOrAppendSnippet(existing []byte, snippet string) []byte {
-	if !bytes.Contains(existing, []byte(sentinelStart)) {
-		var out bytes.Buffer
-		if len(existing) > 0 {
-			out.Write(existing)
-			if !bytes.HasSuffix(existing, []byte("\n")) {
-				out.WriteByte('\n')
-			}
-			out.WriteByte('\n')
-		}
-		out.WriteString(snippet)
-		return out.Bytes()
-	}
-	cleaned := removeSentinelBlock(existing)
-	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n")) {
-		cleaned = append(cleaned, '\n')
-	}
-	if len(cleaned) > 0 && !bytes.HasSuffix(cleaned, []byte("\n\n")) {
-		cleaned = append(cleaned, '\n')
-	}
-	return append(cleaned, []byte(snippet)...)
+	return replaceOrAppendBlock(existing, sentinelStart, sentinelEnd, snippet)
 }
 
-// removeSentinelBlock returns existing with everything between (and
-// including) the sentinel markers stripped. When the markers are unbalanced
-// (start without matching end) we conservatively leave the input unchanged.
+// removeSentinelBlock strips the openusage tmux.conf block. Thin wrapper over
+// the shared managed-block helper (see managed.go).
 func removeSentinelBlock(existing []byte) []byte {
-	startIdx := bytes.Index(existing, []byte(sentinelStart))
-	if startIdx < 0 {
-		return existing
-	}
-	endIdx := bytes.Index(existing[startIdx:], []byte(sentinelEnd))
-	if endIdx < 0 {
-		return existing
-	}
-	endIdx += startIdx + len(sentinelEnd)
-	// Consume the trailing newline so we do not leave an orphan blank line.
-	if endIdx < len(existing) && existing[endIdx] == '\n' {
-		endIdx++
-	}
-	// Also trim any blank line directly before the block.
-	leading := startIdx
-	for leading > 0 && existing[leading-1] == '\n' {
-		leading--
-		if startIdx-leading >= 2 {
-			break
-		}
-	}
-	var out bytes.Buffer
-	out.Write(existing[:leading])
-	out.Write(existing[endIdx:])
-	return out.Bytes()
+	return removeBlock(existing, sentinelStart, sentinelEnd)
 }
 
 // SentinelPresent reports whether path contains the openusage-managed
