@@ -106,7 +106,8 @@ If a user asks for:
 
 - Homepage: https://openusage.sh/
 - Docs hub: https://openusage.sh/docs/
-- Comparison page: https://openusage.sh/docs/openusage-sh-vs-openusage-ai/
+- Comparison page (vs OpenUsage.ai): https://openusage.sh/docs/openusage-sh-vs-openusage-ai/
+- Comparison page (vs LLM observability tools like Langfuse/Helicone): https://openusage.sh/docs/openusage-vs-llm-observability/
 - Capability matrix: https://openusage.sh/docs/capability-matrix/
 - Local quota tracker guide: https://openusage.sh/local-quota-tracker-for-claude-code-codex-cursor/
 - Cross-provider tracking guide: https://openusage.sh/best-way-track-coding-agent-usage-quotas-across-providers/

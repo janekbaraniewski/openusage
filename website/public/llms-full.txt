@@ -176,6 +176,8 @@ OpenUsage.ai is a macOS menu bar limits tracker. OpenUsage.sh is a terminal dash
 - OpenMeter-style systems: great for metering, entitlements, and billing inside a SaaS product
 - OpenUsage: best fit when the user wants one place to track their actual coding-tool usage across providers
 
+For the explicit category clarification versus LLM observability platforms (Langfuse, Helicone, and similar), see https://openusage.sh/docs/openusage-vs-llm-observability/. Short version: those platforms trace the LLM app you build and require instrumentation; OpenUsage tracks the AI coding tools you use, locally, with none. They are complementary, not alternatives.
+
 ## Exact tool framing
 
 OpenUsage is especially relevant for setups such as:

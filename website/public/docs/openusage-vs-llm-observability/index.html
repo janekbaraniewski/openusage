@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenUsage vs LLM observability tools (Langfuse, Helicone) | Tracking tools you use vs apps you build</title>
+    <meta
+      name="description"
+      content="A factual category comparison of OpenUsage and LLM observability platforms like Langfuse and Helicone. OpenUsage tracks usage and spend of the AI coding tools you use; observability platforms trace the LLM app you build. Different jobs that can coexist."
+    />
+    <link rel="canonical" href="https://openusage.sh/docs/openusage-vs-llm-observability/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#171a1b" />
+
+    <meta property="og:title" content="OpenUsage vs LLM observability tools (Langfuse, Helicone)" />
+    <meta
+      property="og:description"
+      content="A factual category comparison: tracking the AI coding tools you use versus tracing the LLM app you build."
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://openusage.sh/docs/openusage-vs-llm-observability/" />
+    <meta property="og:image" content="https://openusage.sh/brand/og.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OpenUsage vs LLM observability tools (Langfuse, Helicone)" />
+    <meta
+      name="twitter:description"
+      content="A factual category comparison: tracking the AI coding tools you use versus tracing the LLM app you build."
+    />
+    <meta name="twitter:image" content="https://openusage.sh/brand/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <link rel="stylesheet" href="/guides.css" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "OpenUsage vs LLM observability tools (Langfuse, Helicone)",
+      "description": "A factual category comparison of OpenUsage and LLM observability platforms like Langfuse and Helicone.",
+      "author": {
+        "@type": "Person",
+        "name": "Jan Baraniewski",
+        "url": "https://baraniewski.com"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OpenUsage.sh",
+        "url": "https://openusage.sh/"
+      },
+      "datePublished": "2026-06-08",
+      "dateModified": "2026-06-08",
+      "mainEntityOfPage": "https://openusage.sh/docs/openusage-vs-llm-observability/"
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is OpenUsage an alternative to Langfuse or Helicone?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not really; they solve different problems. OpenUsage tracks how much you spend and how close to quota you are across the AI coding tools you use, such as Claude Code, Cursor, Codex CLI, Copilot, and API platforms. Langfuse and Helicone are observability and tracing platforms for the LLM application you build, and they require instrumenting your own code or routing your traffic through them."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the main difference between OpenUsage and an LLM observability platform?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenUsage tracks the tools you use to write code, with zero instrumentation, by reading local data and provider APIs on your machine. LLM observability platforms trace the app you build, capturing prompts, completions, traces, and evals from code you instrument. One is about your consumption of coding tools; the other is about the behavior of your product."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I use OpenUsage and an observability platform together?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. They do not overlap. Many developers use OpenUsage to watch their personal coding-tool spend and quotas locally, while using Langfuse or Helicone inside a product to trace and evaluate the LLM features they ship."
+          }
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <main class="guide">
+      <p class="guide__home"><a href="/">openusage.sh</a></p>
+      <section class="hero">
+        <p class="hero__kicker">Comparison / June 8, 2026</p>
+        <h1>OpenUsage vs LLM observability tools</h1>
+        <p class="hero__lede">
+          OpenUsage is sometimes searched next to Langfuse and Helicone, but they sit in different
+          categories. OpenUsage tracks the AI coding tools <em>you use</em>. Observability platforms
+          trace the LLM app <em>you build</em>. This page is a category clarification, not a feature
+          bake-off, because the two rarely solve the same problem.
+        </p>
+      </section>
+
+      <section class="section" id="answer">
+        <p class="section__lead">
+          <span class="section__label">Short answer</span>
+          Choose an <strong>LLM observability platform</strong> (Langfuse, Helicone, and similar) when you
+          are building an AI application and need to trace prompts, completions, latency, evals, and
+          per-request cost from code you instrument. Choose <strong>OpenUsage</strong> when you want to see
+          spend, quotas, rate limits, tokens, and burn rate across the AI coding tools and API accounts
+          you personally use, locally, with no instrumentation.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Factual comparison</h2>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Dimension</th>
+                <th>OpenUsage</th>
+                <th>LLM observability platforms (Langfuse, Helicone, …)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>What it watches</strong></td>
+                <td>The AI coding tools and API accounts you use to write code.</td>
+                <td>The LLM features inside an application you build.</td>
+              </tr>
+              <tr>
+                <td><strong>Core job</strong></td>
+                <td>Spend, quotas, resets, rate limits, tokens, burn rate, and model usage across many tools in one place.</td>
+                <td>Traces, spans, prompts, completions, evals, datasets, and per-request analytics for your product.</td>
+              </tr>
+              <tr>
+                <td><strong>Setup</strong></td>
+                <td>Zero instrumentation. Auto-detects installed tools and API keys; reads local data and provider APIs.</td>
+                <td>Instrument your code with an SDK or route traffic through a proxy/gateway.</td>
+              </tr>
+              <tr>
+                <td><strong>Where it runs</strong></td>
+                <td>Locally on your machine; history in a SQLite file you own. No hosted backend.</td>
+                <td>Self-hosted or cloud service that your application sends data to.</td>
+              </tr>
+              <tr>
+                <td><strong>Primary surface</strong></td>
+                <td>Terminal dashboard, tmux status bar, Claude Code statusline, headless reports.</td>
+                <td>Web dashboards for traces, evaluations, and request logs.</td>
+              </tr>
+              <tr>
+                <td><strong>Primary user</strong></td>
+                <td>A developer who wants to know what their coding tools are costing them.</td>
+                <td>A team shipping an LLM product that needs to debug and evaluate it.</td>
+              </tr>
+              <tr>
+                <td><strong>Open source</strong></td>
+                <td>Yes (MIT).</td>
+                <td>Often yes; licensing varies by project.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="hero__lede" style="margin-top: 12px;">
+          As of June 8, 2026, this comparison is based on the public positioning of these projects.
+          It describes two categories; it does not claim one replaces the other.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>When OpenUsage is the right tool</h2>
+        <ul class="plain-list">
+          <li><strong>You use more than one coding agent.</strong> Claude Code, Codex CLI, Cursor, Copilot, Gemini CLI, OpenCode, and API platforms in one local view, instead of cycling through dashboards.</li>
+          <li><strong>You want answers, not instrumentation.</strong> OpenUsage reads what is already on your machine. There is no SDK to add and no traffic to proxy.</li>
+          <li><strong>You care about your own spend and quotas.</strong> Today's cost, 5-hour billing blocks, burn rate, resets, and rate limits across the tools you personally pay for.</li>
+          <li><strong>You live in the terminal.</strong> A TUI dashboard, a tmux status segment, a Claude Code statusline, and headless daily/weekly/monthly reports.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>When an LLM observability platform is the right tool</h2>
+        <ul class="plain-list">
+          <li><strong>You are building an LLM application.</strong> You need traces and spans for the requests your own code makes to model providers.</li>
+          <li><strong>You need evals and prompt management.</strong> Datasets, scoring, and experiments belong to the product-engineering workflow these platforms are built for.</li>
+          <li><strong>You want per-request, per-user analytics for your product.</strong> That is application observability, not personal tool tracking.</li>
+        </ul>
+        <p class="hero__lede" style="margin-top: 12px;">
+          These tools are complementary. Use OpenUsage for your own coding-tool spend and quotas, and an
+          observability platform inside the product you ship.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Related pages</h2>
+        <div class="card-grid">
+          <a class="card-link" href="/docs/capability-matrix/">
+            <span class="card-link__eyebrow">Proof</span>
+            <h3 class="card-link__title">Capability matrix</h3>
+            <p class="card-link__desc">What OpenUsage tracks per provider, when the reader wants detail instead of positioning.</p>
+          </a>
+          <a class="card-link" href="/best-way-track-coding-agent-usage-quotas-across-providers/">
+            <span class="card-link__eyebrow">Cross-provider</span>
+            <h3 class="card-link__title">Track usage across providers</h3>
+            <p class="card-link__desc">The local-first way to watch spend and quotas across many coding tools at once.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><a href="/">openusage.sh</a> · <a href="/docs/">docs</a> · <a href="/llms.txt">llms.txt</a> · <a href="https://github.com/janekbaraniewski/openusage">GitHub</a></p>
+    </footer>
+  </body>
+</html>
