@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/export"
@@ -98,7 +100,76 @@ Run "openusage tmux install" to wire it into your tmux.conf.`,
 	cmd.AddCommand(newTmuxDoctorCommand())
 	cmd.AddCommand(newTmuxPreviewCommand(f))
 	cmd.AddCommand(newTmuxWatchCommand())
+	cmd.AddCommand(newTmuxFontCommand())
 
+	return cmd
+}
+
+// newTmuxFontCommand manages the bundled provider-icon font: installing it into
+// the user font directory, checking install/version state, and removing it.
+// When installed, `openusage tmux` auto-upgrades the default unicode glyphs to
+// the real provider icons.
+func newTmuxFontCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "font",
+		Short: "Install or check the bundled provider-icon font",
+		Long: `Install the OpenUsage provider-icon font so the status bar can render real
+provider logos instead of emoji.
+
+The font ships glyphs at Private Use Area codepoints; your terminal falls back
+to it for those codepoints once it is installed system-wide. After installing,
+restart your terminal and tmux. Providers without a bundled glyph fall back to
+the unicode emoji, and providers fall back further to ASCII labels with
+--glyphs ascii.`,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "install",
+		Short: "Install the icon font into your user font directory",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			path, err := tmux.InstallFont()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "installed %s v%s at %s\n", tmux.IconFontFamily(), tmux.IconFontVersion(), path)
+			fmt.Fprintln(os.Stdout, "Restart your terminal and tmux so they pick up the new font.")
+			fmt.Fprintln(os.Stdout, "It is used automatically by the default preset; force it with `--glyphs customfont`.")
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the installed icon font",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			path, err := tmux.UninstallFont()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "removed icon font at %s\n", path)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show whether the icon font is installed and up to date",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			st := tmux.FontStatus()
+			fmt.Fprintf(os.Stdout, "family:    %s\n", st.Family)
+			fmt.Fprintf(os.Stdout, "version:   %s\n", st.Version)
+			fmt.Fprintf(os.Stdout, "path:      %s\n", st.Path)
+			fmt.Fprintf(os.Stdout, "glyphs:    %d providers\n", len(tmux.CustomFontProviders()))
+			switch {
+			case !st.Installed:
+				fmt.Fprintln(os.Stdout, "installed: no   (run: openusage tmux font install)")
+			case st.UpToDate:
+				fmt.Fprintln(os.Stdout, "installed: yes, up to date")
+			default:
+				fmt.Fprintln(os.Stdout, "installed: yes, but OUTDATED (run: openusage tmux font install to update)")
+				fmt.Fprintf(os.Stdout, "  embedded sha256:  %s\n", st.EmbeddedSHA)
+				fmt.Fprintf(os.Stdout, "  installed sha256: %s\n", st.InstalledSHA)
+			}
+			return nil
+		},
+	})
 	return cmd
 }
 
@@ -258,7 +329,12 @@ func resolveTmuxOptions(c *cobra.Command, f *tmuxFlags, cfg config.Config) tmuxO
 		opts.colorMode = tmux.ParseColorMode(f.colorMode)
 	}
 
-	// Glyph tier: flag > settings > preset default.
+	// Glyph tier: flag > settings > preset default, then an auto-upgrade to the
+	// bundled icon font when it is installed. The auto-upgrade only kicks in
+	// when the user did not choose a tier explicitly and the resolved tier is
+	// the plain "unicode" default — so an explicit --glyphs, a configured tier,
+	// or an ascii/nerdfont preset are all respected as-is.
+	explicitGlyphs := strings.TrimSpace(f.glyphs) != "" || strings.TrimSpace(tcfg.Glyphs) != ""
 	glyphRaw := f.glyphs
 	if glyphRaw == "" {
 		glyphRaw = tcfg.Glyphs
@@ -269,6 +345,9 @@ func resolveTmuxOptions(c *cobra.Command, f *tmuxFlags, cfg config.Config) tmuxO
 		}
 	}
 	opts.glyphs = tmux.ParseGlyphTier(glyphRaw)
+	if !explicitGlyphs && opts.glyphs == tmux.GlyphTierUnicode && tmux.FontInstalled() {
+		opts.glyphs = tmux.GlyphTierCustomFont
+	}
 
 	// Source: flag > settings > auto.
 	if c.Flags().Changed("source") {
@@ -427,6 +506,7 @@ func newTmuxInstallCommand() *cobra.Command {
 		RightLength: 200,
 		LeftLength:  80,
 	}
+	var withFont, noFont bool
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Print or write the tmux.conf snippet for the openusage status segment",
@@ -444,6 +524,7 @@ func newTmuxInstallCommand() *cobra.Command {
 						InstalledAt: time.Now().UTC().Format(time.RFC3339),
 					})
 				}
+				offerFontInstall(withFont, noFont)
 				return nil
 			}
 			_, err := tmux.Install(os.Stdout, opts)
@@ -460,7 +541,78 @@ func newTmuxInstallCommand() *cobra.Command {
 	fl.StringVar(&opts.BindPopup, "bind-popup", "", "bind a key to display-popup -E openusage (tmux 3.2+)")
 	fl.StringVar(&opts.BindRefresh, "bind-refresh", "", "bind a key to refresh the status bar on demand")
 	fl.StringVar(&opts.Binary, "binary", "", "override the openusage binary path in the snippet")
+	fl.BoolVar(&withFont, "with-font", false, "install the bundled provider-icon font without prompting")
+	fl.BoolVar(&noFont, "no-font", false, "skip the provider-icon font prompt entirely")
 	return cmd
+}
+
+// offerFontInstall nudges the user to install the bundled provider-icon font
+// after a tmux install. We push it: the prompt defaults to Yes. force (from
+// --with-font) installs without asking; skip (from --no-font) does nothing.
+// On a non-interactive stdin we don't block on a prompt — we print a one-line
+// pointer instead.
+func offerFontInstall(force, skip bool) {
+	if skip {
+		return
+	}
+	st := tmux.FontStatus()
+	if st.Installed && st.UpToDate {
+		return // already good, nothing to nudge
+	}
+
+	install := force
+	if !force {
+		if !isStdinTerminal() {
+			fmt.Fprintln(os.Stdout, "Tip: install the provider-icon font for real provider logos in your status bar:")
+			fmt.Fprintln(os.Stdout, "       openusage tmux font install")
+			return
+		}
+		verb := "Install"
+		if st.Installed && !st.UpToDate {
+			verb = "Update"
+		}
+		fmt.Fprintln(os.Stdout, "")
+		fmt.Fprintln(os.Stdout, "OpenUsage ships an icon font so your status bar shows real provider logos")
+		fmt.Fprintln(os.Stdout, "(Claude, Cursor, Codex, …) instead of emoji.")
+		install = promptYesNo(fmt.Sprintf("%s the provider-icon font now? [Y/n] ", verb), true)
+	}
+	if !install {
+		fmt.Fprintln(os.Stdout, "Skipped. Install it anytime with: openusage tmux font install")
+		return
+	}
+	path, err := tmux.InstallFont()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tmux: icon font not installed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "installed %s at %s\n", tmux.IconFontFamily(), path)
+	fmt.Fprintln(os.Stdout, "Restart your terminal and tmux to see the icons.")
+}
+
+// promptYesNo asks a yes/no question on stdin, returning def on an empty reply.
+func promptYesNo(prompt string, def bool) bool {
+	fmt.Fprint(os.Stdout, prompt)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return def
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "":
+		return def
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// isStdinTerminal reports whether stdin is a real interactive terminal, so we
+// only prompt when a human can actually answer. term.IsTerminal does a real
+// TTY ioctl, so it correctly returns false for pipes and /dev/null (an
+// os.ModeCharDevice check would wrongly treat /dev/null as a terminal).
+func isStdinTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func newTmuxUninstallCommand() *cobra.Command {
