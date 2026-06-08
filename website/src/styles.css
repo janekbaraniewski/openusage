@@ -317,6 +317,74 @@ button { font: inherit; cursor: pointer; }
   border-top: 1px solid var(--border);
 }
 
+/* ── Status bar / statusline showcase ─────────────────── */
+.statusbar-section {
+  padding: clamp(80px, 10vw, 140px) 0;
+  border-top: 1px solid var(--border);
+}
+.sb-block {
+  margin-top: clamp(20px, 3vw, 32px);
+}
+.sb-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sb-bar,
+.sb-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+  color: var(--text);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.sb-bar {
+  justify-content: space-between;
+}
+.sb-bar__left {
+  color: var(--text-3);
+}
+.sb-bar__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6ch;
+}
+.sb-line {
+  gap: 0.7ch;
+}
+.sb-ico {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+  background: #d97757; /* Claude brand coral, matching the real icon tint */
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.sb-ok { color: var(--green); }
+.sb-burn { color: var(--orange); }
+.sb-sep { color: var(--text-3); }
+.statusbar-section code {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+
 .features-title {
   margin: 0 0 12px;
   font-size: clamp(1.8rem, 4vw, 3rem);

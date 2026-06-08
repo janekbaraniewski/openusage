@@ -432,6 +432,59 @@ export default function App() {
         </div>
       </section>
 
+      {/* ── Status bar / statusline (lives where you work) ── */}
+      <section className="statusbar-section" id="status-bar">
+        <div className="w">
+          <R><h2 className="features-title">In your status bar, not another tab</h2></R>
+          <R delay={0.05}>
+            <p className="features-lede">
+              The active tool's usage rides along where you already are — your tmux status bar and the
+              Claude Code statusline. Real provider logos, live cost and quota, nothing to open.
+            </p>
+          </R>
+
+          <R delay={0.1}>
+            <div className="sb-block">
+              <span className="sb-label">tmux status bar</span>
+              <div className="sb-bar">
+                <span className="sb-bar__left">0:zsh&nbsp;&nbsp;1:nvim&nbsp;&nbsp;2:logs</span>
+                <span className="sb-bar__seg">
+                  <span className="sb-ico" style={{ WebkitMaskImage: `url(${icon('claudecode')})`, maskImage: `url(${icon('claudecode')})` }} aria-hidden="true" />
+                  <span>5h</span>
+                  <span className="sb-ok">15%</span>
+                  <span className="sb-sep">·</span>
+                  <span>$6.79/today</span>
+                </span>
+              </div>
+            </div>
+          </R>
+
+          <R delay={0.16}>
+            <div className="sb-block">
+              <span className="sb-label">Claude Code statusline</span>
+              <div className="sb-line">
+                <span className="sb-ico" style={{ WebkitMaskImage: `url(${icon('claudecode')})`, maskImage: `url(${icon('claudecode')})` }} aria-hidden="true" />
+                <span>Opus&nbsp;4.8</span>
+                <span className="sb-sep">·</span>
+                <span>$0.42 session</span>
+                <span className="sb-sep">·</span>
+                <span>$6.79 today</span>
+                <span className="sb-sep">·</span>
+                <span className="sb-burn">🔥 $1.20/hr</span>
+                <span className="sb-sep">·</span>
+                <span>🧠 42%</span>
+              </div>
+            </div>
+          </R>
+
+          <R delay={0.22}>
+            <p className="demo__caption" style={{ textAlign: 'left', marginTop: 18 }}>
+              Set it up in one command: <code>openusage tmux install</code> · <code>openusage statusline --install</code>
+            </p>
+          </R>
+        </div>
+      </section>
+
       {/* ── Side-by-side video ────────────────────────────── */}
       <section className="demo">
         <div className="w">
