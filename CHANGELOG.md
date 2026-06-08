@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/janekbaraniewski/openusage/compare/v0.15.0...v0.15.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **tmux:** prepend status segment to inner edge of status-right ([6c809fe](https://github.com/janekbaraniewski/openusage/commit/6c809fe6b6494308ca44a673b4d3fdda55874bcd))
+
 ## [0.15.0](https://github.com/janekbaraniewski/openusage/compare/v0.14.0...v0.15.0) (2026-06-06)
 
 
