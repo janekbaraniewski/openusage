@@ -208,6 +208,17 @@ def main() -> int:
     fb.setupOS2(sTypoAscender=upem, sTypoDescender=0, usWinAscent=upem, usWinDescent=0)
     fb.setupPost()
 
+    # Deterministic output: pin the head timestamps instead of using wall-clock
+    # time, so regenerating the font yields byte-identical bytes. Without this
+    # every build produced a new sha256, which made the embedded-vs-installed
+    # hash check report the font as perpetually "outdated" and let the macOS
+    # and Linux release binaries embed differing fonts. Honor SOURCE_DATE_EPOCH
+    # when set (reproducible-builds convention), else use a fixed epoch.
+    epoch = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+    head = fb.font["head"]
+    head.created = epoch
+    head.modified = epoch
+
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     fb.save(OUTPUT_PATH)
 
