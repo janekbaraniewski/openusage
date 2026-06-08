@@ -119,15 +119,17 @@ func BuildSnippet(opts InstallOptions) string {
 	fmt.Fprintf(&b, "set -g status-right-length %d\n", opts.RightLength)
 	fmt.Fprintf(&b, "set -g status-left-length %d\n", opts.LeftLength)
 
-	cmd := fmt.Sprintf("#(%s tmux --preset %s)", binary, opts.Preset)
 	switch opts.Position {
 	case "left":
+		// Append to status-left so the segment sits at the inner (right)
+		// edge of the left side, next to the window list.
+		cmd := fmt.Sprintf("#(%s tmux --preset %s)", binary, opts.Preset)
 		fmt.Fprintf(&b, "set -ga status-left %q\n", cmd)
 	case "both":
 		fmt.Fprintf(&b, "set -ga status-left %q\n", fmt.Sprintf("#(%s tmux --preset compact --segment tool)", binary))
-		fmt.Fprintf(&b, "set -ga status-right %q\n", cmd)
+		b.WriteString(prependStatusRight(binary, opts.Preset))
 	default: // right
-		fmt.Fprintf(&b, "set -ga status-right %q\n", cmd)
+		b.WriteString(prependStatusRight(binary, opts.Preset))
 	}
 
 	if key := strings.TrimSpace(opts.BindPopup); key != "" {
@@ -140,6 +142,30 @@ func BuildSnippet(opts InstallOptions) string {
 	b.WriteString(sentinelEnd)
 	b.WriteString("\n")
 	return b.String()
+}
+
+// prependStatusRight returns a run-shell line that inserts the openusage
+// segment at the inner (left) edge of status-right at config-load time,
+// instead of appending it to the far-right edge. This places the usage
+// info next to the center of the bar, ahead of the user's existing
+// right-side segments (clock, battery, etc.).
+//
+// The line is idempotent: a guard skips the insert when the segment is
+// already present, so repeated `tmux source-file` calls do not stack copies.
+//
+// We deliberately avoid writing a literal "#(" into the conf. tmux expands
+// #(...) inside run-shell arguments at parse time, which would execute
+// openusage immediately and freeze its output into the option. Instead the
+// shell rebuilds the leading "#" at runtime via printf (so tmux never sees a
+// command substitution to expand) and `tmux set` (no -F) stores the segment
+// unexpanded, preserving both our segment and the user's existing #(...)
+// segments for live rendering.
+func prependStatusRight(binary, preset string) string {
+	inner := fmt.Sprintf("(%s tmux --preset %s)", binary, preset)
+	return fmt.Sprintf(
+		`run-shell -b 'seg="$(printf "#%%s" "%s")"; cur="$(tmux show -gqv status-right)"; case "$cur" in *"$seg"*) exit 0 ;; *) tmux set -g status-right "$seg $cur" ;; esac'`+"\n",
+		inner,
+	)
 }
 
 // withInstallDefaults fills the zero/empty fields of opts with defaults so

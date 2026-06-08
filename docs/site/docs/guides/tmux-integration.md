@@ -42,19 +42,34 @@ The block sits between two sentinel comments, so nothing outside it is touched:
 set -g status-interval 5
 set -g status-right-length 200
 set -g status-left-length 80
-set -ga status-right "#(openusage tmux --preset compact)"
+run-shell -b 'seg="$(printf "#%s" "(openusage tmux --preset compact)")"; cur="$(tmux show -gqv status-right)"; case "$cur" in *"$seg"*) exit 0 ;; *) tmux set -g status-right "$seg $cur" ;; esac'
 # <<< openusage tmux <<<
 ```
+
+### Why a `run-shell` line instead of `set -ga status-right`?
+
+The segment is **prepended** to `status-right` so it sits at the inner (left) edge of the right side, next to the center of the bar, ahead of your existing segments (clock, battery, and the like). A plain `set -ga status-right` would *append* it to the far-right edge instead.
+
+tmux has no native "prepend" for an option, so the block reads the current `status-right` and re-sets it with the openusage segment in front. The line is written carefully:
+
+- It runs at config-load time and is **idempotent**: the `case "$cur" in *"$seg"*) exit 0` guard skips the insert when the segment is already present, so repeated `tmux source-file` calls never stack copies.
+- It avoids a literal `#(` in the `run-shell` argument. tmux expands `#(...)` inside `run-shell` arguments at *parse* time, which would run `openusage` immediately and freeze its output. The shell rebuilds the leading `#` at runtime via `printf`, and `tmux set` (without `-F`) stores both the openusage segment and your existing `#(...)` segments unexpanded for live rendering.
 
 The install helper looks for your tmux config in this order: `$XDG_CONFIG_HOME/tmux/tmux.conf`, `~/.config/tmux/tmux.conf`, `~/.tmux.conf`. If none exist, it creates `~/.config/tmux/tmux.conf`.
 
 ## Manual install
 
-If you prefer to edit your tmux config by hand, paste this near the top of `~/.tmux.conf` (or its XDG-located equivalent):
+If you prefer to edit your tmux config by hand, splice the `#(openusage …)` command directly into your own `status-right` (or `status-left`) at the spot you want it. Editing by hand, *you* control the position, so there is no need for the `run-shell` prepend the installer uses. For example, first on the right side:
 
 ```
 set -g status-interval 5
 set -g status-right-length 200
+set -g status-right "#(openusage tmux --preset compact) | %H:%M | %d-%b"
+```
+
+Or append it to the far-right edge instead:
+
+```
 set -ga status-right "#(openusage tmux --preset compact)"
 ```
 

@@ -217,6 +217,50 @@ func TestBuildSnippetPositionVariants(t *testing.T) {
 	}
 }
 
+// TestBuildSnippetRightPrepends asserts the right-side segment is inserted at
+// the inner edge of status-right (prepended) rather than appended to the
+// far-right edge, and that it never writes a literal "#(" that tmux would
+// expand at parse time.
+func TestBuildSnippetRightPrepends(t *testing.T) {
+	for _, pos := range []string{"right", "both"} {
+		snip := BuildSnippet(InstallOptions{Position: pos})
+
+		// The right segment must be installed via run-shell prepend, not a
+		// plain `set -ga status-right` append.
+		if strings.Contains(snip, "set -ga status-right") {
+			t.Fatalf("%s: still appends to status-right (far-right edge):\n%s", pos, snip)
+		}
+		if !strings.Contains(snip, "run-shell") || !strings.Contains(snip, `tmux set -g status-right "$seg $cur"`) {
+			t.Fatalf("%s: missing prepend run-shell line:\n%s", pos, snip)
+		}
+		// The idempotency guard must be present.
+		if !strings.Contains(snip, `case "$cur" in *"$seg"*) exit 0`) {
+			t.Fatalf("%s: missing idempotency guard:\n%s", pos, snip)
+		}
+
+		// Isolate the run-shell line: a literal "#(" inside a run-shell
+		// argument is expanded by tmux at parse time, so the "#" must be
+		// rebuilt at runtime via printf instead. (A "#(" in a plain
+		// `set status-left/right` line is fine; tmux stores it unexpanded.)
+		var runLine string
+		for _, line := range strings.Split(snip, "\n") {
+			if strings.HasPrefix(line, "run-shell") {
+				runLine = line
+				break
+			}
+		}
+		if runLine == "" {
+			t.Fatalf("%s: no run-shell line found:\n%s", pos, snip)
+		}
+		if strings.Contains(runLine, "#(") {
+			t.Fatalf("%s: run-shell line contains a literal #( that tmux expands at parse time:\n%s", pos, runLine)
+		}
+		if !strings.Contains(runLine, `printf "#%s"`) {
+			t.Fatalf("%s: segment prefix is not rebuilt at runtime via printf:\n%s", pos, runLine)
+		}
+	}
+}
+
 func TestBuildSnippetBindings(t *testing.T) {
 	snip := BuildSnippet(InstallOptions{BindPopup: "u", BindRefresh: "r"})
 	if !strings.Contains(snip, "bind-key u display-popup") {
