@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.17.0](https://github.com/janekbaraniewski/openusage/compare/v0.16.0...v0.17.0) (2026-06-08)
+
+
+### Features
+
+* **tmux:** 'font setup' auto-configures per-range fallback (preferred path) ([e627dd5](https://github.com/janekbaraniewski/openusage/commit/e627dd5dd30583ddd8213675c698a233255bbf4f))
+* **tmux:** add provider icon font (glyph tier + generation + release) ([8957230](https://github.com/janekbaraniewski/openusage/commit/8957230969326902f9ebaef0f908d1c857af38c6))
+* **tmux:** add terminal-font augmenter (copy + extend, never modify original) ([ebcc8e5](https://github.com/janekbaraniewski/openusage/commit/ebcc8e5294226f99a3237394faa1f1a2b93799a9))
+* **tmux:** font CLI command, install prompt, auto-upgrade glyphs ([3a593be](https://github.com/janekbaraniewski/openusage/commit/3a593be944cb68136d5c9f632ac4fde8ab8ce55a))
+* **tmux:** font patch command + reliable macOS font detection + docs ([7dac3a9](https://github.com/janekbaraniewski/openusage/commit/7dac3a9393922f4a51619add61db30d58fb66df0))
+* **tmux:** maximize icon size (true ink bounds) + inject a separator ([86af54c](https://github.com/janekbaraniewski/openusage/commit/86af54cbafefb81419b4c5a7e054bb3510d98efe))
+* **tmux:** one-stop interactive install wizard ([ec7bd8b](https://github.com/janekbaraniewski/openusage/commit/ec7bd8b8201635914bd613dc51002bda6e5e31a4))
+* **tmux:** raise patched-font icon width cap (1.8 -&gt; 2.0) ([3818198](https://github.com/janekbaraniewski/openusage/commit/3818198d063687884da160b13b7e28fd54adf48e))
+* **tmux:** scale provider icons to fill the full character height ([1705e8a](https://github.com/janekbaraniewski/openusage/commit/1705e8a20f37cb44cd12980ad779c831f4d249a8))
+* **tmux:** tint the provider icon with its brand color ([d9ea1a3](https://github.com/janekbaraniewski/openusage/commit/d9ea1a332c76236fa47292695516553b1720b690))
+
+
+### Bug Fixes
+
+* **telemetry:** today_api_cost is today-scoped, not the view-window total ([cb801bd](https://github.com/janekbaraniewski/openusage/commit/cb801bd80c17893536514b7f8b59ebad4ae8e8ff))
+* **tmux:** add zai + moonshot glyphs to ascii/unicode tiers ([57ba26f](https://github.com/janekbaraniewski/openusage/commit/57ba26fcaef347b6df4b059afcb92a85f7403216))
+* **tmux:** give Gemini a distinct unicode glyph (was generic sparkles) ([3c0d98f](https://github.com/janekbaraniewski/openusage/commit/3c0d98f824c0934a7969af003498d227f829c930))
+* **tmux:** make icon font generation deterministic ([41d92a7](https://github.com/janekbaraniewski/openusage/commit/41d92a7f9ad07f66718bb1f5ca4049e21b0cec6d))
+* **tmux:** review fixes — strategy-keyed cache, nerdfont fallback, cleanups ([a00cc8b](https://github.com/janekbaraniewski/openusage/commit/a00cc8ba7c8ee0a0d4333cb4153418627d67b681))
+* **tmux:** stop status-bar flicker, clarify default, skip data-less tools ([f4ed30f](https://github.com/janekbaraniewski/openusage/commit/f4ed30f00cf78b9831640a0fbe201e0f14714c12))
+
+
+### Dependencies
+
+* **deps:** bump github.com/mattn/go-sqlite3 from 1.14.44 to 1.14.45 in the go-minor-and-patch group ([#187](https://github.com/janekbaraniewski/openusage/issues/187)) ([808d881](https://github.com/janekbaraniewski/openusage/commit/808d881ae65f7396517be3b88a6875b92840bfeb))
+* **docs:** bump the docs-minor-and-patch group in /docs/site with 2 updates ([#190](https://github.com/janekbaraniewski/openusage/issues/190)) ([5b7a1db](https://github.com/janekbaraniewski/openusage/commit/5b7a1db74ff0a92da1a2023fc410d53e558dae22))
+* **website:** bump posthog-js from 1.378.1 to 1.382.0 in /website in the website-minor-and-patch group ([#188](https://github.com/janekbaraniewski/openusage/issues/188)) ([42329a2](https://github.com/janekbaraniewski/openusage/commit/42329a282a1b127b6c6cdd3284bc43d7294e520e))
+
+
+### Refactoring
+
+* **tmux:** share font script code, harden patcher, guard font in CI ([60120bb](https://github.com/janekbaraniewski/openusage/commit/60120bbdb1fb05acd543cfcaa034c3d2efe22c49))
+* **tmux:** split platform-specific font detection via build constraints ([4ea0a7a](https://github.com/janekbaraniewski/openusage/commit/4ea0a7aa1d00eef1bed59243510c4891fd1099af))
+* **tmux:** unify the managed-sentinel-block logic ([1c6e1d3](https://github.com/janekbaraniewski/openusage/commit/1c6e1d3dba31034ff5c59363e03a0d98904cfe2b))
+* **tmux:** use samber/lo to match codebase conventions ([5a1054a](https://github.com/janekbaraniewski/openusage/commit/5a1054adbe7e1bacb00128f34505a1575620e7a4))
+
 ## [0.16.0](https://github.com/janekbaraniewski/openusage/compare/v0.15.1...v0.16.0) (2026-06-08)
 
 
