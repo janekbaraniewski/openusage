@@ -151,6 +151,7 @@ Modifiers chain left-to-right (`{block_pct:bar:10:color}` builds a 10-cell bar, 
 | `:pct` | precision (default 0) | `{block_pct:pct}` | `47%` |
 | `:bar` | width (default 8) | `{block_pct:bar:10}` | `▓▓▓▓▓░░░░░` |
 | `:color` | (none) | `{block_pct:color}` | applies threshold colors |
+| `:brand` | (none) | `{tool:icon:brand}` | tints the value with the active provider's brand color (Claude orange, etc.) |
 | `:icon` | (none) | `{tool:icon}` | `🤖` (respects `--glyphs` tier) |
 | `:tokens` | (none) | `{today_input_tokens:tokens}` | `1.2M`, `47k` |
 | `:duration` | (none) | `{block_remaining:duration}` | `2h17m` |
@@ -428,6 +429,30 @@ tmux uses `#` for substitution. The renderer escapes user-supplied content autom
 ### "display-popup not available" (tmux too old)
 
 `--bind-popup` requires tmux 3.2+. Check with `tmux -V` and upgrade, or omit the flag.
+
+### Provider icons show as a box (tofu), as emoji, or render too small
+
+The icon font is correct (`openusage tmux font status` shows it installed); the
+issue is almost always your terminal not rendering the installed glyphs. Work
+through these:
+
+- **Box / tofu instead of a logo** — your terminal is not using the icon font
+  for the icon codepoints (U+E900–E912). On kitty/Ghostty/WezTerm run
+  `openusage tmux font setup` (per-range fallback). On iTerm2/Terminal.app run
+  `openusage tmux font patch` and select the `… +OpenUsage` font in the profile
+  — those terminals have no per-range fallback.
+- **Still tofu / wrong size after `font patch`** — macOS caches fonts by family
+  name, and the augmented font keeps your font's name, so the old copy is served
+  until the cache is cleared. **Fully quit the terminal (Cmd-Q), run
+  `atsutil databases -remove`, then relaunch.** A reboot also works. Verify with
+  printing the Claude codepoint U+E900 in the terminal — the logo should
+  render at full size.
+- **Emoji instead of the logo** — the font is not installed, so the renderer
+  falls back to the unicode tier. Run `openusage tmux font install` (or the
+  `tmux install` wizard) and restart the terminal.
+- **Icon looks small** — terminal cells are taller than wide, so a square logo
+  that fills the full line height would overflow into the next cell. The
+  patched glyph is sized to ~80% of line height as a balance; that is expected.
 
 ### Watch alerts not firing
 
