@@ -543,9 +543,15 @@ func newTmuxInstallCommand() *cobra.Command {
 	var withFont, noFont bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Print or write the tmux.conf snippet for the openusage status segment",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Short: "Set up the tmux status segment (interactive wizard, or flag-driven)",
+		RunE: func(c *cobra.Command, _ []string) error {
 			opts.Version = version.Version
+			// Bare `tmux install` on an interactive terminal launches the
+			// one-stop wizard (position, preset, icons, terminal setup). Passing
+			// any flag, or a non-TTY, keeps the scriptable flag-driven behavior.
+			if c.Flags().NFlag() == 0 && isStdinTerminal() && isStdoutTerminal() {
+				return runTmuxInstallWizard(version.Version)
+			}
 			if opts.Write {
 				path, err := tmux.Install(os.Stdout, opts)
 				if err != nil {
