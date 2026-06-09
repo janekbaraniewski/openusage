@@ -80,14 +80,22 @@ Remote API platforms (OpenAI, Anthropic, OpenRouter, …) appear in the periodic
 
 ### Add to tmux
 
-Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**. Run the interactive installer — one screen with a live preview where you pick position, which tool(s), the segment components, and emoji vs. real provider icons — then reload tmux:
+Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**. It tracks whichever tool you're actively using and renders its real, brand-colored logo:
+
+![OpenUsage in the tmux status bar](./assets/tmux-ccode.png)
+
+Setup is a single command. It opens a one-screen, live-preview configurator where you pick the position, which tool(s) to show, the segment components, and emoji vs. real provider icons — and watch the result update as you go:
 
 ```bash
 openusage tmux install                         # interactive: live-preview configurator
 tmux source-file ~/.config/tmux/tmux.conf      # reload
 ```
 
-It renders e.g. `🤖 5h 15% $6.79/today`, with the icon tinted in the provider's brand color. Want real provider logos instead of emoji? The wizard offers to install a bundled icon font and configure your terminal — see [provider icons](docs/site/docs/guides/tmux-integration.md#provider-icons-custom-font).
+<p align="center">
+  <img src="./assets/install-tmux.gif" alt="Installing the OpenUsage tmux status segment with the live-preview configurator" width="720">
+</p>
+
+Want real provider logos instead of emoji? The configurator offers to install a bundled icon font and configure your terminal — see [provider icons](docs/site/docs/guides/tmux-integration.md#provider-icons-custom-font).
 
 ```bash
 openusage tmux install --write                 # non-interactive (scripting): just write the snippet
