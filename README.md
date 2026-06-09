@@ -80,9 +80,20 @@ Remote API platforms (OpenAI, Anthropic, OpenRouter, …) appear in the periodic
 
 ### Add to tmux
 
-Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**. It tracks whichever tool you're actively using and renders its real, brand-colored logo:
+<table>
+<tr>
+<td width="55%" valign="middle">
+
+Show your Claude Code, Codex, Cursor, Copilot, and OpenRouter usage — cost, quota, burn rate, and the active tool — right in your **tmux status bar**. It tracks whichever tool you're actively using and renders its real, brand-colored logo.
+
+</td>
+<td width="45%" valign="middle">
 
 ![OpenUsage in the tmux status bar](./assets/tmux-ccode.png)
+
+</td>
+</tr>
+</table>
 
 Setup is a single command. It opens a one-screen, live-preview configurator where you pick the position, which tool(s) to show, the segment components, and emoji vs. real provider icons — and watch the result update as you go:
 
