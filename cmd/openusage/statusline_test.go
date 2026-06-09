@@ -183,3 +183,19 @@ func TestStatuslineConfiguratorChoices(t *testing.T) {
 		t.Fatal("options() lost segment selection")
 	}
 }
+
+func TestStatuslineHasInstallUninstallSubcommands(t *testing.T) {
+	cmd := newStatuslineCommand()
+	have := map[string]bool{}
+	for _, c := range cmd.Commands() {
+		have[c.Name()] = true
+	}
+	if !have["install"] || !have["uninstall"] {
+		t.Fatalf("statusline missing install/uninstall subcommands; have %v", have)
+	}
+	// The render command itself must take no positional args (Claude Code calls
+	// `openusage statusline` bare) and still expose --segments for the baked command.
+	if cmd.Flags().Lookup("segments") == nil {
+		t.Fatal("statusline render command missing --segments flag")
+	}
+}

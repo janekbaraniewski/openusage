@@ -24,7 +24,7 @@ Costs are **API-equivalent estimates** derived from your local logs, not your su
 The fastest path is the interactive installer. On a terminal, run:
 
 ```bash
-openusage statusline --install
+openusage statusline install
 ```
 
 This opens a one-screen, **live-preview configurator** (the same style as `openusage tmux install`). Toggle which segments you want, flip the options, and watch the preview update; press **enter** on **Apply** to write it into `~/.claude/settings.json` (your previous settings are backed up to `settings.json.bak`).
@@ -66,16 +66,16 @@ Everything the configurator sets can also be passed as flags — useful for scri
 
 ```bash
 # Only show today's cost and the context gauge:
-openusage statusline --install --segments today,context
+openusage statusline install --segments today,context
 
 # Drop color (e.g. for a terminal that mishandles ANSI), keep all segments:
-openusage statusline --install --color=false
+openusage statusline install --color=false
 
 # Fetch live pricing instead of the embedded table (slightly slower):
-openusage statusline --install --offline=false
+openusage statusline install --offline=false
 ```
 
-Passing any of `--segments`, `--color`, `--offline`, or `--mode` makes `--install` non-interactive and bakes those choices into the installed command.
+Passing any of `--segments`, `--color`, `--offline`, or `--mode` makes the install non-interactive and bakes those choices into the installed command.
 
 Other flags:
 
@@ -101,7 +101,7 @@ A bare `openusage statusline` (no flags) shows every segment in full color.
 ## Uninstall
 
 ```bash
-openusage statusline --uninstall
+openusage statusline uninstall
 ```
 
 This removes only the OpenUsage `statusLine` block (it leaves a third-party statusline alone) and backs up the file first.

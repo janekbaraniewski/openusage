@@ -65,7 +65,7 @@ openusage daily                # usage & cost by day (also: weekly, monthly)
 openusage session              # grouped by session
 openusage blocks               # by 5-hour billing block, with burn rate + projection
 openusage daily --json         # machine-readable output for scripts/CI
-openusage statusline --install # one-line status bar for Claude Code
+openusage statusline install   # one-line status bar for Claude Code
 ```
 
 What each report can show, by provider:
@@ -124,7 +124,7 @@ Show live session cost, today's spend, the active 5-hour block, burn rate, and c
 ![OpenUsage statusline in Claude Code](./assets/claudecodestatus.png)
 
 ```bash
-openusage statusline --install   # interactive: live-preview configurator
+openusage statusline install     # interactive: live-preview configurator
 ```
 
 Like the tmux installer, this opens a one-screen configurator where you toggle which segments to show (model, session/today/block cost, burn rate, context %) and watch a live preview, then writes it into `~/.claude/settings.json`. Restart Claude Code to see it. See the [statusline guide](docs/site/docs/guides/claude-code-statusline.md) for customization and manual setup.

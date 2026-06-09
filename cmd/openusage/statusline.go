@@ -81,7 +81,7 @@ func (o statuslineOptions) segmentEnabled(key string) bool {
 // Claude Code.
 const settingsSnippet = `To wire it in automatically (creates a .bak backup, preserves other keys):
 
-  openusage statusline --install
+  openusage statusline install
 
 Or add this to ~/.claude/settings.json by hand:
 
@@ -93,15 +93,18 @@ Or add this to ~/.claude/settings.json by hand:
     }
   }`
 
-func newStatuslineCommand() *cobra.Command {
-	opts := statuslineOptions{
+func defaultStatuslineOptions() statuslineOptions {
+	return statuslineOptions{
 		offline:       true,
 		mode:          string(claude_code.CostModeCalculate),
 		color:         true,
 		contextMedium: 50,
 		contextHigh:   80,
 	}
-	var install, uninstall bool
+}
+
+func newStatuslineCommand() *cobra.Command {
+	opts := defaultStatuslineOptions()
 
 	cmd := &cobra.Command{
 		Use:   "statusline",
@@ -119,25 +122,11 @@ It runs offline by default (embedded pricing) so it responds instantly; pass
 ` + settingsSnippet,
 		Example: strings.Join([]string{
 			`  echo '{"session_id":"abc","model":{"display_name":"Opus 4.8"}}' | openusage statusline`,
+			"  openusage statusline install",
 			"  openusage statusline --offline=false",
 		}, "\n"),
-		RunE: func(c *cobra.Command, _ []string) error {
-			switch {
-			case install:
-				// Bare `statusline --install` on an interactive terminal opens the
-				// one-screen live-preview configurator. Passing any customizing flag,
-				// or a non-TTY, keeps the scriptable behavior and bakes the flags in.
-				customized := c.Flags().Changed("segments") || c.Flags().Changed("mode") ||
-					c.Flags().Changed("color") || c.Flags().Changed("offline")
-				if !customized && isStdinTerminal() && isStdoutTerminal() {
-					return installStatuslineInteractive(os.Stdout)
-				}
-				return installStatusline(os.Stdout, opts)
-			case uninstall:
-				return uninstallStatusline(os.Stdout)
-			default:
-				return runStatusline(opts, os.Stdin, os.Stdout)
-			}
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runStatusline(opts, os.Stdin, os.Stdout)
 		},
 	}
 
@@ -148,11 +137,55 @@ It runs offline by default (embedded pricing) so it responds instantly; pass
 	fl.Float64Var(&opts.contextMedium, "context-medium", opts.contextMedium, "context %% threshold for the yellow warning color")
 	fl.Float64Var(&opts.contextHigh, "context-high", opts.contextHigh, "context %% threshold for the red warning color")
 	fl.StringSliceVar(&opts.segments, "segments", nil, "comma-separated segments to show: "+strings.Join(allStatuslineSegmentKeys(), ",")+" (default all)")
-	fl.BoolVar(&install, "install", false, "wire this statusline into ~/.claude/settings.json (interactive on a TTY; creates a .bak backup)")
-	fl.BoolVar(&uninstall, "uninstall", false, "remove the openusage statusline from ~/.claude/settings.json")
-	cmd.MarkFlagsMutuallyExclusive("install", "uninstall")
 
+	cmd.AddCommand(newStatuslineInstallCommand(), newStatuslineUninstallCommand())
 	return cmd
+}
+
+func newStatuslineInstallCommand() *cobra.Command {
+	opts := defaultStatuslineOptions()
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Wire the statusline into ~/.claude/settings.json (interactive on a TTY)",
+		Long: `Set up the Claude Code statusline.
+
+On an interactive terminal this opens a one-screen, live-preview configurator:
+toggle which segments show, flip color and pricing, then apply. Passing any
+flag (or a non-TTY) keeps it scriptable and bakes the choices into the installed
+command. A .bak backup of settings.json is created.`,
+		Example: strings.Join([]string{
+			"  openusage statusline install",
+			"  openusage statusline install --segments today,context",
+			"  openusage statusline install --color=false --offline=false",
+		}, "\n"),
+		RunE: func(c *cobra.Command, _ []string) error {
+			customized := c.Flags().Changed("segments") || c.Flags().Changed("mode") ||
+				c.Flags().Changed("color") || c.Flags().Changed("offline") ||
+				c.Flags().Changed("context-medium") || c.Flags().Changed("context-high")
+			if !customized && isStdinTerminal() && isStdoutTerminal() {
+				return installStatuslineInteractive(os.Stdout)
+			}
+			return installStatusline(os.Stdout, opts)
+		},
+	}
+	fl := cmd.Flags()
+	fl.StringSliceVar(&opts.segments, "segments", nil, "comma-separated segments to install: "+strings.Join(allStatuslineSegmentKeys(), ",")+" (default all)")
+	fl.StringVar(&opts.mode, "mode", opts.mode, "cost mode: calculate, display, or auto")
+	fl.BoolVar(&opts.color, "color", opts.color, "colorize the output with ANSI escapes")
+	fl.BoolVar(&opts.offline, "offline", opts.offline, "use embedded pricing and skip network lookups")
+	fl.Float64Var(&opts.contextMedium, "context-medium", opts.contextMedium, "context %% threshold for the yellow warning color")
+	fl.Float64Var(&opts.contextHigh, "context-high", opts.contextHigh, "context %% threshold for the red warning color")
+	return cmd
+}
+
+func newStatuslineUninstallCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the OpenUsage statusline from ~/.claude/settings.json",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return uninstallStatusline(os.Stdout)
+		},
+	}
 }
 
 // claudeSettingsPath resolves the Claude Code settings.json, honoring the
@@ -186,6 +219,12 @@ func statuslineCommandString(opts statuslineOptions) string {
 	}
 	if !opts.offline {
 		cmd += " --offline=false"
+	}
+	if opts.contextMedium != 0 && opts.contextMedium != 50 {
+		cmd += fmt.Sprintf(" --context-medium %g", opts.contextMedium)
+	}
+	if opts.contextHigh != 0 && opts.contextHigh != 80 {
+		cmd += fmt.Sprintf(" --context-high %g", opts.contextHigh)
 	}
 	return cmd
 }
