@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/export"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
@@ -52,6 +54,7 @@ var statuslineSegmentDefs = []struct{ key, label string }{
 	{"today", "Today's cost"},
 	{"block", "5h block cost + time left"},
 	{"burn", "Burn rate"},
+	{"window5h", "5h usage window %"},
 	{"context", "Context window %"},
 }
 
@@ -330,14 +333,44 @@ func writeJSONObjectWithBackup(path string, cfg map[string]any) error {
 func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) error {
 	in := readStatuslineInput(stdin)
 
+	// The 5h usage-window % is rate-limit data the daemon already collects; read
+	// it from the daemon over the local socket (no network) only when the segment
+	// is shown, and omit it silently if the daemon isn't running.
+	fiveHourPct, haveFiveHour := 0.0, false
+	if opts.segmentEnabled("window5h") {
+		fiveHourPct, haveFiveHour = fetchFiveHourPctFromDaemon()
+	}
+
 	events, err := claudeCodeConversationEvents(claude_code.ParseCostMode(opts.mode), opts.offline)
 	if err != nil {
 		// Without logs we can still echo the model and Claude Code's own cost.
-		fmt.Fprintln(stdout, renderStatusline(in, nil, time.Now(), opts))
+		fmt.Fprintln(stdout, renderStatusline(in, nil, fiveHourPct, haveFiveHour, time.Now(), opts))
 		return nil
 	}
-	fmt.Fprintln(stdout, renderStatusline(in, events, time.Now(), opts))
+	fmt.Fprintln(stdout, renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts))
 	return nil
+}
+
+// fetchFiveHourPctFromDaemon reads the claude_code 5h usage-window utilization
+// from the running daemon. It is best-effort: any error (no daemon, timeout,
+// missing metric) returns ok=false so the segment is simply omitted. Never makes
+// a network call — SourceDaemon only talks to the local socket.
+func fetchFiveHourPctFromDaemon() (float64, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	snaps, _, err := export.Collect(ctx, export.SourceDaemon)
+	if err != nil {
+		return 0, false
+	}
+	for _, s := range snaps {
+		if s.ProviderID != "claude_code" {
+			continue
+		}
+		if m, ok := s.Metrics["usage_five_hour"]; ok && m.Used != nil {
+			return *m.Used, true
+		}
+	}
+	return 0, false
 }
 
 // readStatuslineInput reads and decodes the stdin payload. A terminal (no pipe)
@@ -359,7 +392,7 @@ func readStatuslineInput(stdin io.Reader) statuslineInput {
 
 // renderStatusline builds the status line. It is pure (no I/O) so it can be
 // unit-tested with synthetic events.
-func renderStatusline(in statuslineInput, events []report.Event, now time.Time, opts statuslineOptions) string {
+func renderStatusline(in statuslineInput, events []report.Event, fiveHourPct float64, haveFiveHour bool, now time.Time, opts statuslineOptions) string {
 	model := strings.TrimSpace(in.Model.DisplayName)
 	if model == "" {
 		model = shortModelID(in.Model.ID)
@@ -430,15 +463,17 @@ func renderStatusline(in statuslineInput, events []report.Event, now time.Time, 
 	}
 
 	return assembleStatusline(statuslineValues{
-		model:       model,
-		sessionCost: sessionCost,
-		todayCost:   todayCost,
-		blockCost:   blockCost,
-		blockLeft:   blockLeft,
-		burn:        burn,
-		haveBlock:   haveBlock,
-		contextTok:  contextTok,
-		ctxPct:      ctxPct,
+		model:        model,
+		sessionCost:  sessionCost,
+		todayCost:    todayCost,
+		blockCost:    blockCost,
+		blockLeft:    blockLeft,
+		burn:         burn,
+		haveBlock:    haveBlock,
+		fiveHourPct:  fiveHourPct,
+		haveFiveHour: haveFiveHour,
+		contextTok:   contextTok,
+		ctxPct:       ctxPct,
 	}, opts)
 }
 
@@ -446,15 +481,17 @@ func renderStatusline(in statuslineInput, events []report.Event, now time.Time, 
 // from assembly so both the live renderer and the configurator preview can use
 // the same segment layout.
 type statuslineValues struct {
-	model       string
-	sessionCost float64
-	todayCost   float64
-	blockCost   float64
-	blockLeft   time.Duration
-	burn        float64
-	haveBlock   bool
-	contextTok  int
-	ctxPct      float64
+	model        string
+	sessionCost  float64
+	todayCost    float64
+	blockCost    float64
+	blockLeft    time.Duration
+	burn         float64
+	haveBlock    bool
+	fiveHourPct  float64
+	haveFiveHour bool
+	contextTok   int
+	ctxPct       float64
 }
 
 // assembleStatusline joins the enabled segments in canonical order. The three
@@ -480,6 +517,9 @@ func assembleStatusline(v statuslineValues, opts statuslineOptions) string {
 	}
 	if opts.segmentEnabled("burn") && v.haveBlock && v.burn > 0 {
 		parts = append(parts, "🔥 "+colorize(fmt.Sprintf("$%.2f", v.burn), ansiOrange, opts.color)+"/hr")
+	}
+	if opts.segmentEnabled("window5h") && v.haveFiveHour {
+		parts = append(parts, colorize(fmt.Sprintf("🕔 5h %.0f%%", v.fiveHourPct), contextColor(v.fiveHourPct, opts), opts.color))
 	}
 	if opts.segmentEnabled("context") && v.contextTok > 0 {
 		ctxStr := "🧠 " + fmtTokensShort(v.contextTok)

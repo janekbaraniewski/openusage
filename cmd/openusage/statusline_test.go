@@ -31,7 +31,7 @@ func TestRenderStatusline_FullLine(t *testing.T) {
 	in.Model.DisplayName = "Opus 4.8"
 
 	opts := statuslineOptions{offline: true, mode: "calculate", color: false, contextMedium: 50, contextHigh: 80}
-	line := renderStatusline(in, events, now, opts)
+	line := renderStatusline(in, events, 0, false, now, opts)
 
 	for _, want := range []string{"Opus 4.8", "sess", "today", "block", "/hr", "🧠"} {
 		if !strings.Contains(line, want) {
@@ -52,7 +52,7 @@ func TestRenderStatusline_NoLogsFallsBackToInputCost(t *testing.T) {
 	in := statuslineInput{SessionID: "x"}
 	in.Model.DisplayName = "Sonnet"
 	in.Cost.TotalCostUSD = 3.21
-	line := renderStatusline(in, nil, time.Now(), statuslineOptions{color: false, contextMedium: 50, contextHigh: 80})
+	line := renderStatusline(in, nil, 0, false, time.Now(), statuslineOptions{color: false, contextMedium: 50, contextHigh: 80})
 	if !strings.Contains(line, "Sonnet") || !strings.Contains(line, "$3.21 sess") {
 		t.Errorf("fallback line wrong: %s", line)
 	}
@@ -136,7 +136,7 @@ func TestUninstallStatusline_LeavesForeignStatusLine(t *testing.T) {
 func TestAssembleStatuslineSegments(t *testing.T) {
 	v := sampleStatuslineValues()
 	all := assembleStatusline(v, statuslineOptions{color: false})
-	for _, want := range []string{"Opus 4.8", "sess", "today", "block", "/hr", "🧠"} {
+	for _, want := range []string{"Opus 4.8", "sess", "today", "block", "/hr", "5h", "🧠"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("full statusline missing %q: %s", want, all)
 		}

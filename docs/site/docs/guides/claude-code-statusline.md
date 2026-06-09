@@ -12,7 +12,7 @@ OpenUsage can render a one-line status bar for [Claude Code](https://docs.claude
 ![OpenUsage statusline in Claude Code](/img/claudecodestatus.png)
 
 ```
-🤖 Opus 4.8 | 💰 $12.40 sess / $6.79 today / $3.40 block (2h41m left) | 🔥 $1.20/hr | 🧠 96k (48%)
+🤖 Opus 4.8 | 💰 $12.40 sess / $6.79 today / $3.40 block (2h41m left) | 🔥 $1.20/hr | 🕔 5h 15% | 🧠 96k (48%)
 ```
 
 :::note
@@ -32,13 +32,14 @@ This opens a one-screen, **live-preview configurator** (the same style as `openu
 ```
 Configure your Claude Code statusline
 
-preview 🤖 Opus 4.8 | 💰 $12.40 sess / $6.79 today / $3.40 block (2h41m left) | 🔥 $1.20/hr | 🧠 96k (48%)
+preview 🤖 Opus 4.8 | 💰 $12.40 sess / $6.79 today / $3.40 block (2h41m left) | 🔥 $1.20/hr | 🕔 5h 15% | 🧠 96k (48%)
 
   [x] Model name
   [x] Session cost
   [x] Today's cost
   [x] 5h block cost + time left
   [x] Burn rate
+  [x] 5h usage window %
   [x] Context window %
   Color          ‹ on ›
   Pricing        ‹ embedded (instant) ›
@@ -58,7 +59,12 @@ Then **restart Claude Code** (or open a new session) so it re-reads `settings.js
 | Today's cost | `$6.79 today` | All Claude Code spend since local midnight. |
 | 5h block | `$3.40 block (2h41m left)` | The active 5-hour billing block and time remaining. |
 | Burn rate | `🔥 $1.20/hr` | Spend rate for the active block. |
+| 5h usage window | `🕔 5h 15%` | Rate-limit utilization of the rolling 5-hour window. This isn't in the local logs — it's read from the running [OpenUsage daemon](../daemon/overview.md) over the local socket (no network), and is shown only when the daemon is running and has it. |
 | Context % | `🧠 96k (48%)` | Tokens in the context window vs. the model's limit; turns yellow then red as it fills. |
+
+:::tip
+The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md) (`openusage telemetry daemon install`), which is what polls Claude Code's rate-limit quota. The other segments work purely from local logs with no daemon.
+:::
 
 ## Customize
 

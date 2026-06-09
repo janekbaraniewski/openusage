@@ -34,15 +34,17 @@ func (c statuslineChoices) options() statuslineOptions {
 // sampleStatuslineValues is representative data for the live preview.
 func sampleStatuslineValues() statuslineValues {
 	return statuslineValues{
-		model:       "Opus 4.8",
-		sessionCost: 12.40,
-		todayCost:   6.79,
-		blockCost:   3.40,
-		blockLeft:   2*time.Hour + 41*time.Minute,
-		burn:        1.20,
-		haveBlock:   true,
-		contextTok:  96000,
-		ctxPct:      48,
+		model:        "Opus 4.8",
+		sessionCost:  12.40,
+		todayCost:    6.79,
+		blockCost:    3.40,
+		blockLeft:    2*time.Hour + 41*time.Minute,
+		burn:         1.20,
+		haveBlock:    true,
+		fiveHourPct:  15,
+		haveFiveHour: true,
+		contextTok:   96000,
+		ctxPct:       48,
 	}
 }
 
