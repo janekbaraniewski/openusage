@@ -64,6 +64,7 @@ jobs:
       # macOS ships clang; the windows-latest image ships mingw-w64 gcc on PATH.
 
       - name: Run tests
+        shell: bash # pwsh mangles `-coverprofile=coverage.out` into a `.out` package arg
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
