@@ -41,6 +41,40 @@ type statuslineOptions struct {
 	color         bool
 	contextMedium float64
 	contextHigh   float64
+	segments      []string // enabled segment keys; empty means all
+}
+
+// statuslineSegmentDefs are the toggleable pieces of the status line, in render
+// order. Keep this list and the assembly in assembleStatusline in sync.
+var statuslineSegmentDefs = []struct{ key, label string }{
+	{"model", "Model name"},
+	{"session", "Session cost"},
+	{"today", "Today's cost"},
+	{"block", "5h block cost + time left"},
+	{"burn", "Burn rate"},
+	{"context", "Context window %"},
+}
+
+func allStatuslineSegmentKeys() []string {
+	keys := make([]string, len(statuslineSegmentDefs))
+	for i, s := range statuslineSegmentDefs {
+		keys[i] = s.key
+	}
+	return keys
+}
+
+// segmentEnabled reports whether a segment renders. An empty selection means
+// "all segments" so an unconfigured statusline shows everything.
+func (o statuslineOptions) segmentEnabled(key string) bool {
+	if len(o.segments) == 0 {
+		return true
+	}
+	for _, s := range o.segments {
+		if s == key {
+			return true
+		}
+	}
+	return false
 }
 
 // settingsSnippet is shown in --help so users can wire the statusline into
@@ -87,10 +121,18 @@ It runs offline by default (embedded pricing) so it responds instantly; pass
 			`  echo '{"session_id":"abc","model":{"display_name":"Opus 4.8"}}' | openusage statusline`,
 			"  openusage statusline --offline=false",
 		}, "\n"),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			switch {
 			case install:
-				return installStatusline(os.Stdout)
+				// Bare `statusline --install` on an interactive terminal opens the
+				// one-screen live-preview configurator. Passing any customizing flag,
+				// or a non-TTY, keeps the scriptable behavior and bakes the flags in.
+				customized := c.Flags().Changed("segments") || c.Flags().Changed("mode") ||
+					c.Flags().Changed("color") || c.Flags().Changed("offline")
+				if !customized && isStdinTerminal() && isStdoutTerminal() {
+					return installStatuslineInteractive(os.Stdout)
+				}
+				return installStatusline(os.Stdout, opts)
 			case uninstall:
 				return uninstallStatusline(os.Stdout)
 			default:
@@ -105,7 +147,8 @@ It runs offline by default (embedded pricing) so it responds instantly; pass
 	fl.BoolVar(&opts.color, "color", opts.color, "colorize the output with ANSI escapes")
 	fl.Float64Var(&opts.contextMedium, "context-medium", opts.contextMedium, "context %% threshold for the yellow warning color")
 	fl.Float64Var(&opts.contextHigh, "context-high", opts.contextHigh, "context %% threshold for the red warning color")
-	fl.BoolVar(&install, "install", false, "wire this statusline into ~/.claude/settings.json (creates a .bak backup)")
+	fl.StringSliceVar(&opts.segments, "segments", nil, "comma-separated segments to show: "+strings.Join(allStatuslineSegmentKeys(), ",")+" (default all)")
+	fl.BoolVar(&install, "install", false, "wire this statusline into ~/.claude/settings.json (interactive on a TTY; creates a .bak backup)")
 	fl.BoolVar(&uninstall, "uninstall", false, "remove the openusage statusline from ~/.claude/settings.json")
 	cmd.MarkFlagsMutuallyExclusive("install", "uninstall")
 
@@ -123,34 +166,65 @@ func claudeSettingsPath() string {
 }
 
 // statuslineCommandString returns the command Claude Code should invoke: the
-// resolved openusage binary plus the statusline subcommand.
-func statuslineCommandString() string {
+// resolved openusage binary, the statusline subcommand, and any non-default
+// options baked in as flags so the customization survives in settings.json.
+func statuslineCommandString(opts statuslineOptions) string {
 	bin, err := os.Executable()
 	if err != nil || strings.TrimSpace(bin) == "" {
 		bin = "openusage"
 	}
-	return bin + " statusline"
+	cmd := bin + " statusline"
+	// Only persist a subset; an empty/full selection is the implicit default.
+	if n := len(opts.segments); n > 0 && n < len(statuslineSegmentDefs) {
+		cmd += " --segments " + strings.Join(opts.segments, ",")
+	}
+	if m := strings.TrimSpace(opts.mode); m != "" && m != string(claude_code.CostModeCalculate) {
+		cmd += " --mode " + m
+	}
+	if !opts.color {
+		cmd += " --color=false"
+	}
+	if !opts.offline {
+		cmd += " --offline=false"
+	}
+	return cmd
 }
 
 // installStatusline merges the statusLine block into settings.json, preserving
 // every other key and backing up the original file first.
-func installStatusline(out io.Writer) error {
+func installStatusline(out io.Writer, opts statuslineOptions) error {
 	path := claudeSettingsPath()
 	cfg, err := readJSONObject(path)
 	if err != nil {
 		return err
 	}
+	command := statuslineCommandString(opts)
 	cfg["statusLine"] = map[string]any{
 		"type":    "command",
-		"command": statuslineCommandString(),
+		"command": command,
 		"padding": 0,
 	}
 	if err := writeJSONObjectWithBackup(path, cfg); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "installed statusline into %s\n", path)
-	fmt.Fprintf(out, "  command: %s\n", statuslineCommandString())
+	fmt.Fprintf(out, "  command: %s\n", command)
+	fmt.Fprintln(out, "Restart Claude Code (or open a new session) to see it.")
 	return nil
+}
+
+// installStatuslineInteractive runs the one-screen configurator and installs
+// the chosen statusline. Cancelling leaves settings.json untouched.
+func installStatuslineInteractive(out io.Writer) error {
+	ch, err := runStatuslineConfigurator()
+	if err != nil {
+		return err
+	}
+	if ch.cancelled {
+		fmt.Fprintln(out, "statusline: install cancelled.")
+		return nil
+	}
+	return installStatusline(out, ch.options())
 }
 
 // uninstallStatusline removes our statusLine block when it points at openusage.
@@ -316,23 +390,66 @@ func renderStatusline(in statuslineInput, events []report.Event, now time.Time, 
 		}
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "🤖 %s", model)
-	fmt.Fprintf(&b, " | 💰 $%.2f sess / $%.2f today", sessionCost, todayCost)
-	if haveBlock {
-		fmt.Fprintf(&b, " / $%.2f block (%s left)", blockCost, fmtStatusDuration(blockLeft))
-		if burn > 0 {
-			fmt.Fprintf(&b, " | 🔥 %s/hr", colorize(fmt.Sprintf("$%.2f", burn), ansiOrange, opts.color))
-		}
+	return assembleStatusline(statuslineValues{
+		model:       model,
+		sessionCost: sessionCost,
+		todayCost:   todayCost,
+		blockCost:   blockCost,
+		blockLeft:   blockLeft,
+		burn:        burn,
+		haveBlock:   haveBlock,
+		contextTok:  contextTok,
+		ctxPct:      ctxPct,
+	}, opts)
+}
+
+// statuslineValues holds the resolved numbers a status line renders, separate
+// from assembly so both the live renderer and the configurator preview can use
+// the same segment layout.
+type statuslineValues struct {
+	model       string
+	sessionCost float64
+	todayCost   float64
+	blockCost   float64
+	blockLeft   time.Duration
+	burn        float64
+	haveBlock   bool
+	contextTok  int
+	ctxPct      float64
+}
+
+// assembleStatusline joins the enabled segments in canonical order. The three
+// cost figures share one 💰 group joined by " / "; everything else is
+// pipe-separated.
+func assembleStatusline(v statuslineValues, opts statuslineOptions) string {
+	var parts []string
+	if opts.segmentEnabled("model") && v.model != "" {
+		parts = append(parts, "🤖 "+v.model)
 	}
-	if contextTok > 0 {
-		ctxStr := fmt.Sprintf("🧠 %s", fmtTokensShort(contextTok))
-		if ctxPct > 0 {
-			ctxStr += fmt.Sprintf(" (%.0f%%)", ctxPct)
-		}
-		fmt.Fprintf(&b, " | %s", colorize(ctxStr, contextColor(ctxPct, opts), opts.color))
+	var costs []string
+	if opts.segmentEnabled("session") {
+		costs = append(costs, fmt.Sprintf("$%.2f sess", v.sessionCost))
 	}
-	return b.String()
+	if opts.segmentEnabled("today") {
+		costs = append(costs, fmt.Sprintf("$%.2f today", v.todayCost))
+	}
+	if opts.segmentEnabled("block") && v.haveBlock {
+		costs = append(costs, fmt.Sprintf("$%.2f block (%s left)", v.blockCost, fmtStatusDuration(v.blockLeft)))
+	}
+	if len(costs) > 0 {
+		parts = append(parts, "💰 "+strings.Join(costs, " / "))
+	}
+	if opts.segmentEnabled("burn") && v.haveBlock && v.burn > 0 {
+		parts = append(parts, "🔥 "+colorize(fmt.Sprintf("$%.2f", v.burn), ansiOrange, opts.color)+"/hr")
+	}
+	if opts.segmentEnabled("context") && v.contextTok > 0 {
+		ctxStr := "🧠 " + fmtTokensShort(v.contextTok)
+		if v.ctxPct > 0 {
+			ctxStr += fmt.Sprintf(" (%.0f%%)", v.ctxPct)
+		}
+		parts = append(parts, colorize(ctxStr, contextColor(v.ctxPct, opts), opts.color))
+	}
+	return strings.Join(parts, " | ")
 }
 
 // --- helpers ---

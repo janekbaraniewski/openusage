@@ -117,6 +117,18 @@ openusage tmux doctor                          # diagnose if something is off
 
 See the [tmux integration guide](docs/site/docs/guides/tmux-integration.md) for the format grammar, theming, the icon font, and watch-mode alerts.
 
+### Claude Code statusline
+
+Show live session cost, today's spend, the active 5-hour block, burn rate, and context-window usage right in the **Claude Code status bar**:
+
+![OpenUsage statusline in Claude Code](./assets/claudecodestatus.png)
+
+```bash
+openusage statusline --install   # interactive: live-preview configurator
+```
+
+Like the tmux installer, this opens a one-screen configurator where you toggle which segments to show (model, session/today/block cost, burn rate, context %) and watch a live preview, then writes it into `~/.claude/settings.json`. Restart Claude Code to see it. See the [statusline guide](docs/site/docs/guides/claude-code-statusline.md) for customization and manual setup.
+
 ## Track coding agent usage across multiple platforms
 
 Native dashboards show one provider at a time. OpenUsage gives you one local-first view across coding agents, API platforms, and local runtimes so you can answer:

@@ -83,7 +83,7 @@ func TestInstallUninstallStatusline_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installStatusline(io.Discard); err != nil {
+	if err := installStatusline(io.Discard, statuslineOptions{offline: true, color: true}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	cfg, err := readJSONObject(settings)
@@ -130,5 +130,56 @@ func TestUninstallStatusline_LeavesForeignStatusLine(t *testing.T) {
 	cfg, _ := readJSONObject(settings)
 	if _, exists := cfg["statusLine"]; !exists {
 		t.Error("uninstall removed a statusLine it does not manage")
+	}
+}
+
+func TestAssembleStatuslineSegments(t *testing.T) {
+	v := sampleStatuslineValues()
+	all := assembleStatusline(v, statuslineOptions{color: false})
+	for _, want := range []string{"Opus 4.8", "sess", "today", "block", "/hr", "🧠"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("full statusline missing %q: %s", want, all)
+		}
+	}
+	// Only today + context.
+	sub := assembleStatusline(v, statuslineOptions{color: false, segments: []string{"today", "context"}})
+	if strings.Contains(sub, "sess") || strings.Contains(sub, "block") || strings.Contains(sub, "/hr") || strings.Contains(sub, "Opus") {
+		t.Fatalf("subset leaked disabled segments: %s", sub)
+	}
+	if !strings.Contains(sub, "today") || !strings.Contains(sub, "🧠") {
+		t.Fatalf("subset missing enabled segments: %s", sub)
+	}
+}
+
+func TestStatuslineCommandStringBakesOptions(t *testing.T) {
+	// All segments + defaults => bare command, no flags.
+	full := statuslineCommandString(statuslineOptions{offline: true, color: true, mode: "calculate", segments: allStatuslineSegmentKeys()})
+	if strings.Contains(full, "--segments") || strings.Contains(full, "--color") || strings.Contains(full, "--offline") || strings.Contains(full, "--mode") {
+		t.Fatalf("default command should carry no flags: %s", full)
+	}
+	// Subset + non-defaults => flags baked in.
+	custom := statuslineCommandString(statuslineOptions{offline: false, color: false, mode: "auto", segments: []string{"today", "burn"}})
+	for _, want := range []string{"--segments today,burn", "--color=false", "--offline=false", "--mode auto"} {
+		if !strings.Contains(custom, want) {
+			t.Fatalf("custom command missing %q: %s", want, custom)
+		}
+	}
+}
+
+func TestStatuslineConfiguratorChoices(t *testing.T) {
+	m := newStatuslineConfigModel()
+	ch := m.choices()
+	if len(ch.segments) != len(statuslineSegmentDefs) {
+		t.Fatalf("default should enable all segments, got %v", ch.segments)
+	}
+	if !ch.color || !ch.offline {
+		t.Fatalf("defaults: color and embedded pricing on, got color=%v offline=%v", ch.color, ch.offline)
+	}
+	if strings.TrimSpace(m.preview()) == "" {
+		t.Fatal("preview is empty")
+	}
+	// options() round-trips into a usable statuslineOptions.
+	if !ch.options().segmentEnabled("model") {
+		t.Fatal("options() lost segment selection")
 	}
 }

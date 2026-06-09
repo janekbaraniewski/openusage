@@ -137,6 +137,7 @@ const sidebars: SidebarsConfig = {
         'guides/usage-projections',
         'guides/cli-reports',
         'guides/tmux-integration',
+        'guides/claude-code-statusline',
         'guides/headless-servers',
         'guides/multi-machine',
       ],
