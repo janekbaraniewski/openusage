@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.20.0](https://github.com/janekbaraniewski/openusage/compare/v0.19.1...v0.20.0) (2026-06-09)
+
+
+### Features
+
+* **demo:** show fewer breakdown entities for narrow time windows ([b73a4a4](https://github.com/janekbaraniewski/openusage/commit/b73a4a4df31082cc34fd83de8daf7c7505726a4e))
+* **statusline:** add 5h usage-window % segment (sourced from the daemon) ([e900f2b](https://github.com/janekbaraniewski/openusage/commit/e900f2b9ebf574de5d19894d84e67231c1349833))
+* **statusline:** interactive installer + docs for the Claude Code statusline ([0ea9cb2](https://github.com/janekbaraniewski/openusage/commit/0ea9cb25a446f5219128cfe0f34cc4f87916b2b1))
+
+
+### Bug Fixes
+
+* **demo:** hide empty breakdown sections so detail views aren't full of placeholders ([aa7ca5d](https://github.com/janekbaraniewski/openusage/commit/aa7ca5dc77d8be176034fb87ceee7b7b80ad58cd))
+* **demo:** make the demo respond to the selected time window ([866ed18](https://github.com/janekbaraniewski/openusage/commit/866ed18925c7ea5d04f100aa0cf81572f6f1e2ec))
+* **demo:** prune all breakdown dimensions for narrow windows ([09a1fbf](https://github.com/janekbaraniewski/openusage/commit/09a1fbf09400052e561a0373072e16ce5d028dc2))
+* **demo:** remove bogus tool/language data from the openrouter snapshot ([71f0375](https://github.com/janekbaraniewski/openusage/commit/71f03755a542f2ff9631b766bc4b11483062b6c7))
+* **demo:** scale all breakdown sections with the time window, not just the header ([9ee8d67](https://github.com/janekbaraniewski/openusage/commit/9ee8d67108a88782fa921473ba5b4b6e1c18a6f7))
+
+
+### Performance
+
+* **statusline:** cache the 5h usage % and skip log parsing when unneeded ([2e05407](https://github.com/janekbaraniewski/openusage/commit/2e05407327238a485ad7f43da7ef112e09f1cd34))
+
+
+### Refactoring
+
+* **statusline:** make install/uninstall subcommands (align with tmux) ([ef1d1bf](https://github.com/janekbaraniewski/openusage/commit/ef1d1bfb08f09c23eab36aecb36d22781107fc8d))
+
 ## [0.19.1](https://github.com/janekbaraniewski/openusage/compare/v0.19.0...v0.19.1) (2026-06-08)
 
 
