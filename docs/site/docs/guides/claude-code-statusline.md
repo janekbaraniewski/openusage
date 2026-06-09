@@ -29,24 +29,7 @@ openusage statusline install
 
 This opens a one-screen, **live-preview configurator** (the same style as `openusage tmux install`). Toggle which segments you want, flip the options, and watch the preview update; press **enter** on **Apply** to write it into `~/.claude/settings.json` (your previous settings are backed up to `settings.json.bak`).
 
-```
-Configure your Claude Code statusline
-
-preview 🤖 Opus 4.8 | 💰 $12.40 sess / $6.79 today / $3.40 block (2h41m left) | 🔥 $1.20/hr | 🕔 5h 15% | 🧠 96k (48%)
-
-  [x] Model name
-  [x] Session cost
-  [x] Today's cost
-  [x] 5h block cost + time left
-  [x] Burn rate
-  [x] 5h usage window %
-  [x] Context window %
-  Color          ‹ on ›
-  Pricing        ‹ embedded (instant) ›
-  [ Apply ]
-
-↑/↓ move · ←/→ change · space toggle · enter apply · q cancel
-```
+![Installing the Claude Code statusline with the live-preview configurator](/img/statusline-install.gif)
 
 Then **restart Claude Code** (or open a new session) so it re-reads `settings.json`.
 

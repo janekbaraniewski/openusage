@@ -127,7 +127,13 @@ Show live session cost, today's spend, the active 5-hour block, burn rate, and c
 openusage statusline install     # interactive: live-preview configurator
 ```
 
-Like the tmux installer, this opens a one-screen configurator where you toggle which segments to show (model, session/today/block cost, burn rate, context %) and watch a live preview, then writes it into `~/.claude/settings.json`. Restart Claude Code to see it. See the [statusline guide](docs/site/docs/guides/claude-code-statusline.md) for customization and manual setup.
+Like the tmux installer, this opens a one-screen configurator where you toggle which segments to show (model, session/today/block cost, burn rate, **5h usage window %**, context %) and watch a live preview, then writes it into `~/.claude/settings.json`. Restart Claude Code to see it.
+
+<p align="center">
+  <img src="./assets/statusline-install.gif" alt="Installing the Claude Code statusline with the live-preview configurator" width="720">
+</p>
+
+See the [statusline guide](docs/site/docs/guides/claude-code-statusline.md) for customization and manual setup.
 
 ## Track coding agent usage across multiple platforms
 

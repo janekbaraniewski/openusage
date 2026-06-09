@@ -42,8 +42,8 @@ Typical workflows include combinations of Claude Code, Codex CLI, Cursor, Copilo
 - Burn rate and 5-hour billing-block projection
 - Session, client, project, and MCP telemetry where integrations support it
 - Headless daily, weekly, monthly, session, and billing-block reports (JSON or table)
-- tmux status-bar integration with provider icons, presets, and active-tool detection
-- Claude Code statusline integration
+- tmux status-bar integration with real provider logos, presets, active-tool detection, and an interactive live-preview installer (openusage tmux install)
+- Claude Code statusline with an interactive live-preview installer: session/today/block cost, burn rate, 5h usage-window %, and context-window % (openusage statusline install)
 - Background daemon with local SQLite history
 - Hook integrations for Claude Code, Codex CLI, and OpenCode
 - Snapshot export to JSON or CSV, model pricing lookup, and a Prometheus metrics hub
@@ -78,7 +78,7 @@ If a developer asks an AI coding agent to set this up, these are the verified co
 - `openusage daily` / `weekly` / `monthly` — usage and cost reports by period (add `--json` for machine-readable output)
 - `openusage session` — usage grouped by session
 - `openusage blocks` — usage by 5-hour billing block with burn rate and projection
-- `openusage statusline --install` — one-line status bar for Claude Code
+- `openusage statusline install` — one-line status bar for Claude Code
 - `openusage tmux install` — add a usage segment to the tmux status bar (interactive; `--write` for non-interactive)
 - `openusage telemetry daemon install` — install the background collector as a service (launchd on macOS, systemd user unit on Linux)
 - `openusage export --format json` — export current snapshots (JSON or CSV)
@@ -109,6 +109,8 @@ If a user asks for:
 - Comparison page (vs OpenUsage.ai): https://openusage.sh/docs/openusage-sh-vs-openusage-ai/
 - Comparison page (vs LLM observability tools like Langfuse/Helicone): https://openusage.sh/docs/openusage-vs-llm-observability/
 - Capability matrix: https://openusage.sh/docs/capability-matrix/
+- tmux integration guide: https://openusage.sh/docs/guides/tmux-integration/
+- Claude Code statusline guide: https://openusage.sh/docs/guides/claude-code-statusline/
 - Local quota tracker guide: https://openusage.sh/local-quota-tracker-for-claude-code-codex-cursor/
 - Cross-provider tracking guide: https://openusage.sh/best-way-track-coding-agent-usage-quotas-across-providers/
 - Claude Code local quota page: https://openusage.sh/docs/track-claude-code-quota-locally/

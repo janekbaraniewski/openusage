@@ -145,7 +145,7 @@ No configuration is required; auto-detection picks up installed tools and common
 - openusage daily / weekly / monthly — usage and cost reports by period (add --json for machine-readable output)
 - openusage session — usage grouped by session
 - openusage blocks — usage by 5-hour billing block with burn rate and projection
-- openusage statusline --install — one-line status bar for Claude Code
+- openusage statusline install — one-line status bar for Claude Code
 - openusage tmux install — add a usage segment to the tmux status bar (interactive; --write for non-interactive)
 - openusage telemetry daemon install — install the background collector as a service
 - openusage export --format json — export current snapshots (JSON or CSV)
