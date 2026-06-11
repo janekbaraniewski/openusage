@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.21.0](https://github.com/janekbaraniewski/openusage/compare/v0.20.0...v0.21.0) (2026-06-11)
+
+
+### Features
+
+* **windows:** first-class daemon lifecycle + integrations hooks parity ([4c5b7b9](https://github.com/janekbaraniewski/openusage/commit/4c5b7b9d74322b405fb9d1968235697512785fd7))
+
+
+### Bug Fixes
+
+* **detect:** detect opencode auth.json on Windows (XDG-style path) ([c02535b](https://github.com/janekbaraniewski/openusage/commit/c02535bf77038a3ecae15c6c8cb23eb7b51fe1cc)), closes [#149](https://github.com/janekbaraniewski/openusage/issues/149)
+* **windows:** correct path resolution across detect, telemetry, pricing, integrations ([1a57522](https://github.com/janekbaraniewski/openusage/commit/1a5752228b515ed9ce2af80576b62853f1241704))
+
+
+### Dependencies
+
+* **docs:** bump shell-quote from 1.8.3 to 1.8.4 in /docs/site ([b0955b8](https://github.com/janekbaraniewski/openusage/commit/b0955b8ccea3418415445f27017f31cb80fdc1e1))
+
 ## [0.20.0](https://github.com/janekbaraniewski/openusage/compare/v0.19.1...v0.20.0) (2026-06-09)
 
 
