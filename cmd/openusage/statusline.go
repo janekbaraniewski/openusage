@@ -378,14 +378,14 @@ const (
 // daemon is slow/down, fall back to the last-good value within fiveHourMaxAge.
 // Never makes a network call and never blocks longer than the daemon timeout.
 func fiveHourUsagePct() (float64, bool) {
-	if pct, age, ok := readFiveHourCache(); ok && age < fiveHourRefreshInterval {
+	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourRefreshInterval {
 		return pct, true
 	}
 	if pct, ok := fetchFiveHourPctFromDaemon(); ok {
-		writeFiveHourCache(pct)
+		claude_code.WriteFiveHourCache(pct)
 		return pct, true
 	}
-	if pct, age, ok := readFiveHourCache(); ok && age < fiveHourMaxAge {
+	if pct, age, ok := claude_code.ReadFiveHourCache(); ok && age < fiveHourMaxAge {
 		return pct, true
 	}
 	return 0, false
@@ -412,67 +412,9 @@ func fetchFiveHourPctFromDaemon() (float64, bool) {
 	return 0, false
 }
 
-type fiveHourCacheEntry struct {
-	Pct float64   `json:"pct"`
-	TS  time.Time `json:"ts"`
-}
-
-func fiveHourCachePath() string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".cache", "openusage", "statusline-5h.json")
-}
-
-// writeFiveHourCache overwrites the single cache file atomically (temp + rename)
-// so concurrent statusline renders from parallel sessions can never read or
-// leave a half-written file.
-func writeFiveHourCache(pct float64) {
-	p := fiveHourCachePath()
-	if p == "" {
-		return
-	}
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	b, err := json.Marshal(fiveHourCacheEntry{Pct: pct, TS: time.Now()})
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".statusline-5h-*.tmp")
-	if err != nil {
-		return
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		_ = os.Remove(tmpName)
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return
-	}
-	if err := os.Rename(tmpName, p); err != nil {
-		_ = os.Remove(tmpName)
-	}
-}
-
-// readFiveHourCache returns the cached %, its age, and whether it was readable.
-func readFiveHourCache() (float64, time.Duration, bool) {
-	p := fiveHourCachePath()
-	if p == "" {
-		return 0, 0, false
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return 0, 0, false
-	}
-	var c fiveHourCacheEntry
-	if json.Unmarshal(b, &c) != nil || c.TS.IsZero() {
-		return 0, 0, false
-	}
-	return c.Pct, time.Since(c.TS), true
-}
+// The 5h usage cache lives in the claude_code package so the tmux status bar
+// and this statusline share one file and one format — a write from either
+// surface (or the daemon poll) warms the fallback for both.
 
 // readStatuslineInput reads and decodes the stdin payload. A terminal (no pipe)
 // or malformed JSON yields a zero-value input so the command still renders.
