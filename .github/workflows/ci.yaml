@@ -75,7 +75,11 @@ jobs:
           path: coverage.out
 
   build:
-    name: Build
+    # Pin the per-matrix display name so the required status-check context
+    # stays "Build (<os>)" and does not leak the `bin` matrix axis
+    # (otherwise it becomes "Build (ubuntu-latest, openusage)" and branch
+    # protection never sees the context it requires).
+    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
