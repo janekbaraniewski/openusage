@@ -198,10 +198,48 @@ func BuildContext(ctx context.Context, opts BuildOptions) (Context, error) {
 	// conversation log. Failures are non-fatal: the formatter falls back to
 	// the snapshot Metrics map when the synthetic key is missing.
 	if c.Provider == "claude_code" {
+		reconcileFiveHourUsage(&c)
 		populateClaudeCodeSynthetics(&c, opts)
 	}
 
 	return c, nil
+}
+
+// fiveHourCacheMaxAge bounds how stale the disk-cached 5h usage % may be before
+// the bar stops trusting it. The 5h window moves slowly and the daemon refreshes
+// the cache every poll, so a generous bound keeps the segment populated through
+// transient daemon/usage-API slowness while still expiring after a long idle.
+const fiveHourCacheMaxAge = 15 * time.Minute
+
+// reconcileFiveHourUsage keeps the bar's 5h segment (block_pct) populated even
+// when the live snapshot lacks usage_five_hour. The metric originates from the
+// slow claude.ai usage API, which the budget-limited render frequently can't
+// reach (a slow daemon read-model forces a direct fallback that times out on
+// the fetch). So:
+//   - when the snapshot HAS the metric, persist it so future budget-limited
+//     renders have a warm fallback;
+//   - when it's MISSING, inject a recent cached value so block_pct resolves
+//     instead of the segment silently dropping.
+func reconcileFiveHourUsage(c *Context) {
+	if m, ok := c.Snapshot.Metrics["usage_five_hour"]; ok && m.Used != nil {
+		claude_code.WriteFiveHourCache(*m.Used)
+		return
+	}
+	pct, age, ok := claude_code.ReadFiveHourCache()
+	if !ok || age > fiveHourCacheMaxAge {
+		return
+	}
+	if c.Snapshot.Metrics == nil {
+		c.Snapshot.Metrics = map[string]core.Metric{}
+	}
+	limit := 100.0
+	used := pct
+	c.Snapshot.Metrics["usage_five_hour"] = core.Metric{
+		Used:   &used,
+		Limit:  &limit,
+		Unit:   "%",
+		Window: "5h",
+	}
 }
 
 // populateClaudeCodeSynthetics computes the active billing block (cost,

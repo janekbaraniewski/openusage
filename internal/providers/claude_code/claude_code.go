@@ -456,9 +456,24 @@ func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.
 
 	p.setCachedUsage(usage)
 	applyUsageResponse(usage, snap, time.Now())
+	cacheFiveHourFromSnapshot(snap)
 
 	snap.Raw["usage_api_ok"] = "true"
 	return nil
+}
+
+// cacheFiveHourFromSnapshot persists the freshly-resolved 5h usage % to the
+// shared disk cache. Surfaces that render under a tight time budget (the tmux
+// status bar, the statusline) cannot afford the slow live usage fetch, so any
+// full fetch — most importantly the daemon's 30s poll — warms this fallback
+// for them. Best-effort: a missing metric or unwritable cache is ignored.
+func cacheFiveHourFromSnapshot(snap *core.UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	if m, ok := snap.Metrics["usage_five_hour"]; ok && m.Used != nil {
+		WriteFiveHourCache(*m.Used)
+	}
 }
 
 func (p *Provider) getCachedUsage() *usageResponse {
