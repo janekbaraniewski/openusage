@@ -284,6 +284,37 @@ func (s *Store) Init(ctx context.Context) error {
 			PRIMARY KEY (provider_id, account_id, metric_key, observed_at)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_balance_obs_lookup ON balance_observations(provider_id, account_id, metric_key, observed_at);`,
+		// Daily downsample of usage_events: per-day aggregates kept long-term so
+		// raw per-event rows past the hot window can be pruned without losing the
+		// shape of history. See docs/TELEMETRY_TIERED_RETENTION_DESIGN.md.
+		// Dimensions are limited to column-backed fields on usage_events. project
+		// is workspace_id (well-populated on historical rows). language/interface
+		// are intentionally absent: they are derived from source_payload, which is
+		// blanked ~1h after ingest, so they are already unavailable for old events
+		// regardless of downsampling. Capturing them would require denormalizing
+		// at ingest (separate change).
+		`CREATE TABLE IF NOT EXISTS usage_rollup_daily (
+			day TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			account_id TEXT NOT NULL DEFAULT '',
+			model_canonical TEXT NOT NULL DEFAULT '',
+			tool_name TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0,
+			requests INTEGER NOT NULL DEFAULT 0,
+			event_count INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (day, provider_id, account_id, model_canonical, tool_name, project, status)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_rollup_daily_window ON usage_rollup_daily(provider_id, account_id, day);`,
+		// Key/value store for daemon-internal state (e.g. the rollup watermark).
+		`CREATE TABLE IF NOT EXISTS daemon_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 	}
 
 	for _, stmt := range stmts {
@@ -841,14 +872,23 @@ func nullableFloat64(v *float64) interface{} {
 // despite a correct 30-day policy).
 const pruneEventsBatch = 5000
 
-// PruneOldEvents deletes usage_events older than retentionDays in bounded
-// batches. It returns the number of rows deleted and whether the backlog was
-// fully drained (complete=false means it stopped early — context cancelled or
-// a batch error after partial progress — so a backlog remains and the caller
-// should reschedule soon rather than wait a full interval).
-func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int) (deleted int64, complete bool, err error) {
+// PruneOldEvents deletes usage_events older than retentionDays (the hot window)
+// in bounded batches — but only days that have already been rolled up into
+// usage_rollup_daily, so per-event detail is never discarded before its
+// aggregate exists. rolledThroughDay is the rollup watermark (YYYY-MM-DD); an
+// empty watermark means the rollup has not run, so nothing is pruned.
+//
+// Returns the number of rows deleted and whether the backlog was fully drained
+// (complete=false means it stopped early — context cancelled or a batch error
+// after partial progress — so the caller should reschedule soon).
+func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int, rolledThroughDay string) (deleted int64, complete bool, err error) {
 	if s == nil || s.db == nil || retentionDays <= 0 {
 		return 0, true, nil
+	}
+	if strings.TrimSpace(rolledThroughDay) == "" {
+		// Rollup hasn't established a watermark yet — refuse to delete un-rolled
+		// detail. Not an error; the next pass (after a rollup) will prune.
+		return 0, false, nil
 	}
 	cutoff := fmt.Sprintf("-%d day", retentionDays)
 	for {
@@ -857,15 +897,18 @@ func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int) (deleted 
 		}
 		// mattn/go-sqlite3 isn't built with the DELETE...LIMIT extension, so
 		// scope the delete via a subselect on the indexed occurred_at column.
+		// The date() guard is the safety gate: only delete days at or before the
+		// rollup watermark.
 		result, execErr := s.db.ExecContext(ctx, `
 			DELETE FROM usage_events
 			WHERE event_id IN (
 				SELECT event_id FROM usage_events
 				WHERE occurred_at < datetime('now', ?)
+				  AND date(occurred_at) <= ?
 				ORDER BY occurred_at ASC
 				LIMIT ?
 			)
-		`, cutoff, pruneEventsBatch)
+		`, cutoff, rolledThroughDay, pruneEventsBatch)
 		if execErr != nil {
 			if deleted > 0 {
 				return deleted, false, nil

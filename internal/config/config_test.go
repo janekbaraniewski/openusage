@@ -184,8 +184,8 @@ func TestLoadFrom_RetentionDaysExceedingMaxClamped(t *testing.T) {
 
 func TestLoadFrom_NegativeRetentionDaysGetDefault(t *testing.T) {
 	cfg := loadConfigJSON(t, `{"data":{"retention_days":-5}}`)
-	if cfg.Data.RetentionDays != 30 {
-		t.Errorf("retention_days = %d, want 30 (default for negative)", cfg.Data.RetentionDays)
+	if cfg.Data.RetentionDays != 90 {
+		t.Errorf("retention_days = %d, want 90 (default for negative)", cfg.Data.RetentionDays)
 	}
 }
 
@@ -803,8 +803,8 @@ func TestDefaultConfig_DataDefaults(t *testing.T) {
 	if cfg.Data.TimeWindow != "30d" {
 		t.Errorf("default time_window = %q, want '30d'", cfg.Data.TimeWindow)
 	}
-	if cfg.Data.RetentionDays != 30 {
-		t.Errorf("default retention_days = %d, want 30", cfg.Data.RetentionDays)
+	if cfg.Data.RetentionDays != 90 {
+		t.Errorf("default retention_days = %d, want 90", cfg.Data.RetentionDays)
 	}
 }
 
@@ -821,8 +821,8 @@ func TestLoadFrom_DataConfigDefaults(t *testing.T) {
 	if cfg.Data.TimeWindow != "30d" {
 		t.Errorf("missing data section should default time_window to '30d', got %q", cfg.Data.TimeWindow)
 	}
-	if cfg.Data.RetentionDays != 30 {
-		t.Errorf("missing data section should default retention_days to 30, got %d", cfg.Data.RetentionDays)
+	if cfg.Data.RetentionDays != 90 {
+		t.Errorf("missing data section should default retention_days to 90, got %d", cfg.Data.RetentionDays)
 	}
 }
 
@@ -836,9 +836,9 @@ func TestLoadFrom_DataConfigValidation(t *testing.T) {
 		{"valid 7d", `{"data":{"time_window":"7d","retention_days":30}}`, "7d", 30},
 		{"invalid 1h clamps to 7d", `{"data":{"time_window":"1h","retention_days":10}}`, "7d", 10},
 		{"invalid window defaults to 30d", `{"data":{"time_window":"bogus","retention_days":30}}`, "30d", 30},
-		{"zero retention defaults to 30", `{"data":{"time_window":"7d","retention_days":0}}`, "7d", 30},
-		{"negative retention defaults to 30", `{"data":{"time_window":"7d","retention_days":-5}}`, "7d", 30},
-		{"retention capped at 90", `{"data":{"time_window":"30d","retention_days":999}}`, "30d", 90},
+		{"zero retention defaults to 90", `{"data":{"time_window":"7d","retention_days":0}}`, "7d", 90},
+		{"negative retention defaults to 90", `{"data":{"time_window":"7d","retention_days":-5}}`, "7d", 90},
+		{"retention capped at 3650", `{"data":{"time_window":"30d","retention_days":99999}}`, "30d", 3650},
 		{"window clamped to retention", `{"data":{"time_window":"30d","retention_days":7}}`, "7d", 7},
 		{"invalid sub-day clamps to 1d", `{"data":{"time_window":"6h","retention_days":1}}`, "1d", 1},
 	}

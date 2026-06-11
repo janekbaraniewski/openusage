@@ -243,7 +243,7 @@ func DefaultConfig() Config {
 			WarnThreshold:          0.20,
 			CritThreshold:          0.05,
 		},
-		Data:               DataConfig{TimeWindow: "30d", RetentionDays: 30},
+		Data:               DataConfig{TimeWindow: "30d", RetentionDays: defaultRetentionDays},
 		Experimental:       ExperimentalConfig{Analytics: false},
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		Dashboard:          DashboardConfig{View: DashboardViewGrid},
@@ -330,12 +330,18 @@ func normalizeUIConfig(in UIConfig) UIConfig {
 	return in
 }
 
+// defaultRetentionDays is the hot window: how long full per-event detail is
+// kept before being downsampled into the daily rollup. 90d matches the
+// local-file collectors' re-import lookback so re-imported history lands inside
+// the window (no ingest churn).
+const defaultRetentionDays = 90
+
 func normalizeDataConfig(in DataConfig) DataConfig {
 	tw := core.ParseTimeWindow(in.TimeWindow)
 	retention := in.RetentionDays
 	if retention <= 0 {
-		core.Tracef("config: retention_days=%d is invalid, using default 30", retention)
-		retention = 30
+		core.Tracef("config: retention_days=%d is invalid, using default %d", retention, defaultRetentionDays)
+		retention = defaultRetentionDays
 	}
 	// Upper bound only guards against absurd values; it is deliberately large so
 	// users who want to keep long history can (downsampling, not a hard 90-day

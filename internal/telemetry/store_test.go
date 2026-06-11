@@ -460,7 +460,7 @@ func TestStorePruneOldEvents_DeletesExpiredEventsOnly(t *testing.T) {
 	}
 
 	// Prune with 30-day retention: should delete the 2 old events.
-	deleted, complete, err := store.PruneOldEvents(context.Background(), 30)
+	deleted, complete, err := store.PruneOldEvents(context.Background(), 30, "9999-12-31")
 	if err != nil {
 		t.Fatalf("PruneOldEvents: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestStorePruneOldEvents_DeletesExpiredEventsOnly(t *testing.T) {
 	}
 
 	// Edge case: retentionDays <= 0 should be a no-op.
-	noOp, _, err := store.PruneOldEvents(context.Background(), 0)
+	noOp, _, err := store.PruneOldEvents(context.Background(), 0, "")
 	if err != nil {
 		t.Fatalf("PruneOldEvents(0): %v", err)
 	}

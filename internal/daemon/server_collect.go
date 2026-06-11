@@ -98,17 +98,11 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		allReqs = append(allReqs, reqs...)
 	}
 
-	// Drop collected events older than the retention window before they enter
-	// the store. Local-file telemetry sources (codex/opencode session logs,
-	// etc.) carry their full history, so without this floor every collect cycle
-	// re-ingests months of old-dated events that retention then deletes — a
-	// tug-of-war that keeps the DB bloated and retention permanently behind.
-	// Live hook events are always recent, so this only filters the re-import.
-	allReqs, droppedOld := filterReqsOlderThan(allReqs, s.retentionFloor())
-	if droppedOld > 0 && s.shouldLog("collect_floor_drop", time.Minute) {
-		s.infof("collect_floor_drop", "dropped_pre_retention=%d", droppedOld)
-	}
-
+	// No ingest-time age filter: local-file sources re-import the last ~90d of
+	// history each cycle, which is fine because the hot window (retention_days)
+	// is ≥ that lookback, so re-imported events land inside the window and are
+	// never the tug-of-war target. Detail past the hot window is downsampled
+	// into usage_rollup_daily and then pruned (see pruneOldData).
 	direct, retries := s.ingestBatch(ctx, allReqs)
 	if direct.ingested > 0 {
 		s.dataIngested.Store(true)
@@ -200,45 +194,10 @@ func (s *Service) runRetentionLoop(ctx context.Context) {
 	}
 }
 
-// retentionDaysOrDefault resolves the configured retention window, defaulting
-// to 30 days when unset or invalid.
-func (s *Service) retentionDaysOrDefault() int {
-	cfg, err := config.Load()
-	if err != nil {
-		return 30
-	}
-	if cfg.Data.RetentionDays > 0 {
-		return cfg.Data.RetentionDays
-	}
-	return 30
-}
-
-// retentionFloor is the oldest occurred_at that collected events may have and
-// still be worth ingesting. Events before it would be pruned almost
-// immediately, so they are dropped at the door instead.
-func (s *Service) retentionFloor() time.Time {
-	return s.now().Add(-time.Duration(s.retentionDaysOrDefault()) * 24 * time.Hour)
-}
-
-// filterReqsOlderThan returns the requests whose OccurredAt is at or after floor
-// (keeping any with a zero timestamp, which are treated as "now"), plus the
-// count dropped. The input slice is filtered in place.
-func filterReqsOlderThan(reqs []telemetry.IngestRequest, floor time.Time) ([]telemetry.IngestRequest, int) {
-	kept := reqs[:0]
-	dropped := 0
-	for _, r := range reqs {
-		if !r.OccurredAt.IsZero() && r.OccurredAt.Before(floor) {
-			dropped++
-			continue
-		}
-		kept = append(kept, r)
-	}
-	return kept, dropped
-}
-
-// pruneOldData runs one retention pass and reports whether the event backlog is
-// fully drained. A false return means the prune stopped early (budget/context)
-// and the caller should reschedule soon to keep catching up.
+// pruneOldData rolls recent events into the daily downsample, then prunes raw
+// events past the hot window that have already been rolled up. It reports
+// whether the event backlog is fully drained; a false return means the prune
+// stopped early (budget/context) and the caller should reschedule soon.
 func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 	if s == nil || s.store == nil {
 		return true
@@ -268,7 +227,25 @@ func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 		s.infof("balance_prune", "thinned=%d retention_days=%d", thinned, retentionDays)
 	}
 
-	deleted, drained, err := s.store.PruneOldEvents(pruneCtx, retentionDays)
+	// Downsample first: roll recent (and, on first run, all) raw events into the
+	// daily aggregate before any pruning, so detail is never deleted before its
+	// aggregate exists. The watermark advances to the last fully-settled day.
+	rollupCtx, rollupCancel := context.WithTimeout(ctx, 2*time.Minute)
+	rolledDays, rollErr := s.store.RollupDaily(rollupCtx, s.now())
+	rollupCancel()
+	if rollErr != nil {
+		if s.shouldLog("rollup_error", 30*time.Second) {
+			s.warnf("rollup_error", "error=%v", rollErr)
+		}
+		// Without a fresh rollup we must not prune; try again next pass.
+		return false
+	}
+	if rolledDays > 0 {
+		s.infof("rollup_daily", "rows=%d", rolledDays)
+	}
+	watermark, _ := s.store.RollupWatermark(pruneCtx)
+
+	deleted, drained, err := s.store.PruneOldEvents(pruneCtx, retentionDays, watermark)
 	if err != nil {
 		if s.shouldLog("retention_prune_error", 30*time.Second) {
 			s.warnf("retention_prune_error", "error=%v", err)

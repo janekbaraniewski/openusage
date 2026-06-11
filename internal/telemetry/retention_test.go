@@ -83,7 +83,7 @@ func TestPruneOldEventsBatchedRemovesBacklog(t *testing.T) {
 	insert(oldCount, time.Now().Add(-90*24*time.Hour))
 	insert(recentCount, time.Now().Add(-1*time.Hour))
 
-	deleted, complete, err := store.PruneOldEvents(context.Background(), 30)
+	deleted, complete, err := store.PruneOldEvents(context.Background(), 30, "9999-12-31")
 	if err != nil {
 		t.Fatalf("prune: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestPruneOldEventsCancelledContextReturnsProgress(t *testing.T) {
 	cancel() // already cancelled
 
 	// Should return cleanly (0, not-complete, nil) rather than erroring on a dead context.
-	deleted, complete, err := store.PruneOldEvents(ctx, 30)
+	deleted, complete, err := store.PruneOldEvents(ctx, 30, "9999-12-31")
 	if err != nil {
 		t.Errorf("cancelled prune should not error, got %v", err)
 	}

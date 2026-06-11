@@ -20,6 +20,14 @@ func dedupedUsageCTE(filter usageFilter) (string, []any) {
 		}
 	}
 	where, args := usageWhereClause("e", filter)
+	return dedupedUsageCTEWhere(where, args)
+}
+
+// dedupedUsageCTEWhere builds the deduped-usage CTE with an arbitrary WHERE
+// clause over the `e`/`r` aliases (e.g. a date-range scope for the rollup),
+// keeping the logical-event dedup ranking in one place rather than duplicating
+// it. `where` must reference columns with the `e.` prefix where appropriate.
+func dedupedUsageCTEWhere(where string, args []any) (string, []any) {
 	cte := fmt.Sprintf(`
 		WITH scoped_usage AS (
 			SELECT
