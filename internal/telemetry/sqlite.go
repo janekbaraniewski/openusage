@@ -45,6 +45,46 @@ func configureSQLiteConnection(db *sql.DB) error {
 	return nil
 }
 
+// configureSQLiteReadOnlyConnection prepares a read-only handle. Unlike the
+// writer config it runs NO write pragmas: journal_mode/synchronous take the
+// write lock and would serialize every read behind the poller, which is what
+// drove read-model timeouts. query_only is intentionally NOT set because the
+// read model materializes a TEMP table (in the separate temp database, which
+// stays writable even when the main DB is opened read-only).
+//
+// The handle stays single-connection: the materialize + aggregate queries
+// share one connection-local TEMP table, so they must run on the same
+// connection. Cross-request concurrency is unaffected — each read-model call
+// opens its own handle.
+func configureSQLiteReadOnlyConnection(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
+		return fmt.Errorf("set busy_timeout: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	return nil
+}
+
+// openReadOnlyDB opens path with the main database read-only, so it cannot take
+// the write lock or modify (and thus corrupt) the writer's file; in WAL mode
+// (writer process keeping -wal/-shm present) its reads run concurrently with
+// the writer. Returns an error if the handle cannot be validated; callers
+// decide whether to fall back.
+func openReadOnlyDB(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro&_busy_timeout=5000")
+	if err != nil {
+		return nil, err
+	}
+	if err := configureSQLiteReadOnlyConnection(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
 // quickIntegrityCheck runs PRAGMA quick_check(1) which examines the first
 // page of each B-tree. It catches the most common corruption patterns
 // (duplicate page refs, free-list errors) in O(tables) time rather than the
