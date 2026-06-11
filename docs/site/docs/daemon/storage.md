@@ -30,9 +30,10 @@ openusage telemetry daemon run --db-path /var/data/openusage/telemetry.db
 | Table | Purpose |
 |---|---|
 | `usage_events` | Canonical normalized events. One row per turn, message, tool call, or limit snapshot. |
-| `raw_events` | Untouched payload bodies with a schema discriminator. Useful for replay and debugging. |
-| `provider_snapshots` | The most recent collector snapshot per provider/account. Cheap reads for the TUI. |
-| `metadata` | Schema version, last-prune timestamps, and other key/value state. |
+| `usage_raw_events` | Untouched payload bodies with a schema discriminator. Useful for replay and debugging. |
+| `usage_rollup_daily` | Daily downsample of `usage_events` (per day × provider/account/model/tool/project/status). Kept long-term so raw rows past the hot window can be pruned without losing the shape of history. |
+| `balance_observations` | Compact numeric time-series of balance/credit metrics per provider/account. |
+| `daemon_meta` | Key/value daemon state (e.g. the rollup watermark). |
 
 Event types written into `usage_events.event_type`:
 
@@ -102,14 +103,29 @@ Cleanup limits applied during drain and during periodic maintenance:
 
 Hard-stuck spool files (corrupt JSON, repeated dedup misses) remain on disk until manually removed.
 
-## Retention
+## Retention (downsample and keep)
 
-Configured under `data.retention_days` in settings.json (default `30`). Two prune jobs run inside the daemon:
+OpenUsage keeps history bounded **without discarding it**, via two tiers:
 
-- `PruneOldEvents` — deletes rows from `usage_events` older than the window.
-- `PruneRawEventPayloads` — deletes the heavier blob in `raw_events` older than the window, keeping the row for traceability if needed.
+- **Hot tier** — full per-event detail in `usage_events`, kept for
+  `data.retention_days` (the *hot window*, default `90`). Powers recent/detailed
+  views, dedup, drill-down, the 5h block and burn rate.
+- **Cold tier** — a per-day aggregate in `usage_rollup_daily` (summed
+  tokens/cost/requests with provider/account/model/tool/project/status
+  dimensions), kept long-term. Powers 30d, analytics, and all-time totals.
 
-Both run on startup and on a periodic timer. After a long downtime, expect the first cycle to take longer.
+The daemon runs, in order each cycle:
+
+1. **Rollup** — recompute the daily aggregate from the (deduped) raw events and
+   advance a watermark to the last fully-settled day. Idempotent: re-running a
+   day reproduces the same totals.
+2. **Prune-after-rollup** — `PruneOldEvents` deletes raw rows past the hot
+   window **only for days at or below the rollup watermark**, in bounded
+   batches. So per-event detail is never deleted before its aggregate exists;
+   you lose the per-turn timeline beyond the hot window, not the totals or
+   breakdowns.
+3. **Payload pruning** — `PruneRawEventPayloads` clears the heavy payload blob
+   from old raw rows.
 
 ```json
 {
@@ -119,8 +135,23 @@ Both run on startup and on a periodic timer. After a long downtime, expect the f
 }
 ```
 
-:::warning
-Lowering `retention_days` causes immediate deletion of older rows the next time the daemon starts. There is no soft-delete or archive — back the DB up first if you want a copy.
+`retention_days` is the hot-window length. It is no longer capped at 90 — set it
+as high as you like (e.g. a year) to keep more full detail; the daily rollup
+keeps the long-term shape regardless. There is no hard upper wall beyond a
+~10-year sanity ceiling.
+
+:::note Late-arriving / re-imported history
+Local-file sources (codex, opencode, …) re-derive events from their own session
+logs each cycle. Because the hot window (90d) is at least as long as that
+re-import lookback, re-imported events land inside the hot window and are simply
+deduplicated — they do not fight retention.
+:::
+
+:::warning Lowering the window prunes detail
+Lowering `retention_days` lets the next prune delete raw per-event rows older
+than the new window (after they are rolled up). The daily aggregate is kept, but
+per-event drill-down for that period is gone. Back up the DB first if you want
+the raw rows.
 :::
 
 ## Backups
@@ -142,7 +173,9 @@ On detected corruption (failed page checksum, unreadable header), the daemon:
 3. Removes orphaned `-shm` and `-wal` files.
 4. Reinitializes a fresh `telemetry.db`.
 
-Hooks fired during this window go to the spool and drain into the new DB on next pipeline cycle. The corrupt copy is left in place — delete it once you've confirmed nothing useful remains.
+Hooks fired during this window go to the spool and drain into the new DB on next pipeline cycle. Only the **most recent** corrupt copy is kept for forensics; older `telemetry.db.corrupt.*` snapshots are removed automatically on startup so they cannot accumulate on disk.
+
+To reduce the chance of corruption, read paths (the dashboard read model) open the database **read-only** — a reader can never modify (and therefore never corrupt) the writer's file, and its queries do not take the write lock or contend with the daemon's writes.
 
 ## Manual cleanup
 
