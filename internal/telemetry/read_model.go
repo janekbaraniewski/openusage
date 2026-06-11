@@ -78,14 +78,25 @@ func ApplyCanonicalTelemetryViewWithOptions(
 	}
 
 	done := trace("db open+configure")
-	db, err := sql.Open("sqlite3", dbPath)
+	// The read model only reads. Open read-only so reads never take the write
+	// lock and never risk corrupting the writer's file; this is what keeps a
+	// busy poller/checkpoint from blocking dashboard reads past their timeout.
+	db, err := openReadOnlyDB(dbPath)
 	if err != nil {
-		return snaps, fmt.Errorf("open telemetry read model db: %w", err)
+		// Read-only open can fail in rare states (e.g. a WAL DB whose writer
+		// is not yet up, so -shm is absent). Fall back to a read-write handle.
+		// This path runs inside the writer process, so it adds no corruption
+		// risk beyond the previous behavior.
+		db, err = sql.Open("sqlite3", dbPath)
+		if err != nil {
+			return snaps, fmt.Errorf("open telemetry read model db: %w", err)
+		}
+		if cfgErr := configureSQLiteConnection(db); cfgErr != nil {
+			_ = db.Close()
+			return snaps, fmt.Errorf("configure telemetry read model db: %w", cfgErr)
+		}
 	}
 	defer db.Close()
-	if err := configureSQLiteConnection(db); err != nil {
-		return snaps, fmt.Errorf("configure telemetry read model db: %w", err)
-	}
 	done()
 
 	done = trace("hydrateRootsFromLimitSnapshots")
