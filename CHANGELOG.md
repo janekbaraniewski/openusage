@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.22.0](https://github.com/janekbaraniewski/openusage/compare/v0.21.0...v0.22.0) (2026-06-12)
+
+
+### Features
+
+* **config:** raise the retention ceiling from 90d to ~10y ([1f32f6e](https://github.com/janekbaraniewski/openusage/commit/1f32f6e71eadde7dd133024bcd8380b07840ac82))
+* **telemetry:** downsample-and-keep — daily rollup + prune-after-rollup ([4bfb5fd](https://github.com/janekbaraniewski/openusage/commit/4bfb5fd55167f464f107e3d8ad889d8bc54de546))
+
+
+### Bug Fixes
+
+* **daemon:** stop the launchd restart loop on macOS ([903e2a2](https://github.com/janekbaraniewski/openusage/commit/903e2a2222829aee60ef5c60b77b8e42fd5705d0))
+* **telemetry:** make retention actually bound the database ([3e61f41](https://github.com/janekbaraniewski/openusage/commit/3e61f412a4026ab55b3c81796769fccc42f0d7f5))
+* **tmux:** keep the 5h usage quota visible on the status bar ([044b247](https://github.com/janekbaraniewski/openusage/commit/044b24758021e3084a27110ec72cdf02992a7c26))
+
+
+### Performance
+
+* **telemetry:** open the read model read-only ([b30047a](https://github.com/janekbaraniewski/openusage/commit/b30047aa9c348c47dd1f0142a04a8867cab6b2a6))
+
 ## [0.21.0](https://github.com/janekbaraniewski/openusage/compare/v0.20.0...v0.21.0) (2026-06-11)
 
 
