@@ -308,8 +308,13 @@ func renderModelTokenBreakdown(models []modelMixEntry, innerW int, modelColors m
 		hdr.WriteString(dim.Render(padLeft(c.header, numW)))
 	}
 
+	header := dim.Bold(true).Render("  Token Breakdown")
+	if pct, ok := core.CacheHitRatio(sumIn, sumCacheR, sumCacheW); ok {
+		header += dim.Render(fmt.Sprintf(" · %.0f%% cached", pct))
+	}
+
 	lines := []string{
-		dim.Bold(true).Render("  Token Breakdown"),
+		header,
 		hdr.String(),
 	}
 

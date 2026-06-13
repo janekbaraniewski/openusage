@@ -21,7 +21,7 @@ func dashboardWidget(role core.DashboardColorRole) core.DashboardWidget {
 	return providerbase.CodingToolDashboard(
 		providerbase.WithColorRole(role),
 		providerbase.WithGaugePriority(
-			"total_tasks", "total_tokens", "total_cost_usd",
+			"total_tasks", "total_tokens", "total_cost_usd", "cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{

@@ -10,7 +10,7 @@ func dashboardWidget() core.DashboardWidget {
 		providerbase.WithColorRole(core.DashboardColorRoleLavender),
 		providerbase.WithGaugePriority(
 			"chat_quota", "completions_quota", "premium_interactions_quota", "context_window",
-			"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm",
+			"gh_core_rpm", "gh_search_rpm", "gh_graphql_rpm", "cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{Label: "Credits", Keys: []string{"chat_quota", "completions_quota", "premium_interactions_quota", "cli_cost", "cost_today", "7d_cost"}, MaxSegments: 6},

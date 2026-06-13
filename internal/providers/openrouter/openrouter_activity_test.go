@@ -509,6 +509,8 @@ func TestFetch_GenerationExtendedMetrics(t *testing.T) {
 
 	check("today_reasoning_tokens", 120)
 	check("today_cached_tokens", 80)
+	// cache_hit_ratio = native_cached / native_prompt = 80 / 900 = 8.888…%.
+	check("cache_hit_ratio", 80.0/900.0*100)
 	check("today_image_tokens", 5)
 	check("today_native_input_tokens", 900)
 	check("today_native_output_tokens", 450)

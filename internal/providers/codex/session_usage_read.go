@@ -41,6 +41,12 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 		cachedTokens := float64(total.CachedInputTokens)
 		snap.Metrics["session_cached_tokens"] = core.Metric{Used: &cachedTokens, Unit: "tokens", Window: "session"}
 
+		// Codex reports input and cached-input as disjoint prompt buckets, so
+		// the hit ratio is cached / (input + cached). No separate cache-write.
+		if m, ok := core.CacheHitRatioMetric(inputTokens, cachedTokens, 0, "session"); ok {
+			snap.Metrics["cache_hit_ratio"] = m
+		}
+
 		if total.ReasoningOutputTokens > 0 {
 			reasoning := float64(total.ReasoningOutputTokens)
 			snap.Metrics["session_reasoning_tokens"] = core.Metric{Used: &reasoning, Unit: "tokens", Window: "session"}

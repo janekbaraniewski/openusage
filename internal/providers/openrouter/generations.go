@@ -348,6 +348,19 @@ func (p *Provider) fetchGenerationStats(ctx context.Context, baseURL, apiKey str
 		if todayCached > 0 {
 			v := float64(todayCached)
 			snap.Metrics["today_cached_tokens"] = core.Metric{Used: &v, Unit: "tokens", Window: "today"}
+			// Cache hit ratio = cached / prompt. todayCached is in native tokens
+			// and is a subset of the prompt, so pair it with the native prompt
+			// count (same tokenizer units) to avoid a normalized/native mismatch.
+			if todayNativePrompt > 0 {
+				cached := float64(todayCached)
+				nonCached := float64(todayNativePrompt) - cached
+				if nonCached < 0 {
+					nonCached = 0
+				}
+				if m, ok := core.CacheHitRatioMetric(nonCached, cached, 0, "today"); ok {
+					snap.Metrics["cache_hit_ratio"] = m
+				}
+			}
 		}
 		if todayImageTokens > 0 {
 			v := float64(todayImageTokens)

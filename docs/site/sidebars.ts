@@ -135,6 +135,7 @@ const sidebars: SidebarsConfig = {
         'guides/team-tracking',
         'guides/cost-attribution',
         'guides/usage-projections',
+        'guides/cache-hit-ratio',
         'guides/cli-reports',
         'guides/tmux-integration',
         'guides/claude-code-statusline',

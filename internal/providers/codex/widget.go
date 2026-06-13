@@ -10,7 +10,7 @@ func dashboardWidget() core.DashboardWidget {
 		providerbase.WithColorRole(core.DashboardColorRoleLavender),
 		providerbase.WithGaugePriority(
 			"rate_limit_primary", "rate_limit_secondary", "rate_limit_code_review_primary", "context_window",
-			"plan_auto_percent_used", "plan_api_percent_used",
+			"plan_auto_percent_used", "plan_api_percent_used", "cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{Label: "Credits", Keys: []string{"plan_spend", "spend_limit", "individual_spend", "billing_total_cost", "today_cost", "credit_balance"}, MaxSegments: 5},

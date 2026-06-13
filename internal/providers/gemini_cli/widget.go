@@ -11,7 +11,7 @@ func dashboardWidget() core.DashboardWidget {
 		providerbase.WithGaugeMaxLines(1),
 		providerbase.WithGaugePriority(
 			"quota", "quota_pro", "quota_flash", "context_window", "tokens_today", "7d_tokens", "messages_today", "sessions_today", "tool_calls_today",
-			"client_cli_total_tokens", "client_cli_input_tokens",
+			"client_cli_total_tokens", "client_cli_input_tokens", "cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{Label: "Usage", Keys: []string{"quota", "quota_models_exhausted", "quota_models_low", "quota_models_tracked"}, MaxSegments: 4},

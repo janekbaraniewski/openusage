@@ -251,6 +251,18 @@ func applyConversationUsageProjection(snap *core.UsageSnapshot, p conversationUs
 		value := float64(p.weeklyReasoning)
 		snap.Metrics["7d_reasoning_tokens"] = core.Metric{Used: &value, Unit: "tokens", Window: "rolling 7 days"}
 	}
+	// Headline cache hit ratio over the rolling 7-day window — the provider's
+	// most stable window (matches usage_seven_day). Cache writes here are the
+	// sum of all cache-creation tokens (the 5m/1h split is a subset of the
+	// total in weeklyCacheCreate, so it is not added again).
+	if m, ok := core.CacheHitRatioMetric(
+		float64(p.weeklyInputTokens),
+		float64(p.weeklyCacheRead),
+		float64(p.weeklyCacheCreate),
+		"rolling 7 days",
+	); ok {
+		snap.Metrics["cache_hit_ratio"] = m
+	}
 	if p.weeklyToolCalls > 0 {
 		setMetricMax(snap, "7d_tool_calls", float64(p.weeklyToolCalls), "calls", "rolling 7 days")
 	}

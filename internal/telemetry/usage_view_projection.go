@@ -252,11 +252,14 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 
 	var windowRequests, windowCost, windowBillable, windowCacheRead float64
+	var windowInput, windowCacheWrite float64
 	for _, model := range agg.Models {
 		windowRequests += model.Requests
 		windowCost += model.CostUSD
 		windowBillable += model.BillableTokens
 		windowCacheRead += model.CacheReadTokens
+		windowInput += model.InputTokens
+		windowCacheWrite += model.CacheWriteTokens
 	}
 	if windowRequests > 0 {
 		snap.Metrics["window_requests"] = core.Metric{Used: core.Float64Ptr(windowRequests), Unit: "requests", Window: windowLabel}
@@ -273,6 +276,12 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 	if windowCacheRead > 0 {
 		snap.Metrics["window_cache_read_tokens"] = core.Metric{Used: core.Float64Ptr(windowCacheRead), Unit: "tokens", Window: windowLabel}
+	}
+	// cache_hit_ratio is the token-weighted share of prompt tokens served from
+	// cache (read / (input + read + write)). Computed centrally here so every
+	// telemetry-backed provider gets a window-scoped ratio from one place.
+	if m, ok := core.CacheHitRatioMetric(windowInput, windowCacheRead, windowCacheWrite, windowLabel); ok {
+		snap.Metrics["cache_hit_ratio"] = m
 	}
 
 	snap.DailySeries["analytics_cost"] = pointsFromDaily(agg.Daily, func(point telemetryDayPoint) float64 { return point.CostUSD })

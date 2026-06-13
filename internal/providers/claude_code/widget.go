@@ -10,6 +10,7 @@ func dashboardWidget() core.DashboardWidget {
 		providerbase.WithColorRole(core.DashboardColorRoleLavender),
 		providerbase.WithGaugePriority(
 			"usage_five_hour", "usage_seven_day", "usage_seven_day_sonnet", "usage_seven_day_opus", "usage_seven_day_cowork",
+			"cache_hit_ratio",
 		),
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{Label: "Credits", Keys: []string{"today_api_cost", "5h_block_cost", "7d_api_cost", "all_time_api_cost"}, MaxSegments: 5},

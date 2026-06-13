@@ -117,6 +117,18 @@ func TestFetchWithSessionData(t *testing.T) {
 		t.Error("expected session_output_tokens metric")
 	}
 
+	// cache_hit_ratio = cached / (input + cached) = 1000 / (2000 + 1000) = 33.33%.
+	if m, ok := snap.Metrics["cache_hit_ratio"]; ok {
+		if m.Used == nil || *m.Used < 33.3 || *m.Used > 33.4 {
+			t.Errorf("expected cache_hit_ratio≈33.33, got %v", m.Used)
+		}
+		if m.Unit != "%" {
+			t.Errorf("expected cache_hit_ratio unit %%, got %q", m.Unit)
+		}
+	} else {
+		t.Error("expected cache_hit_ratio metric")
+	}
+
 	if m, ok := snap.Metrics["session_reasoning_tokens"]; ok {
 		if m.Used == nil || *m.Used != 100 {
 			t.Errorf("expected session_reasoning_tokens=100, got %v", m.Used)

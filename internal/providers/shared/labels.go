@@ -22,6 +22,7 @@ var CodeStatsMetricLabels = map[string]string{
 	"scored_commits":         "Commits",
 	"total_prompts":          "Prompts",
 	"ai_code_percentage":     "AI Code",
+	"cache_hit_ratio":        "Cache Hit",
 }
 
 // CodeStatsCompactLabels are compact (tile pill) labels for code stats metrics.
@@ -32,6 +33,7 @@ var CodeStatsCompactLabels = map[string]string{
 	"scored_commits":         "commits",
 	"total_prompts":          "prompts",
 	"ai_code_percentage":     "ai %",
+	"cache_hit_ratio":        "cache hit",
 }
 
 // CodingToolHidePrefixes returns the set of metric prefixes hidden by most coding-tool providers.
