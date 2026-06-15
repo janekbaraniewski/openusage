@@ -52,6 +52,7 @@ systemctl --user daemon-reload
 
 ```bash
 brew uninstall openusage
+brew untrust janekbaraniewski/tap   # optional, if you trusted the tap
 brew untap janekbaraniewski/tap     # optional
 ```
 

@@ -241,6 +241,21 @@ jobs:
               bin.install "openusage"
             end
 
+            def caveats
+              <<~EOS
+                Homebrew 6.0+ requires third-party taps to be trusted. A trust grant
+                only covers the formula version it was made for, so each \`brew update\`
+                that bumps openusage can leave the keg installed-but-unlinked
+                ("command not found" until you run \`brew link\`).
+
+                Trust the whole tap once to keep openusage linked across upgrades:
+
+                  brew trust janekbaraniewski/tap
+
+                See https://docs.brew.sh/Tap-Trust for details.
+              EOS
+            end
+
             test do
               assert_match "openusage", shell_output("#{bin}/openusage --version 2>&1", 0)
             end

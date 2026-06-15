@@ -20,6 +20,28 @@ Upgrade later with:
 brew upgrade openusage
 ```
 
+:::warning Homebrew 6.0+ tap trust
+Homebrew 6.0 requires third-party taps to be explicitly trusted. Installing
+with the fully-qualified name above trusts only that one formula version, so a
+later `brew update` that bumps OpenUsage can leave the keg installed but
+**unlinked** — `openusage` then reports `command not found` until you run
+`brew link`.
+
+Trust the whole tap once so OpenUsage stays linked across every upgrade:
+
+```bash
+brew trust janekbaraniewski/tap
+```
+
+If you already hit the unlinked state, re-link the current keg with:
+
+```bash
+brew link janekbaraniewski/tap/openusage
+```
+
+See the [Homebrew Tap Trust docs](https://docs.brew.sh/Tap-Trust) for details.
+:::
+
 ## All platforms — install script
 
 ```bash
