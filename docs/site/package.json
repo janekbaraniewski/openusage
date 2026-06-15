@@ -24,7 +24,7 @@
     "@easyops-cn/docusaurus-search-local": "^0.55.2",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
-    "posthog-js": "^1.382.0",
+    "posthog-js": "^1.386.6",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
