@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.22.0](https://github.com/janekbaraniewski/openusage/compare/v0.21.0...v0.22.0) (2026-06-30)
+
+
+### Features
+
+* **config:** raise the retention ceiling from 90d to ~10y ([1f32f6e](https://github.com/janekbaraniewski/openusage/commit/1f32f6e71eadde7dd133024bcd8380b07840ac82))
+* **metrics:** add cache hit ratio across providers ([10cbbd9](https://github.com/janekbaraniewski/openusage/commit/10cbbd9e03d96713f89ce9c3509b774b2ffbf32f))
+* **metrics:** cache hit ratio across providers ([#213](https://github.com/janekbaraniewski/openusage/issues/213)) ([10cbbd9](https://github.com/janekbaraniewski/openusage/commit/10cbbd9e03d96713f89ce9c3509b774b2ffbf32f))
+* **telemetry:** downsample-and-keep — daily rollup + prune-after-rollup ([4bfb5fd](https://github.com/janekbaraniewski/openusage/commit/4bfb5fd55167f464f107e3d8ad889d8bc54de546))
+
+
+### Bug Fixes
+
+* **daemon:** stop the launchd restart loop on macOS ([903e2a2](https://github.com/janekbaraniewski/openusage/commit/903e2a2222829aee60ef5c60b77b8e42fd5705d0))
+* **homebrew:** surface tap-trust requirement to stop unlinked keg ([#221](https://github.com/janekbaraniewski/openusage/issues/221)) ([92aacbf](https://github.com/janekbaraniewski/openusage/commit/92aacbfc0e1332d41b70e7335da0c6b73bf3b56a)), closes [#216](https://github.com/janekbaraniewski/openusage/issues/216)
+* **telemetry:** make retention actually bound the database ([3e61f41](https://github.com/janekbaraniewski/openusage/commit/3e61f412a4026ab55b3c81796769fccc42f0d7f5))
+* **tmux:** keep the 5h usage quota visible on the status bar ([044b247](https://github.com/janekbaraniewski/openusage/commit/044b24758021e3084a27110ec72cdf02992a7c26))
+
+
+### Performance
+
+* **telemetry:** open the read model read-only ([b30047a](https://github.com/janekbaraniewski/openusage/commit/b30047aa9c348c47dd1f0142a04a8867cab6b2a6))
+
+
+### Dependencies
+
+* **deps:** bump the go-minor-and-patch group across 1 directory with 5 updates ([#233](https://github.com/janekbaraniewski/openusage/issues/233)) ([008b098](https://github.com/janekbaraniewski/openusage/commit/008b098b1ed339d6a19bbfb00e8847f32744210c))
+* **docs:** bump dompurify from 3.4.2 to 3.4.11 in /docs/site ([#228](https://github.com/janekbaraniewski/openusage/issues/228)) ([057ebf7](https://github.com/janekbaraniewski/openusage/commit/057ebf711f5340f644b3d749402a6ab08eee2ce7))
+* **docs:** bump launch-editor from 2.13.2 to 2.14.1 in /docs/site ([#225](https://github.com/janekbaraniewski/openusage/issues/225)) ([0178d1b](https://github.com/janekbaraniewski/openusage/commit/0178d1bb81f24b6d6095699c1e49dbe99f3a90fc))
+* **docs:** bump posthog-js from 1.382.0 to 1.386.6 in /docs/site in the docs-minor-and-patch group ([#217](https://github.com/janekbaraniewski/openusage/issues/217)) ([04e3daf](https://github.com/janekbaraniewski/openusage/commit/04e3daf4d141c9cddf220f64c9ed65dbf69c419e))
+* **docs:** bump posthog-js from 1.386.6 to 1.391.6 in /docs/site in the docs-minor-and-patch group ([#231](https://github.com/janekbaraniewski/openusage/issues/231)) ([aeaeaeb](https://github.com/janekbaraniewski/openusage/commit/aeaeaeb48c9091a3c16b1e38eae1b2d93541e921))
+* **docs:** bump posthog-js from 1.391.6 to 1.396.0 in /docs/site in the docs-minor-and-patch group ([#235](https://github.com/janekbaraniewski/openusage/issues/235)) ([8c5d20f](https://github.com/janekbaraniewski/openusage/commit/8c5d20f827fb68cde81025a9acf1e63996e63494))
+* **docs:** bump undici from 7.25.0 to 7.28.0 in /docs/site ([#227](https://github.com/janekbaraniewski/openusage/issues/227)) ([e64bb4d](https://github.com/janekbaraniewski/openusage/commit/e64bb4ddff67a82c1f4420fb0c0de6994c3c40ac))
+* **docs:** bump webpack-dev-server from 5.2.4 to 5.2.5 in /docs/site ([#230](https://github.com/janekbaraniewski/openusage/issues/230)) ([36fbee6](https://github.com/janekbaraniewski/openusage/commit/36fbee679acefbaabbda87d3f2e18c3a7d138744))
+* **docs:** bump ws in /docs/site ([#226](https://github.com/janekbaraniewski/openusage/issues/226)) ([13a3df6](https://github.com/janekbaraniewski/openusage/commit/13a3df66544ef5826de6d73a90a87606ae0914a9))
+* **website:** bump dompurify from 3.4.0 to 3.4.10 in /website ([#223](https://github.com/janekbaraniewski/openusage/issues/223)) ([c752ba4](https://github.com/janekbaraniewski/openusage/commit/c752ba430002b627dafb7e7202e0451cea24b706))
+* **website:** bump dompurify from 3.4.10 to 3.4.11 in /website ([#229](https://github.com/janekbaraniewski/openusage/issues/229)) ([ae40f28](https://github.com/janekbaraniewski/openusage/commit/ae40f2882ed871d6c5689e42ee6a2d2eb2be50da))
+* **website:** bump the website-minor-and-patch group across 1 directory with 4 updates ([#237](https://github.com/janekbaraniewski/openusage/issues/237)) ([bca2578](https://github.com/janekbaraniewski/openusage/commit/bca257858901df0e6d1891ca0d25215fd2ad800c))
+
 ## [0.21.0](https://github.com/janekbaraniewski/openusage/compare/v0.20.0...v0.21.0) (2026-06-11)
 
 
