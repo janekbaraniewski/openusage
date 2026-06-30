@@ -3,6 +3,8 @@ name: Dependabot rebase open PRs on main update
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -14,6 +16,7 @@ jobs:
   refresh-dependabot-prs:
     name: Refresh open Dependabot PRs
     uses: ./.github/workflows/refresh-dependabot-prs.yaml
-    secrets: inherit
+    secrets:
+      AUTOMATION_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
     permissions:
       contents: read
