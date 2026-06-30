@@ -54,16 +54,6 @@ jobs:
               return response.data;
             }
 
-            async function hasNonDependabotCommits(pullNumber) {
-              const commits = await github.paginate(github.rest.pulls.listCommits, {
-                owner,
-                repo,
-                pull_number: pullNumber,
-                per_page: 100,
-              });
-              return commits.some((commit) => commit.author?.login !== 'dependabot[bot]');
-            }
-
             const pulls = await github.paginate(github.rest.pulls.list, {
               owner,
               repo,
@@ -81,13 +71,8 @@ jobs:
                 });
                 const pull = response.data;
 
-                const hasExternalCommits = await hasNonDependabotCommits(pull.number);
-                if (pull.mergeable_state === 'dirty' || hasExternalCommits) {
-                  const reason = [
-                    pull.mergeable_state === 'dirty' ? 'merge conflicts' : '',
-                    hasExternalCommits ? 'non-Dependabot commits' : '',
-                  ].filter(Boolean).join(' and ');
-                  core.warning(`PR #${pull.number} requires manual attention (${reason}); skipping branch update.`);
+                if (pull.mergeable_state === 'dirty') {
+                  core.warning(`PR #${pull.number} requires manual attention (merge conflicts); skipping branch update.`);
                   continue;
                 }
 
