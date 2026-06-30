@@ -19,6 +19,10 @@ openusage
 
 That is the entire setup. OpenUsage auto-detects installed AI tools and API keys on your workstation, the daemon collects data in the background, and the TUI shows live data in your terminal.
 
+:::tip Homebrew 6.0+
+Run `brew trust janekbaraniewski/tap` once so OpenUsage stays linked across `brew update`. See [Install](./getting-started/install.md#macos--homebrew-recommended) for why.
+:::
+
 ![OpenUsage dashboard](/img/dashboard.png)
 
 ## Why OpenUsage
