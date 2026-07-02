@@ -2,7 +2,7 @@
 
 OpenUsage is the open-source terminal dashboard published at https://openusage.sh/ and https://github.com/janekbaraniewski/openusage.
 
-It tracks spend, quotas, rate limits, tokens, burn rate, model activity, MCP usage, and local session telemetry across 34 AI coding tools and API platforms. It also integrates with the tmux status bar, provides a Claude Code statusline, generates headless daily/weekly/monthly/session/billing-block reports, exports snapshots to JSON or CSV, looks up model pricing, and exposes a Prometheus metrics hub.
+It tracks spend, quotas, rate limits, tokens, burn rate, model activity, MCP usage, and local session telemetry across 35 AI coding tools and API platforms. It also integrates with the tmux status bar, provides a Claude Code statusline, generates headless daily/weekly/monthly/session/billing-block reports, exports snapshots to JSON or CSV, looks up model pricing, and exposes a Prometheus metrics hub.
 
 ## Brand disambiguation
 
@@ -74,7 +74,7 @@ Typical tools in that workflow include Claude Code, Codex CLI, Cursor, GitHub Co
 
 ## Supported providers
 
-34 providers across categories, and growing every release.
+35 providers across categories, and growing every release.
 
 Coding agents, CLIs, and IDE tools:
 

@@ -1,6 +1,6 @@
 # OpenUsage.sh, local quota and usage tracker for AI coding tools
 
-> Open-source terminal dashboard for tracking spend, quotas, rate limits, tokens, burn rate, model usage, and local telemetry across 34 AI coding tools and API platforms. Supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, OpenRouter, OpenAI, Anthropic, and many more. Adds tmux status-bar integration, a Claude Code statusline, headless daily/weekly/monthly/session/billing-block reports, snapshot export, model pricing lookup, and a Prometheus metrics hub.
+> Open-source terminal dashboard for tracking spend, quotas, rate limits, tokens, burn rate, model usage, and local telemetry across 35 AI coding tools and API platforms. Supports Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, OpenRouter, OpenAI, Anthropic, and many more. Adds tmux status-bar integration, a Claude Code statusline, headless daily/weekly/monthly/session/billing-block reports, snapshot export, model pricing lookup, and a Prometheus metrics hub.
 
 ## Brand disambiguation
 
@@ -52,7 +52,7 @@ Typical workflows include combinations of Claude Code, Codex CLI, Cursor, Copilo
 
 ## Supported providers
 
-34 providers across categories. The list grows every release.
+35 providers across categories. The list grows every release.
 
 - Coding agents, CLIs, and IDE tools: Claude Code, Codex CLI, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Ollama, Amp, Goose, Hermes, Kilo Code, Kimi CLI, Kiro, Roo Code, Zed, Qwen CLI, OpenClaw, Crush, Droid, Codebuff, Mux, Pi
 - API platforms: OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, Google Gemini API, Alibaba Cloud

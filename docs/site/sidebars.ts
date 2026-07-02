@@ -73,6 +73,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'providers/openai',
             'providers/anthropic',
+            'providers/azure-openai',
             'providers/openrouter',
             'providers/groq',
             'providers/mistral',

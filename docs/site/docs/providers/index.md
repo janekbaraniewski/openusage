@@ -6,7 +6,7 @@ sidebar_label: Providers
 
 # Providers
 
-OpenUsage supports 34 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
+OpenUsage supports 35 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
 
 ## Coding agents
 
@@ -122,6 +122,10 @@ These providers require an API key in an environment variable. Some return only 
   <a href="./anthropic/">
     <strong>Anthropic</strong>
     <span>RPM/TPM rate limits</span>
+  </a>
+  <a href="./azure-openai/">
+    <strong>Azure OpenAI</strong>
+    <span>RPM/TPM rate limits via Azure resource endpoint</span>
   </a>
   <a href="./openrouter/">
     <strong>OpenRouter</strong>

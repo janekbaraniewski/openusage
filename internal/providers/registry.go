@@ -7,6 +7,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/alibaba_cloud"
 	"github.com/janekbaraniewski/openusage/internal/providers/amp"
 	"github.com/janekbaraniewski/openusage/internal/providers/anthropic"
+	"github.com/janekbaraniewski/openusage/internal/providers/azure_openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/codebuff"
 	"github.com/janekbaraniewski/openusage/internal/providers/codex"
@@ -45,6 +46,7 @@ func AllProviders() []core.UsageProvider {
 	return []core.UsageProvider{
 		openai.New(),
 		anthropic.New(),
+		azure_openai.New(),
 		alibaba_cloud.New(),
 		openrouter.New(),
 		perplexity.New(),

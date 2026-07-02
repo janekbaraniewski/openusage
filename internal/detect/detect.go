@@ -402,6 +402,7 @@ type envKeyMappingEntry struct {
 var envKeyMapping = []envKeyMappingEntry{
 	{EnvVar: "OPENAI_API_KEY", Provider: "openai", AccountID: "openai", AiderShortNames: []string{"openai"}},
 	{EnvVar: "ANTHROPIC_API_KEY", Provider: "anthropic", AccountID: "anthropic", AiderShortNames: []string{"anthropic"}},
+	{EnvVar: "AZURE_OPENAI_API_KEY", Provider: "azure_openai", AccountID: "azure_openai"},
 	{EnvVar: "OPENROUTER_API_KEY", Provider: "openrouter", AccountID: "openrouter", AiderShortNames: []string{"openrouter"}},
 	{EnvVar: "GROQ_API_KEY", Provider: "groq", AccountID: "groq", AiderShortNames: []string{"groq"}},
 	{EnvVar: "MISTRAL_API_KEY", Provider: "mistral", AccountID: "mistral", AiderShortNames: []string{"mistral"}},

@@ -78,6 +78,12 @@ Tracks rate limits via lightweight header probing.
 
 Tracks rate limits via lightweight header probing.
 
+### Azure OpenAI
+
+**Detection:** `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` environment variables
+
+Tracks rate limits via lightweight header probing against your Azure OpenAI resource endpoint.
+
 ### Groq
 
 **Detection:** `GROQ_API_KEY` environment variable
