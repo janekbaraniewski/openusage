@@ -220,7 +220,8 @@ type Config struct {
 //
 // Telemetry sources (e.g. the OpenCode plugin) tag events with whatever provider id the
 // source tool uses internally. Those names don't always match openusage's internal provider
-// ids — e.g. OpenCode says "google" for the Gemini API, "github-copilot" for Copilot.
+// ids — e.g. OpenCode says "google" for the Gemini API, "github-copilot" for Copilot,
+// and "azure" for Azure OpenAI.
 // These defaults paper over the rename mismatches so users don't see "Unmapped" for
 // providers they have configured under a different name.
 //
@@ -231,6 +232,7 @@ func DefaultProviderLinks() map[string]string {
 		"anthropic":      "claude_code",
 		"google":         "gemini_api",
 		"github-copilot": "copilot",
+		"azure":          "azure_openai",
 	}
 }
 

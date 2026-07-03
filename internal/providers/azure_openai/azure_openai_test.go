@@ -85,13 +85,14 @@ func TestFetch_NoEndpoint(t *testing.T) {
 	os.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
 	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
 	os.Unsetenv(endpointEnv)
+	os.Unsetenv(resourceNameEnv)
 
 	p := New()
 	acct := core.AccountConfig{
 		ID:        "test-azure",
 		Provider:  "azure_openai",
 		APIKeyEnv: "TEST_AZURE_OPENAI_KEY",
-		// no BaseURL and no AZURE_OPENAI_ENDPOINT
+		// no BaseURL, no AZURE_OPENAI_ENDPOINT, no AZURE_RESOURCE_NAME
 	}
 
 	snap, err := p.Fetch(context.Background(), acct)
@@ -101,9 +102,49 @@ func TestFetch_NoEndpoint(t *testing.T) {
 	if snap.Status != core.StatusAuth {
 		t.Errorf("Status = %v, want AUTH_REQUIRED for missing endpoint", snap.Status)
 	}
-	if !strings.Contains(snap.Message, endpointEnv) {
-		t.Errorf("Message = %q, want it to mention %s", snap.Message, endpointEnv)
+	if !strings.Contains(snap.Message, resourceNameEnv) {
+		t.Errorf("Message = %q, want it to mention %s", snap.Message, resourceNameEnv)
 	}
+}
+
+func TestResolveEndpoint(t *testing.T) {
+	os.Unsetenv(endpointEnv)
+	os.Unsetenv(resourceNameEnv)
+
+	t.Run("base_url wins over both env vars", func(t *testing.T) {
+		t.Setenv(endpointEnv, "https://from-endpoint-env.openai.azure.com")
+		t.Setenv(resourceNameEnv, "from-resource-name")
+		got := resolveEndpoint(core.AccountConfig{BaseURL: "https://from-base-url.openai.azure.com/"})
+		if want := "https://from-base-url.openai.azure.com"; got != want {
+			t.Errorf("resolveEndpoint() = %q, want %q (trailing slash trimmed)", got, want)
+		}
+	})
+
+	t.Run("endpoint env wins over resource name", func(t *testing.T) {
+		t.Setenv(endpointEnv, "https://from-endpoint-env.openai.azure.com")
+		t.Setenv(resourceNameEnv, "from-resource-name")
+		got := resolveEndpoint(core.AccountConfig{})
+		if want := "https://from-endpoint-env.openai.azure.com"; got != want {
+			t.Errorf("resolveEndpoint() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("resource name builds standard endpoint", func(t *testing.T) {
+		os.Unsetenv(endpointEnv)
+		t.Setenv(resourceNameEnv, "my-resource")
+		got := resolveEndpoint(core.AccountConfig{})
+		if want := "https://my-resource.openai.azure.com"; got != want {
+			t.Errorf("resolveEndpoint() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nothing configured yields empty", func(t *testing.T) {
+		os.Unsetenv(endpointEnv)
+		os.Unsetenv(resourceNameEnv)
+		if got := resolveEndpoint(core.AccountConfig{}); got != "" {
+			t.Errorf("resolveEndpoint() = %q, want empty", got)
+		}
+	})
 }
 
 func TestFetch_EndpointFromEnv(t *testing.T) {

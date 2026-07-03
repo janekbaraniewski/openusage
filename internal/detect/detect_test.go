@@ -165,6 +165,47 @@ func TestDetectEnvKeys_FindsOpenCodeKey(t *testing.T) {
 	}
 }
 
+func TestDetectEnvKeys_FindsAzureKey(t *testing.T) {
+	t.Setenv("AZURE_API_KEY", "azure-test-key-123456")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	found := false
+	for _, acct := range result.Accounts {
+		if acct.Provider == "azure_openai" && acct.APIKeyEnv == "AZURE_API_KEY" && acct.ID == "azure_openai" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected AZURE_API_KEY to be detected as azure_openai")
+	}
+}
+
+func TestDetectEnvKeys_AzureOpenAIKeyWinsOverAzureKey(t *testing.T) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "azure-openai-test-key")
+	t.Setenv("AZURE_API_KEY", "azure-test-key")
+
+	var result Result
+	detectEnvKeys(&result)
+
+	count := 0
+	var apiKeyEnv string
+	for _, acct := range result.Accounts {
+		if acct.ID == "azure_openai" {
+			count++
+			apiKeyEnv = acct.APIKeyEnv
+		}
+	}
+	if count != 1 {
+		t.Fatalf("azure_openai account count = %d, want 1 (deduped by ID)", count)
+	}
+	if apiKeyEnv != "AZURE_OPENAI_API_KEY" {
+		t.Errorf("APIKeyEnv = %q, want AZURE_OPENAI_API_KEY to win (listed first)", apiKeyEnv)
+	}
+}
+
 func TestDetectEnvKeys_FindsZAIKeys(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "zai-test-key-123456")
 	t.Setenv("ZHIPUAI_API_KEY", "zhipuai-test-key-123456")

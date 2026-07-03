@@ -14,7 +14,7 @@ Azure OpenAI serves the same models as OpenAI but through a different endpoint l
 ## At a glance
 
 - **Provider ID** — `azure_openai`
-- **Detection** — `AZURE_OPENAI_API_KEY` environment variable
+- **Detection** — `AZURE_OPENAI_API_KEY` or `AZURE_API_KEY` environment variable
 - **Auth** — API key (`api-key` header)
 - **Type** — API platform (header-only rate limits)
 - **Tracks**:
@@ -23,16 +23,33 @@ Azure OpenAI serves the same models as OpenAI but through a different endpoint l
 
 ## Setup
 
-Azure OpenAI needs two things: an API key **and** your resource endpoint.
+Azure OpenAI needs two things: an API key **and** your resource location.
 
 ### Auto-detection
 
-Set both `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`. OpenUsage registers the provider on next start; the endpoint is read from `AZURE_OPENAI_ENDPOINT` when the account has no `base_url`.
+Set an API key and your resource name. OpenUsage registers the provider on next
+start.
 
 ```bash
-export AZURE_OPENAI_API_KEY="<your-key>"
-export AZURE_OPENAI_ENDPOINT="https://my-resource.openai.azure.com"
+export AZURE_API_KEY="<your-key>"          # or AZURE_OPENAI_API_KEY
+export AZURE_RESOURCE_NAME="my-resource"   # builds https://my-resource.openai.azure.com
 ```
+
+These are the same environment variables [OpenCode](./opencode.md) uses, so a
+single configuration drives both tools — see [Using with OpenCode](#using-with-opencode).
+
+The API key is accepted from either `AZURE_API_KEY` or `AZURE_OPENAI_API_KEY`
+(when both are set, `AZURE_OPENAI_API_KEY` wins). The endpoint is resolved in
+this order:
+
+1. the account's `base_url`,
+2. `AZURE_OPENAI_ENDPOINT`,
+3. `AZURE_RESOURCE_NAME` → `https://<name>.openai.azure.com`.
+
+Use `base_url` or `AZURE_OPENAI_ENDPOINT` (full URL) for **non-standard
+endpoints** — sovereign clouds (e.g. `*.openai.azure.us`) or custom domains —
+where the `*.openai.azure.com` template does not apply. If none of the three is
+set, the tile reports that an endpoint must be configured.
 
 ### Manual configuration
 
@@ -42,14 +59,12 @@ export AZURE_OPENAI_ENDPOINT="https://my-resource.openai.azure.com"
     {
       "id": "azure-openai",
       "provider": "azure_openai",
-      "api_key_env": "AZURE_OPENAI_API_KEY",
+      "api_key_env": "AZURE_API_KEY",
       "base_url": "https://my-resource.openai.azure.com"
     }
   ]
 }
 ```
-
-`base_url` is your Azure OpenAI resource endpoint. If it is omitted, OpenUsage falls back to the `AZURE_OPENAI_ENDPOINT` environment variable. If neither is set, the tile reports that an endpoint must be configured.
 
 ## Data sources & how each metric is computed
 
@@ -57,7 +72,7 @@ OpenUsage sends one `GET {endpoint}/openai/deployments?api-version=2024-10-21` p
 
 Request headers:
 
-- `api-key: $AZURE_OPENAI_API_KEY`
+- `api-key: $AZURE_API_KEY` (or `$AZURE_OPENAI_API_KEY`)
 
 ### `rpm` — requests per minute
 
@@ -103,11 +118,32 @@ Azure attaches `x-ratelimit-*` headers primarily to inference responses. The dep
 - Rate limits, when present, reflect the resource's quota for the probed operation.
 - The probe is a single request per poll cycle — negligible cost, no tokens spent.
 
+## Using with OpenCode
+
+When you drive Azure OpenAI **through [OpenCode](./opencode.md)** rather than
+calling the API directly, the spend and token usage come from OpenCode's
+telemetry, which tags those events with the provider id `azure`. OpenUsage ships
+a built-in provider link — `azure` → `azure_openai` — so that usage is
+**automatically attributed to the Azure OpenAI tile with no extra
+configuration**. (This is the same mechanism that routes OpenCode's Gemini usage
+to the Gemini tile via `google` → `gemini_api`.)
+
+The two data paths complement each other on the same tile:
+
+- **Direct probe** (this provider) → RPM/TPM rate limits.
+- **OpenCode telemetry** (via the `azure` link) → per-model token usage and cost.
+
+Because OpenUsage and OpenCode share the `AZURE_API_KEY` / `AZURE_RESOURCE_NAME`
+environment variables, one set of exports configures both. If you had previously
+added a manual `azure` → `azure_openai` entry under `telemetry.provider_links`,
+you can remove it — the default now covers it.
+
 ## Troubleshooting
 
-- **Endpoint not configured** — set `AZURE_OPENAI_ENDPOINT` or the account's `base_url` to `https://<resource>.openai.azure.com`.
-- **Auth failed** — verify `AZURE_OPENAI_API_KEY` matches a key from the resource's *Keys and Endpoint* blade; rotate if leaked.
+- **Endpoint not configured** — set `AZURE_RESOURCE_NAME` (e.g. `my-resource`), or `AZURE_OPENAI_ENDPOINT` / the account's `base_url` to the full `https://<resource>.openai.azure.com`.
+- **Auth failed** — verify `AZURE_API_KEY` (or `AZURE_OPENAI_API_KEY`) matches a key from the resource's *Keys and Endpoint* blade; rotate if leaked.
 - **No RPM/TPM data** — the resource may not attach rate-limit headers to the deployments listing; the tile still reports connectivity.
+- **Azure usage shows on a different tile / as unmapped** — make sure the Azure OpenAI tile exists (set `AZURE_API_KEY` so the provider is detected); OpenCode's `azure`-tagged telemetry only attaches once an `azure_openai` account is configured.
 
 ## Related
 

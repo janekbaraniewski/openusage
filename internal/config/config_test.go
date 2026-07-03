@@ -759,6 +759,7 @@ func TestDefaultProviderLinks(t *testing.T) {
 		"anthropic":      "claude_code",
 		"google":         "gemini_api",
 		"github-copilot": "copilot",
+		"azure":          "azure_openai",
 	}
 	for source, target := range want {
 		if got := links[source]; got != target {
