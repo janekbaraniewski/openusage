@@ -105,6 +105,7 @@ API platforms:
 
 - OpenAI
 - Anthropic
+- Azure OpenAI
 - OpenRouter
 - Groq
 - Mistral

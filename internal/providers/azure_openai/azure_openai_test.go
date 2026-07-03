@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -25,8 +24,7 @@ func TestFetch_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
-	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
+	t.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
 
 	p := New()
 	acct := core.AccountConfig{
@@ -63,7 +61,7 @@ func TestFetch_Success(t *testing.T) {
 }
 
 func TestFetch_AuthRequired(t *testing.T) {
-	os.Unsetenv("TEST_AZURE_OPENAI_MISSING")
+	t.Setenv("TEST_AZURE_OPENAI_MISSING", "")
 
 	p := New()
 	acct := core.AccountConfig{
@@ -82,10 +80,9 @@ func TestFetch_AuthRequired(t *testing.T) {
 }
 
 func TestFetch_NoEndpoint(t *testing.T) {
-	os.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
-	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
-	os.Unsetenv(endpointEnv)
-	os.Unsetenv(resourceNameEnv)
+	t.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
+	t.Setenv(endpointEnv, "")
+	t.Setenv(resourceNameEnv, "")
 
 	p := New()
 	acct := core.AccountConfig{
@@ -108,8 +105,8 @@ func TestFetch_NoEndpoint(t *testing.T) {
 }
 
 func TestResolveEndpoint(t *testing.T) {
-	os.Unsetenv(endpointEnv)
-	os.Unsetenv(resourceNameEnv)
+	t.Setenv(endpointEnv, "")
+	t.Setenv(resourceNameEnv, "")
 
 	t.Run("base_url wins over both env vars", func(t *testing.T) {
 		t.Setenv(endpointEnv, "https://from-endpoint-env.openai.azure.com")
@@ -130,7 +127,7 @@ func TestResolveEndpoint(t *testing.T) {
 	})
 
 	t.Run("resource name builds standard endpoint", func(t *testing.T) {
-		os.Unsetenv(endpointEnv)
+		t.Setenv(endpointEnv, "")
 		t.Setenv(resourceNameEnv, "my-resource")
 		got := resolveEndpoint(core.AccountConfig{})
 		if want := "https://my-resource.openai.azure.com"; got != want {
@@ -139,8 +136,8 @@ func TestResolveEndpoint(t *testing.T) {
 	})
 
 	t.Run("nothing configured yields empty", func(t *testing.T) {
-		os.Unsetenv(endpointEnv)
-		os.Unsetenv(resourceNameEnv)
+		t.Setenv(endpointEnv, "")
+		t.Setenv(resourceNameEnv, "")
 		if got := resolveEndpoint(core.AccountConfig{}); got != "" {
 			t.Errorf("resolveEndpoint() = %q, want empty", got)
 		}
@@ -154,10 +151,8 @@ func TestFetch_EndpointFromEnv(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
-	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
-	os.Setenv(endpointEnv, server.URL+"/")
-	defer os.Unsetenv(endpointEnv)
+	t.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
+	t.Setenv(endpointEnv, server.URL+"/")
 
 	p := New()
 	acct := core.AccountConfig{
@@ -183,8 +178,7 @@ func TestFetch_RateLimited(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
-	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
+	t.Setenv("TEST_AZURE_OPENAI_KEY", "test-key-value")
 
 	p := New()
 	acct := core.AccountConfig{
@@ -210,8 +204,7 @@ func TestFetch_AuthFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("TEST_AZURE_OPENAI_KEY", "bad-key")
-	defer os.Unsetenv("TEST_AZURE_OPENAI_KEY")
+	t.Setenv("TEST_AZURE_OPENAI_KEY", "bad-key")
 
 	p := New()
 	acct := core.AccountConfig{
