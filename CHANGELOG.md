@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/janekbaraniewski/openusage/compare/v0.22.0...v0.23.0) (2026-07-05)
+
+
+### Features
+
+* **azure:** adopt OpenCode env vars and auto-link OpenCode Azure usage ([26050fe](https://github.com/janekbaraniewski/openusage/commit/26050fe3ca2f858017cd261e69ce528afbdad655))
+* **providers:** add Azure OpenAI Service provider ([#1](https://github.com/janekbaraniewski/openusage/issues/1)) ([38f6a90](https://github.com/janekbaraniewski/openusage/commit/38f6a90b3b4b118441f290f02cea4f90aed70fac))
+
+
+### Bug Fixes
+
+* **azure:** address PR review — t.Setenv in tests, sync provider counts ([2abd452](https://github.com/janekbaraniewski/openusage/commit/2abd452321f8e6e0cc4d19f0bd1ae07ba5a1e258))
+
 ## [0.22.0](https://github.com/janekbaraniewski/openusage/compare/v0.21.0...v0.22.0) (2026-06-30)
 
 
