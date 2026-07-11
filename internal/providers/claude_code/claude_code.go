@@ -436,12 +436,21 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.UsageSnapshot) error {
 	cookies, err := getClaudeSessionCookies()
 	if err != nil {
+		usage, oauthErr := fetchUsageAPIOAuth(ctx)
+		if oauthErr == nil {
+			p.setCachedUsage(usage)
+			applyUsageResponse(usage, snap, time.Now())
+			cacheFiveHourFromSnapshot(snap)
+			snap.Raw["usage_api_ok"] = "true"
+			snap.Raw["usage_api_source"] = "oauth"
+			return nil
+		}
 		if cached := p.getCachedUsage(); cached != nil {
 			applyUsageResponse(cached, snap, time.Now())
 			snap.Raw["usage_api_cached"] = "true"
 			return nil
 		}
-		return fmt.Errorf("cookie extraction: %w", err)
+		return fmt.Errorf("cookie extraction: %v; oauth fallback: %w", err, oauthErr)
 	}
 
 	usage, err := fetchUsageAPI(ctx, orgUUID, cookies)

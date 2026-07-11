@@ -224,3 +224,87 @@ func fetchUsageAPI(ctx context.Context, orgUUID string, cookies map[string]strin
 
 	return &usage, nil
 }
+
+// oauthUsageURL is Anthropic's OAuth-scoped usage endpoint. It is a package
+// variable rather than a constant so tests can point it at an httptest server.
+var oauthUsageURL = "https://api.anthropic.com/api/oauth/usage"
+
+// readClaudeCodeOAuthToken loads the Claude Code CLI's OAuth access token from
+// ~/.claude/.credentials.json. It errors if the file is missing, the token is
+// absent, or the token has already expired (Claude Code refreshes it on next
+// use, so a stale value would only produce 401s).
+func readClaudeCodeOAuthToken() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home directory: %w", err)
+	}
+
+	credsPath := filepath.Join(home, ".claude", ".credentials.json")
+	credsData, err := os.ReadFile(credsPath)
+	if err != nil {
+		return "", fmt.Errorf("reading Claude Code credentials: %w", err)
+	}
+
+	var creds struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+			ExpiresAt   int64  `json:"expiresAt"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(credsData, &creds); err != nil {
+		return "", fmt.Errorf("parsing Claude Code credentials: %w", err)
+	}
+	token := creds.ClaudeAiOauth.AccessToken
+	if token == "" {
+		return "", fmt.Errorf("no OAuth access token in %s", credsPath)
+	}
+	if exp := creds.ClaudeAiOauth.ExpiresAt; exp > 0 && time.Now().UnixMilli() >= exp {
+		return "", fmt.Errorf("Claude Code OAuth token expired (refreshed on next Claude Code use)")
+	}
+	return token, nil
+}
+
+// fetchUsageAPIOAuth queries Anthropic's OAuth usage endpoint with the Claude
+// Code CLI's own access token. This is the fallback where desktop-app cookie
+// extraction is unavailable (anywhere but macOS), and it needs no org UUID:
+// the token is scoped to the account. The endpoint returns the same
+// five_hour/seven_day utilization shape as the claude.ai usage API, so the
+// response decodes into the same struct.
+func fetchUsageAPIOAuth(ctx context.Context) (*usageResponse, error) {
+	token, err := readClaudeCodeOAuthToken()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", oauthUsageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	var usage usageResponse
+	if err := json.Unmarshal(body, &usage); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+
+	return &usage, nil
+}

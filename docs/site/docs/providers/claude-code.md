@@ -146,6 +146,12 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - Source: `GET https://claude.ai/api/organizations/{org_uuid}/usage` with session cookies imported via Settings → 5 KEYS. Returns aggregate per-day usage for the entire organization.
 - Transform: when available, the response is cached in memory and applied on top of the local data. Errors fall back to the cached response (if any) so transient failures don't blank the tile.
 
+### 5h / 7d utilization gauge (`usage_five_hour`, `usage_seven_day`)
+
+- Source (macOS): the Claude **desktop app's** session cookies, decrypted from the macOS keychain, are used to call the usage API above.
+- Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
+- Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
+
 ### Auth status
 
 - Source: derived from data presence. If neither `stats-cache.json`, `~/.claude.json`, nor any JSONL produced data, status becomes `error` (`No Claude Code stats data accessible`). Otherwise `ok` with the message `Claude Code CLI · costs are API-equivalent estimates, not subscription charges`.
@@ -171,7 +177,8 @@ On Linux the provider also probes `~/.config/claude/projects/` as a fallback.
 
 ## API endpoints used
 
-- Optional: `GET https://claude.ai/api/organizations/{org_uuid}/usage` — only when browser-session cookies are imported. See [Daemon integrations](../daemon/integrations.md).
+- Optional: `GET https://claude.ai/api/organizations/{org_uuid}/usage` — only when browser-session cookies are imported (macOS desktop app). See [Daemon integrations](../daemon/integrations.md).
+- Optional: `GET https://api.anthropic.com/api/oauth/usage` — off-macOS fallback for the 5h/7d utilization gauge, authenticated with the Claude Code OAuth token from `~/.claude/.credentials.json`.
 
 ## Caveats
 
