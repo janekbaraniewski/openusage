@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
@@ -43,7 +44,7 @@ func New() *Provider {
 			ID: "opencode",
 			Info: core.ProviderInfo{
 				Name:         "OpenCode",
-				Capabilities: []string{"zen_models_endpoint", "telemetry_driven_metrics"},
+				Capabilities: []string{"zen_models_endpoint", "telemetry_driven_metrics", "console_billing", "subscription_usage"},
 				DocURL:       "https://opencode.ai/docs/",
 			},
 			Auth: core.ProviderAuthSpec{
@@ -62,6 +63,38 @@ func New() *Provider {
 					"Tile spend / model / activity metrics are populated from the OpenCode telemetry plugin; see Settings → 7 INTEG.",
 				},
 			},
+			Dashboard: providerbase.DefaultDashboard(
+				providerbase.WithColorRole(core.DashboardColorRoleBlue),
+				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "console_balance", "monthly_limit"),
+				providerbase.WithCompactRows(
+					core.DashboardCompactRow{
+						Label:       "Quota",
+						Keys:        []string{"rolling_usage", "weekly_usage"},
+						MaxSegments: 2,
+					},
+					core.DashboardCompactRow{
+						Label:       "Credits",
+						Keys:        []string{"console_balance", "monthly_usage", "monthly_limit"},
+						MaxSegments: 3,
+					},
+				),
+				providerbase.WithMetricLabels(map[string]string{
+					"rolling_usage":    "5h Usage",
+					"weekly_usage":     "Weekly",
+					"console_balance":  "Balance",
+					"monthly_usage":    "Month Spend",
+					"monthly_limit":    "Month Limit",
+					"reload_amount":    "Reload",
+					"reload_trigger":   "Reload At",
+				}),
+				providerbase.WithCompactLabels(map[string]string{
+					"rolling_usage":   "5h",
+					"weekly_usage":    "wk",
+					"console_balance": "bal",
+					"monthly_usage":   "mo",
+					"monthly_limit":   "cap",
+				}),
+			),
 		}),
 	}
 }
@@ -135,7 +168,14 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	shared.FinalizeStatus(&snap)
 	if snap.Status == core.StatusOK {
 		if bal, ok := snap.Metrics["console_balance"]; ok && bal.Remaining != nil {
-			snap.Message = fmt.Sprintf("$%.2f balance · %d Zen models", *bal.Remaining, len(models.Data))
+			msg := fmt.Sprintf("$%.2f balance · %d Zen models", *bal.Remaining, len(models.Data))
+			if rolling, ok := snap.Metrics["rolling_usage"]; ok && rolling.Used != nil {
+				msg += fmt.Sprintf(" · %.0f%% 5h", *rolling.Used)
+			}
+			if weekly, ok := snap.Metrics["weekly_usage"]; ok && weekly.Used != nil {
+				msg += fmt.Sprintf(" · %.0f%% weekly", *weekly.Used)
+			}
+			snap.Message = msg
 		} else {
 			snap.Message = fmt.Sprintf("Auth OK · %d Zen models", len(models.Data))
 		}
@@ -165,24 +205,46 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 		}
 	}
 	client.WorkspaceID = workspaceID
-	billing, err := client.QueryBillingInfo(ctx)
-	if err != nil {
-		return err
+
+	// Fetch billing info and subscription usage concurrently.
+	type billingResult struct {
+		info BillingInfo
+		err  error
+	}
+	type subscriptionResult struct {
+		usage SubscriptionUsage
+		err   error
 	}
 
-	// Map billing fields into provider-tile metric keys. Cents-based
-	// internal representation (formatBalance / 1e8 in OpenCode's UI) is
-	// kept as raw numbers in our snapshots; the dashboard widget will
-	// format them.
-	available := billing.Balance / 1e8
-	usage := billing.MonthlyUsage / 1e8
+	billingCh := make(chan billingResult, 1)
+	subscriptionCh := make(chan subscriptionResult, 1)
+
+	go func() {
+		info, err := client.QueryBillingInfo(ctx)
+		billingCh <- billingResult{info, err}
+	}()
+	go func() {
+		usage, err := client.QuerySubscriptionUsage(ctx, workspaceID)
+		subscriptionCh <- subscriptionResult{usage, err}
+	}()
+
+	billing := <-billingCh
+	subscription := <-subscriptionCh
+
+	// Process billing info.
+	if billing.err != nil {
+		return billing.err
+	}
+
+	available := billing.info.Balance / 1e8
+	usage := billing.info.MonthlyUsage / 1e8
 	snap.Metrics["console_balance"] = core.Metric{
 		Remaining: core.Float64Ptr(available),
 		Unit:      "USD",
 		Window:    "current",
 	}
-	if billing.MonthlyLimit != nil {
-		limit := *billing.MonthlyLimit / 1e8
+	if billing.info.MonthlyLimit != nil {
+		limit := *billing.info.MonthlyLimit / 1e8
 		snap.Metrics["monthly_limit"] = core.Metric{
 			Limit:     core.Float64Ptr(limit),
 			Used:      core.Float64Ptr(usage),
@@ -197,26 +259,60 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 		Window: "month",
 	}
 	snap.Metrics["reload_amount"] = core.Metric{
-		Limit: core.Float64Ptr(billing.ReloadAmount / 1e8),
+		Limit: core.Float64Ptr(billing.info.ReloadAmount / 1e8),
 		Unit:  "USD",
 	}
 	snap.Metrics["reload_trigger"] = core.Metric{
-		Limit: core.Float64Ptr(billing.ReloadTrigger / 1e8),
+		Limit: core.Float64Ptr(billing.info.ReloadTrigger / 1e8),
 		Unit:  "USD",
 	}
 
-	if billing.SubscriptionPlan != "" {
-		snap.SetAttribute("subscription_plan", billing.SubscriptionPlan)
+	if billing.info.SubscriptionPlan != "" {
+		snap.SetAttribute("subscription_plan", billing.info.SubscriptionPlan)
 	}
-	if billing.HasSubscription {
+	if billing.info.HasSubscription {
 		snap.SetAttribute("subscription_status", "active")
 	}
-	if billing.PaymentMethodLast4 != "" {
-		snap.SetAttribute("payment_method_last4", billing.PaymentMethodLast4)
+	if billing.info.PaymentMethodLast4 != "" {
+		snap.SetAttribute("payment_method_last4", billing.info.PaymentMethodLast4)
 	}
-	if billing.PaymentMethodType != "" {
-		snap.SetAttribute("payment_method_type", billing.PaymentMethodType)
+	if billing.info.PaymentMethodType != "" {
+		snap.SetAttribute("payment_method_type", billing.info.PaymentMethodType)
 	}
+
+	// Process subscription usage (rolling 5h + weekly percentages).
+	if subscription.err == nil {
+		if subscription.usage.RollingUsagePct > 0 {
+			snap.Metrics["rolling_usage"] = core.Metric{
+				Used:   core.Float64Ptr(subscription.usage.RollingUsagePct),
+				Limit:  core.Float64Ptr(100),
+				Unit:   "percent",
+				Window: "rolling-5h",
+			}
+			if subscription.usage.RollingResetSec > 0 {
+				snap.Resets["rolling_usage_reset"] = snap.Timestamp.Add(
+					time.Duration(subscription.usage.RollingResetSec) * time.Second)
+			}
+		}
+		if subscription.usage.WeeklyUsagePct > 0 {
+			snap.Metrics["weekly_usage"] = core.Metric{
+				Used:   core.Float64Ptr(subscription.usage.WeeklyUsagePct),
+				Limit:  core.Float64Ptr(100),
+				Unit:   "percent",
+				Window: "7d",
+			}
+			if subscription.usage.WeeklyResetSec > 0 {
+				snap.Resets["weekly_usage_reset"] = snap.Timestamp.Add(
+					time.Duration(subscription.usage.WeeklyResetSec) * time.Second)
+			}
+		}
+		if subscription.usage.RenewAt != "" {
+			snap.SetAttribute("subscription_renew_at", subscription.usage.RenewAt)
+		}
+	} else {
+		snap.SetDiagnostic("opencode_subscription_usage_error", subscription.err.Error())
+	}
+
 	snap.SetAttribute("auth_scope", "zen+console")
 	snap.SetAttribute("console_session_browser", session.SourceBrowser)
 
