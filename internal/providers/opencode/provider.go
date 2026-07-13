@@ -111,7 +111,10 @@ type modelsResponse struct {
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	apiKey, authSnap := shared.RequireAPIKey(acct, p.ID())
-	if authSnap != nil {
+	hasBrowserSession := acct.BrowserCookie != nil
+
+	// If no API key and no browser session configured, require auth.
+	if authSnap != nil && !hasBrowserSession {
 		return *authSnap, nil
 	}
 
@@ -120,31 +123,38 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap.SetAttribute("auth_scope", "zen")
 	snap.SetAttribute("api_base_url", baseURL)
 
-	var models modelsResponse
-	statusCode, _, err := shared.FetchJSON(ctx, baseURL+modelsPath, apiKey, &models, p.Client())
-	if err != nil {
-		switch statusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			snap.Status = core.StatusAuth
-			snap.Message = fmt.Sprintf("HTTP %d – check OPENCODE_API_KEY", statusCode)
-			return snap, nil
-		case http.StatusTooManyRequests:
-			snap.Status = core.StatusLimited
-			snap.Message = "rate limited (HTTP 429)"
-			return snap, nil
-		}
-		return snap, fmt.Errorf("opencode zen models: %w", err)
-	}
-
-	if len(models.Data) > 0 {
-		ids := make([]string, 0, len(models.Data))
-		for _, m := range models.Data {
-			if id := strings.TrimSpace(m.ID); id != "" {
-				ids = append(ids, id)
+	// Try Zen API key probe if we have a key.
+	if authSnap == nil {
+		var models modelsResponse
+		statusCode, _, err := shared.FetchJSON(ctx, baseURL+modelsPath, apiKey, &models, p.Client())
+		if err != nil {
+			switch statusCode {
+			case http.StatusUnauthorized, http.StatusForbidden:
+				snap.Status = core.StatusAuth
+				snap.Message = fmt.Sprintf("HTTP %d – check OPENCODE_API_KEY", statusCode)
+				return snap, nil
+			case http.StatusTooManyRequests:
+				snap.Status = core.StatusLimited
+				snap.Message = "rate limited (HTTP 429)"
+				return snap, nil
+			}
+			// If we have a browser session, don't fail on Zen API errors —
+			// the console enrichment can still provide useful data.
+			if !hasBrowserSession {
+				return snap, fmt.Errorf("opencode zen models: %w", err)
 			}
 		}
-		snap.SetAttribute("available_models", strings.Join(ids, ", "))
-		snap.SetAttribute("available_models_count", fmt.Sprintf("%d", len(ids)))
+
+		if len(models.Data) > 0 {
+			ids := make([]string, 0, len(models.Data))
+			for _, m := range models.Data {
+				if id := strings.TrimSpace(m.ID); id != "" {
+					ids = append(ids, id)
+				}
+			}
+			snap.SetAttribute("available_models", strings.Join(ids, ", "))
+			snap.SetAttribute("available_models_count", fmt.Sprintf("%d", len(ids)))
+		}
 	}
 
 	// Optional: enrich the snapshot with console-side data (balance,
@@ -169,8 +179,12 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	shared.FinalizeStatus(&snap)
 	if snap.Status == core.StatusOK {
+		modelCount := snap.Attributes["available_models_count"]
 		if bal, ok := snap.Metrics["console_balance"]; ok && bal.Remaining != nil {
-			msg := fmt.Sprintf("$%.2f balance · %d Zen models", *bal.Remaining, len(models.Data))
+			msg := fmt.Sprintf("$%.2f balance", *bal.Remaining)
+			if modelCount != "" {
+				msg += fmt.Sprintf(" · %s Zen models", modelCount)
+			}
 			if rolling, ok := snap.Metrics["rolling_usage"]; ok && rolling.Used != nil {
 				msg += fmt.Sprintf(" · %.0f%% 5h", *rolling.Used)
 			}
@@ -178,8 +192,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 				msg += fmt.Sprintf(" · %.0f%% weekly", *weekly.Used)
 			}
 			snap.Message = msg
+		} else if modelCount != "" {
+			snap.Message = fmt.Sprintf("Auth OK · %s Zen models", modelCount)
 		} else {
-			snap.Message = fmt.Sprintf("Auth OK · %d Zen models", len(models.Data))
+			snap.Message = "Auth OK"
 		}
 	}
 	return snap, nil
