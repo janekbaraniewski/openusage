@@ -155,7 +155,7 @@ func (m Model) settingsModalHint() string {
 		if m.settings.apiKeyEditing {
 			return "Type API key  ·  Enter: validate & save  ·  Esc: cancel"
 		}
-		if m.hasBrowserSessionRows(m.apiKeysTabIDs()) {
+		if m.selectedAPIKeyRowSupportsBrowserSession() {
 			return "Up/Down: select  ·  Enter: edit key  ·  c: read browser cookie  ·  b: open site  ·  x: disconnect browser  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"

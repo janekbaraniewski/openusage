@@ -100,17 +100,17 @@ func (m Model) apiKeysTabIDs() []string {
 	return ids
 }
 
-// hasBrowserSessionRows reports whether the Keys tab has at least one
-// browser-session-capable provider — controls whether the c/b/x
-// keybindings (read cookie / open site / disconnect) are relevant, since
-// they only apply to browser-session rows.
-func (m Model) hasBrowserSessionRows(ids []string) bool {
-	for _, id := range ids {
-		if supportsBrowserSessionProvider(providerForAccountID(id, m.accountProviders)) {
-			return true
-		}
+// selectedAPIKeyRowSupportsBrowserSession reports whether the Keys tab row
+// currently under the cursor supports browser-session auth — controls
+// whether the c/b/x keybindings (read cookie / open site / disconnect) are
+// shown in the footer, since they only do something on that specific row.
+func (m Model) selectedAPIKeyRowSupportsBrowserSession() bool {
+	ids := m.apiKeysTabIDs()
+	if len(ids) == 0 {
+		return false
 	}
-	return false
+	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
+	return supportsBrowserSessionProvider(providerForAccountID(ids[cursor], m.accountProviders))
 }
 
 func providerForAccountID(accountID string, accountProviders map[string]string) string {
