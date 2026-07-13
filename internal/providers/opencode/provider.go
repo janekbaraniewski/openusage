@@ -65,12 +65,12 @@ func New() *Provider {
 			},
 			Dashboard: providerbase.DefaultDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
-				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "console_balance", "monthly_limit"),
+				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "monthly_usage_pct", "console_balance", "monthly_limit"),
 				providerbase.WithCompactRows(
 					core.DashboardCompactRow{
 						Label:       "Quota",
-						Keys:        []string{"rolling_usage", "weekly_usage"},
-						MaxSegments: 2,
+						Keys:        []string{"rolling_usage", "weekly_usage", "monthly_usage_pct"},
+						MaxSegments: 3,
 					},
 					core.DashboardCompactRow{
 						Label:       "Credits",
@@ -79,20 +79,22 @@ func New() *Provider {
 					},
 				),
 				providerbase.WithMetricLabels(map[string]string{
-					"rolling_usage":    "5h Usage",
-					"weekly_usage":     "Weekly",
-					"console_balance":  "Balance",
-					"monthly_usage":    "Month Spend",
-					"monthly_limit":    "Month Limit",
-					"reload_amount":    "Reload",
-					"reload_trigger":   "Reload At",
+					"rolling_usage":     "5h Usage",
+					"weekly_usage":      "Weekly",
+					"monthly_usage_pct": "Monthly",
+					"console_balance":   "Balance",
+					"monthly_usage":     "Month Spend",
+					"monthly_limit":     "Month Limit",
+					"reload_amount":     "Reload",
+					"reload_trigger":    "Reload At",
 				}),
 				providerbase.WithCompactLabels(map[string]string{
-					"rolling_usage":   "5h",
-					"weekly_usage":    "wk",
-					"console_balance": "bal",
-					"monthly_usage":   "mo",
-					"monthly_limit":   "cap",
+					"rolling_usage":     "5h",
+					"weekly_usage":      "wk",
+					"monthly_usage_pct": "mo",
+					"console_balance":   "bal",
+					"monthly_usage":     "mo$",
+					"monthly_limit":     "cap",
 				}),
 			),
 		}),
@@ -206,45 +208,56 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 	}
 	client.WorkspaceID = workspaceID
 
-	// Fetch billing info and subscription usage concurrently.
-	type billingResult struct {
-		info BillingInfo
-		err  error
-	}
-	type subscriptionResult struct {
-		usage SubscriptionUsage
-		err   error
+	// Fetch billing info and subscription usage from the Go usage page HTML.
+	// This is more reliable than individual RPC calls whose content-hash
+	// IDs rotate on every backend deploy. The page embeds both billing.get
+	// and lite.subscription.get data in a Seroval script blob.
+	type pageResult struct {
+		subscription SubscriptionUsage
+		billing      BillingInfo
+		err          error
 	}
 
-	billingCh := make(chan billingResult, 1)
-	subscriptionCh := make(chan subscriptionResult, 1)
-
+	pageCh := make(chan pageResult, 1)
 	go func() {
-		info, err := client.QueryBillingInfo(ctx)
-		billingCh <- billingResult{info, err}
-	}()
-	go func() {
-		usage, err := client.QuerySubscriptionUsage(ctx, workspaceID)
-		subscriptionCh <- subscriptionResult{usage, err}
+		sub, bill, err := client.FetchGoUsagePage(ctx, workspaceID)
+		pageCh <- pageResult{sub, bill, err}
 	}()
 
-	billing := <-billingCh
-	subscription := <-subscriptionCh
+	page := <-pageCh
+
+	// If HTML scraping fails, fall back to individual RPC calls.
+	var billing BillingInfo
+	var subscription SubscriptionUsage
+	billingFailed := false
+
+	if page.err != nil {
+		snap.SetDiagnostic("opencode_page_scrape_error", page.err.Error())
+		billingFailed = true
+	} else {
+		billing = page.billing
+		subscription = page.subscription
+	}
+
+	// Fallback: try individual billing RPC if page scraping didn't get billing data.
+	if billingFailed || (billing.Balance == 0 && billing.MonthlyUsage == 0 && billing.MonthlyLimit == nil) {
+		billingRPC, err := client.QueryBillingInfo(ctx)
+		if err == nil {
+			billing = billingRPC
+			billingFailed = false
+		}
+	}
 
 	// Process billing info.
-	if billing.err != nil {
-		return billing.err
-	}
-
-	available := billing.info.Balance / 1e8
-	usage := billing.info.MonthlyUsage / 1e8
+	available := billing.Balance / 1e8
+	usage := billing.MonthlyUsage / 1e8
 	snap.Metrics["console_balance"] = core.Metric{
 		Remaining: core.Float64Ptr(available),
 		Unit:      "USD",
 		Window:    "current",
 	}
-	if billing.info.MonthlyLimit != nil {
-		limit := *billing.info.MonthlyLimit / 1e8
+	if billing.MonthlyLimit != nil {
+		limit := *billing.MonthlyLimit / 1e8
 		snap.Metrics["monthly_limit"] = core.Metric{
 			Limit:     core.Float64Ptr(limit),
 			Used:      core.Float64Ptr(usage),
@@ -259,58 +272,65 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 		Window: "month",
 	}
 	snap.Metrics["reload_amount"] = core.Metric{
-		Limit: core.Float64Ptr(billing.info.ReloadAmount / 1e8),
+		Limit: core.Float64Ptr(billing.ReloadAmount / 1e8),
 		Unit:  "USD",
 	}
 	snap.Metrics["reload_trigger"] = core.Metric{
-		Limit: core.Float64Ptr(billing.info.ReloadTrigger / 1e8),
+		Limit: core.Float64Ptr(billing.ReloadTrigger / 1e8),
 		Unit:  "USD",
 	}
 
-	if billing.info.SubscriptionPlan != "" {
-		snap.SetAttribute("subscription_plan", billing.info.SubscriptionPlan)
+	if billing.SubscriptionPlan != "" {
+		snap.SetAttribute("subscription_plan", billing.SubscriptionPlan)
 	}
-	if billing.info.HasSubscription {
+	if billing.HasSubscription {
 		snap.SetAttribute("subscription_status", "active")
 	}
-	if billing.info.PaymentMethodLast4 != "" {
-		snap.SetAttribute("payment_method_last4", billing.info.PaymentMethodLast4)
+	if billing.PaymentMethodLast4 != "" {
+		snap.SetAttribute("payment_method_last4", billing.PaymentMethodLast4)
 	}
-	if billing.info.PaymentMethodType != "" {
-		snap.SetAttribute("payment_method_type", billing.info.PaymentMethodType)
+	if billing.PaymentMethodType != "" {
+		snap.SetAttribute("payment_method_type", billing.PaymentMethodType)
 	}
 
-	// Process subscription usage (rolling 5h + weekly percentages).
-	if subscription.err == nil {
-		if subscription.usage.RollingUsagePct > 0 {
+	// Process subscription usage (rolling 5h + weekly + monthly percentages).
+	if subscription.RollingUsagePct > 0 || subscription.WeeklyUsagePct > 0 || subscription.MonthlyUsagePct > 0 {
+		if subscription.RollingUsagePct > 0 {
 			snap.Metrics["rolling_usage"] = core.Metric{
-				Used:   core.Float64Ptr(subscription.usage.RollingUsagePct),
+				Used:   core.Float64Ptr(subscription.RollingUsagePct),
 				Limit:  core.Float64Ptr(100),
 				Unit:   "percent",
 				Window: "rolling-5h",
 			}
-			if subscription.usage.RollingResetSec > 0 {
+			if subscription.RollingResetSec > 0 {
 				snap.Resets["rolling_usage_reset"] = snap.Timestamp.Add(
-					time.Duration(subscription.usage.RollingResetSec) * time.Second)
+					time.Duration(subscription.RollingResetSec) * time.Second)
 			}
 		}
-		if subscription.usage.WeeklyUsagePct > 0 {
+		if subscription.WeeklyUsagePct > 0 {
 			snap.Metrics["weekly_usage"] = core.Metric{
-				Used:   core.Float64Ptr(subscription.usage.WeeklyUsagePct),
+				Used:   core.Float64Ptr(subscription.WeeklyUsagePct),
 				Limit:  core.Float64Ptr(100),
 				Unit:   "percent",
 				Window: "7d",
 			}
-			if subscription.usage.WeeklyResetSec > 0 {
+			if subscription.WeeklyResetSec > 0 {
 				snap.Resets["weekly_usage_reset"] = snap.Timestamp.Add(
-					time.Duration(subscription.usage.WeeklyResetSec) * time.Second)
+					time.Duration(subscription.WeeklyResetSec) * time.Second)
 			}
 		}
-		if subscription.usage.RenewAt != "" {
-			snap.SetAttribute("subscription_renew_at", subscription.usage.RenewAt)
+		if subscription.MonthlyUsagePct > 0 {
+			snap.Metrics["monthly_usage_pct"] = core.Metric{
+				Used:   core.Float64Ptr(subscription.MonthlyUsagePct),
+				Limit:  core.Float64Ptr(100),
+				Unit:   "percent",
+				Window: "month",
+			}
+			if subscription.MonthlyResetSec > 0 {
+				snap.Resets["monthly_usage_reset"] = snap.Timestamp.Add(
+					time.Duration(subscription.MonthlyResetSec) * time.Second)
+			}
 		}
-	} else {
-		snap.SetDiagnostic("opencode_subscription_usage_error", subscription.err.Error())
 	}
 
 	snap.SetAttribute("auth_scope", "zen+console")

@@ -316,12 +316,14 @@ func parseWorkspaceIDsFromBody(body string) []string {
 }
 
 // SubscriptionUsage is the parsed shape of a subscription.get response.
-// Contains rolling 5-hour and weekly usage percentages with reset timers.
+// Contains rolling 5-hour, weekly, and monthly usage percentages with reset timers.
 type SubscriptionUsage struct {
 	RollingUsagePct float64
 	RollingResetSec int
 	WeeklyUsagePct  float64
 	WeeklyResetSec  int
+	MonthlyUsagePct float64
+	MonthlyResetSec int
 	RenewAt         string
 }
 
@@ -482,6 +484,182 @@ func (c *ConsoleClient) do(req *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("console: http %d: %s", resp.StatusCode, shortenBody(body))
 	}
 	return body, nil
+}
+
+// CallGETRaw is a debug helper that performs a GET-style server function call
+// and returns the raw response body. Not for production use.
+func (c *ConsoleClient) CallGETRaw(ctx context.Context, fnID string, args ...any) ([]byte, error) {
+	return c.callGET(ctx, fnID, args...)
+}
+
+// FetchPageRaw fetches a page from the OpenCode console with cookie auth.
+// Used for scraping the Go usage page HTML.
+func (c *ConsoleClient) FetchPageRaw(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.applyHeaders(req, "")
+	return c.do(req)
+}
+
+// FetchGoUsagePage fetches the OpenCode Go usage page and extracts billing
+// and subscription usage data from the embedded Seroval script. This is more
+// reliable than individual RPC calls whose IDs rotate on every deploy.
+func (c *ConsoleClient) FetchGoUsagePage(ctx context.Context, workspaceID string) (SubscriptionUsage, BillingInfo, error) {
+	if workspaceID == "" {
+		return SubscriptionUsage{}, BillingInfo{}, errors.New("console: workspace ID required")
+	}
+
+	url := fmt.Sprintf("%s/workspace/%s/go", c.baseURL, workspaceID)
+	body, err := c.FetchPageRaw(ctx, url)
+	if err != nil {
+		return SubscriptionUsage{}, BillingInfo{}, fmt.Errorf("console: fetch go page: %w", err)
+	}
+
+	html := string(body)
+	if looksSignedOutFromHTML(html) {
+		return SubscriptionUsage{}, BillingInfo{}, &ConsoleAuthError{StatusCode: 401, Body: "page indicates signed out"}
+	}
+
+	subscription, billing := parseGoUsagePageHTML(html)
+	return subscription, billing, nil
+}
+
+// looksSignedOutFromHTML checks if an HTML response indicates the user is
+// not authenticated.
+func looksSignedOutFromHTML(html string) bool {
+	lower := strings.ToLower(html)
+	return strings.Contains(lower, "sign in") ||
+		strings.Contains(lower, "login") ||
+		strings.Contains(lower, "auth/authorize")
+}
+
+// parseGoUsagePageHTML extracts billing and subscription usage data from the
+// embedded Seroval script in the OpenCode Go usage page HTML.
+func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
+	subscription := SubscriptionUsage{}
+	billing := BillingInfo{}
+
+	// Extract the main Seroval script blob
+	scriptRE := regexp.MustCompile(`self\.\$R=self\.\$R\|\|\[\].*`)
+	scriptMatch := scriptRE.FindString(html)
+	if scriptMatch == "" {
+		return subscription, billing
+	}
+
+	// Extract billing data by finding the billing.get assignment followed by
+	// the billing fields object. The pattern is:
+	// billing.get["wrk_..."]}=$R[N]=$R[M]($R[O]={...billing fields...})
+	billingObjRE := regexp.MustCompile(`billing\.get\["[^"]*"\].*?\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := billingObjRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		billing = parseBillingFields(matches[1])
+	}
+
+	// Extract subscription usage. The pattern is:
+	// rollingUsage:$R[N]={status:"ok",resetInSec:N,usagePercent:N},...
+	// Note: field order varies; use independent extractions.
+	rollingBlockRE := regexp.MustCompile(`rollingUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := rollingBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v := extractFloatField(block, "usagePercent"); v > 0 {
+			subscription.RollingUsagePct = v
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.RollingResetSec = int(v)
+		}
+	}
+
+	weeklyBlockRE := regexp.MustCompile(`weeklyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := weeklyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v := extractFloatField(block, "usagePercent"); v > 0 {
+			subscription.WeeklyUsagePct = v
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.WeeklyResetSec = int(v)
+		}
+	}
+
+	monthlyBlockRE := regexp.MustCompile(`monthlyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := monthlyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v := extractFloatField(block, "usagePercent"); v > 0 {
+			subscription.MonthlyUsagePct = v
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.MonthlyResetSec = int(v)
+		}
+	}
+
+	return subscription, billing
+}
+
+// parseBillingFields extracts billing info from a Seroval object fragment
+// like: customerID:"cus_xxx",balance:0,reloadAmount:20,...
+func parseBillingFields(fields string) BillingInfo {
+	b := BillingInfo{}
+	b.CustomerID = extractStringField(fields, "customerID")
+	b.PaymentMethodType = extractStringField(fields, "paymentMethodType")
+	b.SubscriptionPlan = extractStringField(fields, "subscriptionPlan")
+
+	if v := extractFloatField(fields, "balance"); v != 0 {
+		b.Balance = v
+	}
+	if v := extractFloatField(fields, "reloadAmount"); v != 0 {
+		b.ReloadAmount = v
+	}
+	if v := extractFloatField(fields, "reloadTrigger"); v != 0 {
+		b.ReloadTrigger = v
+	}
+
+	if v := extractNullableFloat(fields, "monthlyLimit"); v != nil {
+		b.MonthlyLimit = v
+	}
+	if v := extractNullableFloat(fields, "monthlyUsage"); v != nil {
+		b.MonthlyUsage = *v
+	}
+
+	if strings.Contains(fields, "subscriptionID:") && !strings.Contains(fields, "subscriptionID:null") {
+		b.HasSubscription = true
+	}
+
+	return b
+}
+
+// extractStringField pulls a string value from a Seroval object fragment.
+// Handles: field:"value" and field:null
+func extractStringField(fields, key string) string {
+	re := regexp.MustCompile(key + `:"([^"]*)"`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+// extractFloatField pulls a numeric value from a Seroval object fragment.
+// Handles: field:123, field:0, field:1.5
+func extractFloatField(fields, key string) float64 {
+	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		f, _ := strconv.ParseFloat(matches[1], 64)
+		return f
+	}
+	return 0
+}
+
+// extractNullableFloat pulls a nullable numeric value from a Seroval fragment.
+// Returns nil for null, pointer to value otherwise.
+func extractNullableFloat(fields, key string) *float64 {
+	re := regexp.MustCompile(key + `:(null|-?[0-9]+(?:\.[0-9]+)?)`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		if matches[1] == "null" {
+			return nil
+		}
+		f, _ := strconv.ParseFloat(matches[1], 64)
+		return &f
+	}
+	return nil
 }
 
 func shortenBody(b []byte) string {
