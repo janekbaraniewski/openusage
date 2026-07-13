@@ -67,6 +67,11 @@ func New() *Provider {
 			Dashboard: providerbase.DefaultDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
 				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "monthly_usage_pct", "console_balance", "monthly_limit"),
+				// OpenCode Zen quota has three meaningful usage-window
+				// percentages (5h / 7d / ~30d monthly) — the default cap of 2
+				// gauge lines would always bump the monthly figure in favor
+				// of the two shorter windows.
+				providerbase.WithGaugeMaxLines(3),
 				providerbase.WithCompactRows(
 					core.DashboardCompactRow{
 						Label:       "Quota",
