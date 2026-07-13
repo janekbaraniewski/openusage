@@ -317,12 +317,19 @@ func parseWorkspaceIDsFromBody(body string) []string {
 
 // SubscriptionUsage is the parsed shape of a subscription.get response.
 // Contains rolling 5-hour, weekly, and monthly usage percentages with reset timers.
+//
+// The *OK fields distinguish "field present in the response with a value of
+// 0" from "field absent" — a usagePercent of 0 is a legitimate reading (the
+// quota window just reset) and must not be treated the same as "not found".
 type SubscriptionUsage struct {
 	RollingUsagePct float64
+	RollingUsageOK  bool
 	RollingResetSec int
 	WeeklyUsagePct  float64
+	WeeklyUsageOK   bool
 	WeeklyResetSec  int
 	MonthlyUsagePct float64
+	MonthlyUsageOK  bool
 	MonthlyResetSec int
 	RenewAt         string
 }
@@ -562,8 +569,9 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
 	rollingBlockRE := regexp.MustCompile(`rollingUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := rollingBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v := extractFloatField(block, "usagePercent"); v > 0 {
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
 			subscription.RollingUsagePct = v
+			subscription.RollingUsageOK = true
 		}
 		if v := extractFloatField(block, "resetInSec"); v > 0 {
 			subscription.RollingResetSec = int(v)
@@ -573,8 +581,9 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
 	weeklyBlockRE := regexp.MustCompile(`weeklyUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := weeklyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v := extractFloatField(block, "usagePercent"); v > 0 {
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
 			subscription.WeeklyUsagePct = v
+			subscription.WeeklyUsageOK = true
 		}
 		if v := extractFloatField(block, "resetInSec"); v > 0 {
 			subscription.WeeklyResetSec = int(v)
@@ -584,8 +593,9 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
 	monthlyBlockRE := regexp.MustCompile(`monthlyUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := monthlyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v := extractFloatField(block, "usagePercent"); v > 0 {
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
 			subscription.MonthlyUsagePct = v
+			subscription.MonthlyUsageOK = true
 		}
 		if v := extractFloatField(block, "resetInSec"); v > 0 {
 			subscription.MonthlyResetSec = int(v)
@@ -635,6 +645,19 @@ func extractStringField(fields, key string) string {
 		return matches[1]
 	}
 	return ""
+}
+
+// extractFloatFieldOK pulls a numeric value from a Seroval object fragment,
+// reporting via ok whether the field was present at all — distinguishing
+// "field:0" (found, value 0) from "field absent" (not found).
+func extractFloatFieldOK(fields, key string) (float64, bool) {
+	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+	matches := re.FindStringSubmatch(fields)
+	if len(matches) < 2 {
+		return 0, false
+	}
+	f, _ := strconv.ParseFloat(matches[1], 64)
+	return f, true
 }
 
 // extractFloatField pulls a numeric value from a Seroval object fragment.

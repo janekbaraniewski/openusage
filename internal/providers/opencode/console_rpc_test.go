@@ -324,3 +324,43 @@ func TestParseSubscriptionUsageFallback(t *testing.T) {
 		t.Errorf("WeeklyResetSec = %v, want 180000", got.WeeklyResetSec)
 	}
 }
+
+func TestParseGoUsagePageHTML_ZeroUsagePercentIsNotDroppedAsMissing(t *testing.T) {
+	html := `<html><script>self.$R=self.$R||[];` +
+		`billing.get["wrk_x"]}=$R[1]=$R[2]($R[3]={balance:0,reloadAmount:2000000000,reloadTrigger:500000000});` +
+		`rollingUsage:$R[4]={status:"ok",resetInSec:1800,usagePercent:0};` +
+		`weeklyUsage:$R[5]={status:"ok",resetInSec:200000,usagePercent:12.5};` +
+		`monthlyUsage:$R[6]={status:"ok",resetInSec:900000,usagePercent:0};` +
+		`</script></html>`
+
+	subscription, _ := parseGoUsagePageHTML(html)
+
+	if !subscription.RollingUsageOK {
+		t.Fatalf("RollingUsageOK = false, want true (usagePercent:0 is a legitimate reading, not a missing field)")
+	}
+	if subscription.RollingUsagePct != 0 {
+		t.Errorf("RollingUsagePct = %v, want 0", subscription.RollingUsagePct)
+	}
+	if !subscription.WeeklyUsageOK || subscription.WeeklyUsagePct != 12.5 {
+		t.Errorf("WeeklyUsageOK/Pct = %v/%v, want true/12.5", subscription.WeeklyUsageOK, subscription.WeeklyUsagePct)
+	}
+	if !subscription.MonthlyUsageOK {
+		t.Fatalf("MonthlyUsageOK = false, want true (usagePercent:0 is a legitimate reading, not a missing field)")
+	}
+	if subscription.MonthlyUsagePct != 0 {
+		t.Errorf("MonthlyUsagePct = %v, want 0", subscription.MonthlyUsagePct)
+	}
+}
+
+func TestParseGoUsagePageHTML_MissingBlockLeavesUsageOKFalse(t *testing.T) {
+	html := `<html><script>self.$R=self.$R||[];` +
+		`billing.get["wrk_x"]}=$R[1]=$R[2]($R[3]={balance:0,reloadAmount:0,reloadTrigger:0});` +
+		`</script></html>`
+
+	subscription, _ := parseGoUsagePageHTML(html)
+
+	if subscription.RollingUsageOK || subscription.WeeklyUsageOK || subscription.MonthlyUsageOK {
+		t.Errorf("expected all *UsageOK flags false when no usage blocks are present, got rolling=%v weekly=%v monthly=%v",
+			subscription.RollingUsageOK, subscription.WeeklyUsageOK, subscription.MonthlyUsageOK)
+	}
+}

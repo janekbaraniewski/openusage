@@ -160,9 +160,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	// Optional: enrich the snapshot with console-side data (balance,
 	// monthly usage, subscription) when a browser-session cookie is
-	// configured for this account. Failures are non-fatal — the
-	// API-key probe already succeeded above, the snapshot is in a good
-	// state, we just skip the enrichment and surface a hint.
+	// configured for this account. Failures are non-fatal when we already
+	// have a validated Zen API key — the snapshot is in a good state, we
+	// just skip the enrichment and surface a hint.
 	if err := p.enrichFromConsole(ctx, acct, &snap); err != nil {
 		// Distinguish "no cookie configured" (silent) from "cookie
 		// rejected" (loud diagnostic for the tile).
@@ -175,6 +175,19 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			// expected when user hasn't connected a browser session
 		default:
 			snap.Raw["console_error"] = err.Error()
+		}
+
+		// We never validated a Zen API key (authSnap != nil, so the probe
+		// above was skipped) and console enrichment also failed to produce
+		// usable data. Without this, shared.FinalizeStatus would default
+		// the still-empty snap.Status to StatusOK — reporting a healthy
+		// tile for an account that has neither a working API key nor a
+		// working browser session.
+		if authSnap != nil && snap.Status == "" {
+			snap.Status = authSnap.Status
+			if authSnap.Message != "" {
+				snap.Message = authSnap.Message
+			}
 		}
 	}
 
@@ -208,7 +221,10 @@ var errNoCookieConfigured = errors.New("opencode: no browser session configured"
 // without refreshing from the browser. This avoids the destructive refresh in
 // LoadOrRefreshBrowserSession that overwrites stored sessions when multiple
 // accounts use different browsers for the same domain.
-func loadStoredSession(accountID string) (config.BrowserSession, bool, error) {
+//
+// A package-level var (not a plain func) so tests can stub it — mirrors the
+// loadBrowserSession/newConsoleClient seams above.
+var loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
 	return config.LoadSession(accountID)
 }
 
@@ -268,11 +284,34 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 	}
 
 	// Fallback: try individual billing RPC if page scraping didn't get billing data.
+	var fallbackErr error
 	if billingFailed || (billing.Balance == 0 && billing.MonthlyUsage == 0 && billing.MonthlyLimit == nil) {
 		billingRPC, err := client.QueryBillingInfo(ctx)
 		if err == nil {
 			billing = billingRPC
 			billingFailed = false
+		} else if billingFailed {
+			// Only treat the fallback's error as fatal when the primary page
+			// scrape had already failed. If the page scrape succeeded with a
+			// genuine zero balance, a failing fallback isn't itself a problem.
+			fallbackErr = err
+		}
+	}
+
+	if billingFailed {
+		// Both the page scrape and the billing RPC fallback failed. Return
+		// the error instead of falling through to write zero-valued billing
+		// metrics into the snapshot as if they were real data — that would
+		// present "$0.00 balance" for what may actually be an expired
+		// session that needs reauthentication.
+		var authErr *ConsoleAuthError
+		switch {
+		case errors.As(fallbackErr, &authErr):
+			return fallbackErr
+		case errors.As(page.err, &authErr):
+			return page.err
+		default:
+			return fmt.Errorf("opencode console: billing unavailable (page scrape: %v, fallback: %v)", page.err, fallbackErr)
 		}
 	}
 
@@ -322,8 +361,10 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 	}
 
 	// Process subscription usage (rolling 5h + weekly + monthly percentages).
-	if subscription.RollingUsagePct > 0 || subscription.WeeklyUsagePct > 0 || subscription.MonthlyUsagePct > 0 {
-		if subscription.RollingUsagePct > 0 {
+	// Gate on the *OK presence flags, not value > 0 — a legitimate 0% reading
+	// (quota window just reset) must still populate the metric.
+	if subscription.RollingUsageOK || subscription.WeeklyUsageOK || subscription.MonthlyUsageOK {
+		if subscription.RollingUsageOK {
 			snap.Metrics["rolling_usage"] = core.Metric{
 				Used:   core.Float64Ptr(subscription.RollingUsagePct),
 				Limit:  core.Float64Ptr(100),
@@ -335,7 +376,7 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 					time.Duration(subscription.RollingResetSec) * time.Second)
 			}
 		}
-		if subscription.WeeklyUsagePct > 0 {
+		if subscription.WeeklyUsageOK {
 			snap.Metrics["weekly_usage"] = core.Metric{
 				Used:   core.Float64Ptr(subscription.WeeklyUsagePct),
 				Limit:  core.Float64Ptr(100),
@@ -347,7 +388,7 @@ func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfi
 					time.Duration(subscription.WeeklyResetSec) * time.Second)
 			}
 		}
-		if subscription.MonthlyUsagePct > 0 {
+		if subscription.MonthlyUsageOK {
 			snap.Metrics["monthly_usage_pct"] = core.Metric{
 				Used:   core.Float64Ptr(subscription.MonthlyUsagePct),
 				Limit:  core.Float64Ptr(100),
