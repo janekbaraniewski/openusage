@@ -10,12 +10,12 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/klauspost/compress v1.19.0
-	github.com/mattn/go-sqlite3 v1.14.47
+	github.com/mattn/go-sqlite3 v1.14.48
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.53.0
-	golang.org/x/mod v0.37.0
-	golang.org/x/term v0.44.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/mod v0.38.0
+	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -47,12 +47,12 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zalando/go-keyring v0.2.7 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260508192327-42602be52be6 // indirect
-	golang.org/x/text v0.38.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
+	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 )
 
