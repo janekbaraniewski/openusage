@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
@@ -203,12 +204,23 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 var errNoCookieConfigured = errors.New("opencode: no browser session configured")
 
+// loadStoredSession reads a browser session directly from the credentials file
+// without refreshing from the browser. This avoids the destructive refresh in
+// LoadOrRefreshBrowserSession that overwrites stored sessions when multiple
+// accounts use different browsers for the same domain.
+func loadStoredSession(accountID string) (config.BrowserSession, bool, error) {
+	return config.LoadSession(accountID)
+}
+
 // enrichFromConsole loads the stored browser session for the account, calls
 // the OpenCode console RPCs, and merges the results into the snapshot's
 // metrics + attributes. Returns errNoCookieConfigured when the user hasn't
 // opted in to browser-session auth.
 func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) error {
-	session, ok, err := loadBrowserSession(ctx, acct, nil)
+	// Load directly from stored credentials to avoid the browser refresh
+	// in LoadOrRefreshBrowserSession, which can overwrite stored sessions
+	// when multiple accounts use different browsers for the same domain.
+	session, ok, err := loadStoredSession(acct.ID)
 	if err != nil || !ok || session.Value == "" {
 		return errNoCookieConfigured
 	}
