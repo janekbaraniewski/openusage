@@ -11,12 +11,21 @@ import (
 	"time"
 )
 
-// writeCredentials drops a fake ~/.claude/.credentials.json under a temp HOME
-// and points os.UserHomeDir at it via HOME.
-func writeCredentials(t *testing.T, body string) {
+// setTempHome points os.UserHomeDir at a fresh temp dir. HOME covers
+// Unix-likes; USERPROFILE is what os.UserHomeDir reads on Windows.
+func setTempHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+// writeCredentials drops a fake ~/.claude/.credentials.json under a temp home
+// directory.
+func writeCredentials(t *testing.T, body string) {
+	t.Helper()
+	home := setTempHome(t)
 	dir := filepath.Join(home, ".claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -84,7 +93,7 @@ func TestReadClaudeCodeOAuthToken(t *testing.T) {
 }
 
 func TestReadClaudeCodeOAuthToken_MissingFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // no .claude/.credentials.json
+	setTempHome(t) // no .claude/.credentials.json
 	if _, err := readClaudeCodeOAuthToken(); err == nil {
 		t.Fatal("expected error for missing credentials file")
 	}
