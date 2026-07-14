@@ -3,6 +3,7 @@ package claude_code
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,9 @@ import (
 
 type Provider struct {
 	providerbase.Base
-	mu            sync.Mutex
-	usageAPICache *usageResponse // last successful Usage API response
+	mu                  sync.Mutex
+	usageAPICache       *usageResponse // last successful Usage API response
+	lastUsageAuthSource string         // name of the usageAuthSource that last succeeded; empty until a first success
 
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
@@ -433,42 +435,156 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
+// usageAuthSource is one way of authenticating against the usage API.
+// prepare resolves credentials and, on success, returns the URL to call and
+// a closure that applies auth headers to the request; it errs without
+// making a request if the credential it needs (cookies, an OAuth token)
+// isn't available.
+type usageAuthSource struct {
+	name    string
+	prepare func() (url string, setAuth func(*http.Request), err error)
+}
+
+// usageAuthSources lists the auth sources in priority order: cookie/org
+// (macOS desktop app) first, then the CLI's own OAuth token as the fallback
+// used everywhere the desktop app's session cookies aren't available.
+func (p *Provider) usageAuthSources(orgUUID string) []usageAuthSource {
+	return []usageAuthSource{
+		{
+			name: "cookie",
+			prepare: func() (string, func(*http.Request), error) {
+				cookies, err := getClaudeSessionCookies()
+				if err != nil {
+					return "", nil, err
+				}
+				url := fmt.Sprintf("https://claude.ai/api/organizations/%s/usage", orgUUID)
+				return url, cookieAuthHeaders(cookies), nil
+			},
+		},
+		{
+			name: "oauth",
+			prepare: func() (string, func(*http.Request), error) {
+				token, err := readClaudeCodeOAuthToken()
+				if err != nil {
+					return "", nil, err
+				}
+				return oauthUsageURL, oauthAuthHeaders(token), nil
+			},
+		},
+	}
+}
+
+// cookieAuthHeaders builds the auth closure for the cookie/org usage source:
+// the desktop app's session cookies plus the browser-shaped headers the
+// claude.ai endpoint expects. Kept separate from getClaudeSessionCookies so
+// the header scheme can be tested without macOS keychain/cookie access.
+func cookieAuthHeaders(cookies map[string]string) func(*http.Request) {
+	return func(req *http.Request) {
+		var cookieParts []string
+		for name, value := range cookies {
+			cookieParts = append(cookieParts, fmt.Sprintf("%s=%s", name, value))
+		}
+		req.Header.Set("Cookie", strings.Join(cookieParts, "; "))
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+		req.Header.Set("Referer", "https://claude.ai/settings/usage")
+		req.Header.Set("anthropic-client-platform", "web_claude_ai")
+	}
+}
+
+// oauthAuthHeaders builds the auth closure for the OAuth usage source: the
+// Claude Code CLI's own bearer token. Kept separate from
+// readClaudeCodeOAuthToken so the header scheme can be tested without a
+// credentials file on disk.
+func oauthAuthHeaders(token string) func(*http.Request) {
+	return func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	}
+}
+
+// readUsageAPI resolves usage data through one of usageAuthSources. Once a
+// source has succeeded, it's pinned (p.lastUsageAuthSource) and later calls
+// go straight to it instead of re-probing every source on every poll; if the
+// pinned source stops working, the pin is cleared so the next call re-scans
+// all sources from scratch.
 func (p *Provider) readUsageAPI(ctx context.Context, orgUUID string, snap *core.UsageSnapshot) error {
-	cookies, err := getClaudeSessionCookies()
-	if err != nil {
-		usage, oauthErr := fetchUsageAPIOAuth(ctx)
-		if oauthErr == nil {
-			p.setCachedUsage(usage)
-			applyUsageResponse(usage, snap, time.Now())
-			cacheFiveHourFromSnapshot(snap)
-			snap.Raw["usage_api_ok"] = "true"
-			snap.Raw["usage_api_source"] = "oauth"
+	sources := p.usageAuthSources(orgUUID)
+
+	if pinned := p.getLastUsageAuthSource(); pinned != "" {
+		src, ok := findUsageAuthSource(sources, pinned)
+		if ok {
+			if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
+				return nil
+			}
+			p.setLastUsageAuthSource("")
+		}
+		if p.applyCachedUsage(snap) {
 			return nil
 		}
-		if cached := p.getCachedUsage(); cached != nil {
-			applyUsageResponse(cached, snap, time.Now())
-			snap.Raw["usage_api_cached"] = "true"
-			return nil
-		}
-		return fmt.Errorf("cookie extraction: %v; oauth fallback: %w", err, oauthErr)
+		return fmt.Errorf("%s auth source (previously successful) failed and no cached usage available", pinned)
 	}
 
-	usage, err := fetchUsageAPI(ctx, orgUUID, cookies)
-	if err != nil {
-		if cached := p.getCachedUsage(); cached != nil {
-			applyUsageResponse(cached, snap, time.Now())
-			snap.Raw["usage_api_cached"] = "true"
+	var errs []string
+	for _, src := range sources {
+		if err := p.tryUsageAuthSource(ctx, src, snap); err == nil {
 			return nil
+		} else {
+			errs = append(errs, fmt.Sprintf("%s: %v", src.name, err))
 		}
-		return fmt.Errorf("API fetch: %w", err)
 	}
 
+	if p.applyCachedUsage(snap) {
+		return nil
+	}
+	return fmt.Errorf("all usage API sources failed: %s", strings.Join(errs, "; "))
+}
+
+func findUsageAuthSource(sources []usageAuthSource, name string) (usageAuthSource, bool) {
+	for _, src := range sources {
+		if src.name == name {
+			return src, true
+		}
+	}
+	return usageAuthSource{}, false
+}
+
+// tryUsageAuthSource attempts a single auth source. On success it applies
+// the fetched usage to snap and pins the source for subsequent calls.
+func (p *Provider) tryUsageAuthSource(ctx context.Context, src usageAuthSource, snap *core.UsageSnapshot) error {
+	url, setAuth, err := src.prepare()
+	if err != nil {
+		return err
+	}
+	usage, err := fetchUsageAPIWithAuth(ctx, url, setAuth)
+	if err != nil {
+		return err
+	}
+	p.applyFetchedUsage(usage, snap, src.name)
+	p.setLastUsageAuthSource(src.name)
+	return nil
+}
+
+// applyFetchedUsage records a freshly fetched usage response as the shared
+// cache and applies it to snap. source names which auth source produced it
+// (e.g. "cookie", "oauth").
+func (p *Provider) applyFetchedUsage(usage *usageResponse, snap *core.UsageSnapshot, source string) {
 	p.setCachedUsage(usage)
 	applyUsageResponse(usage, snap, time.Now())
 	cacheFiveHourFromSnapshot(snap)
-
 	snap.Raw["usage_api_ok"] = "true"
-	return nil
+	snap.Raw["usage_api_source"] = source
+}
+
+// applyCachedUsage applies the last cached usage response to snap, if any,
+// reporting whether a cached value was available.
+func (p *Provider) applyCachedUsage(snap *core.UsageSnapshot) bool {
+	cached := p.getCachedUsage()
+	if cached == nil {
+		return false
+	}
+	applyUsageResponse(cached, snap, time.Now())
+	snap.Raw["usage_api_cached"] = "true"
+	return true
 }
 
 // cacheFiveHourFromSnapshot persists the freshly-resolved 5h usage % to the
@@ -495,4 +611,16 @@ func (p *Provider) setCachedUsage(u *usageResponse) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.usageAPICache = u
+}
+
+func (p *Provider) getLastUsageAuthSource() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastUsageAuthSource
+}
+
+func (p *Provider) setLastUsageAuthSource(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.lastUsageAuthSource = name
 }
