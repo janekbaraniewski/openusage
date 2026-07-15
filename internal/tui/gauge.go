@@ -180,10 +180,19 @@ func gaugeWindowDuration(window string) (time.Duration, bool) {
 }
 
 // formatDurationShort renders a duration as a compact human string like
-// "1h 23m" or "42m" or "5s". Used by gauge projections / reset countdowns.
+// "2d 3h", "1h 23m", "42m", or "5s". Used by gauge projections / reset
+// countdowns.
 func formatDurationShort(d time.Duration) string {
 	if d <= 0 {
 		return "0m"
+	}
+	if d >= 24*time.Hour {
+		days := int(d / (24 * time.Hour))
+		hours := int((d % (24 * time.Hour)) / time.Hour)
+		if hours == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd %dh", days, hours)
 	}
 	if d >= time.Hour {
 		h := int(d / time.Hour)

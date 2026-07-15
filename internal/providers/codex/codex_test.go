@@ -55,6 +55,9 @@ func TestDashboardWidgetCursorParityFlags(t *testing.T) {
 	if len(widget.CompactRows) < 5 {
 		t.Fatalf("expected >=5 compact rows, got %d", len(widget.CompactRows))
 	}
+	if len(widget.GaugePriority) == 0 || widget.GaugePriority[0] != "codex_credit_percent_used" {
+		t.Fatalf("expected credit percentage to be the primary gauge, got %#v", widget.GaugePriority)
+	}
 }
 
 func TestFetchWithSessionData(t *testing.T) {
@@ -317,6 +320,28 @@ func TestHasChangedDetectsNestedSessionFileUpdates(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("expected HasChanged to detect newer nested session file")
+	}
+}
+
+func TestHasChangedPollsAuthenticatedRemoteQuota(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "auth.json"), []byte(`{"tokens":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	changed, err := p.HasChanged(core.AccountConfig{
+		ID:       "codex-test",
+		Provider: "codex",
+		RuntimeHints: map[string]string{
+			"config_dir": tmpDir,
+		},
+	}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("HasChanged() error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected authenticated Codex account to poll remote quota")
 	}
 }
 

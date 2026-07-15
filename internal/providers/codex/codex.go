@@ -35,6 +35,8 @@ type Provider struct {
 	providerbase.Base
 	telemetryCacheMu sync.Mutex
 	telemetryCache   map[string]*telemetryCacheEntry
+	creditHistoryMu  sync.Mutex
+	creditHistory    map[string][]creditUsageObservation
 }
 
 type telemetryCacheEntry struct {
@@ -49,7 +51,7 @@ func New() *Provider {
 			ID: "codex",
 			Info: core.ProviderInfo{
 				Name:         "OpenAI Codex CLI",
-				Capabilities: []string{"local_sessions", "live_usage_endpoint", "rate_limits", "token_usage", "credits", "by_model", "by_client"},
+				Capabilities: []string{"local_sessions", "live_usage_endpoint", "rate_limits", "token_usage", "credits", "burn_rate", "by_model", "by_client"},
 				DocURL:       "https://github.com/openai/codex",
 			},
 			Auth: core.ProviderAuthSpec{
@@ -63,14 +65,18 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
+		telemetryCache: make(map[string]*telemetryCacheEntry),
+		creditHistory:  make(map[string][]creditUsageObservation),
 	}
 }
 
 type rateLimits struct {
-	Primary   *rateLimitBucket `json:"primary,omitempty"`
-	Secondary *rateLimitBucket `json:"secondary,omitempty"`
-	Credits   *creditInfo      `json:"credits,omitempty"`
-	PlanType  *string          `json:"plan_type,omitempty"`
+	Primary           *rateLimitBucket    `json:"primary,omitempty"`
+	Secondary         *rateLimitBucket    `json:"secondary,omitempty"`
+	Credits           *creditInfo         `json:"credits,omitempty"`
+	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
+	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
+	PlanType          *string             `json:"plan_type,omitempty"`
 }
 
 type rateLimitBucket struct {
@@ -109,6 +115,8 @@ type usagePayload struct {
 	CodeReviewRateLimit  *usageLimitDetails     `json:"code_review_rate_limit,omitempty"`
 	AdditionalRateLimits []usageAdditionalLimit `json:"additional_rate_limits,omitempty"`
 	Credits              *usageCredits          `json:"credits,omitempty"`
+	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
+	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
 	RateLimitStatus      *usageRateLimitStatus  `json:"rate_limit_status,omitempty"`
 }
 
@@ -118,6 +126,8 @@ type usageRateLimitStatus struct {
 	CodeReviewRateLimit  *usageLimitDetails     `json:"code_review_rate_limit,omitempty"`
 	AdditionalRateLimits []usageAdditionalLimit `json:"additional_rate_limits,omitempty"`
 	Credits              *usageCredits          `json:"credits,omitempty"`
+	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
+	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
 }
 
 type usageLimitDetails struct {
@@ -146,9 +156,10 @@ type usageAdditionalLimit struct {
 }
 
 type usageCredits struct {
-	HasCredits bool `json:"has_credits"`
-	Unlimited  bool `json:"unlimited"`
-	Balance    any  `json:"balance"`
+	HasCredits   bool `json:"has_credits"`
+	HasCreditsV2 bool `json:"hasCredits,omitempty"`
+	Unlimited    bool `json:"unlimited"`
+	Balance      any  `json:"balance"`
 }
 
 type usageEntry struct {
@@ -206,6 +217,14 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		}
 	}
 	if configDir == "" {
+		return true, nil
+	}
+	// Codex credit limits come from the authenticated remote/app-server
+	// sources and can change without any local session file being modified.
+	// Keep authenticated accounts polling so the dashboard can observe quota
+	// deltas and build the burn-rate forecast.
+	authPath := acct.Hint("auth_file", filepath.Join(configDir, "auth.json"))
+	if _, err := os.Stat(authPath); err == nil {
 		return true, nil
 	}
 	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
@@ -277,6 +296,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["quota_api_error"] = liveErr.Error()
 	}
 
+	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
+	if cliErr != nil {
+		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
+	}
+
 	versionFile := filepath.Join(configDir, "version.json")
 	if data, err := os.ReadFile(versionFile); err == nil {
 		var ver versionInfo
@@ -297,7 +321,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasData := hasLocalData || hasLiveData
+	hasData := hasLocalData || hasLiveData || hasCLIData
 	if !hasData {
 		if errors.Is(liveErr, errLiveUsageAuth) {
 			snap.Status = core.StatusAuth
@@ -310,12 +334,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.applyCursorCompatibilityMetrics(&snap)
+	p.applyCreditForecast(&snap, acct.ID)
 	p.applyRateLimitStatus(&snap)
 
 	switch {
-	case hasLiveData && hasLocalData:
+	case (hasLiveData || hasCLIData) && hasLocalData:
 		snap.Message = "Codex live usage + local session data"
-	case hasLiveData:
+	case hasLiveData || hasCLIData:
 		snap.Message = "Codex live usage data"
 	default:
 		snap.Message = "Codex CLI session data"
@@ -331,7 +356,8 @@ func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {
 
 	status := core.StatusOK
 	for key, metric := range snap.Metrics {
-		if !strings.HasPrefix(key, "rate_limit_") || metric.Unit != "%" || metric.Used == nil {
+		isRateLimit := strings.HasPrefix(key, "rate_limit_") || key == "codex_credit_percent_used"
+		if !isRateLimit || metric.Unit != "%" || metric.Used == nil {
 			continue
 		}
 		used := *metric.Used

@@ -111,6 +111,7 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApp
 	summary.limitMetricsApplied += applyUsageLimitDetails(payload.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
 	summary.limitMetricsApplied += applyUsageLimitDetails(payload.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
 	summary.limitMetricsApplied += applyUsageAdditionalLimits(payload.AdditionalRateLimits, snap)
+	applyCreditLimitDetails(firstCreditLimit(payload.IndividualLimitV2, payload.IndividualLimit), snap, "live")
 
 	if payload.RateLimitStatus != nil {
 		status := payload.RateLimitStatus
@@ -120,6 +121,7 @@ func applyUsagePayload(payload *usagePayload, snap *core.UsageSnapshot) usageApp
 		summary.limitMetricsApplied += applyUsageLimitDetails(status.RateLimit, "rate_limit_primary", "rate_limit_secondary", snap)
 		summary.limitMetricsApplied += applyUsageLimitDetails(status.CodeReviewRateLimit, "rate_limit_code_review_primary", "rate_limit_code_review_secondary", snap)
 		summary.limitMetricsApplied += applyUsageAdditionalLimits(status.AdditionalRateLimits, snap)
+		applyCreditLimitDetails(firstCreditLimit(status.IndividualLimitV2, status.IndividualLimit), snap, "live")
 		if payload.Credits == nil {
 			applyUsageCredits(status.Credits, snap)
 		}
@@ -151,11 +153,13 @@ func applyUsageCredits(credits *usageCredits, snap *core.UsageSnapshot) {
 	if credits == nil {
 		return
 	}
+	hasCredits := credits.HasCredits || credits.HasCreditsV2
+	unlimited := credits.Unlimited
 
 	switch {
-	case credits.Unlimited:
+	case unlimited:
 		snap.Raw["credits"] = "unlimited"
-	case credits.HasCredits:
+	case hasCredits:
 		snap.Raw["credits"] = "available"
 		if formatted := formatCreditsBalance(credits.Balance); formatted != "" {
 			snap.Raw["credit_balance"] = formatted

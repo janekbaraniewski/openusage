@@ -27,7 +27,7 @@ The Codex provider previously exposed only a narrow subset of session and limit 
 
 1. Fabricating authoritative API limits not returned by Codex itself.
 2. Replacing Codex source-of-truth with fully derived synthetic limit percentages.
-3. Changing global dashboard rendering rules for other providers.
+3. Changing existing USD burn-rate or credit-balance rendering for other providers.
 
 ## 4. Implemented Design
 
@@ -37,6 +37,7 @@ Codex now merges two sources:
 
 1. Local session JSONL (`~/.codex/sessions/...`) for rich activity signals.
 2. Live usage endpoint (`/wham/usage` / `/api/codex/usage`) for current limit windows and account metadata.
+3. Codex CLI app-server RPC (`account/rateLimits/read`) for the authoritative individual credit quota when the live HTTP payload omits it.
 
 New extraction paths emit:
 
@@ -65,6 +66,10 @@ New extraction paths emit:
 8. Daily totals:
    - `analytics_tokens`, `analytics_requests`
    - aliases: `tokens_total`, `requests`
+9. Individual credit quota and forecast:
+   - `codex_credit_limit` for used/total credits and its reset time.
+   - `codex_credit_percent_used` for the used percentage.
+   - `codex_credit_burn_rate` and `codex_credit_runout_hours` derived from successive CLI quota observations.
 
 ### 4.2 Cursor-Compatibility Aliases
 
@@ -90,6 +95,7 @@ Codex dashboard widget now mirrors Cursor-style composition:
 7. Code stats slot mapping uses Codex metric keys.
 8. Compact rows align with Cursor-style `Credits/Team/Usage/Activity/Lines`.
 9. Prefix/key hiding rules suppress noisy raw metric families once rendered as sections.
+10. The primary credit gauge includes the reset countdown and projected percent at reset, using the current-period average burn rate.
 
 ### 4.4 TUI Support for Codex Trends (`internal/tui/tiles.go`)
 
@@ -111,6 +117,7 @@ Direct metrics are read from Codex events/API without estimation:
 3. Raw token deltas and per-model/per-client totals from JSONL.
 4. Request/session counts from observed events.
 5. Live account metadata (`plan_type`, account identifiers, credits presence).
+6. Individual credit quota (`individualLimit.used`, `individualLimit.limit`, remaining percentage, and reset) from the Codex CLI app-server RPC.
 
 ### 5.2 Inferred/heuristic metrics
 
@@ -120,6 +127,7 @@ The following are computed heuristically from observed actions:
 2. Code patch stats (`composer_lines_*`, `composer_files_changed`).
 3. `scored_commits` (from command detection).
 4. `ai_code_percentage` (patch-call ratio heuristic).
+5. Credit burn rate and runout time. When Codex supplies the next monthly reset, OpenUsage infers the preceding calendar-month boundary and calculates the average from cumulative current-period usage over that elapsed period. Without a usable reset timestamp, it falls back to successive authoritative quota snapshots.
 
 These are intentionally useful but not canonical API truth.
 
@@ -155,10 +163,16 @@ The demo snapshot should match real Codex section structure and key families whi
 
 | File | Purpose |
 |------|---------|
-| `internal/providers/codex/codex.go` | session/API parsing, aliases, trends, model/client/tool/language/code metrics |
-| `internal/providers/codex/widget.go` | Cursor-like section/compact-row config for Codex |
+| `internal/providers/codex/codex.go` | session/API parsing, aliases, trends, model/client/tool/language/code metrics, credit forecast wiring |
+| `internal/providers/codex/cli_rate_limits.go` | Codex app-server RPC transport and `individualLimit` decoding |
+| `internal/providers/codex/credit_forecast.go` | used/total credit metrics and observed burn/runout projection |
+| `internal/providers/codex/widget.go` | Cursor-like section/compact-row config for Codex, including credit forecast rows |
 | `internal/providers/codex/codex_test.go` | codex extraction + alias + widget parity regression tests |
+| `internal/providers/codex/credit_forecast_test.go` | CLI quota decoding, provider wiring, reset, and forecast regression tests |
 | `internal/tui/tiles.go` | interface-as-client trend support for `usage_client_*` / `usage_source_*` |
+| `internal/tui/tiles_gauge.go` | top-usage reset and projected-percent annotation for Codex credits |
+| `internal/tui/tiles_gauge_test.go` | top-usage Codex credit projection regression coverage |
+| `internal/tui/detail_sections.go` | structured Codex credit forecast detail section |
 | `cmd/demo/main.go` | codex demo fixture parity/anonymization (in progress) |
 | `cmd/demo/main_test.go` | demo codex coverage assertions (to be aligned with final fixture keys) |
 

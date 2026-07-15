@@ -104,6 +104,7 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 				snap.Raw["credits"] = "none"
 			}
 		}
+		applyCreditLimitDetails(firstCreditLimit(rl.IndividualLimitV2, rl.IndividualLimit), snap, "session")
 
 		if rl.PlanType != nil {
 			snap.Raw["plan_type"] = *rl.PlanType
