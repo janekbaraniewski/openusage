@@ -20,7 +20,8 @@ Local-file provider for the OpenAI Codex CLI. Reads session logs, auth state, an
   - Daily session counts
   - Model and client breakdowns
   - Rate-limit windows (primary and secondary)
-  - Credit balance
+  - Individual credit usage versus the current monthly limit
+  - Credit burn rate and projected runout time
   - Plan and version
   - Patch stats
 
@@ -51,10 +52,11 @@ Override `config_dir` and `sessions_dir` only if the CLI uses non-default paths.
 
 ## Data sources & how each metric is computed
 
-Codex has two data paths:
+Codex has three data paths:
 
 1. **Local files** — JSONL session transcripts and auth/config metadata under `~/.codex/`. Always available after a single Codex run.
 2. **Live ChatGPT usage endpoint** — an authenticated POST to ChatGPT's backend, only attempted when `~/.codex/auth.json` contains a non-empty access token. Provides plan, credits, and rate-limit windows.
+3. **Codex CLI app-server** — an authenticated local `codex app-server` JSON-RPC request to `account/rateLimits/read`. Provides the authoritative individual monthly credit limit and next reset when the live HTTP payload omits it.
 
 The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatgpt_base_url` → the value parsed from `~/.codex/config.toml` (`chatgpt_base_url`) → `https://chatgpt.com/backend-api`. The path is `/wham/usage` for `chatgpt.com/backend-api` and `/api/codex/usage` otherwise.
 
@@ -80,6 +82,13 @@ The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatg
 
 - Source: `credits.balance` (or `credits.has_credits` boolean) from the same live response.
 - Transform: stored as a metric `Remaining` in USD. `unlimited=true` is reflected as a special attribute.
+
+### Individual credits and forecast
+
+- Source: `individualLimit` from the Codex CLI app-server `account/rateLimits/read` response. The response provides the current-period `limit`, cumulative `used` credits (or a remaining percentage), and the next `resetsAt` timestamp.
+- Transform: `codex_credit_limit` contains used/remaining/total credits, while `codex_credit_percent_used` drives the primary dashboard gauge.
+- Forecast: when the next monthly reset is available, OpenUsage infers the preceding calendar-month boundary and calculates the average burn rate from cumulative current-period usage divided by elapsed time since that boundary. The dashboard shows the reset countdown and projected percentage at reset. Without a usable reset timestamp, it falls back to successive observed quota samples.
+- Forecast source is recorded as `inferred_period_start` or `observed_usage` so the estimate is distinguishable from authoritative quota data.
 
 ### Plan, version, account email
 
@@ -116,6 +125,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
   - `GET https://chatgpt.com/backend-api/wham/usage` (default), or
   - `GET <base>/api/codex/usage` for non-ChatGPT bases.
   - Headers: `Authorization: Bearer <auth.json access_token>` and `ChatGPT-Account-Id: <account_id>` when available.
+- Optional local CLI quota endpoint: `codex -s read-only -a untrusted app-server`, using the standard JSON-RPC handshake followed by `account/rateLimits/read`.
 
 ## Files read
 
@@ -126,14 +136,15 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
 
 ## Caveats
 
-- Credit balance only appears when the live endpoint is reachable; offline sessions still show local activity.
+- Individual credit usage and the forecast require authenticated Codex quota data from the live endpoint or CLI app-server; offline sessions still show local activity.
 - Rate-limit windows are reported by the API and may differ from documented limits during quota changes.
+- The monthly period start is inferred from the next reset because Codex reports the reset boundary but not an explicit start timestamp.
 - The provider has hooks-style integration with the daemon: see [Daemon integrations](../daemon/integrations.md).
 
 ## Troubleshooting
 
 - **Tile is empty** — run `codex` once to populate `~/.codex/sessions/`.
-- **No credit balance** — `~/.codex/auth.json` is missing or expired. Re-authenticate with the Codex CLI.
+- **No credit usage or forecast** — `~/.codex/auth.json` is missing or expired, or the CLI app-server quota request failed. Re-authenticate with the Codex CLI and wait for the next daemon poll.
 - **Sessions missing** — confirm `sessions_dir` matches the path Codex writes to.
 
 ## Related

@@ -263,6 +263,32 @@ func TestTileGaugeProjectionAnnotation_FitsInWindow(t *testing.T) {
 	}
 }
 
+func TestTileGaugeProjectionAnnotation_CodexCredits(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	usedPct := 36.0
+	limit := 7500.0
+	rate := 7.73
+	creditPct := core.Metric{Used: &usedPct, Limit: core.Float64Ptr(100), Unit: "%", Window: "current-period"}
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_percent_used": creditPct,
+			"codex_credit_limit":        {Used: &limit, Limit: &limit, Unit: "credits", Window: "current-period"},
+			"codex_credit_burn_rate":    {Used: &rate, Unit: "credits/hour", Window: "current-period average"},
+		},
+		Resets: map[string]time.Time{
+			"codex_credit_limit": now.Add(16*24*time.Hour + 12*time.Hour),
+		},
+	}
+
+	out := tileGaugeProjectionAnnotation(snap, "codex_credit_percent_used", creditPct, usedPct, now)
+	if !strings.Contains(out, "resets 16d 12h") {
+		t.Errorf("expected Codex reset countdown, got %q", out)
+	}
+	if !strings.Contains(out, "~77% by reset") {
+		t.Errorf("expected projected Codex percent at reset, got %q", out)
+	}
+}
+
 func TestTileGaugeProjectionAnnotation_OvershootsWindow(t *testing.T) {
 	// User's reported scenario: 5h window started 1h 18m ago, 22% used.
 	// Pace = 0.22/78 = 0.002820/min → pctPerMinute = 0.2820.
