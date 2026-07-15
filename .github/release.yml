@@ -1,0 +1,37 @@
+# Configures GitHub's auto-generated release notes.
+# release-please uses this when "changelog-type": "github" is set in
+# release-please-config.json: it calls the GitHub generate-notes API, which
+# credits each PR's author ("... by @user in #123") and adds a
+# "New Contributors" section. Categorization here is by PR *label*.
+# Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    # Keep the release PR itself and CI bot noise out of the notes.
+    labels:
+      - "autorelease: pending"
+      - "autorelease: tagged"
+    authors:
+      - github-actions
+      - github-actions[bot]
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+        - feature
+    - title: Bug Fixes
+      labels:
+        - bug
+        - fix
+    - title: Performance
+      labels:
+        - performance
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Dependencies
+      labels:
+        - dependencies
+    # Anything not matched above still shows up here, still credited.
+    - title: Other Changes
+      labels:
+        - "*"
