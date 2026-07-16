@@ -37,7 +37,8 @@ type Service struct {
 	logThrottle *core.LogThrottle
 
 	rmCache       *readModelCache
-	dataIngested  atomic.Bool // set when new data is ingested; read model loop skips refresh when clean
+	dataIngested  atomic.Bool  // set when new data is ingested; read model loop skips refresh when clean
+	lastIngestAt  atomic.Int64 // UnixNano of the most recent ingest; lets readers refresh only when data changed
 	pollScheduler *PollScheduler
 
 	pollStateMu sync.Mutex
@@ -58,6 +59,22 @@ func (s *Service) now() time.Time {
 		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+// markDataIngested records that new data landed. It arms the flag the
+// background read-model refresh loop consumes and stamps the ingest time so
+// on-demand readers can tell whether their cached view is stale relative to
+// real data (rather than merely old in wall-clock terms).
+func (s *Service) markDataIngested() {
+	s.dataIngested.Store(true)
+	s.lastIngestAt.Store(time.Now().UnixNano())
+}
+
+// ingestedSince reports whether any data was ingested after t. A zero
+// lastIngestAt (nothing ingested yet) reports false.
+func (s *Service) ingestedSince(t time.Time) bool {
+	last := s.lastIngestAt.Load()
+	return last > 0 && last > t.UnixNano()
 }
 
 func RunServer(cfg Config) error {
