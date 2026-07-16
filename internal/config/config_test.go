@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -210,6 +211,147 @@ func TestSaveTo_CreatesFileAndDir(t *testing.T) {
 	}
 	if !loaded.Experimental.Analytics {
 		t.Error("expected analytics=true after round-trip")
+	}
+}
+
+func TestSaveTo_FollowsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privilege on Windows")
+	}
+
+	realDir := t.TempDir()
+	realPath := filepath.Join(realDir, "settings.json")
+
+	linkDir := t.TempDir()
+	linkPath := filepath.Join(linkDir, "settings.json")
+
+	cfg := DefaultConfig()
+	cfg.Theme = "Dracula"
+	if err := SaveTo(realPath, cfg); err != nil {
+		t.Fatalf("seeding real file: %v", err)
+	}
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Fatalf("creating symlink: %v", err)
+	}
+
+	cfg.Theme = "Synthwave '84"
+	if err := SaveTo(linkPath, cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("expected settings.json to remain a symlink")
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != realPath {
+		t.Errorf("symlink target changed: got %q, want %q", target, realPath)
+	}
+
+	loaded, err := LoadFrom(realPath)
+	if err != nil {
+		t.Fatalf("loading real file: %v", err)
+	}
+	if loaded.Theme != "Synthwave '84" {
+		t.Errorf("expected real file to reflect write through symlink, got theme %q", loaded.Theme)
+	}
+
+	if _, err := os.Stat(linkPath + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected no leftover tmp file next to symlink")
+	}
+	if _, err := os.Stat(realPath + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected no leftover tmp file next to real target")
+	}
+}
+
+func TestSaveTo_FollowsSymlinkChain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privilege on Windows")
+	}
+
+	realDir := t.TempDir()
+	realPath := filepath.Join(realDir, "settings.json")
+
+	midDir := t.TempDir()
+	midPath := filepath.Join(midDir, "settings.json")
+
+	linkDir := t.TempDir()
+	linkPath := filepath.Join(linkDir, "settings.json")
+
+	cfg := DefaultConfig()
+	if err := SaveTo(realPath, cfg); err != nil {
+		t.Fatalf("seeding real file: %v", err)
+	}
+	if err := os.Symlink(realPath, midPath); err != nil {
+		t.Fatalf("creating mid symlink: %v", err)
+	}
+	if err := os.Symlink(midPath, linkPath); err != nil {
+		t.Fatalf("creating outer symlink: %v", err)
+	}
+
+	cfg.Theme = "Dracula"
+	if err := SaveTo(linkPath, cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, l := range []struct{ path, wantTarget string }{
+		{linkPath, midPath},
+		{midPath, realPath},
+	} {
+		info, err := os.Lstat(l.path)
+		if err != nil {
+			t.Fatalf("lstat %s: %v", l.path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("expected %s to remain a symlink", l.path)
+		}
+		target, err := os.Readlink(l.path)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", l.path, err)
+		}
+		if target != l.wantTarget {
+			t.Errorf("symlink %s target changed: got %q, want %q", l.path, target, l.wantTarget)
+		}
+	}
+
+	loaded, err := LoadFrom(realPath)
+	if err != nil {
+		t.Fatalf("loading real file: %v", err)
+	}
+	if loaded.Theme != "Dracula" {
+		t.Errorf("expected real file to reflect write through symlink chain, got theme %q", loaded.Theme)
+	}
+}
+
+func TestSaveTo_BrokenSymlinkErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privilege on Windows")
+	}
+
+	linkDir := t.TempDir()
+	linkPath := filepath.Join(linkDir, "settings.json")
+	missingTarget := filepath.Join(t.TempDir(), "gone.json")
+
+	if err := os.Symlink(missingTarget, linkPath); err != nil {
+		t.Fatalf("creating broken symlink: %v", err)
+	}
+
+	if err := SaveTo(linkPath, DefaultConfig()); err == nil {
+		t.Fatal("expected error saving through a broken symlink")
+	}
+
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("expected broken symlink to remain untouched, but it was replaced")
 	}
 }
 
