@@ -163,7 +163,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 		s.warnf("poll_ingest_warning", "error=%v", ingestErr)
 	}
 	if ingestErr == nil && len(snapshots) > 0 {
-		s.dataIngested.Store(true)
+		s.markDataIngested()
 	}
 
 	durationMs := time.Since(started).Milliseconds()

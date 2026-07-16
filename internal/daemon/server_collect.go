@@ -105,11 +105,11 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 	// into usage_rollup_daily and then pruned (see pruneOldData).
 	direct, retries := s.ingestBatch(ctx, allReqs)
 	if direct.ingested > 0 {
-		s.dataIngested.Store(true)
+		s.markDataIngested()
 	}
 	flush, enqueued, flushWarnings := s.flushBacklog(ctx, retries, backlogFlushLimit)
 	if flush.Ingested > 0 {
-		s.dataIngested.Store(true)
+		s.markDataIngested()
 	}
 	warnings = append(warnings, flushWarnings...)
 

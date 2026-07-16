@@ -72,7 +72,7 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	interval := readModelCacheInterval(s.cfg.PollInterval)
 
 	s.infof("read_model_cache_loop_start", "interval=%s", interval)
-	s.dataIngested.Store(true) // ensure first boot always computes
+	s.markDataIngested() // ensure first boot always computes
 	s.refreshReadModelCacheFromConfig(ctx)
 
 	ticker := time.NewTicker(interval)

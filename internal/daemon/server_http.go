@@ -125,7 +125,12 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
 		}
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
-		if time.Since(cachedAt) > 2*time.Second {
+		// Refresh opportunistically only when new data has actually been
+		// ingested since this entry was built. Without the data gate, every
+		// connected client's poll (~5s) forced a full recompute purely because
+		// the entry aged past the staleness floor — pinning daemon CPU even
+		// when nothing changed. The staleness floor still debounces bursts.
+		if time.Since(cachedAt) > 2*time.Second && s.ingestedSince(cachedAt) {
 			s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 		}
 		return
@@ -148,7 +153,7 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	// again instead of sticking on stale empty templates. Without this,
 	// a single failed compute can leave the read-model cache permanently
 	// empty until the next ingest event.
-	s.dataIngested.Store(true)
+	s.markDataIngested()
 	s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
 	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})

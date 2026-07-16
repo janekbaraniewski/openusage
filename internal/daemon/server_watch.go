@@ -69,7 +69,7 @@ func (s *Service) runWatchLoop(ctx context.Context) {
 			}
 			eventName, eventOp := event.Name, event.Op
 			debounceTimer = time.AfterFunc(debounceInterval, func() {
-				s.dataIngested.Store(true) // trigger read model refresh
+				s.markDataIngested() // trigger read model refresh
 				core.Tracef("[watch] change detected: %s op=%s", eventName, eventOp)
 			})
 
