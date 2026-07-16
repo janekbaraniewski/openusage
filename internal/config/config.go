@@ -508,7 +508,20 @@ func SaveTo(path string, cfg Config) error {
 
 // saveLocked is the actual write path; callers MUST hold saveMu.
 func saveLocked(path string, cfg Config) error {
-	dir := filepath.Dir(path)
+	target := path
+	if _, err := os.Lstat(path); err == nil {
+		// Resolve the full symlink chain so the write lands on the real file
+		// instead of replacing the symlink itself.
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("resolving config path %s: %w", path, err)
+		}
+		target = resolved
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat config: %w", err)
+	}
+
+	dir := filepath.Dir(target)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
@@ -519,12 +532,12 @@ func saveLocked(path string, cfg Config) error {
 	}
 	data = append(data, '\n')
 
-	tmpPath := path + ".tmp"
+	tmpPath := target + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
 		return fmt.Errorf("writing config tmp file: %w", err)
 	}
 	defer os.Remove(tmpPath) // no-op if rename succeeded; cleans up on rename failure
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, target); err != nil {
 		return fmt.Errorf("renaming config tmp file: %w", err)
 	}
 	return nil
