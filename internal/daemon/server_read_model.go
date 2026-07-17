@@ -29,6 +29,10 @@ func (s *Service) computeReadModel(
 	return result, err
 }
 
+func shouldRefreshCachedReadModel(cachedAt time.Time, cachedVersion, currentVersion uint64, now time.Time) bool {
+	return currentVersion > cachedVersion && now.Sub(cachedAt) > 2*time.Second
+}
+
 func (s *Service) refreshReadModelCacheAsync(
 	parent context.Context,
 	cacheKey string,
@@ -38,6 +42,7 @@ func (s *Service) refreshReadModelCacheAsync(
 	if !s.rmCache.beginRefresh(cacheKey) {
 		return
 	}
+	refreshVersion := s.dataVersion.Load()
 	go func() {
 		defer s.rmCache.endRefresh(cacheKey)
 		refreshCtx, cancel := context.WithTimeout(parent, timeout)
@@ -49,7 +54,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			}
 			return
 		}
-		s.rmCache.set(cacheKey, snapshots)
+		s.rmCache.set(cacheKey, snapshots, refreshVersion)
 		s.pushToExporter(refreshCtx, snapshots)
 	}()
 }
