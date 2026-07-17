@@ -40,6 +40,7 @@ type Service struct {
 
 	rmCache       *readModelCache
 	dataIngested  atomic.Bool   // set when new data is ingested; read model loop skips refresh when clean
+	dataVersion   atomic.Uint64 // increments after each successful ingest so HTTP caches refresh only when stale
 	collectNow    chan struct{} // coalesced source-change requests consumed by the single collect loop
 	pollScheduler *PollScheduler
 
@@ -50,6 +51,14 @@ type Service struct {
 	// state that needs to be reproducible in tests. Defaults to
 	// core.SystemClock{}; tests can override via WithClock.
 	clock core.Clock
+}
+
+func (s *Service) markDataIngested() {
+	if s == nil {
+		return
+	}
+	s.dataVersion.Add(1)
+	s.dataIngested.Store(true)
 }
 
 // now is the canonical "what time is it?" hook for the daemon. Code that

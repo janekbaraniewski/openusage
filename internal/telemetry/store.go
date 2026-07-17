@@ -247,6 +247,35 @@ func (s *Store) Init(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_window ON usage_events(provider_id, account_id, occurred_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_account_type_occurred ON usage_events(provider_id, account_id, event_type, occurred_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_type_provider ON usage_events(event_type, provider_id);`,
+		// Append-only invalidation log for the incremental usage read model. The
+		// payload stays deliberately small: readers already retain the previous
+		// winner and can reload the changed event by ID. Recording deletes is
+		// essential because retention can remove the current logical winner.
+		`CREATE TABLE IF NOT EXISTS usage_event_changes (
+			seq INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id TEXT NOT NULL,
+			operation TEXT NOT NULL CHECK(operation IN ('insert', 'update', 'delete')),
+			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_event_changes_event ON usage_event_changes(event_id, seq);`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_insert
+			AFTER INSERT ON usage_events BEGIN
+				INSERT INTO usage_event_changes(event_id, operation) VALUES (NEW.event_id, 'insert');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_update
+			AFTER UPDATE ON usage_events BEGIN
+				INSERT INTO usage_event_changes(event_id, operation) VALUES (NEW.event_id, 'update');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_delete
+			AFTER DELETE ON usage_events BEGIN
+				INSERT INTO usage_event_changes(event_id, operation) VALUES (OLD.event_id, 'delete');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_raw_payload_change
+			AFTER UPDATE OF source_payload ON usage_raw_events
+			WHEN OLD.source_payload IS NOT NEW.source_payload BEGIN
+				INSERT INTO usage_event_changes(event_id, operation)
+				SELECT event_id, 'update' FROM usage_events WHERE raw_event_id = NEW.raw_event_id;
+			END;`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_source_system ON usage_raw_events(source_system);`,
 		`CREATE TABLE IF NOT EXISTS usage_reconciliation_windows (
 			recon_id TEXT PRIMARY KEY,
@@ -976,6 +1005,29 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 	n, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("telemetry: prune raw event payloads rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// PruneUsageEventChanges bounds the durable incremental-read-model log. A
+// seven-day age gate avoids churning an active reader, while retainTail keeps
+// a useful suffix even on quiet installations. Readers detect sequence gaps
+// and safely cold-rebuild instead of applying an incomplete suffix.
+func (s *Store) PruneUsageEventChanges(ctx context.Context, retainTail int) (int64, error) {
+	if s == nil || s.db == nil || retainTail < 1 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM usage_event_changes
+		WHERE seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM usage_event_changes)
+		  AND datetime(changed_at) < datetime('now', '-7 day')
+	`, retainTail)
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune usage event changes: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune usage event changes rows affected: %w", err)
 	}
 	return n, nil
 }

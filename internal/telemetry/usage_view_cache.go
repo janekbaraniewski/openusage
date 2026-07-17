@@ -29,7 +29,9 @@ import (
 const usageViewCacheMaxEntries = 64
 
 type usageViewCacheEntry struct {
+	mu         sync.Mutex
 	agg        *telemetryUsageAgg
+	state      *incrementalUsageState
 	maxRowID   int64
 	count      int64
 	insertedAt time.Time
@@ -55,14 +57,15 @@ type usageViewCacheNamespace string
 func usageViewCacheKey(namespace usageViewCacheNamespace, filter usageFilter) string {
 	providers := strings.Join(normalizeProviderIDs(filter.ProviderIDs), ",")
 	since := int64(0)
-	if !filter.Since.IsZero() {
+	windowKey := strings.TrimSpace(string(filter.WindowKey))
+	if windowKey == "" && !filter.Since.IsZero() {
 		since = filter.Since.UTC().UnixNano()
 	}
 	today := int64(0)
 	if !filter.TodaySince.IsZero() {
 		today = filter.TodaySince.UTC().UnixNano()
 	}
-	return fmt.Sprintf("%s|%s|%s|%d|%d", namespace, providers, strings.TrimSpace(filter.AccountID), since, today)
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%d", namespace, providers, strings.TrimSpace(filter.AccountID), windowKey, since, today)
 }
 
 func (s *usageViewCacheStore) lookup(key string) (*usageViewCacheEntry, bool) {
@@ -155,9 +158,14 @@ func loadUsageViewCached(
 	if !hit || entry == nil {
 		return nil, maxRowID, count, false, nil
 	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
 	if entry.maxRowID != maxRowID || entry.count != count {
 		core.Tracef("[usage_view_cache] miss (fingerprint changed) providers=%v account=%s maxRowID=%d→%d count=%d→%d",
 			filter.ProviderIDs, filter.AccountID, entry.maxRowID, maxRowID, entry.count, count)
+		return nil, maxRowID, count, false, nil
+	}
+	if entry.state != nil && (entry.state.filter.Since != filter.Since || entry.state.filter.TodaySince != filter.TodaySince) {
 		return nil, maxRowID, count, false, nil
 	}
 	core.Tracef("[usage_view_cache] hit providers=%v account=%s maxRowID=%d count=%d age=%s",
@@ -181,4 +189,48 @@ func storeUsageViewCache(
 		count:      count,
 		insertedAt: time.Now(),
 	})
+}
+
+func storeIncrementalUsageViewCache(
+	namespace usageViewCacheNamespace,
+	filter usageFilter,
+	state *incrementalUsageState,
+	agg *telemetryUsageAgg,
+	maxRowID, count int64,
+) {
+	if namespace == "" || state == nil || agg == nil {
+		return
+	}
+	key := usageViewCacheKey(namespace, filter)
+	globalUsageViewCache.store(key, &usageViewCacheEntry{
+		agg: agg, state: state, maxRowID: maxRowID, count: count, insertedAt: time.Now(),
+	})
+}
+
+func refreshIncrementalUsageView(
+	ctx context.Context,
+	db *sql.DB,
+	namespace usageViewCacheNamespace,
+	filter usageFilter,
+	maxRowID, count int64,
+) (*telemetryUsageAgg, bool, error) {
+	if namespace == "" {
+		return nil, false, nil
+	}
+	key := usageViewCacheKey(namespace, filter)
+	entry, ok := globalUsageViewCache.lookup(key)
+	if !ok || entry == nil || entry.state == nil {
+		return nil, false, nil
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	agg, handled, err := entry.state.applyChanges(ctx, db, filter)
+	if err != nil || !handled {
+		return nil, handled, err
+	}
+	entry.agg = agg
+	entry.maxRowID = maxRowID
+	entry.count = count
+	entry.insertedAt = time.Now()
+	return agg, true, nil
 }

@@ -60,6 +60,9 @@ func (s *Service) handleHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tally, _ := s.ingestBatch(r.Context(), parsed.Requests)
+	if tally.ingested > 0 {
+		s.markDataIngested()
+	}
 	warnings := append([]string(nil), parsed.Warnings...)
 	if tally.failed > 0 {
 		warnings = append(warnings, fmt.Sprintf("%d ingest failures", tally.failed))
@@ -119,23 +122,24 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheKey := ReadModelRequestKey(req)
-	if cached, cachedAt, ok := s.rmCache.get(cacheKey); ok {
+	if cached, cachedAt, cachedVersion, ok := s.rmCache.get(cacheKey); ok {
 		core.Tracef("[read_model] cache hit key=%s age=%s providers=%d", cacheKey, time.Since(cachedAt).Round(time.Millisecond), len(cached))
 		for id, snap := range cached {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
 		}
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
-		if time.Since(cachedAt) > 2*time.Second {
+		if shouldRefreshCachedReadModel(cachedAt, cachedVersion, s.dataVersion.Load(), time.Now()) {
 			s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 		}
 		return
 	}
 
+	computeVersion := s.dataVersion.Load()
 	computeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	snapshots, err := s.computeReadModel(computeCtx, req)
 	cancel()
 	if err == nil && len(snapshots) > 0 {
-		s.rmCache.set(cacheKey, snapshots)
+		s.rmCache.set(cacheKey, snapshots, computeVersion)
 		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
 		return
 	}
