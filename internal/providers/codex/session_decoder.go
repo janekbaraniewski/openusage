@@ -79,6 +79,13 @@ func walkSessionFile(path string, fn func(sessionLine) error) error {
 // It returns the next safe byte offset and absolute line number so callers can
 // resume after append-only growth without reading the file from the beginning.
 func walkSessionFileFrom(path string, byteOffset int64, startLine int, fn func(sessionLine) error) (int64, int, error) {
+	return walkSessionFileRange(path, byteOffset, -1, startLine, fn)
+}
+
+// walkSessionFileRange is the bounded form used when a caller must parse a
+// filesystem snapshot without consuming bytes appended after it was taken.
+// A negative endOffset reads through the current EOF.
+func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startLine int, fn func(sessionLine) error) (int64, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return byteOffset, startLine, err
@@ -89,7 +96,14 @@ func walkSessionFileFrom(path string, byteOffset int64, startLine int, fn func(s
 		return byteOffset, startLine, err
 	}
 
-	reader := bufio.NewReaderSize(f, 512*1024)
+	var source io.Reader = f
+	if endOffset >= 0 {
+		if endOffset < byteOffset {
+			return byteOffset, startLine, fmt.Errorf("codex session end offset %d precedes start offset %d", endOffset, byteOffset)
+		}
+		source = io.LimitReader(f, endOffset-byteOffset)
+	}
+	reader := bufio.NewReaderSize(source, 512*1024)
 	nextOffset := byteOffset
 	lineNumber := startLine
 	for {

@@ -39,8 +39,9 @@ type Service struct {
 	logThrottle *core.LogThrottle
 
 	rmCache       *readModelCache
-	dataIngested  atomic.Bool  // set when new data is ingested; read model loop skips refresh when clean
-	lastIngestAt  atomic.Int64 // UnixNano of the most recent ingest; lets readers refresh only when data changed
+	dataIngested  atomic.Bool   // set when new data is ingested; read model loop skips refresh when clean
+	lastIngestAt  atomic.Int64  // UnixNano of the most recent ingest; lets readers refresh only when data changed
+	collectNow    chan struct{} // coalesced source-change requests consumed by the single collect loop
 	pollScheduler *PollScheduler
 
 	pollStateMu sync.Mutex
@@ -162,6 +163,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		exp:              exp,
 		logThrottle:      core.NewLogThrottle(200, 10*time.Minute),
 		rmCache:          newReadModelCache(),
+		collectNow:       make(chan struct{}, 1),
 		pollScheduler:    newPollScheduler(cfg.PollInterval),
 		pollState:        make(map[string]*providerPollState),
 		clock:            core.SystemClock{},
@@ -199,6 +201,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runSpoolMaintenanceLoop(ctx)
 	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
+	go svc.runTelemetryPayloadMaintenanceLoop(ctx)
 
 	if svc.exp != nil {
 		go svc.exp.Start(ctx)
