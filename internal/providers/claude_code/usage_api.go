@@ -191,24 +191,18 @@ func decryptChromiumCookie(encrypted []byte, key []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-func fetchUsageAPI(ctx context.Context, orgUUID string, cookies map[string]string) (*usageResponse, error) {
-	url := fmt.Sprintf("https://claude.ai/api/organizations/%s/usage", orgUUID)
-
+// fetchUsageAPIWithAuth performs the GET/parse round trip shared by every
+// usage-API source (cookie-authenticated org endpoint, OAuth-authenticated
+// account endpoint): only how the request is authenticated differs between
+// them, so callers supply that as a closure over an already-resolved
+// credential rather than duplicating the request/response plumbing.
+func fetchUsageAPIWithAuth(ctx context.Context, url string, setAuth func(*http.Request)) (*usageResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-
-	var cookieParts []string
-	for name, value := range cookies {
-		cookieParts = append(cookieParts, fmt.Sprintf("%s=%s", name, value))
-	}
-	req.Header.Set("Cookie", strings.Join(cookieParts, "; "))
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Referer", "https://claude.ai/settings/usage")
-	req.Header.Set("anthropic-client-platform", "web_claude_ai")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -272,49 +266,4 @@ func readClaudeCodeOAuthToken() (string, error) {
 		return "", fmt.Errorf("Claude Code OAuth token expired (refreshed on next Claude Code use)")
 	}
 	return token, nil
-}
-
-// fetchUsageAPIOAuth queries Anthropic's OAuth usage endpoint with the Claude
-// Code CLI's own access token. This is the fallback where desktop-app cookie
-// extraction is unavailable (anywhere but macOS), and it needs no org UUID:
-// the token is scoped to the account. The endpoint returns the same
-// five_hour/seven_day utilization shape as the claude.ai usage API, so the
-// response decodes into the same struct.
-func fetchUsageAPIOAuth(ctx context.Context) (*usageResponse, error) {
-	token, err := readClaudeCodeOAuthToken()
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", oauthUsageURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	var usage usageResponse
-	if err := json.Unmarshal(body, &usage); err != nil {
-		return nil, fmt.Errorf("parsing response: %w", err)
-	}
-
-	return &usage, nil
 }
