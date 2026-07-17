@@ -49,6 +49,20 @@ func TestLoadUsageViewCached_ColdStart(t *testing.T) {
 	}
 }
 
+func TestUsageViewCacheKey_UsesStableRollingWindowIdentity(t *testing.T) {
+	namespace := usageViewCacheNamespace("stable-window")
+	first := usageFilter{
+		ProviderIDs: []string{"codex"},
+		Since:       time.Date(2026, 7, 17, 12, 0, 0, 1, time.UTC),
+		WindowKey:   core.TimeWindow30d,
+	}
+	second := first
+	second.Since = first.Since.Add(5 * time.Second)
+	if usageViewCacheKey(namespace, first) != usageViewCacheKey(namespace, second) {
+		t.Fatal("rolling cutoff movement must not create a new read-model cache entry")
+	}
+}
+
 // TestLoadUsageViewCached_HitWhenFingerprintMatches stores an agg then verifies
 // a subsequent lookup with unchanged data returns a cache hit.
 func TestLoadUsageViewCached_HitWhenFingerprintMatches(t *testing.T) {

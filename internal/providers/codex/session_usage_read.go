@@ -1,7 +1,10 @@
 package codex
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -143,18 +146,53 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 }
 
 func findLastTokenCount(path string) (*eventPayload, error) {
-	var lastPayload *eventPayload
-	if err := walkSessionFile(path, func(record sessionLine) error {
-		if record.EventPayload == nil || record.EventPayload.Type != "token_count" {
-			return nil
-		}
-		payload := *record.EventPayload
-		lastPayload = &payload
-		return nil
-	}); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		return nil, err
 	}
-	return lastPayload, nil
+	size := info.Size()
+	for tailBytes := int64(512 * 1024); ; tailBytes *= 2 {
+		if tailBytes > size {
+			tailBytes = size
+		}
+		tailOffset := size - tailBytes
+		if tailOffset > 0 {
+			f, err := os.Open(path)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := f.Seek(tailOffset, io.SeekStart); err != nil {
+				_ = f.Close()
+				return nil, err
+			}
+			reader := bufio.NewReaderSize(f, 64*1024)
+			discarded, err := reader.ReadBytes('\n')
+			_ = f.Close()
+			if err != nil && err != io.EOF {
+				return nil, err
+			}
+			tailOffset += int64(len(discarded))
+		}
+
+		var lastPayload *eventPayload
+		_, _, err := walkSessionFileFrom(path, tailOffset, 0, func(record sessionLine) error {
+			if record.EventPayload == nil || record.EventPayload.Type != "token_count" {
+				return nil
+			}
+			payload := *record.EventPayload
+			lastPayload = &payload
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if lastPayload != nil || tailOffset == 0 {
+			return lastPayload, nil
+		}
+		if tailBytes == size {
+			return nil, nil
+		}
+	}
 }
 
 func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) error {

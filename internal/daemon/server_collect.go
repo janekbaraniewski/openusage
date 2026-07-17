@@ -18,31 +18,40 @@ func (s *Service) runCollectLoop(ctx context.Context) {
 	s.infof("collect_loop_start", "interval=%s", interval)
 	s.collectAndFlush(ctx)
 	for {
+		triggeredByChange := false
 		select {
 		case <-ctx.Done():
 			s.infof("collect_loop_stop", "reason=context_done")
 			return
 		case <-time.After(interval):
-			collected := s.collectAndFlush(ctx)
-			if collected == 0 {
-				consecutiveEmpty++
-				if consecutiveEmpty >= 3 {
-					newInterval := interval * 2
-					if newInterval > maxInterval {
-						newInterval = maxInterval
-					}
-					if newInterval != interval {
-						interval = newInterval
-						s.infof("collect_backoff", "interval=%s empty_cycles=%d", interval, consecutiveEmpty)
-					}
-				}
-			} else {
-				if consecutiveEmpty > 0 && interval != s.cfg.CollectInterval {
-					s.infof("collect_reset", "interval=%s→%s collected=%d", interval, s.cfg.CollectInterval, collected)
-				}
-				consecutiveEmpty = 0
-				interval = s.cfg.CollectInterval
+		case <-s.collectNow:
+			triggeredByChange = true
+		}
+
+		collected := s.collectAndFlush(ctx)
+		if collected == 0 {
+			// Noisy filesystem notifications must not accelerate periodic
+			// backoff; they already received an immediate collection attempt.
+			if triggeredByChange {
+				continue
 			}
+			consecutiveEmpty++
+			if consecutiveEmpty >= 3 {
+				newInterval := interval * 2
+				if newInterval > maxInterval {
+					newInterval = maxInterval
+				}
+				if newInterval != interval {
+					interval = newInterval
+					s.infof("collect_backoff", "interval=%s empty_cycles=%d", interval, consecutiveEmpty)
+				}
+			}
+		} else {
+			if consecutiveEmpty > 0 && interval != s.cfg.CollectInterval {
+				s.infof("collect_reset", "interval=%s→%s collected=%d", interval, s.cfg.CollectInterval, collected)
+			}
+			consecutiveEmpty = 0
+			interval = s.cfg.CollectInterval
 		}
 	}
 }
@@ -85,7 +94,7 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 	if accountsErr != nil {
 		warnings = append(warnings, fmt.Sprintf("collector account config: %v", accountsErr))
 	}
-	collectors, collectorWarnings := buildCollectors(accounts)
+	collectors, collectorWarnings := buildCollectorsFromSources(accounts, s.telemetrySources)
 	warnings = append(warnings, collectorWarnings...)
 
 	for _, collector := range collectors {
@@ -98,18 +107,17 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		allReqs = append(allReqs, reqs...)
 	}
 
-	// No ingest-time age filter: local-file sources re-import the last ~90d of
-	// history each cycle, which is fine because the hot window (retention_days)
-	// is ≥ that lookback, so re-imported events land inside the window and are
-	// never the tug-of-war target. Detail past the hot window is downsampled
-	// into usage_rollup_daily and then pruned (see pruneOldData).
+	// No ingest-time age filter: local-file sources import their available
+	// history on the first cycle and emit only changed-file events afterward.
+	// Detail past the hot window is downsampled into usage_rollup_daily and then
+	// pruned (see pruneOldData).
 	direct, retries := s.ingestBatch(ctx, allReqs)
 	if direct.ingested > 0 {
-		s.dataIngested.Store(true)
+		s.markDataIngested()
 	}
 	flush, enqueued, flushWarnings := s.flushBacklog(ctx, retries, backlogFlushLimit)
 	if flush.Ingested > 0 {
-		s.dataIngested.Store(true)
+		s.markDataIngested()
 	}
 	warnings = append(warnings, flushWarnings...)
 
@@ -126,7 +134,6 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		for _, warning := range warnings {
 			s.warnf("collect_warning", "message=%q", warning)
 		}
-		s.pruneTelemetryOrphans(ctx)
 		return totalCollected
 	}
 
@@ -134,38 +141,47 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		s.infof("collect_idle_slow", "duration_ms=%d", durationMs)
 	}
 
-	s.pruneTelemetryOrphans(ctx)
 	return totalCollected
 }
 
-func (s *Service) pruneTelemetryOrphans(ctx context.Context) {
+const telemetryPayloadMaintenanceBatchSize = 10000
+
+func nextTelemetryPayloadMaintenanceDelay(backlog bool) time.Duration {
+	if backlog {
+		return 10 * time.Minute
+	}
+	return 6 * time.Hour
+}
+
+func (s *Service) runTelemetryPayloadMaintenanceLoop(ctx context.Context) {
 	if s == nil || s.store == nil {
 		return
 	}
-	if !s.shouldLog("prune_orphan_raw_events_tick", 45*time.Second) {
-		return
-	}
-
-	const pruneBatchSize = 10000
-	pruneCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-
-	removed, err := s.store.PruneOrphanRawEvents(pruneCtx, pruneBatchSize)
-	if err != nil {
-		if s.shouldLog("prune_orphan_raw_events_error", 20*time.Second) {
-			s.warnf("prune_orphan_raw_events_error", "error=%v", err)
+	// Keep large-table cleanup off the hot collection path and away from
+	// startup. Orphan cleanup already runs after retention deletes canonical
+	// events; this loop only strips old raw payload bodies in bounded batches.
+	timer := time.NewTimer(10 * time.Minute)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			maintenanceCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			pruned, err := s.store.PruneRawEventPayloads(maintenanceCtx, 1, telemetryPayloadMaintenanceBatchSize)
+			cancel()
+			if err != nil {
+				if s.shouldLog("prune_raw_payloads_error", 30*time.Minute) {
+					s.warnf("prune_raw_payloads_error", "error=%v", err)
+				}
+				timer.Reset(10 * time.Minute)
+				continue
+			}
+			if pruned > 0 {
+				s.infof("prune_raw_payloads", "pruned=%d batch_size=%d", pruned, telemetryPayloadMaintenanceBatchSize)
+			}
+			timer.Reset(nextTelemetryPayloadMaintenanceDelay(pruned >= telemetryPayloadMaintenanceBatchSize))
 		}
-		return
-	}
-	if removed > 0 {
-		s.infof("prune_orphan_raw_events", "removed=%d batch_size=%d", removed, pruneBatchSize)
-	}
-
-	payloadCtx, payloadCancel := context.WithTimeout(ctx, 4*time.Second)
-	defer payloadCancel()
-	pruned, pruneErr := s.store.PruneRawEventPayloads(payloadCtx, 1, pruneBatchSize)
-	if pruneErr == nil && pruned > 0 {
-		s.infof("prune_raw_payloads", "pruned=%d", pruned)
 	}
 }
 
@@ -216,6 +232,13 @@ func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	if removed, changeErr := s.store.PruneUsageEventChanges(pruneCtx, 50000); changeErr != nil {
+		if s.shouldLog("usage_change_log_prune_error", 30*time.Second) {
+			s.warnf("usage_change_log_prune_error", "error=%v", changeErr)
+		}
+	} else if removed > 0 {
+		s.infof("usage_change_log_prune", "removed=%d", removed)
+	}
 
 	// Thin and trim the balance observation series independently of usage
 	// events — it grows on its own poll cadence and has its own retention floor.

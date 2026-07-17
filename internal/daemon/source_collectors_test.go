@@ -52,6 +52,22 @@ func TestBuildCollectors_AmbiguousAccountsFallBackToSourceScope(t *testing.T) {
 	}
 }
 
+func TestBuildCollectorsFromSourcesReusesTelemetrySourceInstances(t *testing.T) {
+	sources := telemetrySourcesBySystem()
+
+	first, firstWarnings := buildCollectorsFromSources(nil, sources)
+	second, secondWarnings := buildCollectorsFromSources(nil, sources)
+	if len(firstWarnings) != 0 || len(secondWarnings) != 0 {
+		t.Fatalf("warnings = %v, %v; want none", firstWarnings, secondWarnings)
+	}
+
+	firstCodex := findSourceCollector(t, first, "codex")
+	secondCodex := findSourceCollector(t, second, "codex")
+	if firstCodex.Source != secondCodex.Source {
+		t.Fatal("codex telemetry source was recreated between collector builds")
+	}
+}
+
 func TestResolveTelemetrySourceOptionsFromAccounts_UsesExplicitAccount(t *testing.T) {
 	source, ok := providers.TelemetrySourceBySystem("codex")
 	if !ok {

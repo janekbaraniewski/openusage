@@ -20,6 +20,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -27,17 +28,20 @@ type Service struct {
 	cfg Config
 	ctx context.Context
 
-	store        *telemetry.Store
-	pipeline     *telemetry.Pipeline
-	quotaIngest  *telemetry.QuotaSnapshotIngestor
-	providerByID map[string]core.UsageProvider
-	exp          *exporter.Exporter
+	store            *telemetry.Store
+	pipeline         *telemetry.Pipeline
+	quotaIngest      *telemetry.QuotaSnapshotIngestor
+	providerByID     map[string]core.UsageProvider
+	telemetrySources map[string]shared.TelemetrySource
+	exp              *exporter.Exporter
 
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
 	logThrottle *core.LogThrottle
 
 	rmCache       *readModelCache
-	dataIngested  atomic.Bool // set when new data is ingested; read model loop skips refresh when clean
+	dataIngested  atomic.Bool   // set when new data is ingested; read model loop skips refresh when clean
+	dataVersion   atomic.Uint64 // increments after each successful ingest so HTTP caches refresh only when stale
+	collectNow    chan struct{} // coalesced source-change requests consumed by the single collect loop
 	pollScheduler *PollScheduler
 
 	pollStateMu sync.Mutex
@@ -47,6 +51,14 @@ type Service struct {
 	// state that needs to be reproducible in tests. Defaults to
 	// core.SystemClock{}; tests can override via WithClock.
 	clock core.Clock
+}
+
+func (s *Service) markDataIngested() {
+	if s == nil {
+		return
+	}
+	s.dataVersion.Add(1)
+	s.dataIngested.Store(true)
 }
 
 // now is the canonical "what time is it?" hook for the daemon. Code that
@@ -131,19 +143,22 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		}
 	}
 
+	telemetrySources := telemetrySourcesBySystem()
 	svc := &Service{
-		cfg:           cfg,
-		ctx:           ctx,
-		store:         store,
-		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
-		providerByID:  providersByID(),
-		exp:           exp,
-		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
-		rmCache:       newReadModelCache(),
-		pollScheduler: newPollScheduler(cfg.PollInterval),
-		pollState:     make(map[string]*providerPollState),
-		clock:         core.SystemClock{},
+		cfg:              cfg,
+		ctx:              ctx,
+		store:            store,
+		pipeline:         telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:      telemetry.NewQuotaSnapshotIngestor(store),
+		providerByID:     providersByID(),
+		telemetrySources: telemetrySources,
+		exp:              exp,
+		logThrottle:      core.NewLogThrottle(200, 10*time.Minute),
+		rmCache:          newReadModelCache(),
+		collectNow:       make(chan struct{}, 1),
+		pollScheduler:    newPollScheduler(cfg.PollInterval),
+		pollState:        make(map[string]*providerPollState),
+		clock:            core.SystemClock{},
 	}
 
 	svc.infof(
@@ -154,7 +169,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.SpoolDir,
 		svc.cfg.CollectInterval,
 		svc.cfg.PollInterval,
-		telemetrySourceCount(),
+		len(telemetrySources),
 		len(svc.providerByID),
 	)
 
@@ -178,6 +193,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runSpoolMaintenanceLoop(ctx)
 	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
+	go svc.runTelemetryPayloadMaintenanceLoop(ctx)
 
 	if svc.exp != nil {
 		go svc.exp.Start(ctx)

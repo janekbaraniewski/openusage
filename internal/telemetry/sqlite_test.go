@@ -56,6 +56,26 @@ func TestWALCheckpoint_TruncatesWAL(t *testing.T) {
 	}
 }
 
+func TestConfigureSQLiteReadOnlyConnectionKeepsTempWorkInMemory(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	if err := configureSQLiteReadOnlyConnection(db); err != nil {
+		t.Fatalf("configure read-only connection: %v", err)
+	}
+
+	var tempStore int
+	if err := db.QueryRow(`PRAGMA temp_store`).Scan(&tempStore); err != nil {
+		t.Fatalf("query temp_store: %v", err)
+	}
+	if tempStore != 2 {
+		t.Fatalf("temp_store = %d, want 2 (MEMORY)", tempStore)
+	}
+}
+
 func TestWALSizeBytes_NonExistentFile(t *testing.T) {
 	size := WALSizeBytes("/nonexistent/path/test.db")
 	if size != 0 {

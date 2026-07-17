@@ -1,12 +1,339 @@
 package codex
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
+
+func TestCollectSkipsUnchangedSessionFiles(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	path := filepath.Join(sessionsDir, "rollout-unchanged.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-unchanged"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{"sessions_dir": sessionsDir}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first Collect() events = %d, want 1", len(first))
+	}
+
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Collect() events = %d, want 0 for unchanged files", len(second))
+	}
+
+	touchedTime := time.Now().Add(time.Second)
+	if err := os.Chtimes(path, touchedTime, touchedTime); err != nil {
+		t.Fatalf("touch unchanged session: %v", err)
+	}
+	touched, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Collect() after mtime-only change error: %v", err)
+	}
+	if len(touched) != 0 {
+		t.Fatalf("Collect() after mtime-only change events = %d, want 0", len(touched))
+	}
+
+	appended := `{"timestamp":"2026-07-17T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":15,"output_tokens":10,"total_tokens":25}}}}
+`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open session for append: %v", err)
+	}
+	if _, err := f.WriteString(appended); err != nil {
+		_ = f.Close()
+		t.Fatalf("append session: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	third, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third Collect() error: %v", err)
+	}
+	if len(third) != 1 {
+		t.Fatalf("third Collect() events = %d, want only the appended event", len(third))
+	}
+	if got := *third[0].TokenUsage.TotalTokens; got != 10 {
+		t.Fatalf("third Collect() total_tokens = %d, want appended delta 10", got)
+	}
+}
+
+func TestCollectDoesNotReplayFileWhenObservedSizeCatchesUpToResumeOffset(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	path := filepath.Join(sessionsDir, "rollout-growing-during-scan.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-growing"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	state, nextOffset, nextLineNumber, err := primeTelemetryParserState(path, int64(len(content)))
+	if err != nil {
+		t.Fatalf("prime session state: %v", err)
+	}
+	provider := New()
+	provider.telemetryBaselineInitialized = true
+	provider.telemetryCache = map[string]*telemetryCacheEntry{
+		path: {
+			size:       int64(len(content) - 1),
+			byteOffset: nextOffset,
+			lineNumber: nextLineNumber,
+			state:      state,
+		},
+	}
+
+	events, err := provider.Collect(context.Background(), shared.TelemetryCollectOptions{
+		Paths: map[string]string{"sessions_dir": sessionsDir},
+	})
+	if err != nil {
+		t.Fatalf("Collect() error: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Collect() events = %d, want 0 without bytes beyond the resume offset", len(events))
+	}
+}
+
+func TestCollectBaselinesOldSessionFilesWhenEnabled(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	oldPath := filepath.Join(sessionsDir, "rollout-old.jsonl")
+	recentPath := filepath.Join(sessionsDir, "rollout-recent.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-baseline"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(oldPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write old session file: %v", err)
+	}
+	if err := os.WriteFile(recentPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write recent session file: %v", err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+		t.Fatalf("chtimes old session file: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{
+		"sessions_dir":           sessionsDir,
+		"baseline_existing":      "true",
+		"baseline_recent_window": "30m",
+	}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first Collect() events = %d, want only recent file event", len(first))
+	}
+	if got := first[0].Payload["source_file"]; got != recentPath {
+		t.Fatalf("source_file = %#v, want %q", got, recentPath)
+	}
+
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Collect() events = %d, want 0 after baseline", len(second))
+	}
+
+	appended := `{"timestamp":"2026-07-17T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":15,"output_tokens":10,"total_tokens":25}}}}
+`
+	f, err := os.OpenFile(oldPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open old session for append: %v", err)
+	}
+	if _, err := f.WriteString(appended); err != nil {
+		_ = f.Close()
+		t.Fatalf("append old session: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close old session: %v", err)
+	}
+
+	third, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third Collect() error: %v", err)
+	}
+	if len(third) != 1 {
+		t.Fatalf("third Collect() events = %d, want only the appended baseline event", len(third))
+	}
+	if got := *third[0].TokenUsage.TotalTokens; got != 10 {
+		t.Fatalf("third Collect() total_tokens = %d, want appended delta 10", got)
+	}
+}
+
+func TestCollectDefersParserPrimingForBaselinedFilesUntilTheyGrow(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	path := filepath.Join(sessionsDir, "rollout-lazy-baseline.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-lazy"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	provider := New()
+	first, err := provider.Collect(context.Background(), shared.TelemetryCollectOptions{Paths: map[string]string{
+		"sessions_dir":           sessionsDir,
+		"baseline_existing":      "true",
+		"baseline_recent_window": "0s",
+	}})
+	if err != nil {
+		t.Fatalf("Collect() error: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("Collect() events = %d, want existing history baselined", len(first))
+	}
+	entry := provider.telemetryCache[path]
+	if entry == nil {
+		t.Fatal("expected baseline cache entry")
+	}
+	if entry.state != nil {
+		t.Fatal("baseline eagerly primed parser state; want lazy priming after growth")
+	}
+}
+
+func TestPrimeTelemetryParserStateStopsAtCapturedSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-growing.jsonl")
+	prefix := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-bounded"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	appended := `{"timestamp":"2026-07-17T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":15,"output_tokens":10,"total_tokens":25}}}}
+`
+	if err := os.WriteFile(path, []byte(prefix+appended), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	state, nextOffset, _, err := primeTelemetryParserState(path, int64(len(prefix)))
+	if err != nil {
+		t.Fatalf("prime session state: %v", err)
+	}
+	if nextOffset != int64(len(prefix)) {
+		t.Fatalf("next offset = %d, want captured size %d", nextOffset, len(prefix))
+	}
+	if !state.hasPrevious || state.previous.TotalTokens != 15 {
+		t.Fatalf("previous usage = %+v, want total tokens 15 at captured size", state.previous)
+	}
+}
+
+func TestCollectBaselinesOnlyFilesPresentOnInitialScan(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-baseline-once"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	existingPath := filepath.Join(sessionsDir, "rollout-existing.jsonl")
+	if err := os.WriteFile(existingPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write existing session: %v", err)
+	}
+	// A live writer can update mtime after Collect captures its cutoff but
+	// before the directory walk reaches this file. A zero window means all
+	// files present on the initial scan must still be baselined.
+	futureTime := time.Now().Add(time.Hour)
+	if err := os.Chtimes(existingPath, futureTime, futureTime); err != nil {
+		t.Fatalf("set future mtime: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{
+		"sessions_dir":           sessionsDir,
+		"baseline_existing":      "true",
+		"baseline_recent_window": "0s",
+	}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("first Collect() events = %d, want existing history baselined", len(first))
+	}
+
+	newPath := filepath.Join(sessionsDir, "rollout-new.jsonl")
+	if err := os.WriteFile(newPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write new session: %v", err)
+	}
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 1 {
+		t.Fatalf("second Collect() events = %d, want new session collected", len(second))
+	}
+}
+
+func TestCollectDoesNotBaselineFileCreatedAfterEmptyInitialScan(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{
+		"sessions_dir":           sessionsDir,
+		"baseline_existing":      "true",
+		"baseline_recent_window": "0s",
+	}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("first Collect() events = %d, want empty initial scan", len(first))
+	}
+
+	path := filepath.Join(sessionsDir, "rollout-created-later.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-created-later"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 1 {
+		t.Fatalf("second Collect() events = %d, want newly created file event", len(second))
+	}
+}
 
 func TestParseTelemetrySessionFile_CollectsTokenDeltas(t *testing.T) {
 	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "02", "22")

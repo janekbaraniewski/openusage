@@ -9,6 +9,22 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+type pollProviderResult struct {
+	accountID    string
+	snapshot     core.UsageSnapshot
+	shouldIngest bool
+}
+
+func pollSnapshotsForIngest(results []pollProviderResult) map[string]core.UsageSnapshot {
+	snapshots := make(map[string]core.UsageSnapshot)
+	for _, result := range results {
+		if result.shouldIngest {
+			snapshots[result.accountID] = result.snapshot
+		}
+	}
+	return snapshots
+}
+
 func (s *Service) runPollLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
@@ -46,12 +62,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 		return
 	}
 
-	type providerResult struct {
-		accountID string
-		snapshot  core.UsageSnapshot
-	}
-
-	results := make(chan providerResult, len(accounts))
+	results := make(chan pollProviderResult, len(accounts))
 	var wg sync.WaitGroup
 
 	for _, acct := range accounts {
@@ -71,7 +82,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 
 			provider, ok := s.providerByID[account.Provider]
 			if !ok {
-				results <- providerResult{
+				results <- pollProviderResult{
 					accountID: account.ID,
 					snapshot: core.UsageSnapshot{
 						ProviderID: account.Provider,
@@ -80,6 +91,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 						Status:     core.StatusError,
 						Message:    fmt.Sprintf("no provider adapter registered for %q (restart/reinstall telemetry daemon if recently added)", account.Provider),
 					},
+					shouldIngest: true,
 				}
 				return
 			}
@@ -92,7 +104,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 				state := s.pollState[account.ID]
 				s.pollStateMu.Unlock()
 				if state != nil && state.hasSnap {
-					results <- providerResult{accountID: account.ID, snapshot: state.lastSnap}
+					results <- pollProviderResult{accountID: account.ID, snapshot: state.lastSnap}
 					return
 				}
 				// No cached snapshot yet — must fetch.
@@ -101,7 +113,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 			// Check if provider data has changed since last fetch (optional interface).
 			if cached := s.skipUnchangedProvider(provider, account); cached != nil {
 				s.pollScheduler.RecordPoll(account.ID, false)
-				results <- providerResult{accountID: account.ID, snapshot: *cached}
+				results <- pollProviderResult{accountID: account.ID, snapshot: *cached}
 				return
 			}
 
@@ -133,7 +145,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 			}
 			s.pollStateMu.Unlock()
 
-			results <- providerResult{accountID: account.ID, snapshot: snap}
+			results <- pollProviderResult{accountID: account.ID, snapshot: snap, shouldIngest: changed}
 		}(acct)
 	}
 
@@ -143,9 +155,11 @@ func (s *Service) pollProviders(ctx context.Context) {
 	}()
 
 	snapshots := make(map[string]core.UsageSnapshot, len(accounts))
+	pollResults := make([]pollProviderResult, 0, len(accounts))
 	statusCounts := map[core.Status]int{}
 	errorCount := 0
 	for result := range results {
+		pollResults = append(pollResults, result)
 		snapshots[result.accountID] = result.snapshot
 		statusCounts[result.snapshot.Status]++
 		if result.snapshot.Status == core.StatusError {
@@ -156,24 +170,29 @@ func (s *Service) pollProviders(ctx context.Context) {
 		return
 	}
 
-	ingestCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-	defer cancel()
-	ingestErr := s.ingestQuotaSnapshots(ingestCtx, snapshots)
+	changedSnapshots := pollSnapshotsForIngest(pollResults)
+	var ingestErr error
+	if len(changedSnapshots) > 0 {
+		ingestCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		ingestErr = s.ingestQuotaSnapshots(ingestCtx, changedSnapshots)
+		cancel()
+	}
 	if ingestErr != nil && s.shouldLog("poll_ingest_warning", 10*time.Second) {
 		s.warnf("poll_ingest_warning", "error=%v", ingestErr)
 	}
-	if ingestErr == nil && len(snapshots) > 0 {
-		s.dataIngested.Store(true)
+	if ingestErr == nil && len(changedSnapshots) > 0 {
+		s.markDataIngested()
 	}
 
 	durationMs := time.Since(started).Milliseconds()
 	if ingestErr != nil || errorCount > 0 || s.shouldLog("poll_cycle_info", 45*time.Second) {
 		s.infof(
 			"poll_cycle",
-			"duration_ms=%d accounts=%d snapshots=%d status_ok=%d status_auth=%d status_limited=%d status_error=%d status_unknown=%d ingest_error=%t",
+			"duration_ms=%d accounts=%d snapshots=%d changed=%d status_ok=%d status_auth=%d status_limited=%d status_error=%d status_unknown=%d ingest_error=%t",
 			durationMs,
 			len(accounts),
 			len(snapshots),
+			len(changedSnapshots),
 			statusCounts[core.StatusOK],
 			statusCounts[core.StatusAuth],
 			statusCounts[core.StatusLimited],

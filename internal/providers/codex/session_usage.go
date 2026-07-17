@@ -3,12 +3,23 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
+
+func codexSessionUsageBreakdownsEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("OPENUSAGE_CODEX_SKIP_SESSION_BREAKDOWNS")))
+	switch value {
+	case "1", "true", "yes", "on":
+		return false
+	default:
+		return true
+	}
+}
 
 func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.UsageSnapshot) error {
 	modelTotals := make(map[string]tokenUsage)

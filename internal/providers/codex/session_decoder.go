@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 )
 
@@ -69,69 +71,117 @@ type sessionLine struct {
 }
 
 func walkSessionFile(path string, fn func(sessionLine) error) error {
+	_, _, err := walkSessionFileFrom(path, 0, 0, fn)
+	return err
+}
+
+// walkSessionFileFrom walks complete JSONL records starting at byteOffset.
+// It returns the next safe byte offset and absolute line number so callers can
+// resume after append-only growth without reading the file from the beginning.
+func walkSessionFileFrom(path string, byteOffset int64, startLine int, fn func(sessionLine) error) (int64, int, error) {
+	return walkSessionFileRange(path, byteOffset, -1, startLine, fn)
+}
+
+// walkSessionFileRange is the bounded form used when a caller must parse a
+// filesystem snapshot without consuming bytes appended after it was taken.
+// A negative endOffset reads through the current EOF.
+func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startLine int, fn func(sessionLine) error) (int64, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return byteOffset, startLine, err
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 512*1024), maxScannerBufferSize)
-	lineNumber := 0
-
-	for scanner.Scan() {
-		lineNumber++
-		line := scanner.Bytes()
-		if !bytes.Contains(line, []byte(`"type":"event_msg"`)) &&
-			!bytes.Contains(line, []byte(`"type":"turn_context"`)) &&
-			!bytes.Contains(line, []byte(`"type":"session_meta"`)) &&
-			!bytes.Contains(line, []byte(`"type":"response_item"`)) {
-			continue
-		}
-
-		var event sessionEvent
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
-		}
-
-		record := sessionLine{
-			Timestamp:  event.Timestamp,
-			LineNumber: lineNumber,
-		}
-
-		switch event.Type {
-		case "session_meta":
-			var meta sessionMetaPayload
-			if json.Unmarshal(event.Payload, &meta) != nil {
-				continue
-			}
-			record.SessionMeta = &meta
-		case "turn_context":
-			var tc turnContextPayload
-			if json.Unmarshal(event.Payload, &tc) != nil {
-				continue
-			}
-			record.TurnContext = &tc
-		case "event_msg":
-			var payload eventPayload
-			if json.Unmarshal(event.Payload, &payload) != nil {
-				continue
-			}
-			record.EventPayload = &payload
-		case "response_item":
-			var item responseItemPayload
-			if json.Unmarshal(event.Payload, &item) != nil {
-				continue
-			}
-			record.ResponseItem = &item
-		default:
-			continue
-		}
-
-		if err := fn(record); err != nil {
-			return err
-		}
+	if _, err := f.Seek(byteOffset, io.SeekStart); err != nil {
+		return byteOffset, startLine, err
 	}
 
-	return scanner.Err()
+	var source io.Reader = f
+	if endOffset >= 0 {
+		if endOffset < byteOffset {
+			return byteOffset, startLine, fmt.Errorf("codex session end offset %d precedes start offset %d", endOffset, byteOffset)
+		}
+		source = io.LimitReader(f, endOffset-byteOffset)
+	}
+	reader := bufio.NewReaderSize(source, 512*1024)
+	nextOffset := byteOffset
+	lineNumber := startLine
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > maxScannerBufferSize {
+			return nextOffset, lineNumber, fmt.Errorf("codex session line exceeds %d bytes", maxScannerBufferSize)
+		}
+		if len(line) == 0 && readErr == io.EOF {
+			return nextOffset, lineNumber, nil
+		}
+
+		// Do not consume a partially-written final record. It will be retried
+		// after the writer appends the remaining bytes on the next cycle.
+		if readErr == io.EOF && !json.Valid(bytes.TrimSpace(line)) {
+			return nextOffset, lineNumber, nil
+		}
+
+		lineNumber++
+		nextOffset += int64(len(line))
+		if record, ok := decodeSessionLine(line, lineNumber); ok {
+			if err := fn(record); err != nil {
+				return nextOffset, lineNumber, err
+			}
+		}
+
+		if readErr == io.EOF {
+			return nextOffset, lineNumber, nil
+		}
+		if readErr != nil {
+			return nextOffset, lineNumber, readErr
+		}
+	}
+}
+
+func decodeSessionLine(line []byte, lineNumber int) (sessionLine, bool) {
+	if !bytes.Contains(line, []byte(`"type":"event_msg"`)) &&
+		!bytes.Contains(line, []byte(`"type":"turn_context"`)) &&
+		!bytes.Contains(line, []byte(`"type":"session_meta"`)) &&
+		!bytes.Contains(line, []byte(`"type":"response_item"`)) {
+		return sessionLine{}, false
+	}
+
+	var event sessionEvent
+	if err := json.Unmarshal(line, &event); err != nil {
+		return sessionLine{}, false
+	}
+
+	record := sessionLine{
+		Timestamp:  event.Timestamp,
+		LineNumber: lineNumber,
+	}
+	switch event.Type {
+	case "session_meta":
+		var meta sessionMetaPayload
+		if json.Unmarshal(event.Payload, &meta) != nil {
+			return sessionLine{}, false
+		}
+		record.SessionMeta = &meta
+	case "turn_context":
+		var tc turnContextPayload
+		if json.Unmarshal(event.Payload, &tc) != nil {
+			return sessionLine{}, false
+		}
+		record.TurnContext = &tc
+	case "event_msg":
+		var payload eventPayload
+		if json.Unmarshal(event.Payload, &payload) != nil {
+			return sessionLine{}, false
+		}
+		record.EventPayload = &payload
+	case "response_item":
+		var item responseItemPayload
+		if json.Unmarshal(event.Payload, &item) != nil {
+			return sessionLine{}, false
+		}
+		record.ResponseItem = &item
+	default:
+		return sessionLine{}, false
+	}
+	return record, true
 }

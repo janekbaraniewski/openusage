@@ -69,7 +69,7 @@ func (s *Service) runWatchLoop(ctx context.Context) {
 			}
 			eventName, eventOp := event.Name, event.Op
 			debounceTimer = time.AfterFunc(debounceInterval, func() {
-				s.dataIngested.Store(true) // trigger read model refresh
+				s.requestCollection()
 				core.Tracef("[watch] change detected: %s op=%s", eventName, eventOp)
 			})
 
@@ -81,6 +81,18 @@ func (s *Service) runWatchLoop(ctx context.Context) {
 				s.warnf("watch_error", "error=%v", err)
 			}
 		}
+	}
+}
+
+func (s *Service) requestCollection() {
+	if s == nil || s.collectNow == nil {
+		return
+	}
+	select {
+	case s.collectNow <- struct{}{}:
+	default:
+		// A collection is already queued. One pass observes the latest state
+		// for all local sources, so additional notifications can be coalesced.
 	}
 }
 

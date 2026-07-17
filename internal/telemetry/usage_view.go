@@ -146,6 +146,7 @@ type usageFilter struct {
 	AccountID       string
 	Since           time.Time
 	TodaySince      time.Time
+	WindowKey       core.TimeWindow
 	materializedTbl string
 }
 
@@ -191,7 +192,7 @@ func applyCanonicalUsageViewWithDB(
 		cacheKey := strings.Join(sourceProviders, ",") + "|" + accountScope
 		agg, ok := cache[cacheKey]
 		if !ok {
-			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, cacheNamespace, sourceProviders, accountScope, since, todaySince)
+			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, cacheNamespace, sourceProviders, accountScope, since, todaySince, timeWindow)
 			if loadErr != nil {
 				return snaps, loadErr
 			}
@@ -268,7 +269,7 @@ func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) (map[string]
 	return out, nil
 }
 
-func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheNamespace usageViewCacheNamespace, providerIDs []string, accountID string, since time.Time, todaySince time.Time) (*telemetryUsageAgg, error) {
+func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheNamespace usageViewCacheNamespace, providerIDs []string, accountID string, since time.Time, todaySince time.Time, windowKey core.TimeWindow) (*telemetryUsageAgg, error) {
 	providerIDs = normalizeProviderIDs(providerIDs)
 	if len(providerIDs) == 0 {
 		return &telemetryUsageAgg{}, nil
@@ -281,6 +282,7 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheN
 			AccountID:   accountID,
 			Since:       since,
 			TodaySince:  todaySince,
+			WindowKey:   windowKey,
 		})
 		if err != nil {
 			return nil, err
@@ -301,6 +303,7 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheN
 		ProviderIDs: providerIDs,
 		Since:       since,
 		TodaySince:  todaySince,
+		WindowKey:   windowKey,
 	})
 	if err != nil {
 		return nil, err
@@ -322,6 +325,24 @@ func loadUsageViewForFilter(ctx context.Context, db *sql.DB, cacheNamespace usag
 	if hit {
 		core.Tracef("[usage_view_perf] loadUsageViewForFilter CACHE HIT: %dms (providers=%v)", time.Since(filterStart).Milliseconds(), filter.ProviderIDs)
 		return cached, nil
+	}
+	if cacheNamespace != "" {
+		incremental, handled, incrementalErr := refreshIncrementalUsageView(ctx, db, cacheNamespace, filter, maxRowID, count)
+		if incrementalErr != nil {
+			return nil, incrementalErr
+		}
+		if handled {
+			core.Tracef("[usage_view_perf] loadUsageViewForFilter INCREMENTAL: %dms (providers=%v)", time.Since(filterStart).Milliseconds(), filter.ProviderIDs)
+			return incremental, nil
+		}
+
+		state, built, buildErr := buildIncrementalUsageState(ctx, db, filter)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		storeIncrementalUsageViewCache(cacheNamespace, filter, state, built, maxRowID, count)
+		core.Tracef("[usage_view_perf] loadUsageViewForFilter COLD INCREMENTAL BUILD: %dms (events=%d, providers=%v)", time.Since(filterStart).Milliseconds(), built.EventCount, filter.ProviderIDs)
+		return built, nil
 	}
 
 	agg := newTelemetryUsageAgg()
