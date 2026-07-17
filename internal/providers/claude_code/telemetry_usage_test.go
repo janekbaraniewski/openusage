@@ -1,12 +1,70 @@
 package claude_code
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
+
+func TestCollectSkipsUnchangedConversationFiles(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "projects", "repo-a")
+	if err := os.MkdirAll(projectsDir, 0o755); err != nil {
+		t.Fatalf("mkdir projects: %v", err)
+	}
+
+	path := filepath.Join(projectsDir, "session.jsonl")
+	content := `{"type":"assistant","sessionId":"sess1","requestId":"req-1","timestamp":"2026-07-17T10:00:00Z","message":{"id":"msg-1","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{
+		"projects_dir":     filepath.Dir(projectsDir),
+		"alt_projects_dir": filepath.Join(t.TempDir(), "missing"),
+	}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first Collect() events = %d, want 1", len(first))
+	}
+
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Collect() events = %d, want 0 for unchanged files", len(second))
+	}
+
+	appended := `{"type":"assistant","sessionId":"sess1","requestId":"req-2","timestamp":"2026-07-17T10:00:01Z","message":{"id":"msg-2","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":7,"output_tokens":3}}}
+`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open conversation for append: %v", err)
+	}
+	if _, err := f.WriteString(appended); err != nil {
+		_ = f.Close()
+		t.Fatalf("append conversation: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close conversation: %v", err)
+	}
+
+	third, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third Collect() error: %v", err)
+	}
+	if len(third) != 1 {
+		t.Fatalf("third Collect() events = %d, want only 1 appended event", len(third))
+	}
+}
 
 func TestParseTelemetryConversationFile_DedupesByRequestIDAndExtractsToolEvents(t *testing.T) {
 	projectsDir := filepath.Join(t.TempDir(), "projects", "repo-a")

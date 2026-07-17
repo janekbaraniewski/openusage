@@ -42,7 +42,6 @@ type Provider struct {
 type telemetryCacheEntry struct {
 	modTime time.Time
 	size    int64
-	events  []shared.TelemetryEvent
 }
 
 func New() *Provider {
