@@ -224,7 +224,14 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 	if !ok {
 		return ""
 	}
+	// Providers store the reset timestamp under either the bare metric key
+	// (claude_code: snap.Resets["usage_five_hour"]) or a "_reset"-suffixed
+	// key (copilot, opencode: snap.Resets["rolling_usage_reset"]) — both are
+	// established conventions in this codebase, so check both.
 	resetAt, hasReset := snap.Resets[key]
+	if !hasReset {
+		resetAt, hasReset = snap.Resets[key+"_reset"]
+	}
 	if !hasReset {
 		return ""
 	}

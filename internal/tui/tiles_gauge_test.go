@@ -263,6 +263,33 @@ func TestTileGaugeProjectionAnnotation_FitsInWindow(t *testing.T) {
 	}
 }
 
+func TestTileGaugeProjectionAnnotation_SuffixedResetKeyAndAliasedWindows(t *testing.T) {
+	// Some providers (copilot, opencode) store the reset timestamp under a
+	// "<key>_reset" suffixed key rather than the bare metric key, and use
+	// "rolling-5h"/"month" as documented Window aliases for "5h"/"30d"
+	// (see core.Metric's Window doc comment). Both conventions must resolve
+	// to a real annotation, not silently render nothing.
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+
+	rolling := makeUsageMetric(50, 100, "rolling-5h")
+	snap := core.UsageSnapshot{
+		Resets: map[string]time.Time{"rolling_usage_reset": now.Add(4 * time.Hour)},
+	}
+	out := tileGaugeProjectionAnnotation(snap, "rolling_usage", rolling, 50, now)
+	if !strings.Contains(out, "resets") {
+		t.Errorf("rolling-5h window with _reset-suffixed key: expected a reset annotation, got %q", out)
+	}
+
+	monthly := makeUsageMetric(50, 100, "month")
+	snap2 := core.UsageSnapshot{
+		Resets: map[string]time.Time{"monthly_usage_pct_reset": now.Add(15 * 24 * time.Hour)},
+	}
+	out2 := tileGaugeProjectionAnnotation(snap2, "monthly_usage_pct", monthly, 50, now)
+	if !strings.Contains(out2, "resets") {
+		t.Errorf("month window with _reset-suffixed key: expected a reset annotation, got %q", out2)
+	}
+}
+
 func TestTileGaugeProjectionAnnotation_OvershootsWindow(t *testing.T) {
 	// User's reported scenario: 5h window started 1h 18m ago, 22% used.
 	// Pace = 0.22/78 = 0.002820/min → pctPerMinute = 0.2820.

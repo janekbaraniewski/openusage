@@ -171,6 +171,32 @@ func applyCanonicalUsageViewWithDB(
 	}
 	core.Tracef("[usage_view_perf] queryTelemetryActiveProviders: %dms", time.Since(activeStart).Milliseconds())
 
+	// Accounts sharing the same source-provider set are ambiguous for the
+	// provider-scope fallback below: if account-scoped telemetry is empty
+	// for one of several sibling accounts, falling back to a provider-wide
+	// query would leak a sibling account's usage into this one. Only allow
+	// the fallback when a source-provider set maps to exactly one account.
+	siblingAccountsByProviderKey := make(map[string]map[string]bool, len(snaps))
+	for accountID, snap := range snaps {
+		providerID := strings.TrimSpace(snap.ProviderID)
+		if providerID == "" {
+			continue
+		}
+		accountScope := strings.TrimSpace(snap.AccountID)
+		if accountScope == "" {
+			accountScope = strings.TrimSpace(accountID)
+		}
+		sourceProviders := telemetrySourceProvidersForTarget(providerID, providerLinks)
+		if len(sourceProviders) == 0 {
+			continue
+		}
+		providerKey := strings.Join(sourceProviders, ",")
+		if siblingAccountsByProviderKey[providerKey] == nil {
+			siblingAccountsByProviderKey[providerKey] = make(map[string]bool, 1)
+		}
+		siblingAccountsByProviderKey[providerKey][accountScope] = true
+	}
+
 	for accountID, snap := range snaps {
 		s := snap
 		providerID := strings.TrimSpace(s.ProviderID)
@@ -188,10 +214,13 @@ func applyCanonicalUsageViewWithDB(
 			continue
 		}
 
-		cacheKey := strings.Join(sourceProviders, ",") + "|" + accountScope
+		providerKey := strings.Join(sourceProviders, ",")
+		allowProviderFallback := len(siblingAccountsByProviderKey[providerKey]) <= 1
+
+		cacheKey := providerKey + "|" + accountScope
 		agg, ok := cache[cacheKey]
 		if !ok {
-			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, cacheNamespace, sourceProviders, accountScope, since, todaySince)
+			loaded, loadErr := loadUsageViewForProviderWithSources(ctx, db, cacheNamespace, sourceProviders, accountScope, allowProviderFallback, since, todaySince)
 			if loadErr != nil {
 				return snaps, loadErr
 			}
@@ -268,7 +297,7 @@ func queryTelemetryActiveProviders(ctx context.Context, db *sql.DB) (map[string]
 	return out, nil
 }
 
-func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheNamespace usageViewCacheNamespace, providerIDs []string, accountID string, since time.Time, todaySince time.Time) (*telemetryUsageAgg, error) {
+func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheNamespace usageViewCacheNamespace, providerIDs []string, accountID string, allowProviderFallback bool, since time.Time, todaySince time.Time) (*telemetryUsageAgg, error) {
 	providerIDs = normalizeProviderIDs(providerIDs)
 	if len(providerIDs) == 0 {
 		return &telemetryUsageAgg{}, nil
@@ -294,7 +323,15 @@ func loadUsageViewForProviderWithSources(ctx context.Context, db *sql.DB, cacheN
 			scoped.AccountID = accountID
 			return scoped, nil
 		}
-		// Fall through to provider-scoped query if no account-scoped events found.
+		// No account-scoped events. Only fall through to the provider-scoped
+		// query when this account is the sole account for its provider —
+		// otherwise the provider-wide aggregate would include a sibling
+		// account's usage and misattribute it to this one.
+		if !allowProviderFallback {
+			scoped.Scope = "account"
+			scoped.AccountID = accountID
+			return scoped, nil
+		}
 	}
 
 	fallback, err := loadUsageViewForFilter(ctx, db, cacheNamespace, usageFilter{
