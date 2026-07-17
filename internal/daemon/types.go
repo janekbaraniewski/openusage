@@ -57,8 +57,9 @@ type HealthResponse struct {
 }
 
 type cachedReadModelEntry struct {
-	snapshots map[string]core.UsageSnapshot
-	updatedAt time.Time
+	snapshots   map[string]core.UsageSnapshot
+	updatedAt   time.Time
+	dataVersion uint64
 }
 
 type readModelCache struct {
@@ -74,31 +75,32 @@ func newReadModelCache() *readModelCache {
 	}
 }
 
-func (c *readModelCache) get(cacheKey string) (map[string]core.UsageSnapshot, time.Time, bool) {
+func (c *readModelCache) get(cacheKey string) (map[string]core.UsageSnapshot, time.Time, uint64, bool) {
 	if cacheKey == "" {
-		return nil, time.Time{}, false
+		return nil, time.Time{}, 0, false
 	}
 	c.mu.RLock()
 	entry, ok := c.entries[cacheKey]
 	if !ok || len(entry.snapshots) == 0 {
 		c.mu.RUnlock()
-		return nil, time.Time{}, false
+		return nil, time.Time{}, 0, false
 	}
 	// Return direct reference — snapshots are deep-cloned on set() and
 	// treated as immutable once cached. Consumers must not mutate.
 	c.mu.RUnlock()
-	return entry.snapshots, entry.updatedAt, true
+	return entry.snapshots, entry.updatedAt, entry.dataVersion, true
 }
 
-func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSnapshot) {
+func (c *readModelCache) set(cacheKey string, snapshots map[string]core.UsageSnapshot, dataVersion uint64) {
 	if cacheKey == "" || len(snapshots) == 0 {
 		return
 	}
 	now := time.Now().UTC()
 	c.mu.Lock()
 	c.entries[cacheKey] = cachedReadModelEntry{
-		snapshots: core.DeepCloneSnapshots(snapshots),
-		updatedAt: now,
+		snapshots:   core.DeepCloneSnapshots(snapshots),
+		updatedAt:   now,
+		dataVersion: dataVersion,
 	}
 	// Evict stale entries to prevent unbounded growth.
 	const maxEntries = 50

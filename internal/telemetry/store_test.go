@@ -40,6 +40,93 @@ func TestStoreInit_CreatesTables(t *testing.T) {
 	}
 }
 
+func TestStoreInit_TracksUsageEventChanges(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	input, total, requests := int64(10), int64(10), int64(1)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC),
+		ProviderID:    "codex",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "session-change-log",
+		TurnID:        "turn-change-log",
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    &requests,
+		},
+	}); err != nil {
+		t.Fatalf("ingest change-log event: %v", err)
+	}
+
+	assertLatestOperation := func(want string) {
+		t.Helper()
+		var operation string
+		if err := db.QueryRow(`SELECT operation FROM usage_event_changes ORDER BY seq DESC LIMIT 1`).Scan(&operation); err != nil {
+			t.Fatalf("query usage event change: %v", err)
+		}
+		if operation != want {
+			t.Fatalf("expected %s change, got %q", want, operation)
+		}
+	}
+	assertLatestOperation("insert")
+
+	if _, err := db.Exec(`UPDATE usage_events SET input_tokens = 20 WHERE session_id = 'session-change-log'`); err != nil {
+		t.Fatalf("update usage event: %v", err)
+	}
+	assertLatestOperation("update")
+
+	if _, err := db.Exec(`DELETE FROM usage_events WHERE session_id = 'session-change-log'`); err != nil {
+		t.Fatalf("delete usage event: %v", err)
+	}
+	assertLatestOperation("delete")
+}
+
+func TestStorePruneUsageEventChanges_KeepsRecentTail(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := db.Exec(`INSERT INTO usage_event_changes(event_id, operation, changed_at) VALUES (?, 'insert', datetime('now', '-8 day'))`, i); err != nil {
+			t.Fatalf("insert old change: %v", err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO usage_event_changes(event_id, operation) VALUES ('recent', 'insert')`); err != nil {
+		t.Fatalf("insert recent change: %v", err)
+	}
+	removed, err := store.PruneUsageEventChanges(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("prune changes: %v", err)
+	}
+	if removed != 4 {
+		t.Fatalf("expected four old rows removed while retaining a two-row tail, got %d", removed)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes`).Scan(&count); err != nil {
+		t.Fatalf("count changes: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two retained changes, got %d", count)
+	}
+}
+
 func TestStoreIngest_IdempotentByDedupKey(t *testing.T) {
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
 	if err != nil {

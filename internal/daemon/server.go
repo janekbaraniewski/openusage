@@ -41,6 +41,7 @@ type Service struct {
 	rmCache       *readModelCache
 	dataIngested  atomic.Bool   // set when new data is ingested; read model loop skips refresh when clean
 	lastIngestAt  atomic.Int64  // UnixNano of the most recent ingest; lets readers refresh only when data changed
+	dataVersion   atomic.Uint64 // increments after each successful ingest so HTTP caches refresh only when stale
 	collectNow    chan struct{} // coalesced source-change requests consumed by the single collect loop
 	pollScheduler *PollScheduler
 
@@ -53,6 +54,15 @@ type Service struct {
 	clock core.Clock
 }
 
+func (s *Service) markDataIngested() {
+	if s == nil {
+		return
+	}
+	s.dataVersion.Add(1)
+	s.dataIngested.Store(true)
+	s.lastIngestAt.Store(time.Now().UnixNano())
+}
+
 // now is the canonical "what time is it?" hook for the daemon. Code that
 // stamps snap.Timestamp, persists state, or computes deadlines should call
 // this rather than time.Now(). Pure observability paths (request duration
@@ -62,15 +72,6 @@ func (s *Service) now() time.Time {
 		return s.clock.Now()
 	}
 	return time.Now()
-}
-
-// markDataIngested records that new data landed. It arms the flag the
-// background read-model refresh loop consumes and stamps the ingest time so
-// on-demand readers can tell whether their cached view is stale relative to
-// real data (rather than merely old in wall-clock terms).
-func (s *Service) markDataIngested() {
-	s.dataIngested.Store(true)
-	s.lastIngestAt.Store(time.Now().UnixNano())
 }
 
 // ingestedSince reports whether any data was ingested after t. A zero

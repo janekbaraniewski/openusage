@@ -232,6 +232,13 @@ func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	if removed, changeErr := s.store.PruneUsageEventChanges(pruneCtx, 50000); changeErr != nil {
+		if s.shouldLog("usage_change_log_prune_error", 30*time.Second) {
+			s.warnf("usage_change_log_prune_error", "error=%v", changeErr)
+		}
+	} else if removed > 0 {
+		s.infof("usage_change_log_prune", "removed=%d", removed)
+	}
 
 	// Thin and trim the balance observation series independently of usage
 	// events — it grows on its own poll cadence and has its own retention floor.
