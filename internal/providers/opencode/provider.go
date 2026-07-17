@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
@@ -35,6 +36,8 @@ const (
 
 type Provider struct {
 	providerbase.Base
+	telemetryCacheMu        sync.Mutex
+	telemetryDBFingerprints map[string]string
 }
 
 func New() *Provider {
