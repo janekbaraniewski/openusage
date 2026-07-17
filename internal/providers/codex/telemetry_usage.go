@@ -1,9 +1,11 @@
 package codex
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,6 +34,9 @@ func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	sessionsDir := shared.ExpandHome(opts.Path("sessions_dir", DefaultTelemetrySessionsDir()))
 	accountID := strings.TrimSpace(opts.Path("account_id", "codex-cli"))
+	baselineExisting := codexBaselineExistingEnabled(opts)
+	baselineRecentWindow := codexBaselineRecentWindow(opts)
+	baselineCutoff := time.Now().Add(-baselineRecentWindow)
 
 	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
 	if err != nil {
@@ -46,6 +51,8 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	if p.telemetryCache == nil {
 		p.telemetryCache = make(map[string]*telemetryCacheEntry)
 	}
+	baselineInitialFiles := baselineExisting && !p.telemetryBaselineInitialized
+	p.telemetryBaselineInitialized = true
 
 	var out []shared.TelemetryEvent
 	pendingCache := make(map[string]*telemetryCacheEntry)
@@ -54,12 +61,50 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 			return nil, ctx.Err()
 		}
 		if entry, ok := p.telemetryCache[path]; ok {
-			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
+			// Codex session logs are append-only. Some filesystem activity can
+			// update mtime without adding bytes, which must not trigger a full
+			// historical reparse.
+			if entry.size == info.Size() {
+				entry.modTime = info.ModTime()
 				continue
 			}
+			if info.Size() > entry.byteOffset && entry.byteOffset > 0 && entry.state != nil {
+				nextState := entry.state.clone()
+				events, nextOffset, nextLineNumber, err := parseTelemetrySessionFileFrom(path, entry.byteOffset, entry.lineNumber, nextState)
+				if err == nil && nextOffset >= entry.byteOffset {
+					if accountID != "" {
+						for i := range events {
+							events[i].AccountID = accountID
+						}
+					}
+					pendingCache[path] = &telemetryCacheEntry{
+						modTime:    info.ModTime(),
+						size:       info.Size(),
+						byteOffset: nextOffset,
+						lineNumber: nextLineNumber,
+						state:      nextState,
+					}
+					out = append(out, events...)
+					continue
+				}
+			}
+		} else if baselineInitialFiles && (baselineRecentWindow == 0 || info.ModTime().Before(baselineCutoff)) {
+			state, nextOffset, nextLineNumber, err := primeTelemetryParserState(path, info.Size())
+			if err != nil {
+				continue
+			}
+			p.telemetryCache[path] = &telemetryCacheEntry{
+				modTime:    info.ModTime(),
+				size:       info.Size(),
+				byteOffset: nextOffset,
+				lineNumber: nextLineNumber,
+				state:      state,
+			}
+			continue
 		}
 
-		events, err := ParseTelemetrySessionFile(path)
+		state := newTelemetryParserState(path)
+		events, nextOffset, nextLineNumber, err := parseTelemetrySessionFileFrom(path, 0, 0, state)
 		if err != nil {
 			continue
 		}
@@ -69,8 +114,11 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 			}
 		}
 		pendingCache[path] = &telemetryCacheEntry{
-			modTime: info.ModTime(),
-			size:    info.Size(),
+			modTime:    info.ModTime(),
+			size:       info.Size(),
+			byteOffset: nextOffset,
+			lineNumber: nextLineNumber,
+			state:      state,
 		}
 		out = append(out, events...)
 	}
@@ -78,6 +126,112 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		p.telemetryCache[path] = entry
 	}
 	return out, nil
+}
+
+func codexBaselineExistingEnabled(opts shared.TelemetryCollectOptions) bool {
+	value := strings.ToLower(strings.TrimSpace(opts.Path("baseline_existing", os.Getenv("OPENUSAGE_CODEX_BASELINE_EXISTING"))))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexBaselineRecentWindow(opts shared.TelemetryCollectOptions) time.Duration {
+	value := strings.TrimSpace(opts.Path("baseline_recent_window", os.Getenv("OPENUSAGE_CODEX_BASELINE_RECENT_WINDOW")))
+	if value == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d < 0 {
+		return 10 * time.Minute
+	}
+	return d
+}
+
+const (
+	codexTelemetryPrimeInitialTailBytes int64 = 512 * 1024
+	codexTelemetryPrimeMaxTailBytes     int64 = 8 * 1024 * 1024
+)
+
+// primeTelemetryParserState establishes the resume offset and cumulative token
+// state without materializing telemetry events for history that is already in
+// the local store. Only the first record and a bounded tail are inspected.
+func primeTelemetryParserState(path string, size int64) (*telemetryParserState, int64, int, error) {
+	state := newTelemetryParserState(path)
+
+	firstFile, err := os.Open(path)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	firstReader := bufio.NewReaderSize(firstFile, 512*1024)
+	firstLine, readErr := firstReader.ReadBytes('\n')
+	_ = firstFile.Close()
+	if readErr != nil && readErr != io.EOF {
+		return nil, 0, 0, readErr
+	}
+	if record, ok := decodeSessionLine(firstLine, 1); ok && record.SessionMeta != nil {
+		applyTelemetrySessionMeta(state, record.SessionMeta)
+	}
+
+	baseState := state
+	for tailBytes := codexTelemetryPrimeInitialTailBytes; ; tailBytes *= 2 {
+		if tailBytes > codexTelemetryPrimeMaxTailBytes {
+			tailBytes = codexTelemetryPrimeMaxTailBytes
+		}
+		state = baseState.clone()
+		tailOffset := size - tailBytes
+		if tailOffset < 0 {
+			tailOffset = 0
+		}
+		if tailOffset > 0 {
+			tailFile, err := os.Open(path)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			if _, err := tailFile.Seek(tailOffset, io.SeekStart); err != nil {
+				_ = tailFile.Close()
+				return nil, 0, 0, err
+			}
+			tailReader := bufio.NewReaderSize(tailFile, 512*1024)
+			discarded, err := tailReader.ReadBytes('\n')
+			_ = tailFile.Close()
+			if err != nil && err != io.EOF {
+				return nil, 0, 0, err
+			}
+			tailOffset += int64(len(discarded))
+		}
+
+		// The exact historical line number is intentionally not counted because
+		// that would require rereading the whole file. Using the byte offset keeps
+		// fallback IDs monotonic and collision-free for newly appended records.
+		startLine := 0
+		if tailOffset > 0 {
+			startLine = int(tailOffset)
+		}
+		nextOffset, nextLineNumber, err := walkSessionFileFrom(path, tailOffset, startLine, func(record sessionLine) error {
+			switch {
+			case record.SessionMeta != nil:
+				applyTelemetrySessionMeta(state, record.SessionMeta)
+			case record.TurnContext != nil:
+				applyTelemetryTurnContext(state, record.TurnContext)
+			case record.EventPayload != nil && record.EventPayload.Type == "token_count" && record.EventPayload.Info != nil:
+				state.previous = record.EventPayload.Info.TotalTokenUsage
+				state.hasPrevious = true
+				if state.previous.TotalTokens > 0 {
+					state.turnIndex++
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, nextOffset, nextLineNumber, err
+		}
+		if state.hasPrevious || tailOffset == 0 || tailBytes == codexTelemetryPrimeMaxTailBytes {
+			return state, nextOffset, nextLineNumber, nil
+		}
+	}
 }
 
 func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
@@ -95,46 +249,87 @@ func DefaultTelemetrySessionsDir() string {
 
 // ParseTelemetrySessionFile parses a Codex session JSONL file into normalized telemetry events.
 func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
-	sessionID := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	model := ""
-	upstreamProviderID := codexTelemetryUpstreamModel
-	workspaceID := ""
-	currentTurnID := ""
-	clientName := "Other"
-	clientSource := ""
-	clientOriginator := ""
-	var previous tokenUsage
-	hasPrevious := false
-	turnIndex := 0
+	state := newTelemetryParserState(path)
+	events, _, _, err := parseTelemetrySessionFileFrom(path, 0, 0, state)
+	return events, err
+}
+
+type telemetryParserState struct {
+	sessionID          string
+	model              string
+	upstreamProviderID string
+	workspaceID        string
+	currentTurnID      string
+	clientName         string
+	clientSource       string
+	clientOriginator   string
+	previous           tokenUsage
+	hasPrevious        bool
+	turnIndex          int
+}
+
+func newTelemetryParserState(path string) *telemetryParserState {
+	return &telemetryParserState{
+		sessionID:          strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		upstreamProviderID: codexTelemetryUpstreamModel,
+		clientName:         "Other",
+	}
+}
+
+func (s *telemetryParserState) clone() *telemetryParserState {
+	if s == nil {
+		return nil
+	}
+	cloned := *s
+	return &cloned
+}
+
+func applyTelemetrySessionMeta(state *telemetryParserState, meta *sessionMetaPayload) {
+	if state == nil || meta == nil {
+		return
+	}
+	if sid := core.FirstNonEmpty(meta.SessionID, meta.ID); sid != "" {
+		state.sessionID = sid
+	}
+	if strings.TrimSpace(meta.Model) != "" {
+		state.model = strings.TrimSpace(meta.Model)
+	}
+	if strings.TrimSpace(meta.ModelProvider) != "" {
+		state.upstreamProviderID = strings.TrimSpace(meta.ModelProvider)
+	}
+	if ws := shared.SanitizeWorkspace(meta.CWD); ws != "" {
+		state.workspaceID = ws
+	}
+	state.clientSource = strings.TrimSpace(meta.Source)
+	state.clientOriginator = strings.TrimSpace(meta.Originator)
+	state.clientName = classifyClient(state.clientSource, state.clientOriginator)
+}
+
+func applyTelemetryTurnContext(state *telemetryParserState, turn *turnContextPayload) {
+	if state == nil || turn == nil {
+		return
+	}
+	if strings.TrimSpace(turn.Model) != "" {
+		state.model = strings.TrimSpace(turn.Model)
+	}
+	if strings.TrimSpace(turn.TurnID) != "" {
+		state.currentTurnID = strings.TrimSpace(turn.TurnID)
+	}
+}
+
+func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int, state *telemetryParserState) ([]shared.TelemetryEvent, int64, int, error) {
+	if state == nil {
+		state = newTelemetryParserState(path)
+	}
 	toolByCallID := make(map[string]int)
 
 	var out []shared.TelemetryEvent
-	if err := walkSessionFile(path, func(record sessionLine) error {
+	nextOffset, nextLineNumber, err := walkSessionFileFrom(path, byteOffset, lineNumber, func(record sessionLine) error {
 		switch {
 		case record.SessionMeta != nil:
-			sid := core.FirstNonEmpty(record.SessionMeta.SessionID, record.SessionMeta.ID)
-			if sid != "" {
-				sessionID = sid
-			}
-			if strings.TrimSpace(record.SessionMeta.Model) != "" {
-				model = strings.TrimSpace(record.SessionMeta.Model)
-			}
-			if strings.TrimSpace(record.SessionMeta.ModelProvider) != "" {
-				upstreamProviderID = strings.TrimSpace(record.SessionMeta.ModelProvider)
-			}
-			if ws := shared.SanitizeWorkspace(record.SessionMeta.CWD); ws != "" {
-				workspaceID = ws
-			}
-			clientSource = strings.TrimSpace(record.SessionMeta.Source)
-			clientOriginator = strings.TrimSpace(record.SessionMeta.Originator)
-			clientName = classifyClient(clientSource, clientOriginator)
+			applyTelemetrySessionMeta(state, record.SessionMeta)
 		case record.TurnContext != nil:
-			if strings.TrimSpace(record.TurnContext.Model) != "" {
-				model = strings.TrimSpace(record.TurnContext.Model)
-			}
-			if strings.TrimSpace(record.TurnContext.TurnID) != "" {
-				currentTurnID = strings.TrimSpace(record.TurnContext.TurnID)
-			}
+			applyTelemetryTurnContext(state, record.TurnContext)
 		case record.EventPayload != nil:
 			payload := record.EventPayload
 			if payload.Type != "token_count" || payload.Info == nil {
@@ -143,28 +338,28 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 
 			total := payload.Info.TotalTokenUsage
 			delta := total
-			if hasPrevious {
-				delta = usageDelta(total, previous)
+			if state.hasPrevious {
+				delta = usageDelta(total, state.previous)
 				if !validUsageDelta(delta) {
 					delta = total
 				}
 			}
-			previous = total
-			hasPrevious = true
+			state.previous = total
+			state.hasPrevious = true
 
 			if delta.TotalTokens <= 0 {
 				return nil
 			}
-			turnIndex++
+			state.turnIndex++
 
 			occurredAt := time.Now().UTC()
 			if ts, err := shared.ParseTimestampString(record.Timestamp); err == nil {
 				occurredAt = ts
 			}
 
-			turnID := fmt.Sprintf("%s:%d", sessionID, turnIndex)
-			if strings.TrimSpace(currentTurnID) != "" {
-				turnID = strings.TrimSpace(currentTurnID)
+			turnID := fmt.Sprintf("%s:%d", state.sessionID, state.turnIndex)
+			if strings.TrimSpace(state.currentTurnID) != "" {
+				turnID = strings.TrimSpace(state.currentTurnID)
 			}
 			if strings.TrimSpace(payload.RequestID) != "" {
 				turnID = strings.TrimSpace(payload.RequestID)
@@ -179,14 +374,14 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				Channel:       shared.TelemetryChannelJSONL,
 				OccurredAt:    occurredAt,
 				AccountID:     "codex",
-				WorkspaceID:   workspaceID,
-				SessionID:     sessionID,
+				WorkspaceID:   state.workspaceID,
+				SessionID:     state.sessionID,
 				TurnID:        turnID,
 				MessageID:     messageID,
 				ProviderID:    codexTelemetryProviderID,
 				AgentName:     "codex",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:      model,
+				ModelRaw:      state.model,
 				TokenUsage: core.TokenUsage{
 					InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
 					OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),
@@ -198,10 +393,10 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				Payload: map[string]any{
 					"source_file":       path,
 					"line":              record.LineNumber,
-					"upstream_provider": upstreamProviderID,
-					"client":            clientName,
-					"client_source":     clientSource,
-					"client_originator": clientOriginator,
+					"upstream_provider": state.upstreamProviderID,
+					"client":            state.clientName,
+					"client_source":     state.clientSource,
+					"client_originator": state.clientOriginator,
 				},
 			})
 		case record.ResponseItem != nil:
@@ -221,22 +416,22 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 					toolName = "unknown"
 				}
 
-				turnID := fmt.Sprintf("%s:tool:%d", sessionID, record.LineNumber)
-				if strings.TrimSpace(currentTurnID) != "" {
-					turnID = strings.TrimSpace(currentTurnID)
+				turnID := fmt.Sprintf("%s:tool:%d", state.sessionID, record.LineNumber)
+				if strings.TrimSpace(state.currentTurnID) != "" {
+					turnID = strings.TrimSpace(state.currentTurnID)
 				}
 				callID := strings.TrimSpace(item.CallID)
-				messageID := core.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", sessionID, record.LineNumber))
+				messageID := core.FirstNonEmpty(callID, turnID, fmt.Sprintf("%s:%d", state.sessionID, record.LineNumber))
 				eventPayload := codexBuildToolPayload(path, record.LineNumber, *item)
-				if strings.TrimSpace(upstreamProviderID) != "" {
-					eventPayload["upstream_provider"] = strings.TrimSpace(upstreamProviderID)
+				if strings.TrimSpace(state.upstreamProviderID) != "" {
+					eventPayload["upstream_provider"] = strings.TrimSpace(state.upstreamProviderID)
 				}
-				eventPayload["client"] = clientName
-				if clientSource != "" {
-					eventPayload["client_source"] = clientSource
+				eventPayload["client"] = state.clientName
+				if state.clientSource != "" {
+					eventPayload["client_source"] = state.clientSource
 				}
-				if clientOriginator != "" {
-					eventPayload["client_originator"] = clientOriginator
+				if state.clientOriginator != "" {
+					eventPayload["client_originator"] = state.clientOriginator
 				}
 
 				out = append(out, shared.TelemetryEvent{
@@ -244,15 +439,15 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 					Channel:       shared.TelemetryChannelJSONL,
 					OccurredAt:    occurredAt,
 					AccountID:     "codex",
-					WorkspaceID:   workspaceID,
-					SessionID:     sessionID,
+					WorkspaceID:   state.workspaceID,
+					SessionID:     state.sessionID,
 					TurnID:        turnID,
 					MessageID:     messageID,
 					ToolCallID:    callID,
 					ProviderID:    codexTelemetryProviderID,
 					AgentName:     "codex",
 					EventType:     shared.TelemetryEventTypeToolUsage,
-					ModelRaw:      model,
+					ModelRaw:      state.model,
 					TokenUsage: core.TokenUsage{
 						Requests: core.Int64Ptr(1),
 					},
@@ -280,10 +475,11 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			}
 		}
 		return nil
-	}); err != nil {
-		return out, err
+	})
+	if err != nil {
+		return out, nextOffset, nextLineNumber, err
 	}
-	return out, nil
+	return out, nextOffset, nextLineNumber, nil
 }
 
 // ParseTelemetryNotifyPayload parses Codex notify hook payloads.
