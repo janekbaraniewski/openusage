@@ -210,6 +210,7 @@ func (s *Store) Init(ctx context.Context) error {
 			agent_session_id TEXT
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_ingested_at ON usage_raw_events(ingested_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_payload_pending ON usage_raw_events(ingested_at) WHERE source_payload != '{}';`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_source ON usage_raw_events(source_system, source_channel);`,
 		`CREATE TABLE IF NOT EXISTS usage_events (
 			event_id TEXT PRIMARY KEY,

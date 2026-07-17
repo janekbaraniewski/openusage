@@ -32,6 +32,12 @@ func TestStoreInit_CreatesTables(t *testing.T) {
 			t.Fatalf("table %s missing: %v", table, err)
 		}
 	}
+
+	var indexName string
+	err = db.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_usage_raw_events_payload_pending'`).Scan(&indexName)
+	if err != nil {
+		t.Fatalf("pending payload index missing: %v", err)
+	}
 }
 
 func TestStoreIngest_IdempotentByDedupKey(t *testing.T) {

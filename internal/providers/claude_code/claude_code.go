@@ -25,8 +25,9 @@ type Provider struct {
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
 
-	telemetryCacheMu sync.Mutex
-	telemetryCache   map[string]*telemetryCacheEntry // keyed by file path
+	telemetryCacheMu             sync.Mutex
+	telemetryCache               map[string]*telemetryCacheEntry // keyed by file path
+	telemetryBaselineInitialized bool
 }
 
 // jsonlCacheEntry caches parsed conversation records for a single JSONL file.

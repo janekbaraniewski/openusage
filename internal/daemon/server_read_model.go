@@ -68,6 +68,10 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	if !s.readModelCacheLoopEnabled() {
+		s.infof("read_model_cache_loop_skip", "reason=no_exporter_on_demand_http_cache")
+		return
+	}
 
 	interval := readModelCacheInterval(s.cfg.PollInterval)
 
@@ -89,6 +93,12 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 			s.refreshReadModelCacheFromConfig(ctx)
 		}
 	}
+}
+
+// Local dashboard clients populate and refresh the cache through handleReadModel.
+// Only a remote exporter needs proactive refreshes without an HTTP reader.
+func (s *Service) readModelCacheLoopEnabled() bool {
+	return s != nil && s.exp != nil
 }
 
 func (s *Service) refreshReadModelCacheFromConfig(ctx context.Context) {

@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,9 +43,6 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	if err != nil {
 		return nil, fmt.Errorf("collect codex telemetry files: %w", err)
 	}
-	if len(fileInfos) == 0 {
-		return nil, nil
-	}
 
 	p.telemetryCacheMu.Lock()
 	defer p.telemetryCacheMu.Unlock()
@@ -53,6 +51,9 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	}
 	baselineInitialFiles := baselineExisting && !p.telemetryBaselineInitialized
 	p.telemetryBaselineInitialized = true
+	if len(fileInfos) == 0 {
+		return nil, nil
+	}
 
 	var out []shared.TelemetryEvent
 	pendingCache := make(map[string]*telemetryCacheEntry)
@@ -68,9 +69,32 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 				entry.modTime = info.ModTime()
 				continue
 			}
-			if info.Size() > entry.byteOffset && entry.byteOffset > 0 && entry.state != nil {
-				nextState := entry.state.clone()
-				events, nextOffset, nextLineNumber, err := parseTelemetrySessionFileFrom(path, entry.byteOffset, entry.lineNumber, nextState)
+			// The file may grow after CollectFilesWithStat snapshots its size but
+			// before the parser reaches EOF. In that race byteOffset can be ahead
+			// of the cached size. When a later stat catches up exactly, there are
+			// no unread bytes; falling through would replay the whole session.
+			if info.Size() == entry.byteOffset {
+				entry.modTime = info.ModTime()
+				entry.size = info.Size()
+				continue
+			}
+			if info.Size() > entry.byteOffset && entry.byteOffset >= 0 {
+				nextState := entry.state
+				resumeOffset := entry.byteOffset
+				resumeLineNumber := entry.lineNumber
+				if nextState == nil && resumeOffset > 0 {
+					var primeErr error
+					nextState, resumeOffset, resumeLineNumber, primeErr = primeTelemetryParserState(path, resumeOffset)
+					if primeErr != nil {
+						continue
+					}
+				}
+				if nextState == nil {
+					nextState = newTelemetryParserState(path)
+				} else {
+					nextState = nextState.clone()
+				}
+				events, nextOffset, nextLineNumber, err := parseTelemetrySessionFileFrom(path, resumeOffset, resumeLineNumber, nextState)
 				if err == nil && nextOffset >= entry.byteOffset {
 					if accountID != "" {
 						for i := range events {
@@ -79,7 +103,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 					}
 					pendingCache[path] = &telemetryCacheEntry{
 						modTime:    info.ModTime(),
-						size:       info.Size(),
+						size:       max(info.Size(), nextOffset),
 						byteOffset: nextOffset,
 						lineNumber: nextLineNumber,
 						state:      nextState,
@@ -89,16 +113,14 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 				}
 			}
 		} else if baselineInitialFiles && (baselineRecentWindow == 0 || info.ModTime().Before(baselineCutoff)) {
-			state, nextOffset, nextLineNumber, err := primeTelemetryParserState(path, info.Size())
+			resumeOffset, err := baselineTelemetryResumeOffset(path, info.Size())
 			if err != nil {
 				continue
 			}
 			p.telemetryCache[path] = &telemetryCacheEntry{
 				modTime:    info.ModTime(),
 				size:       info.Size(),
-				byteOffset: nextOffset,
-				lineNumber: nextLineNumber,
-				state:      state,
+				byteOffset: resumeOffset,
 			}
 			continue
 		}
@@ -115,7 +137,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		}
 		pendingCache[path] = &telemetryCacheEntry{
 			modTime:    info.ModTime(),
-			size:       info.Size(),
+			size:       max(info.Size(), nextOffset),
 			byteOffset: nextOffset,
 			lineNumber: nextLineNumber,
 			state:      state,
@@ -126,6 +148,62 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		p.telemetryCache[path] = entry
 	}
 	return out, nil
+}
+
+// baselineTelemetryResumeOffset finds a safe boundary for a file that already
+// existed when collection started. Complete history is skipped without
+// eagerly reconstructing parser state for every archived session. If the last
+// JSONL record is being written, its start is retained so it can be parsed once
+// the writer completes it.
+func baselineTelemetryResumeOffset(path string, size int64) (int64, error) {
+	if size <= 0 {
+		return 0, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	last := []byte{0}
+	if _, err := f.ReadAt(last, size-1); err != nil {
+		return 0, err
+	}
+	if last[0] == '\n' {
+		return size, nil
+	}
+
+	window := int64(4096)
+	for {
+		if window > size {
+			window = size
+		}
+		start := size - window
+		buf := make([]byte, window)
+		if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+			return 0, err
+		}
+		if idx := bytes.LastIndexByte(buf, '\n'); idx >= 0 {
+			lastLineStart := start + int64(idx) + 1
+			if json.Valid(bytes.TrimSpace(buf[idx+1:])) {
+				return size, nil
+			}
+			return lastLineStart, nil
+		}
+		if start == 0 {
+			if json.Valid(bytes.TrimSpace(buf)) {
+				return size, nil
+			}
+			return 0, nil
+		}
+		if window >= int64(maxScannerBufferSize) {
+			return size, nil
+		}
+		window *= 2
+		if window > int64(maxScannerBufferSize) {
+			window = int64(maxScannerBufferSize)
+		}
+	}
 }
 
 func codexBaselineExistingEnabled(opts shared.TelemetryCollectOptions) bool {
@@ -165,7 +243,7 @@ func primeTelemetryParserState(path string, size int64) (*telemetryParserState, 
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	firstReader := bufio.NewReaderSize(firstFile, 512*1024)
+	firstReader := bufio.NewReaderSize(io.LimitReader(firstFile, size), 512*1024)
 	firstLine, readErr := firstReader.ReadBytes('\n')
 	_ = firstFile.Close()
 	if readErr != nil && readErr != io.EOF {
@@ -175,63 +253,87 @@ func primeTelemetryParserState(path string, size int64) (*telemetryParserState, 
 		applyTelemetrySessionMeta(state, record.SessionMeta)
 	}
 
-	baseState := state
+	// Search backwards and decode only the newest relevant records. Tool output
+	// can put several megabytes between token_count events; decoding every JSON
+	// record in that tail caused a full-core spike when an active session first
+	// grew after daemon startup.
+	if err := primeTelemetryTailState(path, size, state); err != nil {
+		return nil, 0, 0, err
+	}
+
+	// Historical line numbers are deliberately approximated by the byte offset.
+	// This keeps fallback IDs monotonic without counting every line in history.
+	return state, size, int(size), nil
+}
+
+func primeTelemetryTailState(path string, size int64, state *telemetryParserState) error {
+	if size <= 0 || state == nil {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var latestToken *tokenInfo
+	var latestTurn *turnContextPayload
 	for tailBytes := codexTelemetryPrimeInitialTailBytes; ; tailBytes *= 2 {
+		if tailBytes > size {
+			tailBytes = size
+		}
 		if tailBytes > codexTelemetryPrimeMaxTailBytes {
 			tailBytes = codexTelemetryPrimeMaxTailBytes
 		}
-		state = baseState.clone()
-		tailOffset := size - tailBytes
-		if tailOffset < 0 {
-			tailOffset = 0
+		start := size - tailBytes
+		buf := make([]byte, tailBytes)
+		if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+			return err
 		}
-		if tailOffset > 0 {
-			tailFile, err := os.Open(path)
-			if err != nil {
-				return nil, 0, 0, err
+		if start > 0 {
+			if firstNewline := bytes.IndexByte(buf, '\n'); firstNewline >= 0 {
+				buf = buf[firstNewline+1:]
+			} else {
+				buf = nil
 			}
-			if _, err := tailFile.Seek(tailOffset, io.SeekStart); err != nil {
-				_ = tailFile.Close()
-				return nil, 0, 0, err
-			}
-			tailReader := bufio.NewReaderSize(tailFile, 512*1024)
-			discarded, err := tailReader.ReadBytes('\n')
-			_ = tailFile.Close()
-			if err != nil && err != io.EOF {
-				return nil, 0, 0, err
-			}
-			tailOffset += int64(len(discarded))
 		}
 
-		// The exact historical line number is intentionally not counted because
-		// that would require rereading the whole file. Using the byte offset keeps
-		// fallback IDs monotonic and collision-free for newly appended records.
-		startLine := 0
-		if tailOffset > 0 {
-			startLine = int(tailOffset)
-		}
-		nextOffset, nextLineNumber, err := walkSessionFileFrom(path, tailOffset, startLine, func(record sessionLine) error {
-			switch {
-			case record.SessionMeta != nil:
-				applyTelemetrySessionMeta(state, record.SessionMeta)
-			case record.TurnContext != nil:
-				applyTelemetryTurnContext(state, record.TurnContext)
-			case record.EventPayload != nil && record.EventPayload.Type == "token_count" && record.EventPayload.Info != nil:
-				state.previous = record.EventPayload.Info.TotalTokenUsage
-				state.hasPrevious = true
-				if state.previous.TotalTokens > 0 {
-					state.turnIndex++
+		lines := bytes.Split(buf, []byte{'\n'})
+		for i := len(lines) - 1; i >= 0 && (latestToken == nil || latestTurn == nil); i-- {
+			line := lines[i]
+			if len(line) == 0 {
+				continue
+			}
+			if latestToken == nil && bytes.Contains(line, []byte(`"type":"token_count"`)) {
+				if record, ok := decodeSessionLine(line, int(start)); ok && record.EventPayload != nil && record.EventPayload.Info != nil {
+					info := *record.EventPayload.Info
+					latestToken = &info
 				}
 			}
-			return nil
-		})
-		if err != nil {
-			return nil, nextOffset, nextLineNumber, err
+			if latestTurn == nil && bytes.Contains(line, []byte(`"type":"turn_context"`)) {
+				if record, ok := decodeSessionLine(line, int(start)); ok && record.TurnContext != nil {
+					turn := *record.TurnContext
+					latestTurn = &turn
+				}
+			}
 		}
-		if state.hasPrevious || tailOffset == 0 || tailBytes == codexTelemetryPrimeMaxTailBytes {
-			return state, nextOffset, nextLineNumber, nil
+
+		if (latestToken != nil && latestTurn != nil) || start == 0 || tailBytes == codexTelemetryPrimeMaxTailBytes {
+			break
 		}
 	}
+
+	if latestTurn != nil {
+		applyTelemetryTurnContext(state, latestTurn)
+	}
+	if latestToken != nil {
+		state.previous = latestToken.TotalTokenUsage
+		state.hasPrevious = true
+		if state.previous.TotalTokens > 0 {
+			state.turnIndex++
+		}
+	}
+	return nil
 }
 
 func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
