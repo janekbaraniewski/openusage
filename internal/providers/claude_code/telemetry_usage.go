@@ -46,26 +46,27 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	}
 
 	var out []shared.TelemetryEvent
+	pendingCache := make(map[string]*telemetryCacheEntry)
 	for path, info := range fileInfos {
 		if ctx.Err() != nil {
-			return out, ctx.Err()
+			return nil, ctx.Err()
 		}
 
 		// Check cache: skip unchanged files entirely.
 		if entry, ok := p.telemetryCache[path]; ok {
 			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
-				out = append(out, entry.events...)
 				continue
 			}
 			// File grew (append-only): parse only new lines.
 			if info.Size() > entry.byteSize && entry.byteSize > 0 {
 				newEvents, newSize, err := parseTelemetryConversationFileFrom(path, entry.byteSize)
 				if err == nil && newSize > entry.byteSize {
-					entry.events = append(entry.events, newEvents...)
-					entry.modTime = info.ModTime()
-					entry.size = info.Size()
-					entry.byteSize = newSize
-					out = append(out, entry.events...)
+					pendingCache[path] = &telemetryCacheEntry{
+						modTime:  info.ModTime(),
+						size:     info.Size(),
+						byteSize: newSize,
+					}
+					out = append(out, newEvents...)
 					continue
 				}
 			}
@@ -76,13 +77,15 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		if err != nil {
 			continue
 		}
-		p.telemetryCache[path] = &telemetryCacheEntry{
+		pendingCache[path] = &telemetryCacheEntry{
 			modTime:  info.ModTime(),
 			size:     info.Size(),
 			byteSize: info.Size(),
-			events:   events,
 		}
 		out = append(out, events...)
+	}
+	for path, entry := range pendingCache {
+		p.telemetryCache[path] = entry
 	}
 	return out, nil
 }

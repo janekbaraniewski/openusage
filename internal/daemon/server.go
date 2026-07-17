@@ -20,6 +20,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -27,11 +28,12 @@ type Service struct {
 	cfg Config
 	ctx context.Context
 
-	store        *telemetry.Store
-	pipeline     *telemetry.Pipeline
-	quotaIngest  *telemetry.QuotaSnapshotIngestor
-	providerByID map[string]core.UsageProvider
-	exp          *exporter.Exporter
+	store            *telemetry.Store
+	pipeline         *telemetry.Pipeline
+	quotaIngest      *telemetry.QuotaSnapshotIngestor
+	providerByID     map[string]core.UsageProvider
+	telemetrySources map[string]shared.TelemetrySource
+	exp              *exporter.Exporter
 
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
 	logThrottle *core.LogThrottle
@@ -131,19 +133,21 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		}
 	}
 
+	telemetrySources := telemetrySourcesBySystem()
 	svc := &Service{
-		cfg:           cfg,
-		ctx:           ctx,
-		store:         store,
-		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
-		providerByID:  providersByID(),
-		exp:           exp,
-		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
-		rmCache:       newReadModelCache(),
-		pollScheduler: newPollScheduler(cfg.PollInterval),
-		pollState:     make(map[string]*providerPollState),
-		clock:         core.SystemClock{},
+		cfg:              cfg,
+		ctx:              ctx,
+		store:            store,
+		pipeline:         telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:      telemetry.NewQuotaSnapshotIngestor(store),
+		providerByID:     providersByID(),
+		telemetrySources: telemetrySources,
+		exp:              exp,
+		logThrottle:      core.NewLogThrottle(200, 10*time.Minute),
+		rmCache:          newReadModelCache(),
+		pollScheduler:    newPollScheduler(cfg.PollInterval),
+		pollState:        make(map[string]*providerPollState),
+		clock:            core.SystemClock{},
 	}
 
 	svc.infof(
@@ -154,7 +158,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.SpoolDir,
 		svc.cfg.CollectInterval,
 		svc.cfg.PollInterval,
-		telemetrySourceCount(),
+		len(telemetrySources),
 		len(svc.providerByID),
 	)
 

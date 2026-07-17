@@ -1,12 +1,68 @@
 package codex
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
+
+func TestCollectSkipsUnchangedSessionFiles(t *testing.T) {
+	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions dir: %v", err)
+	}
+
+	path := filepath.Join(sessionsDir, "rollout-unchanged.jsonl")
+	content := `{"timestamp":"2026-07-17T10:00:00Z","type":"session_meta","payload":{"id":"sess-unchanged"}}
+{"timestamp":"2026-07-17T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{Paths: map[string]string{"sessions_dir": sessionsDir}}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first Collect() events = %d, want 1", len(first))
+	}
+
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Collect() events = %d, want 0 for unchanged files", len(second))
+	}
+
+	appended := `{"timestamp":"2026-07-17T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":15,"output_tokens":10,"total_tokens":25}}}}
+`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open session for append: %v", err)
+	}
+	if _, err := f.WriteString(appended); err != nil {
+		_ = f.Close()
+		t.Fatalf("append session: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	third, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third Collect() error: %v", err)
+	}
+	if len(third) != 2 {
+		t.Fatalf("third Collect() events = %d, want 2 after changed file reparse", len(third))
+	}
+}
 
 func TestParseTelemetrySessionFile_CollectsTokenDeltas(t *testing.T) {
 	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "02", "22")

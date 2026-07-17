@@ -48,14 +48,13 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	}
 
 	var out []shared.TelemetryEvent
+	pendingCache := make(map[string]*telemetryCacheEntry)
 	for path, info := range fileInfos {
 		if ctx.Err() != nil {
-			return out, ctx.Err()
+			return nil, ctx.Err()
 		}
-
 		if entry, ok := p.telemetryCache[path]; ok {
 			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
-				out = append(out, entry.events...)
 				continue
 			}
 		}
@@ -69,12 +68,14 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 				events[i].AccountID = accountID
 			}
 		}
-		p.telemetryCache[path] = &telemetryCacheEntry{
+		pendingCache[path] = &telemetryCacheEntry{
 			modTime: info.ModTime(),
 			size:    info.Size(),
-			events:  events,
 		}
 		out = append(out, events...)
+	}
+	for path, entry := range pendingCache {
+		p.telemetryCache[path] = entry
 	}
 	return out, nil
 }

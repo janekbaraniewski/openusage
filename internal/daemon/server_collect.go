@@ -85,7 +85,7 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 	if accountsErr != nil {
 		warnings = append(warnings, fmt.Sprintf("collector account config: %v", accountsErr))
 	}
-	collectors, collectorWarnings := buildCollectors(accounts)
+	collectors, collectorWarnings := buildCollectorsFromSources(accounts, s.telemetrySources)
 	warnings = append(warnings, collectorWarnings...)
 
 	for _, collector := range collectors {
@@ -98,11 +98,10 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		allReqs = append(allReqs, reqs...)
 	}
 
-	// No ingest-time age filter: local-file sources re-import the last ~90d of
-	// history each cycle, which is fine because the hot window (retention_days)
-	// is ≥ that lookback, so re-imported events land inside the window and are
-	// never the tug-of-war target. Detail past the hot window is downsampled
-	// into usage_rollup_daily and then pruned (see pruneOldData).
+	// No ingest-time age filter: local-file sources import their available
+	// history on the first cycle and emit only changed-file events afterward.
+	// Detail past the hot window is downsampled into usage_rollup_daily and then
+	// pruned (see pruneOldData).
 	direct, retries := s.ingestBatch(ctx, allReqs)
 	if direct.ingested > 0 {
 		s.dataIngested.Store(true)
