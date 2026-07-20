@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.24.0 (2026-07-20)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump github.com/klauspost/compress from 1.18.6 to 1.19.0 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/244
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/247
+* deps(website): bump the website-minor-and-patch group in /website with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/246
+* deps(docs): bump posthog-js from 1.396.0 to 1.396.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/245
+* deps(deps): bump the go-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/252
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 8 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/254
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/253
+* ci(actions): bump the actions-minor-and-patch group with 7 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/256
+* deps(docs): bump typescript from 6.0.3 to 7.0.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/255
+* deps(docs): bump websocket-driver from 0.7.4 to 0.7.5 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/267
+### Other Changes
+* fix(docs): stop extending @docusaurus/tsconfig so typecheck works on typescript 7 by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/261
+* feat(claude_code): OAuth usage-API fallback so the 5h/7d gauge works off-macOS by @PavelCz in https://github.com/janekbaraniewski/openusage/pull/249
+* feat(release): credit contributors in release notes by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/262
+* refactor(claude_code): unify usage-API auth sources behind a closure list by @roehrijn in https://github.com/janekbaraniewski/openusage/pull/258
+* feat(themes): add Catppuccin Frappé by @achappell in https://github.com/janekbaraniewski/openusage/pull/257
+* fix(config): follow symlink chain when saving config by @roehrijn in https://github.com/janekbaraniewski/openusage/pull/264
+* feat: add Codex credit forecasting by @achappell in https://github.com/janekbaraniewski/openusage/pull/263
+* fix(tui): surface browser-session keybindings in the Keys tab footer by @achappell in https://github.com/janekbaraniewski/openusage/pull/251
+
+## New Contributors
+* @PavelCz made their first contribution in https://github.com/janekbaraniewski/openusage/pull/249
+* @roehrijn made their first contribution in https://github.com/janekbaraniewski/openusage/pull/258
+* @achappell made their first contribution in https://github.com/janekbaraniewski/openusage/pull/257
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.23.0...v0.24.0
+
 ## [0.23.0](https://github.com/janekbaraniewski/openusage/compare/v0.22.0...v0.23.0) (2026-07-05)
 
 
