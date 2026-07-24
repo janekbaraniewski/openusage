@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.24.1 (2026-07-24)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump posthog-js from 1.399.2 to 1.404.1 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/270
+* ci(actions): bump actions/setup-node from 6.4.0 to 7.0.0 by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/274
+* ci(actions): bump actions/setup-python from 6 to 7 by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/275
+* ci(actions): bump actions/setup-go from 6.5.0 to 7.0.0 by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/273
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/272
+* deps(website): bump the website-minor-and-patch group in /website with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/271
+* deps(docs): bump svgo from 3.3.3 to 3.3.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/278
+* deps(website): bump dompurify from 3.4.11 to 3.4.12 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/279
+* deps(docs): bump webpack-dev-server from 5.2.5 to 5.2.6 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/284
+* deps(docs): bump shell-quote from 1.8.4 to 1.10.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/281
+* deps(docs): bump fast-uri from 3.1.2 to 3.1.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/283
+* deps(docs): bump body-parser from 1.20.5 to 1.20.6 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/282
+* deps(docs): bump dompurify from 3.4.11 to 3.4.12 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/280
+### Other Changes
+* perf(daemon): gate on-demand read-model refresh on new data by @roehrijn in https://github.com/janekbaraniewski/openusage/pull/265
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.0...v0.24.1
+
 ## 0.24.0 (2026-07-20)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
