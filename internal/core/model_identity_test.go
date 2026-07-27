@@ -9,6 +9,9 @@ func TestNormalizeCanonicalModel_ClaudeLineage(t *testing.T) {
 	if got.LineageID != "anthropic/claude-opus-4.6" {
 		t.Fatalf("lineage = %q, want anthropic/claude-opus-4.6", got.LineageID)
 	}
+	if got.Canonical != "anthropic/claude-opus-4.6" {
+		t.Fatalf("canonical = %q, want anthropic/claude-opus-4.6", got.Canonical)
+	}
 	if got.Confidence < 0.9 {
 		t.Fatalf("confidence = %.2f, want >= 0.9", got.Confidence)
 	}
