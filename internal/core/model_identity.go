@@ -103,7 +103,7 @@ func normalizeCanonicalModel(providerID, rawModelID string, cfg ModelNormalizati
 		identity.LineageID = identity.Vendor + "/" + claude.lineage
 		identity.Confidence = claude.confidence
 		identity.Reason = claude.reason
-		identity.Canonical = "anthropic/claude-" + FirstNonEmpty(claude.variant, "unknown")
+		identity.Canonical = identity.Vendor + "/" + claude.lineage
 	case "gpt":
 		gpt := canonicalizeGPT(tokens)
 		identity.Vendor = FirstNonEmpty(identity.Vendor, "openai")
