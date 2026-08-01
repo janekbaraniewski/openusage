@@ -218,8 +218,11 @@ func TestFetch_QuotaLimit_LimitedByBusinessCode(t *testing.T) {
 }
 
 func TestFetch_ParsesModelAndToolUsage(t *testing.T) {
-	today := time.Now().UTC().Format("2006-01-02")
-	yesterday := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
+	// Both day keys come from one instant; two separate time.Now() calls can
+	// straddle midnight and collapse yesterday onto today.
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+	yesterday := now.Add(-24 * time.Hour).Format("2006-01-02")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

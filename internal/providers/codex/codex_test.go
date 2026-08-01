@@ -771,17 +771,24 @@ func TestClassifyClient_NormalizesCodexWrapperSources(t *testing.T) {
 func TestFetchExtractsToolLanguageAndCodeStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	// The provider buckets events by the day encoded in their timestamp and
+	// compares that against time.Now().UTC() for requests_today, so the
+	// fixture must live on the real current UTC day. Anchor the day directory
+	// and every event timestamp to the start of that day: derived from a
+	// single instant they can never straddle midnight the way now-relative
+	// offsets did.
 	now := time.Now().UTC()
-	dayDir := filepath.Join(sessionsRoot, now.Format("2006"), now.Format("01"), now.Format("02"))
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dayDir := filepath.Join(sessionsRoot, dayStart.Format("2006"), dayStart.Format("01"), dayStart.Format("02"))
 	if err := os.MkdirAll(dayDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	sessionFile := filepath.Join(dayDir, "rollout-rich.jsonl")
-	ts1 := now.Add(-2 * time.Minute).Format(time.RFC3339)
-	ts2 := now.Add(-90 * time.Second).Format(time.RFC3339)
-	ts3 := now.Add(-60 * time.Second).Format(time.RFC3339)
-	ts4 := now.Add(-30 * time.Second).Format(time.RFC3339)
+	ts1 := dayStart.Add(1 * time.Second).Format(time.RFC3339)
+	ts2 := dayStart.Add(2 * time.Second).Format(time.RFC3339)
+	ts3 := dayStart.Add(3 * time.Second).Format(time.RFC3339)
+	ts4 := dayStart.Add(4 * time.Second).Format(time.RFC3339)
 	sessionContent := fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"sess-rich","source":"cli","originator":"codex_cli_rs"}}
 {"timestamp":"%s","type":"turn_context","payload":{"model":"gpt-5-codex"}}
 {"timestamp":"%s","type":"event_msg","payload":{"type":"user_message","text":"first"}}

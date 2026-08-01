@@ -661,7 +661,13 @@ func TestApplyCanonicalUsageView_ProviderFallbackUsesProviderIDWhenUpstreamMissi
 func TestApplyCanonicalUsageView_IncludesErroredToolCallsAndMCPBreakdown(t *testing.T) {
 	dbPath, store := openUsageViewTestStore(t)
 
-	occurredAt := time.Now().UTC().Add(-2 * time.Minute)
+	// The daily series groups by date(occurred_at), so the two events must land
+	// on the same UTC day for usage_mcp_gopls to be a single point. Anchoring to
+	// the start of the current UTC day keeps them together; a now-relative
+	// offset put them on either side of midnight whenever the test ran in the
+	// first couple of minutes of a day.
+	now := time.Now().UTC()
+	occurredAt := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("codex"),
 		SourceChannel: SourceChannelJSONL,
@@ -959,11 +965,17 @@ func TestApplyCanonicalUsageView_UsesClientFromPayloadBeforeWorkspace(t *testing
 func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) {
 	dbPath, store := openUsageViewTestStore(t)
 
-	now := time.Now().UTC()
+	// Every event and the day key asserted below derive from this one instant,
+	// anchored to the start of the current UTC day (the read model buckets on
+	// date(occurred_at), which is UTC). With now-relative offsets a run within
+	// a couple of seconds of midnight scattered the events across two days and
+	// the per-day series lookup missed them.
+	nowUTC := time.Now().UTC()
+	dayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
 	if _, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("codex"),
 		SourceChannel: SourceChannelJSONL,
-		OccurredAt:    now,
+		OccurredAt:    dayStart,
 		ProviderID:    "codex",
 		AccountID:     "codex-cli",
 		WorkspaceID:   "openusage",
@@ -987,7 +999,7 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 	if _, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("codex"),
 		SourceChannel: SourceChannelJSONL,
-		OccurredAt:    now.Add(1 * time.Second),
+		OccurredAt:    dayStart.Add(1 * time.Second),
 		ProviderID:    "codex",
 		AccountID:     "codex-cli",
 		WorkspaceID:   "garage-tracker",
@@ -1011,7 +1023,7 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 	if _, err := store.Ingest(context.Background(), IngestRequest{
 		SourceSystem:  SourceSystem("codex"),
 		SourceChannel: SourceChannelJSONL,
-		OccurredAt:    now.Add(2 * time.Second),
+		OccurredAt:    dayStart.Add(2 * time.Second),
 		ProviderID:    "codex",
 		AccountID:     "codex-cli",
 		AgentName:     "codex",
@@ -1055,7 +1067,7 @@ func TestApplyCanonicalUsageView_EmitsProjectMetricsFromWorkspace(t *testing.T) 
 		t.Fatalf("unexpected unknown project bucket emitted: %+v", snap.Metrics["project_unknown_requests"])
 	}
 
-	day := now.Format("2006-01-02")
+	day := dayStart.Format("2006-01-02")
 	if got := seriesValueByDate(snap.DailySeries["usage_project_openusage"], day); got != 1 {
 		t.Fatalf("usage_project_openusage[%s] = %v, want 1", day, got)
 	}

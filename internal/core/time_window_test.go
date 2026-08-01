@@ -139,17 +139,28 @@ func TestLargestWindowFitting(t *testing.T) {
 	}
 }
 
+// sameCalendarDay reports whether a and b fall on the same calendar date.
+func sameCalendarDay(a, b time.Time) bool {
+	return a.Year() == b.Year() && a.Month() == b.Month() && a.Day() == b.Day()
+}
+
 func TestLocalMidnight(t *testing.T) {
+	// LocalMidnight reads its own clock, so bracket the call rather than
+	// comparing against a separately captured time.Now(): if midnight lands
+	// between the two clock reads the dates legitimately differ. The result
+	// must match the day observed on one side of the call or the other.
+	before := time.Now()
 	m := LocalMidnight()
+	after := time.Now()
+
 	if m.Hour() != 0 || m.Minute() != 0 || m.Second() != 0 || m.Nanosecond() != 0 {
 		t.Errorf("LocalMidnight() = %v, want 00:00:00.000000000", m)
 	}
-	now := time.Now()
-	if m.Year() != now.Year() || m.Month() != now.Month() || m.Day() != now.Day() {
-		t.Errorf("LocalMidnight() date = %v, want %v", m.Format("2006-01-02"), now.Format("2006-01-02"))
+	if !sameCalendarDay(m, before) && !sameCalendarDay(m, after) {
+		t.Errorf("LocalMidnight() date = %v, want %v or %v", m.Format("2006-01-02"), before.Format("2006-01-02"), after.Format("2006-01-02"))
 	}
-	if m.Location() != now.Location() {
-		t.Errorf("LocalMidnight() location = %v, want %v", m.Location(), now.Location())
+	if m.Location() != after.Location() {
+		t.Errorf("LocalMidnight() location = %v, want %v", m.Location(), after.Location())
 	}
 }
 
@@ -162,12 +173,14 @@ func TestTimeWindowSince(t *testing.T) {
 		t.Errorf("TimeWindowAll.Since() = %v, want zero", allSince)
 	}
 
-	// "1d" returns local midnight (calendar day boundary).
+	// "1d" returns local midnight (calendar day boundary). Bracketed for the
+	// same reason as TestLocalMidnight: Since() reads the clock itself.
 	oneDaySince := TimeWindow1d.Since()
+	afterOneDay := time.Now()
 	if oneDaySince.Hour() != 0 || oneDaySince.Minute() != 0 || oneDaySince.Second() != 0 {
 		t.Errorf("TimeWindow1d.Since() = %v, want midnight", oneDaySince)
 	}
-	if oneDaySince.Year() != now.Year() || oneDaySince.Month() != now.Month() || oneDaySince.Day() != now.Day() {
+	if !sameCalendarDay(oneDaySince, now) && !sameCalendarDay(oneDaySince, afterOneDay) {
 		t.Errorf("TimeWindow1d.Since() date = %v, want today", oneDaySince.Format("2006-01-02"))
 	}
 

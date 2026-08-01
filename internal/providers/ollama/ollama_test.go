@@ -98,11 +98,13 @@ func TestFetch_Success(t *testing.T) {
 	}
 
 	now := time.Now().In(time.Local)
+	// Date and clock come from the same instant: an offset clock (now-1m)
+	// paired with today's date stamps a line dated today but timed yesterday
+	// whenever the test runs just after midnight.
 	today := now.Format("2006/01/02")
-	t0 := now.Add(-1 * time.Minute).Format("15:04:05")
-	t1 := now.Format("15:04:05")
+	t0 := now.Format("15:04:05")
 	logData := fmt.Sprintf(`[GIN] %s - %s | 200 | 1.2s | 127.0.0.1 | POST     "/api/chat"`+"\n", today, t0) +
-		fmt.Sprintf(`[GIN] %s - %s | 200 | 850ms | 127.0.0.1 | POST     "/v1/chat/completions"`+"\n", today, t1)
+		fmt.Sprintf(`[GIN] %s - %s | 200 | 850ms | 127.0.0.1 | POST     "/v1/chat/completions"`+"\n", today, t0)
 	if err := os.WriteFile(filepath.Join(logDir, "server.log"), []byte(logData), 0o644); err != nil {
 		t.Fatalf("write server log: %v", err)
 	}
@@ -381,8 +383,10 @@ func TestFetch_NoSyntheticUsageWithoutCloudWindows(t *testing.T) {
 	}
 
 	now := time.Now().In(time.Local)
+	// Date and clock come from the same instant, so the fixture cannot land on
+	// today's date with yesterday's wall-clock time just after midnight.
 	today := now.Format("2006/01/02")
-	t0 := now.Add(-2 * time.Minute).Format("15:04:05")
+	t0 := now.Format("15:04:05")
 	logData := fmt.Sprintf(`[GIN] %s - %s | 200 | 1.2s | 127.0.0.1 | POST     "/api/chat"`+"\n", today, t0)
 	if err := os.WriteFile(filepath.Join(logDir, "server.log"), []byte(logData), 0o644); err != nil {
 		t.Fatalf("write server log: %v", err)
@@ -528,8 +532,10 @@ func TestFetchServerLogs_CountsAnthropicMessagesPath(t *testing.T) {
 	}
 
 	now := time.Now().In(time.Local)
+	// Date and clock come from the same instant, so the fixture cannot land on
+	// today's date with yesterday's wall-clock time just after midnight.
 	today := now.Format("2006/01/02")
-	t0 := now.Add(-1 * time.Minute).Format("15:04:05")
+	t0 := now.Format("15:04:05")
 	logData := fmt.Sprintf(`[GIN] %s - %s | 200 | 640ms | 127.0.0.1 | POST     "/v1/messages"`+"\n", today, t0)
 	if err := os.WriteFile(filepath.Join(logDir, "server.log"), []byte(logData), 0o644); err != nil {
 		t.Fatalf("write server log: %v", err)
