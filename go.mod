@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/klauspost/compress v1.19.1
-	github.com/mattn/go-sqlite3 v1.14.48
+	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.54.0
