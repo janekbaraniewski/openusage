@@ -451,6 +451,59 @@ func TestApplyCanonicalUsageView_FallsBackToProviderScopeForAccountView(t *testi
 	}
 }
 
+func TestApplyCanonicalUsageView_DoesNotLeakProviderScopeAcrossSiblingAccounts(t *testing.T) {
+	dbPath, store := openUsageViewTestStore(t)
+
+	occurredAt := time.Date(2026, 2, 23, 7, 30, 0, 0, time.UTC)
+	input := int64(77)
+	total := int64(77)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("opencode"),
+		SourceChannel: SourceChannelHook,
+		OccurredAt:    occurredAt,
+		ProviderID:    "opencode",
+		AccountID:     "opencode",
+		AgentName:     "opencode",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "sess-a",
+		MessageID:     "msg-a",
+		ModelRaw:      "claude-4.6-opus-high-thinking",
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    int64Ptr(1),
+		},
+	}); err != nil {
+		t.Fatalf("ingest usage event: %v", err)
+	}
+
+	// Two accounts share the "opencode" provider (e.g. two browser-session
+	// accounts). Only "opencode" has locally-tagged usage telemetry; the
+	// sibling "opencode-personal" account has none. The provider-scope
+	// fallback must not leak the "opencode" account's usage into
+	// "opencode-personal" just because they share a provider.
+	snaps := map[string]core.UsageSnapshot{
+		"opencode": {
+			ProviderID: "opencode",
+			AccountID:  "opencode",
+		},
+		"opencode-personal": {
+			ProviderID: "opencode",
+			AccountID:  "opencode-personal",
+		},
+	}
+
+	merged, err := applyCanonicalUsageViewForTest(context.Background(), dbPath, snaps)
+	if err != nil {
+		t.Fatalf("apply canonical usage view: %v", err)
+	}
+
+	personal := merged["opencode-personal"]
+	if _, ok := personal.Metrics["client_opencode_requests"]; ok {
+		t.Fatalf("opencode-personal picked up sibling account's usage metrics via provider-scope fallback: %+v", personal.Metrics)
+	}
+}
+
 func TestApplyCanonicalUsageView_ClearsStalePrefixedAttributeAndDiagnosticKeys(t *testing.T) {
 	dbPath, store := openUsageViewTestStore(t)
 

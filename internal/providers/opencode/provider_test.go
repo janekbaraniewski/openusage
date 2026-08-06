@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -126,14 +125,17 @@ func TestFetch_RateLimited_429(t *testing.T) {
 }
 
 func TestFetch_ConsoleEnrichmentAutoDiscoversWorkspaceID(t *testing.T) {
-	origLoadBrowserSession := loadBrowserSession
+	origLoadStoredSession := loadStoredSession
 	origNewConsoleClient := newConsoleClient
 	t.Cleanup(func() {
-		loadBrowserSession = origLoadBrowserSession
+		loadStoredSession = origLoadStoredSession
 		newConsoleClient = origNewConsoleClient
 	})
 
-	loadBrowserSession = func(context.Context, core.AccountConfig, browsercookies.Reader) (config.BrowserSession, bool, error) {
+	// enrichFromConsole calls loadStoredSession (a pure credentials-file
+	// read), not the now-unused loadBrowserSession var — stub the seam
+	// that's actually on the call path.
+	loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
 		return config.BrowserSession{
 			Value:         "test-cookie-value",
 			CookieName:    "auth",
@@ -191,5 +193,104 @@ func TestFetch_ConsoleEnrichmentAutoDiscoversWorkspaceID(t *testing.T) {
 	}
 	if _, ok := snap.Diagnostics["opencode_console_workspace_error"]; ok {
 		t.Fatalf("unexpected workspace discovery diagnostic: %+v", snap.Diagnostics)
+	}
+}
+
+// TestFetch_BrowserSessionOnlyNoAPIKey_ConsoleFailureSurfacesAuthNotOK covers
+// an account configured for browser-session auth only (no Zen API key) whose
+// stored session is missing/expired: previously the Zen probe was skipped
+// (no key to probe with) and enrichFromConsole's failure was silently
+// swallowed, leaving snap.Status empty and shared.FinalizeStatus defaulting
+// it to a false StatusOK. It must now surface the underlying auth-required
+// status instead.
+func TestFetch_BrowserSessionOnlyNoAPIKey_ConsoleFailureSurfacesAuthNotOK(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	t.Cleanup(func() { loadStoredSession = origLoadStoredSession })
+
+	loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{}, false, nil
+	}
+
+	acct := core.AccountConfig{
+		ID:        "opencode-personal",
+		Provider:  "opencode",
+		APIKeyEnv: "TEST_OPENCODE_MISSING_FOR_BROWSER_ONLY",
+		BrowserCookie: &core.BrowserCookieRef{
+			Domain:        ".opencode.ai",
+			CookieName:    "auth",
+			SourceBrowser: "safari",
+		},
+	}
+
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	if snap.Status == core.StatusOK {
+		t.Fatalf("status = OK, want a non-OK status — account has neither a valid API key nor a working browser session (msg=%q)", snap.Message)
+	}
+	if snap.Status != core.StatusAuth {
+		t.Errorf("status = %s, want AUTH_REQUIRED", snap.Status)
+	}
+}
+
+// TestFetch_ConsoleDoubleFailure_DoesNotFabricateZeroBalance covers the case
+// where both the HTML usage-page scrape and the billing-RPC fallback fail
+// (e.g. an expired session cookie). Previously both errors were discarded
+// and a zero-valued billing struct was written into the snapshot as if it
+// were real data ("$0.00 balance"). It must now surface the failure instead.
+func TestFetch_ConsoleDoubleFailure_DoesNotFabricateZeroBalance(t *testing.T) {
+	origLoadStoredSession := loadStoredSession
+	origNewConsoleClient := newConsoleClient
+	t.Cleanup(func() {
+		loadStoredSession = origLoadStoredSession
+		newConsoleClient = origNewConsoleClient
+	})
+
+	loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{
+			Value:         "test-cookie-value",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		}, true, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Both the go-usage-page fetch and the billing RPC fallback come
+		// back unauthorized, simulating an expired session cookie.
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	newConsoleClient = func(cookieValue, cookieName, workspaceID string) *ConsoleClient {
+		client := NewConsoleClient(cookieValue, cookieName, workspaceID)
+		client.baseURL = server.URL
+		return client
+	}
+
+	acct := core.AccountConfig{
+		ID:        "opencode-personal",
+		Provider:  "opencode",
+		APIKeyEnv: "TEST_OPENCODE_MISSING_FOR_DOUBLE_FAILURE",
+		BrowserCookie: &core.BrowserCookieRef{
+			Domain:        ".opencode.ai",
+			CookieName:    "auth",
+			SourceBrowser: "firefox",
+		},
+	}
+	acct.SetHint("opencode_workspace_id", "wrk_test")
+
+	snap, err := New().Fetch(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("Fetch error: %v", err)
+	}
+	if _, ok := snap.Metrics["console_balance"]; ok {
+		t.Fatalf("console_balance metric present despite both page scrape and billing fallback failing: %+v", snap.Metrics["console_balance"])
+	}
+	if snap.Status == core.StatusOK {
+		t.Fatalf("status = OK, want a non-OK status when console enrichment fully failed (msg=%q)", snap.Message)
+	}
+	if _, ok := snap.Diagnostics["opencode_console_auth_error"]; !ok {
+		t.Errorf("expected opencode_console_auth_error diagnostic, got diagnostics=%+v", snap.Diagnostics)
 	}
 }
