@@ -63,6 +63,12 @@ func configureSQLiteReadOnlyConnection(db *sql.DB) error {
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
 		return fmt.Errorf("set busy_timeout: %w", err)
 	}
+	// Read-model refreshes materialize and index a deduplicated TEMP table.
+	// Keeping it in memory avoids writing and rereading tens of thousands of
+	// rows from a transient on-disk database on every telemetry cache miss.
+	if _, err := db.Exec(`PRAGMA temp_store = MEMORY;`); err != nil {
+		return fmt.Errorf("set temp_store MEMORY: %w", err)
+	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	return nil
