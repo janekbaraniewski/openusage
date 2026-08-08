@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.24.2 (2026-08-08)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump github.com/mattn/go-sqlite3 from 1.14.48 to 1.14.49 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/294
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/296
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/295
+* ci(actions): bump actions/stale from 10.4.0 to 11.0.0 by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/298
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/297
+* deps(docs): bump undici from 7.28.0 to 7.29.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/301
+* deps(docs): bump brace-expansion from 1.1.14 to 1.1.18 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/302
+* deps(docs): bump fast-uri from 3.1.4 to 3.1.5 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/303
+* deps(docs): bump mermaid from 11.15.0 to 11.16.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/304
+* deps(website): bump dompurify from 3.4.12 to 3.4.13 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/305
+* deps(docs): bump dompurify from 3.4.12 to 3.4.13 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/306
+* deps(docs): bump js-yaml from 4.1.1 to 4.3.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/307
+### Other Changes
+* Preserve full Claude model lineage in canonical identifiers by @sanjeevafk in https://github.com/janekbaraniewski/openusage/pull/285
+
+## New Contributors
+* @sanjeevafk made their first contribution in https://github.com/janekbaraniewski/openusage/pull/285
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.1...v0.24.2
+
 ## 0.24.1 (2026-08-01)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
