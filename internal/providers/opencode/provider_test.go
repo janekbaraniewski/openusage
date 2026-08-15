@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -126,14 +125,17 @@ func TestFetch_RateLimited_429(t *testing.T) {
 }
 
 func TestFetch_ConsoleEnrichmentAutoDiscoversWorkspaceID(t *testing.T) {
-	origLoadBrowserSession := loadBrowserSession
+	origLoadStoredSession := loadStoredSession
 	origNewConsoleClient := newConsoleClient
 	t.Cleanup(func() {
-		loadBrowserSession = origLoadBrowserSession
+		loadStoredSession = origLoadStoredSession
 		newConsoleClient = origNewConsoleClient
 	})
 
-	loadBrowserSession = func(context.Context, core.AccountConfig, browsercookies.Reader) (config.BrowserSession, bool, error) {
+	// enrichFromConsole calls loadStoredSession (a pure credentials-file
+	// read), not the now-unused loadBrowserSession var — stub the seam
+	// that's actually on the call path.
+	loadStoredSession = func(accountID string) (config.BrowserSession, bool, error) {
 		return config.BrowserSession{
 			Value:         "test-cookie-value",
 			CookieName:    "auth",
