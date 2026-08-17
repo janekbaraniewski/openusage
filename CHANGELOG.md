@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.24.3 (2026-08-17)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump github.com/klauspost/compress from 1.19.1 to 1.19.2 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/308
+* deps(website): bump the website-minor-and-patch group in /website with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/310
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/312
+* deps(docs): bump posthog-js from 1.409.3 to 1.413.3 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/309
+### Other Changes
+* fix(config): recover a config left with stale trailing bytes by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/319
+* fix(deps): patch transitive npm advisories in docs and website locks by @achappell in https://github.com/janekbaraniewski/openusage/pull/316
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.2...v0.24.3
+
 ## 0.24.2 (2026-08-08)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
