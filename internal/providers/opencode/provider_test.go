@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,6 +12,19 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
+
+// TestMain neutralizes the browser-session lookup for the whole package. Left at
+// its default, Fetch reads the developer's real browser cookie store, and on
+// macOS that blocks in a Keychain prompt no test binary can answer — the test
+// hangs until the 10m timeout. It only passes in CI because there is no browser
+// profile there. Tests that exercise console enrichment override this seam with
+// a session of their own.
+func TestMain(m *testing.M) {
+	loadBrowserSession = func(context.Context, core.AccountConfig, browsercookies.Reader) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{}, false, nil
+	}
+	os.Exit(m.Run())
+}
 
 func zenModelsBody() string {
 	return `{

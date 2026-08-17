@@ -27,6 +27,11 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
+// loadBrowserSession is a seam so tests can supply a session instead of reading
+// the developer's real browser cookie store, which on macOS blocks in a Keychain
+// prompt no test binary can answer.
+var loadBrowserSession = shared.LoadOrRefreshBrowserSession
+
 const (
 	consoleBaseURL = "https://console.perplexity.ai"
 
@@ -77,7 +82,7 @@ func New() *Provider {
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
-	session, ok, err := shared.LoadOrRefreshBrowserSession(ctx, acct, nil)
+	session, ok, err := loadBrowserSession(ctx, acct, nil)
 	if err != nil || !ok || session.Value == "" {
 		snap.Status = core.StatusAuth
 		snap.Message = "browser session not configured — Settings → 5 KEYS → perplexity → Enter"

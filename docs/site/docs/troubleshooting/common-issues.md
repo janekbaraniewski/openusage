@@ -102,6 +102,41 @@ Checks:
 
 5. **Time window mismatch.** A `1d` window resets at local midnight. If you opened the dashboard at 23:59 and looked again at 00:01, the totals just rolled over. Cycle to `7d` or `30d` for context.
 
+## "Error loading config: parsing config ..."
+
+Symptoms: a command exits immediately with a parse error naming your
+`settings.json`, for example `invalid character 's' after top-level value`.
+
+The config file is not valid JSON. Only commands that read the config are
+affected — `openusage version`, `openusage --help`, and the daemon
+install/uninstall commands keep working, so you can still manage the daemon
+while the file is broken.
+
+One corruption shape heals itself: if the file holds a complete config object
+followed by leftover bytes (the signature of a write that did not truncate, so
+the tail of a longer previous version survives), OpenUsage recovers the config,
+rewrites the file cleanly, and keeps the original as
+`settings.json.corrupt` for inspection. You only see the parse error for damage
+that leaves no complete config to recover, such as a truncated file.
+
+To recover by hand, inspect the end of the file:
+
+```bash
+tail -20 ~/.config/openusage/settings.json
+python3 -m json.tool ~/.config/openusage/settings.json
+```
+
+If it cannot be salvaged, move it aside and OpenUsage starts from defaults and
+re-detects your tools:
+
+```bash
+mv ~/.config/openusage/settings.json ~/.config/openusage/settings.json.bad
+```
+
+Manually configured accounts and preferences (theme, widget layout) live in that
+file and have to be re-entered. Collected usage history does not — it lives in
+the telemetry database (see [paths](../reference/paths.md)).
+
 ## When to file an issue
 
 If none of the above helps, capture a debug log:

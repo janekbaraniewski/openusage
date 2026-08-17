@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -29,6 +30,18 @@ func isolateConfigDir(t *testing.T) {
 		t.Setenv("USERPROFILE", tmp)
 		t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
 		t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	}
+}
+
+// stubNoBrowserSession makes the browser-session lookup report "none configured"
+// without touching the developer's real browsers or Keychain.
+func stubNoBrowserSession(t *testing.T) {
+	t.Helper()
+
+	orig := loadBrowserSession
+	t.Cleanup(func() { loadBrowserSession = orig })
+	loadBrowserSession = func(context.Context, core.AccountConfig, browsercookies.Reader) (config.BrowserSession, bool, error) {
+		return config.BrowserSession{}, false, nil
 	}
 }
 
@@ -128,6 +141,11 @@ func TestFetch_CookieConfigured_PopulatesAllFields(t *testing.T) {
 // No cookie → AUTH state with helpful message pointing at the connect flow.
 func TestFetch_NoCookie_AuthMessage(t *testing.T) {
 	isolateConfigDir(t)
+	// With no stored session, the real lookup falls through to scanning the
+	// developer's browsers, and decrypting a Chrome cookie for perplexity.ai
+	// blocks in a macOS Keychain prompt no test binary can answer. Stub the
+	// no-session answer this test is actually about.
+	stubNoBrowserSession(t)
 
 	snap, err := New().Fetch(context.Background(), core.AccountConfig{
 		ID:       "perplexity",

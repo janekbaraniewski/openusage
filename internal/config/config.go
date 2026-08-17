@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -265,22 +266,53 @@ func ConfigPath() string {
 }
 
 func Load() (Config, error) {
-	return LoadFrom(ConfigPath())
+	path := ConfigPath()
+
+	cfg, salvaged, err := loadFrom(path)
+	if err != nil || !salvaged {
+		return cfg, err
+	}
+
+	// Rewrite the salvaged config so the stale bytes are gone for good, keeping
+	// the corrupt original alongside it for inspection. Best effort: a repair we
+	// cannot write must not stop the caller from using what we just salvaged.
+	if err := repairCorruptFile(path, cfg); err != nil {
+		core.Tracef("config: repairing %s failed: %v", path, err)
+	}
+	return cfg, nil
 }
 
 func LoadFrom(path string) (Config, error) {
+	cfg, _, err := loadFrom(path)
+	return cfg, err
+}
+
+// loadFrom reads and normalizes the config at path. The salvaged return reports
+// that the file did not parse cleanly but a complete config was recovered from
+// it, so the caller may want to rewrite the file.
+func loadFrom(path string) (Config, bool, error) {
 	cfg := DefaultConfig()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, nil
+			return cfg, false, nil
 		}
-		return cfg, fmt.Errorf("reading config: %w", err)
+		return cfg, false, fmt.Errorf("reading config: %w", err)
 	}
 
+	salvaged := false
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return DefaultConfig(), fmt.Errorf("parsing config %s: %w", path, err)
+		// A failed Unmarshal leaves cfg partially populated, so salvage into a
+		// fresh value rather than the half-written one.
+		cfg = DefaultConfig()
+		trailing, rerr := decodeLeadingValue(data, &cfg)
+		if rerr != nil {
+			return DefaultConfig(), false, fmt.Errorf("parsing config %s: %w", path, err)
+		}
+		core.Tracef("config: %s holds a complete config followed by %d stale bytes "+
+			"(left by a write that did not truncate); recovering it and discarding the tail", path, trailing)
+		salvaged = true
 	}
 
 	cfg.UI = normalizeUIConfig(cfg.UI)
@@ -297,7 +329,52 @@ func LoadFrom(path string) (Config, error) {
 	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(cfg.Dashboard.WidgetSections)
 	cfg.Dashboard.DetailSections = normalizeDetailWidgetSections(cfg.Dashboard.DetailSections)
 
-	return cfg, nil
+	return cfg, salvaged, nil
+}
+
+// decodeLeadingValue decodes the first complete JSON value in data into out and
+// returns the number of bytes left over after it.
+//
+// This is the recovery path for a config file whose writer did not truncate: a
+// shorter document written over a longer one from offset 0 leaves a valid config
+// object followed by the tail of the previous version, which json.Unmarshal
+// rejects wholesale ("invalid character 's' after top-level value"). Everything
+// the config owns is in that leading object, so it is fully recoverable. A file
+// that is truncated or structurally broken instead has no complete leading
+// value, and decoding it fails here as it should.
+func decodeLeadingValue(data []byte, out *Config) (int, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(out); err != nil {
+		return 0, err
+	}
+	return len(data) - int(dec.InputOffset()), nil
+}
+
+// corruptBackupSuffix names the copy repairCorruptFile keeps of a config file it
+// had to salvage.
+const corruptBackupSuffix = ".corrupt"
+
+// repairCorruptFile backs up the unparseable config at path and rewrites it from
+// the config salvaged out of it. The backup is overwritten on each repair: it is
+// a debugging aid for the corruption just seen, not a version history.
+func repairCorruptFile(path string, cfg Config) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading corrupt config: %w", err)
+	}
+	// Re-check under the lock: another writer may have replaced the file with a
+	// good one between the salvaging read and this repair, and overwriting that
+	// with our salvaged copy would throw away their write.
+	if json.Valid(data) {
+		return nil
+	}
+	if err := os.WriteFile(path+corruptBackupSuffix, data, 0o600); err != nil {
+		return fmt.Errorf("backing up corrupt config: %w", err)
+	}
+	return saveLocked(path, cfg)
 }
 
 func normalizeUIConfig(in UIConfig) UIConfig {

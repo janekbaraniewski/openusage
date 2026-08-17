@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -127,6 +128,92 @@ func TestLoadFrom_InvalidJSON(t *testing.T) {
 	}
 	if cfg.Theme != "Gruvbox" {
 		t.Errorf("expected default theme on error, got %q", cfg.Theme)
+	}
+}
+
+// staleTailConfig is what a writer that does not truncate leaves behind: a
+// shorter document written over a longer one from offset 0, so a complete config
+// object is followed by the tail of the previous version.
+const staleTailConfig = `{
+  "theme": "Nord",
+  "tmux": {
+    "format": "{tool:icon}"
+  }
+}
+_cost:money}/today}",
+    "alerts": {}
+  }
+}
+`
+
+func TestLoadFrom_RecoversConfigFollowedByStaleBytes(t *testing.T) {
+	cfg, err := LoadFrom(writeSettingsJSON(t, staleTailConfig))
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v, want the leading config recovered", err)
+	}
+	if cfg.Theme != "Nord" {
+		t.Errorf("theme = %q, want Nord", cfg.Theme)
+	}
+	if cfg.Tmux.Format != "{tool:icon}" {
+		t.Errorf("tmux format = %q, want {tool:icon}", cfg.Tmux.Format)
+	}
+	if cfg.UI.RefreshIntervalSeconds != DefaultConfig().UI.RefreshIntervalSeconds {
+		t.Errorf("recovered config skipped normalization: refresh = %d", cfg.UI.RefreshIntervalSeconds)
+	}
+}
+
+func TestLoadFrom_TruncatedJSONStillFails(t *testing.T) {
+	// No complete leading value, so there is nothing to salvage.
+	cfg, err := LoadFrom(writeSettingsJSON(t, `{"theme":"Nord","ui":{`))
+	if err == nil {
+		t.Fatal("expected error for truncated JSON")
+	}
+	if cfg.Theme != DefaultConfig().Theme {
+		t.Errorf("expected default theme on error, got %q", cfg.Theme)
+	}
+}
+
+func TestLoad_RepairsConfigWithStaleBytesInPlace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("config dir is resolved from APPDATA on windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".config", "openusage", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(staleTailConfig), 0o644); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Theme != "Nord" {
+		t.Errorf("theme = %q, want Nord", cfg.Theme)
+	}
+
+	// The file itself must now be clean, so the next reader needs no salvaging.
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read repaired config: %v", err)
+	}
+	var probe Config
+	if err := json.Unmarshal(repaired, &probe); err != nil {
+		t.Fatalf("repaired config does not parse: %v\n%s", err, repaired)
+	}
+	if probe.Theme != "Nord" {
+		t.Errorf("repaired theme = %q, want Nord", probe.Theme)
+	}
+
+	backup, err := os.ReadFile(path + corruptBackupSuffix)
+	if err != nil {
+		t.Fatalf("read corrupt backup: %v", err)
+	}
+	if string(backup) != staleTailConfig {
+		t.Errorf("backup does not hold the original bytes:\n%s", backup)
 	}
 }
 
