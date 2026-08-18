@@ -7,6 +7,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/alibaba_cloud"
 	"github.com/janekbaraniewski/openusage/internal/providers/amp"
 	"github.com/janekbaraniewski/openusage/internal/providers/anthropic"
+	"github.com/janekbaraniewski/openusage/internal/providers/antigravity"
 	"github.com/janekbaraniewski/openusage/internal/providers/azure_openai"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/codebuff"
@@ -59,6 +60,7 @@ func AllProviders() []core.UsageProvider {
 		opencode.New(),
 		gemini_api.New(),
 		gemini_cli.New(),
+		antigravity.New(),
 		ollama.New(),
 		copilot.New(),
 		cursor.New(),
