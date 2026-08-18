@@ -313,6 +313,7 @@ var daemonInstallEnvVars = []string{
 	"GOOGLE_API_KEY",
 	"OLLAMA_API_KEY",
 	"OLLAMA_HOST",
+	"CODEX_HOME",
 	"ALIBABA_CLOUD_API_KEY",
 	"OPENUSAGE_DEBUG",
 	// Hub exporter Bearer token. Captured at install time so the daemon's

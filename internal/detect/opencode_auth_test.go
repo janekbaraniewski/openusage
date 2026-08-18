@@ -108,6 +108,7 @@ func TestDetectOpenCodeAuth_EnvVarWins(t *testing.T) {
 func TestDetectOpenCodeAuth_MissingFileIsSilent(t *testing.T) {
 	tmp := t.TempDir()
 	setHome(t, tmp)
+	t.Setenv("XDG_DATA_HOME", "")
 
 	var result Result
 	detectOpenCodeAuth(&result) // must not panic, must not add accounts
