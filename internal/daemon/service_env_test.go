@@ -10,6 +10,7 @@ import (
 func TestCurrentServiceEnvSnapshot_IncludesKnownConfiguredVars(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-openai")
 	t.Setenv("ZEN_API_KEY", "sk-zen")
+	t.Setenv("CODEX_HOME", "/tmp/codex")
 	t.Setenv("OPENUSAGE_HUB_TOKEN", "hub-secret")
 	t.Setenv("UNRELATED_ENV", "ignore-me")
 
@@ -20,6 +21,9 @@ func TestCurrentServiceEnvSnapshot_IncludesKnownConfiguredVars(t *testing.T) {
 	}
 	if env["ZEN_API_KEY"] != "sk-zen" {
 		t.Fatalf("ZEN_API_KEY = %q, want sk-zen", env["ZEN_API_KEY"])
+	}
+	if env["CODEX_HOME"] != "/tmp/codex" {
+		t.Fatalf("CODEX_HOME = %q, want /tmp/codex", env["CODEX_HOME"])
 	}
 	if env["OPENUSAGE_HUB_TOKEN"] != "hub-secret" {
 		t.Fatalf("OPENUSAGE_HUB_TOKEN = %q, want hub-secret", env["OPENUSAGE_HUB_TOKEN"])

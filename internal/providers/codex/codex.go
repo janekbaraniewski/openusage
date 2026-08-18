@@ -86,9 +86,9 @@ type rateLimitBucket struct {
 }
 
 type creditInfo struct {
-	HasCredits bool     `json:"has_credits"`
-	Unlimited  bool     `json:"unlimited"`
-	Balance    *float64 `json:"balance"`
+	HasCredits bool `json:"has_credits"`
+	Unlimited  bool `json:"unlimited"`
+	Balance    any  `json:"balance"`
 }
 
 type versionInfo struct {

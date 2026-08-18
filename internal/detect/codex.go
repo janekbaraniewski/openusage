@@ -22,8 +22,15 @@ func detectCodex(result *Result) {
 		return
 	}
 
-	home := homeDir()
-	configDir := filepath.Join(home, ".codex")
+	configDir := filepath.Join(homeDir(), ".codex")
+
+	codexHome := os.Getenv("CODEX_HOME")
+
+	if codexHome != "" {
+		configDir = codexHome
+	}
+
+	sessionsDir := filepath.Join(configDir, "sessions")
 
 	tool := DetectedTool{
 		Name:       "OpenAI Codex CLI",
@@ -34,10 +41,7 @@ func detectCodex(result *Result) {
 	result.Tools = append(result.Tools, tool)
 
 	log.Printf("[detect] Found Codex CLI at %s", bin)
-
-	sessionsDir := filepath.Join(configDir, "sessions")
 	authFile := filepath.Join(configDir, "auth.json")
-
 	hasSessions := dirExists(sessionsDir)
 	hasAuth := fileExists(authFile)
 

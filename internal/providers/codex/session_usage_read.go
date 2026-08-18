@@ -97,8 +97,8 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 				snap.Raw["credits"] = "unlimited"
 			} else if rl.Credits.HasCredits {
 				snap.Raw["credits"] = "available"
-				if rl.Credits.Balance != nil {
-					snap.Raw["credit_balance"] = fmt.Sprintf("$%.2f", *rl.Credits.Balance)
+				if formatted := formatCreditsBalance(rl.Credits.Balance); formatted != "" {
+					snap.Raw["credit_balance"] = formatted
 				}
 			} else {
 				snap.Raw["credits"] = "none"
