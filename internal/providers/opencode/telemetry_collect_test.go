@@ -156,6 +156,61 @@ func TestCollectTelemetryFromSQLite(t *testing.T) {
 	}
 }
 
+func TestProviderCollectSkipsUnchangedSQLite(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "opencode.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	stmts := []string{
+		`CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL);`,
+		`CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);`,
+		`INSERT INTO session (id, directory) VALUES ('sess-cache', '/tmp/work');`,
+		`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('msg-cache', 'sess-cache', 1771754400000, 1771754405000, '{"role":"assistant","providerID":"openrouter","modelID":"test","tokens":{"total":15,"input":10,"output":5}}');`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			_ = db.Close()
+			t.Fatalf("exec schema/data stmt: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite db: %v", err)
+	}
+
+	provider := New()
+	opts := shared.TelemetryCollectOptions{
+		Paths: map[string]string{"db_path": dbPath},
+		PathLists: map[string][]string{
+			"events_dirs": {filepath.Join(t.TempDir(), "missing")},
+		},
+	}
+	first, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first Collect() error: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first Collect() events = %d, want 1", len(first))
+	}
+	second, err := provider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second Collect() error: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Collect() events = %d, want 0 for unchanged sqlite", len(second))
+	}
+
+	t.Setenv("OPENUSAGE_OPENCODE_BASELINE_EXISTING", "true")
+	baselineProvider := New()
+	baselined, err := baselineProvider.Collect(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("baseline Collect() error: %v", err)
+	}
+	if len(baselined) != 0 {
+		t.Fatalf("baseline Collect() events = %d, want existing sqlite skipped", len(baselined))
+	}
+}
+
 func TestCollectTelemetryFromSQLite_UsesStepFinishUsage(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "opencode.db")
 	db, err := sql.Open("sqlite3", dbPath)

@@ -33,16 +33,19 @@ var errLiveUsageAuth = errors.New("live usage auth failed")
 
 type Provider struct {
 	providerbase.Base
-	telemetryCacheMu sync.Mutex
-	telemetryCache   map[string]*telemetryCacheEntry
-	creditHistoryMu  sync.Mutex
-	creditHistory    map[string][]creditUsageObservation
+	telemetryCacheMu             sync.Mutex
+	telemetryCache               map[string]*telemetryCacheEntry
+	telemetryBaselineInitialized bool
+	creditHistoryMu              sync.Mutex
+	creditHistory                map[string][]creditUsageObservation
 }
 
 type telemetryCacheEntry struct {
-	modTime time.Time
-	size    int64
-	events  []shared.TelemetryEvent
+	modTime    time.Time
+	size       int64
+	byteOffset int64
+	lineNumber int
+	state      *telemetryParserState
 }
 
 func New() *Provider {
@@ -287,8 +290,12 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if err := p.readDailySessionCounts(sessionsDir, &snap); err != nil {
 		snap.Raw["session_counts_error"] = err.Error()
 	}
-	if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
-		snap.Raw["split_error"] = err.Error()
+	if codexSessionUsageBreakdownsEnabled() {
+		if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
+			snap.Raw["split_error"] = err.Error()
+		}
+	} else {
+		snap.Raw["session_breakdowns"] = "disabled"
 	}
 
 	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)

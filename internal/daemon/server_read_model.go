@@ -29,6 +29,10 @@ func (s *Service) computeReadModel(
 	return result, err
 }
 
+func shouldRefreshCachedReadModel(cachedAt time.Time, cachedVersion, currentVersion uint64, now time.Time) bool {
+	return currentVersion > cachedVersion && now.Sub(cachedAt) > 2*time.Second
+}
+
 func (s *Service) refreshReadModelCacheAsync(
 	parent context.Context,
 	cacheKey string,
@@ -38,6 +42,7 @@ func (s *Service) refreshReadModelCacheAsync(
 	if !s.rmCache.beginRefresh(cacheKey) {
 		return
 	}
+	refreshVersion := s.dataVersion.Load()
 	go func() {
 		defer s.rmCache.endRefresh(cacheKey)
 		refreshCtx, cancel := context.WithTimeout(parent, timeout)
@@ -49,7 +54,7 @@ func (s *Service) refreshReadModelCacheAsync(
 			}
 			return
 		}
-		s.rmCache.set(cacheKey, snapshots)
+		s.rmCache.set(cacheKey, snapshots, refreshVersion)
 		s.pushToExporter(refreshCtx, snapshots)
 	}()
 }
@@ -66,6 +71,10 @@ func (s *Service) serviceContext(fallback context.Context) context.Context {
 
 func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 	if s == nil {
+		return
+	}
+	if !s.readModelCacheLoopEnabled() {
+		s.infof("read_model_cache_loop_skip", "reason=no_exporter_on_demand_http_cache")
 		return
 	}
 
@@ -89,6 +98,12 @@ func (s *Service) runReadModelCacheLoop(ctx context.Context) {
 			s.refreshReadModelCacheFromConfig(ctx)
 		}
 	}
+}
+
+// Local dashboard clients populate and refresh the cache through handleReadModel.
+// Only a remote exporter needs proactive refreshes without an HTTP reader.
+func (s *Service) readModelCacheLoopEnabled() bool {
+	return s != nil && s.exp != nil
 }
 
 func (s *Service) refreshReadModelCacheFromConfig(ctx context.Context) {

@@ -30,45 +30,61 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	defaultProjectsDir, defaultAltProjectsDir := DefaultTelemetryProjectsDirs()
 	projectsDir := shared.ExpandHome(opts.Path("projects_dir", defaultProjectsDir))
 	altProjectsDir := shared.ExpandHome(opts.Path("alt_projects_dir", defaultAltProjectsDir))
+	baselineExisting := claudeBaselineExistingEnabled(opts)
 
 	fileInfos, err := collectJSONLFilesWithStatAcross(projectsDir, altProjectsDir)
 	if err != nil {
 		return nil, err
 	}
-	if len(fileInfos) == 0 {
-		return nil, nil
-	}
-
 	p.telemetryCacheMu.Lock()
 	defer p.telemetryCacheMu.Unlock()
 	if p.telemetryCache == nil {
 		p.telemetryCache = make(map[string]*telemetryCacheEntry)
 	}
+	baselineInitialFiles := baselineExisting && !p.telemetryBaselineInitialized
+	p.telemetryBaselineInitialized = true
+	if len(fileInfos) == 0 {
+		return nil, nil
+	}
 
 	var out []shared.TelemetryEvent
+	pendingCache := make(map[string]*telemetryCacheEntry)
 	for path, info := range fileInfos {
 		if ctx.Err() != nil {
-			return out, ctx.Err()
+			return nil, ctx.Err()
 		}
 
 		// Check cache: skip unchanged files entirely.
 		if entry, ok := p.telemetryCache[path]; ok {
 			if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
-				out = append(out, entry.events...)
+				continue
+			}
+			if info.Size() == entry.byteSize {
+				entry.modTime = info.ModTime()
+				entry.size = info.Size()
 				continue
 			}
 			// File grew (append-only): parse only new lines.
 			if info.Size() > entry.byteSize && entry.byteSize > 0 {
 				newEvents, newSize, err := parseTelemetryConversationFileFrom(path, entry.byteSize)
 				if err == nil && newSize > entry.byteSize {
-					entry.events = append(entry.events, newEvents...)
-					entry.modTime = info.ModTime()
-					entry.size = info.Size()
-					entry.byteSize = newSize
-					out = append(out, entry.events...)
+					pendingCache[path] = &telemetryCacheEntry{
+						modTime:  info.ModTime(),
+						size:     max(info.Size(), newSize),
+						byteSize: newSize,
+					}
+					out = append(out, newEvents...)
 					continue
 				}
 			}
+		}
+		if baselineInitialFiles {
+			p.telemetryCache[path] = &telemetryCacheEntry{
+				modTime:  info.ModTime(),
+				size:     info.Size(),
+				byteSize: info.Size(),
+			}
+			continue
 		}
 
 		// Full parse (cache miss or file shrunk).
@@ -76,15 +92,27 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		if err != nil {
 			continue
 		}
-		p.telemetryCache[path] = &telemetryCacheEntry{
+		pendingCache[path] = &telemetryCacheEntry{
 			modTime:  info.ModTime(),
 			size:     info.Size(),
 			byteSize: info.Size(),
-			events:   events,
 		}
 		out = append(out, events...)
 	}
+	for path, entry := range pendingCache {
+		p.telemetryCache[path] = entry
+	}
 	return out, nil
+}
+
+func claudeBaselineExistingEnabled(opts shared.TelemetryCollectOptions) bool {
+	value := strings.ToLower(strings.TrimSpace(opts.Path("baseline_existing", os.Getenv("OPENUSAGE_CLAUDE_BASELINE_EXISTING"))))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {

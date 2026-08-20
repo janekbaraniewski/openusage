@@ -140,11 +140,41 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	var out []shared.TelemetryEvent
 
 	if strings.TrimSpace(dbPath) != "" {
-		events, err := CollectTelemetryFromSQLite(ctx, dbPath)
-		if err != nil {
-			return out, fmt.Errorf("collect opencode sqlite telemetry: %w", err)
+		cacheKey := dbPath + "|" + accountID
+		fingerprint, fingerprintErr := opencodeSQLiteFingerprint(dbPath)
+		if fingerprintErr != nil {
+			return out, fmt.Errorf("fingerprint opencode sqlite telemetry: %w", fingerprintErr)
 		}
-		appendDedupTelemetryEvents(&out, events, seenMessage, seenTools, accountID)
+		p.telemetryCacheMu.Lock()
+		if p.telemetryDBFingerprints == nil {
+			p.telemetryDBFingerprints = make(map[string]string)
+		}
+		cachedFingerprint := p.telemetryDBFingerprints[cacheKey]
+		if cachedFingerprint == "" && fingerprint != "" && opencodeBaselineExistingEnabled() {
+			p.telemetryDBFingerprints[cacheKey] = fingerprint
+			cachedFingerprint = fingerprint
+		}
+		p.telemetryCacheMu.Unlock()
+		if fingerprint == "" || fingerprint != cachedFingerprint {
+			events, err := CollectTelemetryFromSQLite(ctx, dbPath)
+			if err != nil {
+				return out, fmt.Errorf("collect opencode sqlite telemetry: %w", err)
+			}
+			appendDedupTelemetryEvents(&out, events, seenMessage, seenTools, accountID)
+
+			fingerprintAfter, err := opencodeSQLiteFingerprint(dbPath)
+			if err != nil {
+				return out, fmt.Errorf("fingerprint collected opencode sqlite telemetry: %w", err)
+			}
+			if fingerprintAfter != "" {
+				p.telemetryCacheMu.Lock()
+				if p.telemetryDBFingerprints == nil {
+					p.telemetryDBFingerprints = make(map[string]string)
+				}
+				p.telemetryDBFingerprints[cacheKey] = fingerprintAfter
+				p.telemetryCacheMu.Unlock()
+			}
+		}
 	}
 
 	roots := append([]string{}, eventsDirs...)
@@ -167,6 +197,41 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	}
 
 	return out, nil
+}
+
+func opencodeSQLiteFingerprint(dbPath string) (string, error) {
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	fingerprint := fmt.Sprintf("db:%d:%d", info.Size(), info.ModTime().UnixNano())
+
+	walInfo, err := os.Stat(dbPath + "-wal")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fingerprint + ":wal:missing", nil
+		}
+		return "", err
+	}
+	if walInfo.Size() == 0 {
+		// Opening SQLite may create or touch an empty WAL. Its mtime is not a
+		// source-data change and must not invalidate the cache every cycle.
+		return fingerprint + ":wal:0", nil
+	}
+	return fmt.Sprintf("%s:wal:%d:%d", fingerprint, walInfo.Size(), walInfo.ModTime().UnixNano()), nil
+}
+
+func opencodeBaselineExistingEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("OPENUSAGE_OPENCODE_BASELINE_EXISTING")))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
