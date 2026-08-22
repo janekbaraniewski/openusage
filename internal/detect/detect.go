@@ -64,6 +64,7 @@ func AutoDetect() Result {
 	detectOpenClaw(&result)
 	detectPi(&result)
 	detectQwenCLI(&result)
+	detectMakora(&result)
 
 	// Phase 2: process env vars. Most authoritative; runs before any
 	// file-based credential adoption so a freshly-set env var always

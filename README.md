@@ -159,7 +159,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 ## Features
 
 - **Cross-provider tracking** — compare coding agents, API platforms, and local runtimes in one local dashboard
-- **35 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
+- **36 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, tokens, burn rate, and per-model usage at a glance
 - **tmux integration** — show the active tool's usage in your tmux status bar, with provider icons, presets, and active-tool detection
@@ -173,7 +173,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 
 ## Supported providers
 
-35 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
+36 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
 
 ### Claude Code
 
@@ -215,6 +215,7 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **OpenRouter** | `OPENROUTER_API_KEY` | Credits, activity, per-model breakdown |
 | **Groq** | `GROQ_API_KEY` | Rate limits, daily usage windows |
 | **Mistral AI** | `MISTRAL_API_KEY` | Subscription, usage endpoints |
+| **Makora** | `MAKORA_SESSION_TOKEN` / `MAKORA_EMAIL` + `MAKORA_PASSWORD` / token cache | Credits balance, monthly spend limit, per-model cost & tokens, daily spend series |
 | **DeepSeek** | `DEEPSEEK_API_KEY` | Rate limits, account balance |
 | **Moonshot (Kimi)** | `MOONSHOT_API_KEY` | Balance breakdown (cash + voucher), org limits, tier; supports api.moonshot.ai (default) and api.moonshot.cn |
 | **Perplexity** | Browser session at console.perplexity.ai | Tier, balance, lifetime spend, auto-reload, 30d usage analytics |

@@ -77,6 +77,7 @@ const sidebars: SidebarsConfig = {
             'providers/openrouter',
             'providers/groq',
             'providers/mistral',
+            'providers/makora',
             'providers/deepseek',
             'providers/moonshot',
             'providers/perplexity',

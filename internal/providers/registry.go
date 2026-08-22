@@ -24,6 +24,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/kilocode"
 	"github.com/janekbaraniewski/openusage/internal/providers/kimi_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/kiro"
+	"github.com/janekbaraniewski/openusage/internal/providers/makora"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
 	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
 	"github.com/janekbaraniewski/openusage/internal/providers/mux"
@@ -54,6 +55,7 @@ func AllProviders() []core.UsageProvider {
 		mistral.New(),
 		moonshot.New(),
 		deepseek.New(),
+		makora.New(),
 		xai.New(),
 		zai.New(),
 		opencode.New(),
