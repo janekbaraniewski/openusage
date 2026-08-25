@@ -214,6 +214,12 @@ func (s *Service) runRetentionLoop(ctx context.Context) {
 // events past the hot window that have already been rolled up. It reports
 // whether the event backlog is fully drained; a false return means the prune
 // stopped early (budget/context) and the caller should reschedule soon.
+//
+// The change-log drain state is OR'd into the return so the catch-up loop
+// stays active while either backlog remains. Without that, a one-time change-
+// log explosion (e.g. a 51M-row backlog from many concurrent candidate
+// updates) would let the loop fall back to the 6h idle interval even though
+// the log was still 50x over its size budget.
 func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 	if s == nil || s.store == nil {
 		return true
@@ -232,12 +238,25 @@ func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if removed, changeErr := s.store.PruneUsageEventChanges(pruneCtx, 50000); changeErr != nil {
+	// Drain the change log in a tight loop. A coalesced log is bounded by
+	// O(distinct events) — typically 3-4x the events table — so the size
+	// ceiling is conservative. The old single-shot 50k prune could not keep
+	// up with a backlog (the user's machine was sitting on 51M rows); the
+	// size-based target makes backlog drain in seconds on a healthy DB and
+	// keeps the log bounded on a busy one.
+	const changeLogTargetRows = int64(200000)
+	const changeLogRetainTail = int64(10000)
+	changeLogDone := true
+	if removed, done, changeErr := s.store.PruneUsageEventChangesToSize(pruneCtx, changeLogTargetRows, changeLogRetainTail); changeErr != nil {
 		if s.shouldLog("usage_change_log_prune_error", 30*time.Second) {
 			s.warnf("usage_change_log_prune_error", "error=%v", changeErr)
 		}
+		changeLogDone = false
 	} else if removed > 0 {
-		s.infof("usage_change_log_prune", "removed=%d", removed)
+		s.infof("usage_change_log_prune", "removed=%d done=%v", removed, done)
+		if !done {
+			changeLogDone = false
+		}
 	}
 
 	// Thin and trim the balance observation series independently of usage
@@ -275,7 +294,7 @@ func (s *Service) pruneOldData(ctx context.Context) (complete bool) {
 		}
 		return false
 	}
-	complete = drained
+	complete = drained && changeLogDone
 	if deleted > 0 {
 		s.infof("retention_prune", "deleted=%d retention_days=%d", deleted, retentionDays)
 		orphanCtx, orphanCancel := context.WithTimeout(ctx, 10*time.Second)
