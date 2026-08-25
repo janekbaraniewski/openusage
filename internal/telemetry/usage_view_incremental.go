@@ -267,10 +267,27 @@ func (s *incrementalUsageState) applyChanges(ctx context.Context, db *sql.DB, fi
 		return s.acc.snapshot(), true, nil
 	}
 
+	// Coalesce: for each event_id keep only the latest operation. The change
+	// log is sourced from a (event_id, operation) UNIQUE index, so a single
+	// event can still appear up to 3 times (insert / update / delete across
+	// its lifecycle). The reader's job is to make the in-memory state match
+	// the latest persisted state for each event; replaying every intermediate
+	// op is wasted work. Rows arrive in seq ASC, so a last-write-wins map is
+	// sufficient.
+	latest := make(map[string]change, len(changes))
+	var appliedMaxSeq int64
 	for _, c := range changes {
+		if prev, ok := latest[c.eventID]; !ok || c.seq > prev.seq {
+			latest[c.eventID] = c
+		}
+		if c.seq > appliedMaxSeq {
+			appliedMaxSeq = c.seq
+		}
+	}
+
+	for _, c := range latest {
 		s.removeCandidate(c.eventID)
 		if c.operation == "delete" {
-			s.changeSeq = c.seq
 			s.appliedChanges++
 			continue
 		}
@@ -280,17 +297,15 @@ func (s *incrementalUsageState) applyChanges(ctx context.Context, db *sql.DB, fi
 			return nil, false, loadErr
 		}
 		if !found {
-			s.changeSeq = c.seq
 			continue
 		}
 		if !usageViewEventMatchesFilter(event, s.filter) {
-			s.changeSeq = c.seq
 			continue
 		}
 		s.addCandidate(event)
-		s.changeSeq = c.seq
 		s.appliedChanges++
 	}
+	s.changeSeq = appliedMaxSeq
 	return s.acc.snapshot(), true, nil
 }
 
