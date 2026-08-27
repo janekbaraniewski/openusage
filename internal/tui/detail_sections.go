@@ -187,6 +187,10 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 // buildDetailUsageSection builds the usage overview — gauges + compact metrics.
 // Does NOT include summary/detail text (that's in the compact header now).
 func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, hideCosts bool, now time.Time) []string {
+	if snap.ProviderID == "antigravity" {
+		return buildAntigravityDetailUsageSection(snap, innerW, warnThresh, critThresh, now)
+	}
+
 	var lines []string
 
 	// Usage gauge bars.
@@ -201,6 +205,87 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 		}
 		lines = append(lines, compactLines...)
 	}
+
+	return lines
+}
+
+func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+	var lines []string
+
+	barW := innerW - 14
+	if barW < 20 {
+		barW = 20
+	}
+	if barW > 50 {
+		barW = 50
+	}
+
+	renderQuotaBlock := func(title string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(title))
+		lines = append(lines, "  "+dimStyle.Render(modelsDesc))
+		lines = append(lines, "")
+
+		renderItem := func(label string, candidateKeys []string, defaultRemaining float64) {
+			var met core.Metric
+			found := false
+			matchedKey := ""
+			for _, k := range candidateKeys {
+				if m, ok := snap.Metrics[k]; ok && m.Remaining != nil {
+					met = m
+					found = true
+					matchedKey = k
+					break
+				}
+			}
+
+			remaining := defaultRemaining
+			if found && met.Remaining != nil {
+				remaining = *met.Remaining
+			}
+
+			resetStr := ""
+			if matchedKey != "" {
+				resetAt, hasReset := snap.Resets[matchedKey]
+				if !hasReset {
+					resetAt, hasReset = snap.Resets[matchedKey+"_reset"]
+				}
+				if hasReset && !resetAt.IsZero() {
+					diff := resetAt.Sub(now)
+					if diff > 0 {
+						resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
+					}
+				}
+			}
+
+			gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
+			lines = append(lines, "    "+gaugeBar)
+			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.0f%% remaining%s", remaining, resetStr)))
+			lines = append(lines, "")
+		}
+
+		renderItem("Weekly Limit Remaining", weeklyKeys, 100)
+		renderItem("Five Hour Limit Remaining", fiveHourKeys, 100)
+	}
+
+	// 1. GEMINI MODELS
+	renderQuotaBlock(
+		"GEMINI MODELS",
+		"Models within this group: Gemini 2.5 Flash, Gemini 2.5 Pro, Gemini 3.7 Flash",
+		[]string{"quota_gemini_weekly", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
+		[]string{"quota_gemini_5h", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
+	)
+
+	// 2. CLAUDE AND GPT MODELS
+	renderQuotaBlock(
+		"CLAUDE AND GPT MODELS",
+		"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+		[]string{"quota_claude_weekly", "quota_opus_sonnet_weekly", "quota_claude", "quota_opus_sonnet"},
+		[]string{"quota_claude_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_opus_sonnet"},
+	)
 
 	return lines
 }
@@ -246,23 +331,33 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 			label = label[:maxLabelW-1] + "…"
 		}
 
-		// Render the projection variant only when the metric has a recognized
-		// window AND a reset timestamp; otherwise fall back to the plain
-		// gauge. Pace = current% / elapsed_minutes / 100.
-		gauge := RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
-		windowDur, hasWindow := gaugeWindowDuration(met.Window)
+		var gauge string
+		if strings.HasPrefix(key, "quota") && met.Remaining != nil {
+			gauge = RenderGauge(*met.Remaining, gaugeW, warnThresh, critThresh)
+		} else {
+			gauge = RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
+		}
 		resetAt, hasReset := snap.Resets[key]
-		if hasWindow && hasReset {
+		if !hasReset {
+			resetAt, hasReset = snap.Resets[key+"_reset"]
+		}
+		if hasReset && !resetAt.IsZero() {
 			resetIn := resetAt.Sub(now)
-			elapsed := windowDur - resetIn
+			windowDur, hasWindow := gaugeWindowDuration(met.Window)
 			var paceFraction float64
-			if elapsed > 0 && usedPct > 0 {
-				if elapsedMin := elapsed.Minutes(); elapsedMin > 0 {
-					// fraction-of-window per minute
-					paceFraction = (usedPct / 100) / elapsedMin
+			if hasWindow {
+				elapsed := windowDur - resetIn
+				if elapsed > 0 && usedPct > 0 {
+					if elapsedMin := elapsed.Minutes(); elapsedMin > 0 {
+						paceFraction = (usedPct / 100) / elapsedMin
+					}
 				}
 			}
-			gauge = RenderUsageGaugeWithProjection(usedPct, gaugeW, warnThresh, critThresh, paceFraction, resetIn)
+			if strings.HasPrefix(key, "quota") && met.Remaining != nil {
+				gauge = RenderGaugeWithProjection(*met.Remaining, gaugeW, warnThresh, critThresh, resetIn)
+			} else {
+				gauge = RenderUsageGaugeWithProjection(usedPct, gaugeW, warnThresh, critThresh, paceFraction, resetIn)
+			}
 		}
 
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
