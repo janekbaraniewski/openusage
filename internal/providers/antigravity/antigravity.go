@@ -5,6 +5,7 @@ package antigravity
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -286,17 +287,47 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		}
 		remaining := clamp(*quota.RemainingFraction, 0, 1)
 		remainingPercent := remaining * 100
-		key := "quota_" + sanitizeMetricName(name)
-		snap.Metrics[key] = core.Metric{
+		cleanName := sanitizeMetricName(name)
+
+		window := "quota"
+		if strings.Contains(cleanName, "5h") {
+			window = "5h"
+		} else if strings.Contains(cleanName, "weekly") || strings.Contains(cleanName, "7d") {
+			window = "7d"
+		}
+
+		metric := core.Metric{
 			Limit:     core.Float64Ptr(100),
 			Used:      core.Float64Ptr(100 - remainingPercent),
 			Remaining: core.Float64Ptr(remainingPercent),
 			Unit:      "%",
-			Window:    "quota",
+			Window:    window,
 		}
-		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() {
+
+		key := "quota_" + cleanName
+		snap.Metrics[key] = metric
+
+		reset := quotaResetTime(quota, payloadReceivedAt(payload))
+		if !reset.IsZero() {
+			snap.Resets[key] = reset
 			snap.Resets[key+"_reset"] = reset
 		}
+
+		// Alias 3p keys to claude keys for backward and cross-widget compatibility
+		if cleanName == "3p_5h" {
+			snap.Metrics["quota_claude_5h"] = metric
+			if !reset.IsZero() {
+				snap.Resets["quota_claude_5h"] = reset
+				snap.Resets["quota_claude_5h_reset"] = reset
+			}
+		} else if cleanName == "3p_weekly" {
+			snap.Metrics["quota_claude_weekly"] = metric
+			if !reset.IsZero() {
+				snap.Resets["quota_claude_weekly"] = reset
+				snap.Resets["quota_claude_weekly_reset"] = reset
+			}
+		}
+
 		if !found || remaining < worst {
 			worst = remaining
 			worstName = name
@@ -307,7 +338,24 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 	if !found {
 		return
 	}
-	remainingPercent := worst * 100
+
+	// Overall usable quota metric:
+	// If both model pools are tracked, overall available capacity reflects the active pool that
+	// is still available, so having Claude/GPT exhausted does not falsely show 100% used for the account.
+	var overallRemaining float64
+	geminiRem, hasGemini := getPoolRemainingFraction(payload, "gemini")
+	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
+
+	if hasGemini && hasClaude {
+		// If either pool has remaining capacity, use the max remaining so available pool is shown
+		overallRemaining = math.Max(geminiRem, claudeRem)
+	} else if found {
+		overallRemaining = worst
+	} else {
+		overallRemaining = 1.0
+	}
+
+	remainingPercent := overallRemaining * 100
 	snap.Metrics["quota"] = core.Metric{
 		Limit:     core.Float64Ptr(100),
 		Used:      core.Float64Ptr(100 - remainingPercent),
@@ -317,12 +365,55 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 	}
 	if quota, ok := payload.Quota[worstName]; ok {
 		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() {
+			snap.Resets["quota"] = reset
 			snap.Resets["quota_reset"] = reset
 		}
 	}
 }
 
+func getPoolRemainingFraction(payload statusLinePayload, poolKeywords ...string) (float64, bool) {
+	worst := 1.0
+	found := false
+	for name, quota := range payload.Quota {
+		if quota.RemainingFraction == nil {
+			continue
+		}
+		cleanName := strings.ToLower(sanitizeMetricName(name))
+		matches := false
+		for _, kw := range poolKeywords {
+			if strings.Contains(cleanName, kw) {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		fraction := clamp(*quota.RemainingFraction, 0, 1)
+		if !found || fraction < worst {
+			worst = fraction
+			found = true
+		}
+	}
+	return worst, found
+}
+
 func statusFromQuota(payload statusLinePayload) core.Status {
+	geminiRem, hasGemini := getPoolRemainingFraction(payload, "gemini")
+	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
+
+	if hasGemini && hasClaude {
+		// Only LIMITED if BOTH Gemini and Claude/Opus model pools are exhausted
+		if geminiRem <= 0 && claudeRem <= 0 {
+			return core.StatusLimited
+		}
+		// If both are near limit (< 15%)
+		if geminiRem < quotaNearLimitRatio && claudeRem < quotaNearLimitRatio {
+			return core.StatusNearLimit
+		}
+		return core.StatusOK
+	}
+
 	worst, ok := worstQuotaFraction(payload)
 	if !ok {
 		return core.StatusOK
