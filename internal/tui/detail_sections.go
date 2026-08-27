@@ -263,7 +263,7 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 			lines = append(lines, "    "+gaugeBar)
-			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.0f%% remaining%s", remaining, resetStr)))
+			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
 			lines = append(lines, "")
 		}
 

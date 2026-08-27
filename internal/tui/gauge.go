@@ -76,7 +76,7 @@ func renderGaugeWithLabel(percent float64, width int, color lipgloss.Color) stri
 	}
 	bar := renderGaugeBar(percent, width, color)
 	pctStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
-	return fmt.Sprintf("%s %s", bar, pctStyle.Render(fmt.Sprintf("%5.1f%%", percent)))
+	return fmt.Sprintf("%s %s", bar, pctStyle.Render(fmt.Sprintf("%6.2f%%", percent)))
 }
 
 func RenderGauge(percent float64, width int, warnThresh, critThresh float64) string {

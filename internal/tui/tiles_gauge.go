@@ -398,7 +398,7 @@ func (m Model) buildAntigravityTileGaugeLines(snap core.UsageSnapshot, innerW in
 			gaugeBar := RenderGauge(remaining, barW, m.warnThreshold, m.critThreshold)
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 			lines = append(lines, "    "+gaugeBar)
-			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.0f%% remaining%s", remaining, resetStr)))
+			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
 			lines = append(lines, "")
 		}
 
