@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
