@@ -151,6 +151,18 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		return info
 	}
 
+	if pu, ok := snap.Metrics["plan_percent_used"]; ok && pu.Used != nil {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "plan_percent_used"
+		info.summary = fmt.Sprintf("%.0f%% plan used", *pu.Used)
+		info.gaugePercent = *pu.Used
+		if pu.Remaining != nil {
+			info.detail = fmt.Sprintf("%.0f%% remaining", *pu.Remaining)
+		}
+		return info
+	}
+
 	if m, ok := snap.Metrics["plan_spend"]; ok && m.Used != nil && m.Limit != nil {
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
