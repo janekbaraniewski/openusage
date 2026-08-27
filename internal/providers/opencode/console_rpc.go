@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,11 +18,20 @@ import (
 // OpenCode console exposes data behind SolidStart server functions reachable
 // at https://opencode.ai/_server. Each function has a content-hash ID
 // (sha256 of its server-side source); these IDs change on every backend
-// deploy. Pinned IDs below were captured 2026-04-30 from the user's HAR.
+// deploy. Pinned IDs below were captured 2026-04-30 from the user's HAR
+// and cross-referenced against CodexBar's captures.
 // The IDs are paired with a stable "purpose" name so we can grep / replace
 // them in one place when they rotate.
 const (
 	consoleBaseURL = "https://opencode.ai"
+
+	// workspaces — returns the user's workspace list (each containing an
+	// id field like "wrk_..."). No args required.
+	rpcWorkspacesID = "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f"
+
+	// subscription.get — returns rolling 5-hour and weekly usage
+	// percentages with reset timers. Args: [workspaceID].
+	rpcSubscriptionID = "7abeebee372f304e050aaaf92be863f4a86490e382f8c79db68fd94040d691b4"
 
 	// queryBillingInfo — returns balance, monthly limit, monthly usage,
 	// auto-reload config, payment method, subscription state.
@@ -220,6 +230,250 @@ func (c *ConsoleClient) DiscoverWorkspaceID(ctx context.Context) (string, error)
 	return "", fmt.Errorf("console: workspace redirect missing id (HTTP %d)", resp.StatusCode)
 }
 
+// FetchWorkspaceIDsViaRPC discovers workspace IDs by calling the workspaces
+// server function. This is more reliable than the /auth redirect approach
+// used by DiscoverWorkspaceID. Returns the first workspace ID found, or
+// an error if none could be parsed.
+func (c *ConsoleClient) FetchWorkspaceIDsViaRPC(ctx context.Context) (string, error) {
+	if c.Cookie == "" || c.CookieName == "" {
+		return "", errors.New("console: missing session cookie")
+	}
+
+	// Try GET first, fall back to POST if empty.
+	body, err := c.callGET(ctx, rpcWorkspacesID)
+	if err != nil {
+		return "", fmt.Errorf("console: workspaces GET: %w", err)
+	}
+	ids := parseWorkspaceIDsFromResponse(body)
+	if len(ids) > 0 {
+		return ids[0], nil
+	}
+
+	// POST fallback — some SolidStart deployments only honour POST.
+	body, err = c.callPOST(ctx, rpcWorkspacesID)
+	if err != nil {
+		return "", fmt.Errorf("console: workspaces POST: %w", err)
+	}
+	ids = parseWorkspaceIDsFromResponse(body)
+	if len(ids) == 0 {
+		return "", errors.New("console: no workspace IDs found in workspaces response")
+	}
+	return ids[0], nil
+}
+
+// parseWorkspaceIDsFromResponse extracts workspace IDs (wrk_...) from a
+// server response. Tries JSON parsing first, then falls back to regex.
+func parseWorkspaceIDsFromResponse(body []byte) []string {
+	parsed, err := ParseSeroval(body)
+	if err != nil {
+		return parseWorkspaceIDsFromBody(string(body))
+	}
+	return collectWorkspaceIDsFromJSON(parsed)
+}
+
+// collectWorkspaceIDsFromJSON recursively walks a parsed JSON structure
+// looking for strings matching the workspace ID pattern.
+func collectWorkspaceIDsFromJSON(v any) []string {
+	var ids []string
+	switch val := v.(type) {
+	case map[string]any:
+		for _, child := range val {
+			ids = append(ids, collectWorkspaceIDsFromJSON(child)...)
+		}
+	case []any:
+		for _, child := range val {
+			ids = append(ids, collectWorkspaceIDsFromJSON(child)...)
+		}
+	case string:
+		if len(val) > 4 && strings.HasPrefix(val, "wrk_") {
+			ids = append(ids, val)
+		}
+	}
+	seen := make(map[string]bool, len(ids))
+	unique := ids[:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	return unique
+}
+
+// parseWorkspaceIDsFromBody uses regex to find workspace IDs in raw text.
+func parseWorkspaceIDsFromBody(body string) []string {
+	re := regexp.MustCompile(`wrk_[A-Za-z0-9]+`)
+	matches := re.FindAllString(body, -1)
+	seen := make(map[string]bool, len(matches))
+	unique := matches[:0]
+	for _, m := range matches {
+		if !seen[m] {
+			seen[m] = true
+			unique = append(unique, m)
+		}
+	}
+	return unique
+}
+
+// SubscriptionUsage is the parsed shape of a subscription.get response.
+// Contains rolling 5-hour, weekly, and monthly usage percentages with reset timers.
+//
+// The *OK fields distinguish "field present in the response with a value of
+// 0" from "field absent" — a usagePercent of 0 is a legitimate reading (the
+// quota window just reset) and must not be treated the same as "not found".
+type SubscriptionUsage struct {
+	RollingUsagePct float64
+	RollingUsageOK  bool
+	RollingResetSec int
+	WeeklyUsagePct  float64
+	WeeklyUsageOK   bool
+	WeeklyResetSec  int
+	MonthlyUsagePct float64
+	MonthlyUsageOK  bool
+	MonthlyResetSec int
+	RenewAt         string
+}
+
+// QuerySubscriptionUsage fetches the rolling 5-hour and weekly usage
+// percentages for the given workspace. These represent OpenCode's
+// rate-limit quota consumption, not dollar spend.
+func (c *ConsoleClient) QuerySubscriptionUsage(ctx context.Context, workspaceID string) (SubscriptionUsage, error) {
+	if workspaceID == "" {
+		return SubscriptionUsage{}, errors.New("console: workspace ID required")
+	}
+
+	referer := fmt.Sprintf("%s/workspace/%s/billing", c.baseURL, workspaceID)
+	payload := buildArgsPayload(workspaceID)
+	argsJSON, err := json.Marshal(payload)
+	if err != nil {
+		return SubscriptionUsage{}, fmt.Errorf("console: encode args: %w", err)
+	}
+
+	u := fmt.Sprintf("%s/_server?id=%s&args=%s", c.baseURL, rpcSubscriptionID, url.QueryEscape(string(argsJSON)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return SubscriptionUsage{}, err
+	}
+	c.applyHeaders(req, rpcSubscriptionID)
+	req.Header.Set("Referer", referer)
+	req.Header.Set("Accept", "text/javascript, application/json;q=0.9, */*;q=0.8")
+
+	body, err := c.do(req)
+	if err != nil {
+		return SubscriptionUsage{}, fmt.Errorf("console: subscription usage: %w", err)
+	}
+
+	return parseSubscriptionUsage(body)
+}
+
+// parseSubscriptionUsage extracts rolling/weekly usage from a subscription.get
+// response. The response may be Seroval-encoded or plain JSON.
+func parseSubscriptionUsage(body []byte) (SubscriptionUsage, error) {
+	parsed, err := ParseSeroval(body)
+	if err != nil {
+		// Try regex fallback on raw text (CodexBar-style parsing).
+		return parseSubscriptionUsageFallback(string(body))
+	}
+
+	result := SubscriptionUsage{}
+	m, ok := parsed.(map[string]any)
+	if !ok {
+		return SubscriptionUsage{}, fmt.Errorf("console: subscription response not an object: %T", parsed)
+	}
+
+	// Try nested "usage" key first.
+	usageMap := m
+	if nested, ok := m["usage"].(map[string]any); ok {
+		usageMap = nested
+	}
+
+	// Parse rolling usage.
+	if rolling, ok := usageMap["rollingUsage"].(map[string]any); ok {
+		result.RollingUsagePct = floatFieldFromMap(rolling, "usagePercent")
+		result.RollingResetSec = int(floatFieldFromMap(rolling, "resetInSec"))
+	}
+
+	// Parse weekly usage.
+	if weekly, ok := usageMap["weeklyUsage"].(map[string]any); ok {
+		result.WeeklyUsagePct = floatFieldFromMap(weekly, "usagePercent")
+		result.WeeklyResetSec = int(floatFieldFromMap(weekly, "resetInSec"))
+	}
+
+	// Parse renewAt if present.
+	if v, ok := m["renewAt"]; ok {
+		switch val := v.(type) {
+		case string:
+			result.RenewAt = val
+		case float64:
+			result.RenewAt = fmt.Sprintf("%v", val)
+		}
+	}
+
+	if result.RollingUsagePct == 0 && result.WeeklyUsagePct == 0 {
+		return SubscriptionUsage{}, errors.New("console: subscription response missing usage fields")
+	}
+	return result, nil
+}
+
+// parseSubscriptionUsageFallback uses regex to extract usage data from raw
+// text responses, matching CodexBar's fallback parsing strategy.
+func parseSubscriptionUsageFallback(text string) (SubscriptionUsage, error) {
+	result := SubscriptionUsage{}
+
+	if pct := extractDoubleFromText(text, `rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`); pct != nil {
+		result.RollingUsagePct = *pct
+	}
+	if sec := extractIntFromText(text, `rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)`); sec != nil {
+		result.RollingResetSec = *sec
+	}
+	if pct := extractDoubleFromText(text, `weeklyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`); pct != nil {
+		result.WeeklyUsagePct = *pct
+	}
+	if sec := extractIntFromText(text, `weeklyUsage[^}]*?resetInSec\s*:\s*([0-9]+)`); sec != nil {
+		result.WeeklyResetSec = *sec
+	}
+
+	if result.RollingUsagePct == 0 && result.WeeklyUsagePct == 0 {
+		return SubscriptionUsage{}, errors.New("console: subscription response missing usage fields")
+	}
+	return result, nil
+}
+
+func floatFieldFromMap(m map[string]any, key string) float64 {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	if f, ok := v.(float64); ok {
+		return f
+	}
+	return 0
+}
+
+func extractDoubleFromText(text, pattern string) *float64 {
+	re := regexp.MustCompile(pattern)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) < 2 {
+		return nil
+	}
+	if f, err := strconv.ParseFloat(matches[1], 64); err == nil {
+		return &f
+	}
+	return nil
+}
+
+func extractIntFromText(text, pattern string) *int {
+	re := regexp.MustCompile(pattern)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) < 2 {
+		return nil
+	}
+	if i, err := strconv.Atoi(matches[1]); err == nil {
+		return &i
+	}
+	return nil
+}
+
 func (c *ConsoleClient) do(req *http.Request) ([]byte, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -237,6 +491,198 @@ func (c *ConsoleClient) do(req *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("console: http %d: %s", resp.StatusCode, shortenBody(body))
 	}
 	return body, nil
+}
+
+// CallGETRaw is a debug helper that performs a GET-style server function call
+// and returns the raw response body. Not for production use.
+func (c *ConsoleClient) CallGETRaw(ctx context.Context, fnID string, args ...any) ([]byte, error) {
+	return c.callGET(ctx, fnID, args...)
+}
+
+// FetchPageRaw fetches a page from the OpenCode console with cookie auth.
+// Used for scraping the Go usage page HTML.
+func (c *ConsoleClient) FetchPageRaw(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.applyHeaders(req, "")
+	return c.do(req)
+}
+
+// FetchGoUsagePage fetches the OpenCode Go usage page and extracts billing
+// and subscription usage data from the embedded Seroval script. This is more
+// reliable than individual RPC calls whose IDs rotate on every deploy.
+func (c *ConsoleClient) FetchGoUsagePage(ctx context.Context, workspaceID string) (SubscriptionUsage, BillingInfo, error) {
+	if workspaceID == "" {
+		return SubscriptionUsage{}, BillingInfo{}, errors.New("console: workspace ID required")
+	}
+
+	url := fmt.Sprintf("%s/workspace/%s/go", c.baseURL, workspaceID)
+	body, err := c.FetchPageRaw(ctx, url)
+	if err != nil {
+		return SubscriptionUsage{}, BillingInfo{}, fmt.Errorf("console: fetch go page: %w", err)
+	}
+
+	html := string(body)
+	if looksSignedOutFromHTML(html) {
+		return SubscriptionUsage{}, BillingInfo{}, &ConsoleAuthError{StatusCode: 401, Body: "page indicates signed out"}
+	}
+
+	subscription, billing := parseGoUsagePageHTML(html)
+	return subscription, billing, nil
+}
+
+// looksSignedOutFromHTML checks if an HTML response indicates the user is
+// not authenticated.
+func looksSignedOutFromHTML(html string) bool {
+	lower := strings.ToLower(html)
+	return strings.Contains(lower, "sign in") ||
+		strings.Contains(lower, "login") ||
+		strings.Contains(lower, "auth/authorize")
+}
+
+// parseGoUsagePageHTML extracts billing and subscription usage data from the
+// embedded Seroval script in the OpenCode Go usage page HTML.
+func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo) {
+	subscription := SubscriptionUsage{}
+	billing := BillingInfo{}
+
+	// Extract the main Seroval script blob
+	scriptRE := regexp.MustCompile(`self\.\$R=self\.\$R\|\|\[\].*`)
+	scriptMatch := scriptRE.FindString(html)
+	if scriptMatch == "" {
+		return subscription, billing
+	}
+
+	// Extract billing data by finding the billing.get assignment followed by
+	// the billing fields object. The pattern is:
+	// billing.get["wrk_..."]}=$R[N]=$R[M]($R[O]={...billing fields...})
+	billingObjRE := regexp.MustCompile(`billing\.get\["[^"]*"\].*?\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := billingObjRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		billing = parseBillingFields(matches[1])
+	}
+
+	// Extract subscription usage. The pattern is:
+	// rollingUsage:$R[N]={status:"ok",resetInSec:N,usagePercent:N},...
+	// Note: field order varies; use independent extractions.
+	rollingBlockRE := regexp.MustCompile(`rollingUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := rollingBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+			subscription.RollingUsagePct = v
+			subscription.RollingUsageOK = true
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.RollingResetSec = int(v)
+		}
+	}
+
+	weeklyBlockRE := regexp.MustCompile(`weeklyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := weeklyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+			subscription.WeeklyUsagePct = v
+			subscription.WeeklyUsageOK = true
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.WeeklyResetSec = int(v)
+		}
+	}
+
+	monthlyBlockRE := regexp.MustCompile(`monthlyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	if matches := monthlyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
+		block := matches[1]
+		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+			subscription.MonthlyUsagePct = v
+			subscription.MonthlyUsageOK = true
+		}
+		if v := extractFloatField(block, "resetInSec"); v > 0 {
+			subscription.MonthlyResetSec = int(v)
+		}
+	}
+
+	return subscription, billing
+}
+
+// parseBillingFields extracts billing info from a Seroval object fragment
+// like: customerID:"cus_xxx",balance:0,reloadAmount:20,...
+func parseBillingFields(fields string) BillingInfo {
+	b := BillingInfo{}
+	b.CustomerID = extractStringField(fields, "customerID")
+	b.PaymentMethodType = extractStringField(fields, "paymentMethodType")
+	b.SubscriptionPlan = extractStringField(fields, "subscriptionPlan")
+
+	if v := extractFloatField(fields, "balance"); v != 0 {
+		b.Balance = v
+	}
+	if v := extractFloatField(fields, "reloadAmount"); v != 0 {
+		b.ReloadAmount = v
+	}
+	if v := extractFloatField(fields, "reloadTrigger"); v != 0 {
+		b.ReloadTrigger = v
+	}
+
+	if v := extractNullableFloat(fields, "monthlyLimit"); v != nil {
+		b.MonthlyLimit = v
+	}
+	if v := extractNullableFloat(fields, "monthlyUsage"); v != nil {
+		b.MonthlyUsage = *v
+	}
+
+	if strings.Contains(fields, "subscriptionID:") && !strings.Contains(fields, "subscriptionID:null") {
+		b.HasSubscription = true
+	}
+
+	return b
+}
+
+// extractStringField pulls a string value from a Seroval object fragment.
+// Handles: field:"value" and field:null
+func extractStringField(fields, key string) string {
+	re := regexp.MustCompile(key + `:"([^"]*)"`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+// extractFloatFieldOK pulls a numeric value from a Seroval object fragment,
+// reporting via ok whether the field was present at all — distinguishing
+// "field:0" (found, value 0) from "field absent" (not found).
+func extractFloatFieldOK(fields, key string) (float64, bool) {
+	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+	matches := re.FindStringSubmatch(fields)
+	if len(matches) < 2 {
+		return 0, false
+	}
+	f, _ := strconv.ParseFloat(matches[1], 64)
+	return f, true
+}
+
+// extractFloatField pulls a numeric value from a Seroval object fragment.
+// Handles: field:123, field:0, field:1.5
+func extractFloatField(fields, key string) float64 {
+	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		f, _ := strconv.ParseFloat(matches[1], 64)
+		return f
+	}
+	return 0
+}
+
+// extractNullableFloat pulls a nullable numeric value from a Seroval fragment.
+// Returns nil for null, pointer to value otherwise.
+func extractNullableFloat(fields, key string) *float64 {
+	re := regexp.MustCompile(key + `:(null|-?[0-9]+(?:\.[0-9]+)?)`)
+	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
+		if matches[1] == "null" {
+			return nil
+		}
+		f, _ := strconv.ParseFloat(matches[1], 64)
+		return &f
+	}
+	return nil
 }
 
 func shortenBody(b []byte) string {

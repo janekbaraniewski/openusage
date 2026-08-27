@@ -167,13 +167,13 @@ func joinAnnotationParts(parts ...string) string {
 // the window string isn't recognized — in that case we render the plain gauge.
 func gaugeWindowDuration(window string) (time.Duration, bool) {
 	switch strings.ToLower(strings.TrimSpace(window)) {
-	case "5h":
+	case "5h", "rolling-5h":
 		return 5 * time.Hour, true
 	case "1d", "24h", "today":
 		return 24 * time.Hour, true
 	case "7d":
 		return 7 * 24 * time.Hour, true
-	case "30d":
+	case "30d", "month":
 		return 30 * 24 * time.Hour, true
 	}
 	return 0, false
