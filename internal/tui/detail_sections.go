@@ -267,15 +267,15 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			lines = append(lines, "")
 		}
 
-		renderItem("Weekly Limit Remaining", weeklyKeys, 100)
-		renderItem("Five Hour Limit Remaining", fiveHourKeys, 100)
+		renderItem("Weekly Limit Remaining", weeklyKeys, 0)
+		renderItem("Five Hour Limit Remaining", fiveHourKeys, 0)
 	}
 
 	// 1. GEMINI MODELS
 	renderQuotaBlock(
 		"GEMINI MODELS",
 		"Models within this group: Gemini 2.5 Flash, Gemini 2.5 Pro, Gemini 3.7 Flash",
-		[]string{"quota_gemini_weekly", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
+		[]string{"quota_gemini_weekly", "quota_gemini_7d", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
 		[]string{"quota_gemini_5h", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
 	)
 
@@ -283,8 +283,8 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 	renderQuotaBlock(
 		"CLAUDE AND GPT MODELS",
 		"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
-		[]string{"quota_claude_weekly", "quota_opus_sonnet_weekly", "quota_claude", "quota_opus_sonnet"},
-		[]string{"quota_claude_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_opus_sonnet"},
+		[]string{"quota_claude_weekly", "quota_3p_weekly", "quota_3p_7d", "quota_opus_sonnet_weekly", "quota_claude", "quota_3p", "quota_opus_sonnet"},
+		[]string{"quota_claude_5h", "quota_3p_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_3p", "quota_opus_sonnet"},
 	)
 
 	return lines
