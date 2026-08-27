@@ -12,6 +12,10 @@ import (
 )
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
+	if snap.ProviderID == "antigravity" {
+		return m.buildAntigravityTileGaugeLines(snap, innerW)
+	}
+
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
 	if gaugeW < 6 {
@@ -59,7 +63,12 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 			label = label[:maxLabelW-1] + "…"
 		}
 
-		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
+		var gauge string
+		if strings.HasPrefix(key, "quota") && met.Remaining != nil {
+			gauge = RenderGauge(*met.Remaining, gaugeW, m.warnThreshold, m.critThreshold)
+		} else {
+			gauge = RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
+		}
 
 		// Check for stacked gauge configuration
 		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentMetricKeys) > 0 {
@@ -236,7 +245,7 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 	if !hasReset {
 		resetAt, hasReset = snap.Resets[key+"_reset"]
 	}
-	if !hasReset {
+	if !hasReset || resetAt.IsZero() {
 		return ""
 	}
 	resetIn := resetAt.Sub(now)
@@ -331,4 +340,87 @@ func tileCodexCreditProjectionAnnotation(snap core.UsageSnapshot, usedPct float6
 	}
 
 	return joinAnnotationParts(resetPart, projection)
+}
+
+func (m Model) buildAntigravityTileGaugeLines(snap core.UsageSnapshot, innerW int) []string {
+	var lines []string
+
+	barW := innerW - 14
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 50 {
+		barW = 50
+	}
+
+	now := m.viewNow()
+
+	renderBlock := func(groupTitle string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(groupTitle))
+		lines = append(lines, "  "+dimStyle.Render(modelsDesc))
+		lines = append(lines, "")
+
+		renderItem := func(label string, candidateKeys []string, defaultRemaining float64) {
+			var met core.Metric
+			found := false
+			matchedKey := ""
+			for _, k := range candidateKeys {
+				if m, ok := snap.Metrics[k]; ok && m.Remaining != nil {
+					met = m
+					found = true
+					matchedKey = k
+					break
+				}
+			}
+
+			remaining := defaultRemaining
+			if found && met.Remaining != nil {
+				remaining = *met.Remaining
+			}
+
+			resetStr := ""
+			if matchedKey != "" {
+				resetAt, hasReset := snap.Resets[matchedKey]
+				if !hasReset {
+					resetAt, hasReset = snap.Resets[matchedKey+"_reset"]
+				}
+				if hasReset && !resetAt.IsZero() {
+					diff := resetAt.Sub(now)
+					if diff > 0 {
+						resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
+					}
+				}
+			}
+
+			gaugeBar := RenderGauge(remaining, barW, m.warnThreshold, m.critThreshold)
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
+			lines = append(lines, "    "+gaugeBar)
+			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.0f%% remaining%s", remaining, resetStr)))
+			lines = append(lines, "")
+		}
+
+		renderItem("Weekly Limit Remaining", weeklyKeys, 100)
+		renderItem("Five Hour Limit Remaining", fiveHourKeys, 100)
+	}
+
+	// 1. GEMINI MODELS
+	renderBlock(
+		"GEMINI MODELS",
+		"Models within this group: Gemini 2.5 Flash, Gemini 2.5 Pro, Gemini 3.7 Flash",
+		[]string{"quota_gemini_weekly", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
+		[]string{"quota_gemini_5h", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
+	)
+
+	// 2. CLAUDE AND GPT MODELS
+	renderBlock(
+		"CLAUDE AND GPT MODELS",
+		"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+		[]string{"quota_claude_weekly", "quota_opus_sonnet_weekly", "quota_claude", "quota_opus_sonnet"},
+		[]string{"quota_claude_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_opus_sonnet"},
+	)
+
+	return lines
 }

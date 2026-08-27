@@ -128,14 +128,16 @@ func (m *Model) buildTileBodyLines(
 	}
 
 	topUsageLines := m.buildTileGaugeLines(snap, widget, innerW)
-	if di.summary != "" {
-		topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(di.summary)))
-	}
-	if di.detail != "" {
-		topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
-	}
-	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
-		topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
+	if snap.ProviderID != "antigravity" {
+		if di.summary != "" {
+			topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(di.summary)))
+		}
+		if di.detail != "" {
+			topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
+		}
+		if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
+			topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
+		}
 	}
 	if len(topUsageLines) > 0 {
 		sectionsByID[core.DashboardSectionTopUsageProgress] = section{withSectionPadding(topUsageLines)}
