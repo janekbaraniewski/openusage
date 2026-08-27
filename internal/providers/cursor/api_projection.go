@@ -270,12 +270,15 @@ func (p *Provider) fetchFromAPI(ctx context.Context, baseURL, token string, snap
 
 	planName := snap.Raw["plan_name"]
 	if su.PooledLimit > 0 {
-		pooledLimitDollars := su.PooledLimit / 100.0
 		pooledUsedDollars := su.PooledUsed / 100.0
-		pooledRemainingDollars := su.PooledRemaining / 100.0
-		snap.Message = fmt.Sprintf("%s — $%.0f / $%.0f team spend ($%.0f remaining)", planName, pooledUsedDollars, pooledLimitDollars, pooledRemainingDollars)
+		pooledLimitDollars := su.PooledLimit / 100.0
+		pooledPct := (pooledUsedDollars / pooledLimitDollars) * 100
+		snap.Message = fmt.Sprintf("%s — %.1f%% used", planName, pooledPct)
+	} else if pu.TotalPercentUsed > 0 {
+		snap.Message = fmt.Sprintf("%s — %.1f%% used", planName, pu.TotalPercentUsed)
 	} else if limitDollars > 0 {
-		snap.Message = fmt.Sprintf("%s — $%.2f / $%.0f plan spend", planName, totalSpendDollars, limitDollars)
+		usedPct := (totalSpendDollars / limitDollars) * 100
+		snap.Message = fmt.Sprintf("%s — %.1f%% used", planName, usedPct)
 	} else if planName != "" {
 		snap.Message = fmt.Sprintf("%s — %s", planName, periodUsage.DisplayMessage)
 	}

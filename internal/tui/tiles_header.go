@@ -13,6 +13,9 @@ import (
 )
 
 func buildTileHeaderMetaLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
+	if snap.ProviderID == "antigravity" {
+		return nil
+	}
 	var pills []string
 	pills = append(pills, buildTileCyclePills(snap)...)
 	pills = append(pills, buildTileResetPills(snap, widget, animFrame)...)
@@ -406,6 +409,9 @@ func buildTileResetPills(snap core.UsageSnapshot, widget core.DashboardWidget, a
 }
 
 func buildTileResetLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, animFrame int) []string {
+	if snap.ProviderID == "antigravity" {
+		return nil
+	}
 	return wrapTilePills(buildTileResetPills(snap, widget, animFrame), innerW)
 }
 

@@ -54,10 +54,9 @@ func cursorSnapshotDataSignature(snap *core.UsageSnapshot) cursorSnapshotSignatu
 func (p *Provider) buildLocalOnlyMessage(snap *core.UsageSnapshot) {
 	var parts []string
 
-	if metric, ok := snap.Metrics["composer_cost"]; ok && metric.Used != nil && *metric.Used > 0 {
-		parts = append(parts, fmt.Sprintf("$%.2f session cost", *metric.Used))
-	}
-	if metric, ok := snap.Metrics["total_ai_requests"]; ok && metric.Used != nil && *metric.Used > 0 {
+	if metric, ok := snap.Metrics["plan_percent_used"]; ok && metric.Used != nil {
+		parts = append(parts, fmt.Sprintf("%.1f%% used", *metric.Used))
+	} else if metric, ok := snap.Metrics["total_ai_requests"]; ok && metric.Used != nil && *metric.Used > 0 {
 		parts = append(parts, fmt.Sprintf("%.0f requests", *metric.Used))
 	}
 	if metric, ok := snap.Metrics["composer_sessions"]; ok && metric.Used != nil && *metric.Used > 0 {

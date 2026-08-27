@@ -165,5 +165,22 @@ func (p *Provider) ensureCreditGauges(accountID string, snap *core.UsageSnapshot
 			Unit:   "USD",
 			Window: "billing-cycle",
 		}
+		pct := (costUSD / limitUSD) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		rem := 100.0 - pct
+		if rem < 0 {
+			rem = 0
+		}
+		if _, hasPct := snap.Metrics["plan_percent_used"]; !hasPct {
+			snap.Metrics["plan_percent_used"] = core.Metric{
+				Used:      core.Float64Ptr(pct),
+				Remaining: core.Float64Ptr(rem),
+				Limit:     core.Float64Ptr(100),
+				Unit:      "%",
+				Window:    "billing-cycle",
+			}
+		}
 	}
 }
