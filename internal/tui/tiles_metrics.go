@@ -270,6 +270,16 @@ func compactMetricValue(key string, met core.Metric) string {
 	isUSD := isTileUSDMetric(key, met)
 	isPct := met.Unit == "%"
 
+	if strings.HasPrefix(key, "quota") && met.Remaining != nil {
+		if isPct {
+			return fmt.Sprintf("%.0f%%", *met.Remaining)
+		}
+		if isUSD {
+			return fmt.Sprintf("%s left", formatUSD(*met.Remaining))
+		}
+		return fmt.Sprintf("%s left", compactMetricAmount(*met.Remaining, met.Unit))
+	}
+
 	if met.Limit != nil {
 		if hasUsed {
 			if isPct {

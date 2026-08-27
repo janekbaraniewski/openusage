@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )

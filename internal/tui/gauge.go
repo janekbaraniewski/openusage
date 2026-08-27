@@ -155,6 +155,17 @@ func RenderUsageGaugeWithProjection(usedPercent float64, width int, warnThresh, 
 	return gauge + "\n" + dimStyle.Render(annotation)
 }
 
+// RenderGaugeWithProjection renders a remaining/capacity gauge with an optional dim
+// annotation line below showing time-until-reset (e.g. "resets in 3h 51m").
+func RenderGaugeWithProjection(remainingPercent float64, width int, warnThresh, critThresh float64, resetIn time.Duration) string {
+	gauge := RenderGauge(remainingPercent, width, warnThresh, critThresh)
+	if resetIn <= 0 {
+		return gauge
+	}
+	annotation := "resets in " + formatDurationShort(resetIn)
+	return gauge + "\n" + dimStyle.Render(annotation)
+}
+
 // joinAnnotationParts joins non-empty annotation fragments with " · ", dropping
 // any empty entries. Used by gauge renderers that compose a dim
 // "resets … · projected …" line from independently-computed parts.

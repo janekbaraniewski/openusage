@@ -83,41 +83,6 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		snap.Metrics["today_api_cost"].Used != nil,
 		snap.Metrics["spend_limit"].Limit != nil)
 
-	if snap.ProviderID == "cursor" {
-		info.tagEmoji = "⚡"
-		info.tagLabel = "Usage"
-		info.reason = "cursor_usage"
-		if pu, ok := snap.Metrics["plan_percent_used"]; ok && pu.Used != nil {
-			info.summary = fmt.Sprintf("%.0f%% plan used", *pu.Used)
-			info.gaugePercent = *pu.Used
-			if pu.Remaining != nil {
-				info.detail = fmt.Sprintf("%.0f%% remaining", *pu.Remaining)
-			}
-			return info
-		}
-		if pu, ok := snap.Metrics["plan_auto_percent_used"]; ok && pu.Used != nil {
-			info.summary = fmt.Sprintf("%.0f%% auto used", *pu.Used)
-			info.gaugePercent = *pu.Used
-			return info
-		}
-		if req, ok := snap.Metrics["total_ai_requests"]; ok && req.Used != nil {
-			info.summary = fmt.Sprintf("%.0f requests", *req.Used)
-			return info
-		}
-	}
-
-	if pu, ok := snap.Metrics["plan_percent_used"]; ok && pu.Used != nil {
-		info.tagEmoji = "⚡"
-		info.tagLabel = "Usage"
-		info.reason = "plan_percent_used"
-		info.summary = fmt.Sprintf("%.0f%% plan used", *pu.Used)
-		info.gaugePercent = *pu.Used
-		if pu.Remaining != nil {
-			info.detail = fmt.Sprintf("%.0f%% remaining", *pu.Remaining)
-		}
-		return info
-	}
-
 	// available_balance with Used + Limit (e.g. Moonshot via high-water-mark
 	// tracking): cursor-style "$0.13 / $15.00 spent" + "$14.87 remaining".
 	// Must come before the spend_limit / plan_spend branches so providers that
@@ -183,6 +148,18 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			info.gaugePercent = 100 - pct
 		}
 		core.Tracef("[display] %s: branch=spend_limit used=%.2f limit=%.2f gauge=%.1f", snap.ProviderID, *m.Used, *m.Limit, info.gaugePercent)
+		return info
+	}
+
+	if pu, ok := snap.Metrics["plan_percent_used"]; ok && pu.Used != nil {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "plan_percent_used"
+		info.summary = fmt.Sprintf("%.0f%% plan used", *pu.Used)
+		info.gaugePercent = *pu.Used
+		if pu.Remaining != nil {
+			info.detail = fmt.Sprintf("%.0f%% remaining", *pu.Remaining)
+		}
 		return info
 	}
 

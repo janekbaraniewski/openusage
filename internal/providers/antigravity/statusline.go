@@ -134,16 +134,6 @@ func CaptureStatusLine(data []byte, path string) (string, error) {
 	if err := writeStatusFile(path, state); err != nil {
 		return "AGY", err
 	}
-
-	// Also auto-route to specific account status files when email matches:
-	emailLower := strings.ToLower(payload.Email)
-	dir := filepath.Dir(path)
-	if strings.Contains(emailLower, "mohammed") {
-		_ = writeStatusFile(filepath.Join(dir, "antigravity-mohammed-status.json"), state)
-	} else if strings.Contains(emailLower, "nurul") {
-		_ = writeStatusFile(filepath.Join(dir, "antigravity-nurulz-status.json"), state)
-	}
-
 	return renderStatusLine(payload), nil
 }
 
