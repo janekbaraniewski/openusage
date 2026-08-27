@@ -8,6 +8,25 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+func providerThemeColor(providerID string) lipgloss.Color {
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "antigravity":
+		return colorMauve
+	case "opencode":
+		return colorBlue
+	case "cursor":
+		return colorLavender
+	case "claude_code", "anthropic":
+		return colorPeach
+	case "copilot", "github-copilot":
+		return colorGreen
+	case "gemini_cli", "google":
+		return colorSapphire
+	default:
+		return colorAccent
+	}
+}
+
 func (m Model) renderList(w, h int) string {
 	ids := m.filteredIDs()
 	if len(ids) == 0 {
@@ -18,6 +37,20 @@ func (m Model) renderList(w, h int) string {
 			labelStyle.Render("  Fetching usage and spend data."),
 		}
 		return padToSize(strings.Join(empty, "\n"), w, h)
+	}
+
+	selectedProvider := ""
+	if m.cursor >= 0 && m.cursor < len(ids) {
+		if curSnap, ok := m.snapshots[ids[m.cursor]]; ok {
+			selectedProvider = curSnap.ProviderID
+		}
+	}
+
+	providerCounts := make(map[string]int)
+	for _, id := range ids {
+		if snap, ok := m.snapshots[id]; ok {
+			providerCounts[snap.ProviderID]++
+		}
 	}
 
 	itemHeight := 3
@@ -45,7 +78,29 @@ func (m Model) renderList(w, h int) string {
 		if !ok {
 			continue
 		}
-		lines = append(lines, m.renderListItem(snap, i == m.cursor, w))
+		pID := snap.ProviderID
+		pColor := providerThemeColor(pID)
+		isGroupActive := (pID == selectedProvider)
+		hasMultiple := providerCounts[pID] > 1
+
+		// Group header when entering a provider category
+		isFirstInGroup := (i == scrollStart) || (i > 0 && m.snapshots[ids[i-1]].ProviderID != pID)
+		if isFirstInGroup {
+			var headerStr string
+			groupName := strings.ToUpper(pID)
+			countStr := fmt.Sprintf("(%d)", providerCounts[pID])
+			if isGroupActive {
+				prefix := lipgloss.NewStyle().Bold(true).Foreground(pColor).Render("✦ ")
+				title := lipgloss.NewStyle().Bold(true).Foreground(pColor).Render(groupName)
+				count := lipgloss.NewStyle().Foreground(pColor).Render(" " + countStr)
+				headerStr = " " + prefix + title + count
+			} else {
+				headerStr = " " + dimStyle.Render("◈ "+groupName+" "+countStr)
+			}
+			lines = append(lines, headerStr)
+		}
+
+		lines = append(lines, m.renderListItemWithGroup(snap, i == m.cursor, isGroupActive && hasMultiple, pColor, w))
 	}
 
 	if scrollStart > 0 {
@@ -145,12 +200,19 @@ func (m Model) renderWidgetPanelByIndex(index, w, h, bodyOffset int, selected bo
 }
 
 func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) string {
+	pColor := providerThemeColor(snap.ProviderID)
+	return m.renderListItemWithGroup(snap, selected, false, pColor, w)
+}
+
+func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, inActiveGroup bool, pColor lipgloss.Color, w int) string {
 	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID), m.resolveHideCosts(snap))
 
 	iconStr := lipgloss.NewStyle().Foreground(StatusColor(snap.Status)).Render(StatusIcon(snap.Status))
 	nameStyle := lipgloss.NewStyle().Foreground(colorText)
 	if selected {
-		nameStyle = nameStyle.Bold(true).Foreground(colorLavender)
+		nameStyle = nameStyle.Bold(true).Foreground(pColor)
+	} else if inActiveGroup {
+		nameStyle = nameStyle.Foreground(colorText)
 	}
 
 	badge := StatusBadge(snap.Status)
@@ -194,15 +256,26 @@ func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) str
 		summary = summary[:summaryMaxW-1] + "…"
 	}
 
+	sepStyle := surface1Style
+	if inActiveGroup || selected {
+		sepStyle = lipgloss.NewStyle().Foreground(pColor)
+	}
+
 	result := line1 + "\n" +
 		"   " + textBoldStyle.Render(summary) + miniGauge + "\n" +
-		"  " + surface1Style.Render(strings.Repeat("─", w-4))
+		"  " + sepStyle.Render(strings.Repeat("─", w-4))
 
-	if !selected {
+	var indicator string
+	if selected {
+		indicator = lipgloss.NewStyle().Bold(true).Foreground(pColor).Render("┃")
+	} else if inActiveGroup {
+		indicator = lipgloss.NewStyle().Foreground(pColor).Render("│")
+	}
+
+	if indicator == "" {
 		return result
 	}
 
-	indicator := accentBoldStyle.Render("┃")
 	lines := strings.Split(result, "\n")
 	for i, line := range lines {
 		if len(line) > 0 {
