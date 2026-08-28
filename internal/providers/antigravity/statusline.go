@@ -72,6 +72,7 @@ type statusLineQuota struct {
 	RemainingFraction *float64 `json:"remaining_fraction"`
 	ResetTime         string   `json:"reset_time"`
 	ResetInSeconds    *int64   `json:"reset_in_seconds"`
+	Disabled          bool     `json:"disabled"`
 }
 
 // UnmarshalJSON accepts the documented object form and a numeric fraction so

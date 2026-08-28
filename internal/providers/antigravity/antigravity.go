@@ -286,6 +286,9 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 			continue
 		}
 		remaining := clamp(*quota.RemainingFraction, 0, 1)
+		if quota.Disabled {
+			remaining = 0
+		}
 		remainingPercent := remaining * 100
 		cleanName := sanitizeMetricName(name)
 
@@ -390,6 +393,9 @@ func getPoolRemainingFraction(payload statusLinePayload, poolKeywords ...string)
 			continue
 		}
 		fraction := clamp(*quota.RemainingFraction, 0, 1)
+		if quota.Disabled {
+			fraction = 0
+		}
 		if !found || fraction < worst {
 			worst = fraction
 			found = true
