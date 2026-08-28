@@ -155,10 +155,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "plan_percent_used"
-		info.summary = fmt.Sprintf("%.0f%% plan used", *pu.Used)
-		info.gaugePercent = *pu.Used
+		remaining := 100 - *pu.Used
 		if pu.Remaining != nil {
-			info.detail = fmt.Sprintf("%.0f%% remaining", *pu.Remaining)
+			remaining = *pu.Remaining
+		}
+		info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
+		info.gaugePercent = remaining
+		if pu.Remaining != nil {
+			info.detail = fmt.Sprintf("%.2f%% remaining", *pu.Remaining)
 		}
 		return info
 	}
@@ -171,7 +175,11 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			info.gaugePercent = 100 - pct
 		}
 		if pu, ok2 := snap.Metrics["plan_percent_used"]; ok2 && pu.Used != nil {
-			info.detail = fmt.Sprintf("%.0f%% plan used", *pu.Used)
+			rem := 100 - *pu.Used
+			if pu.Remaining != nil {
+				rem = *pu.Remaining
+			}
+			info.detail = fmt.Sprintf("%.2f%% remaining", rem)
 		}
 		return info
 	}
@@ -226,6 +234,46 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		return info
 	}
 
+	if snap.ProviderID == "antigravity" {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "antigravity_quota"
+
+		var parts []string
+		worstRem := 100.0
+		hasAny := false
+
+		// Gemini pool
+		if g5h, ok := snap.Metrics["quota_gemini_5h"]; ok && g5h.Remaining != nil {
+			parts = append(parts, fmt.Sprintf("5h %.2f%%", *g5h.Remaining))
+			if *g5h.Remaining < worstRem {
+				worstRem = *g5h.Remaining
+			}
+			hasAny = true
+		} else if gWk, ok := snap.Metrics["quota_gemini_weekly"]; ok && gWk.Remaining != nil {
+			parts = append(parts, fmt.Sprintf("wk %.2f%%", *gWk.Remaining))
+			if *gWk.Remaining < worstRem {
+				worstRem = *gWk.Remaining
+			}
+			hasAny = true
+		}
+
+		// 3P / Claude pool
+		if c5h, ok := snap.Metrics["quota_3p_5h"]; ok && c5h.Remaining != nil {
+			parts = append(parts, fmt.Sprintf("3p %.2f%%", *c5h.Remaining))
+			if *c5h.Remaining < worstRem {
+				worstRem = *c5h.Remaining
+			}
+			hasAny = true
+		}
+
+		if hasAny {
+			info.summary = strings.Join(parts, " · ") + " rem"
+			info.gaugePercent = worstRem
+			return info
+		}
+	}
+
 	quotaKey := ""
 	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
 		if _, ok := snap.Metrics[key]; ok {
@@ -237,12 +285,16 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		m := snap.Metrics[quotaKey]
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
-			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
-		}
+		remaining := 100.0
 		if m.Remaining != nil {
-			info.detail = fmt.Sprintf("%.0f%% usage left", *m.Remaining)
+			remaining = *m.Remaining
+		} else if m.Used != nil {
+			remaining = 100 - *m.Used
+		}
+		info.gaugePercent = remaining
+		info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
+		if m.Remaining != nil {
+			info.detail = fmt.Sprintf("%.2f%% remaining", *m.Remaining)
 		}
 		return info
 	}
@@ -252,7 +304,7 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagLabel = "Usage"
 		if pct := m.Percent(); pct >= 0 {
 			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
+			info.summary = fmt.Sprintf("%.2f%% remaining", pct)
 		}
 		info.detail = fmt.Sprintf("%s / %s tokens", shortCompact(*m.Used), shortCompact(*m.Limit))
 		return info
@@ -268,15 +320,15 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			}
 			if rate.UsesRemainingPercent {
 				label := metricLabel(widget, rate.LabelKey)
-				rateParts = append(rateParts, fmt.Sprintf("%s %.0f%%", label, 100-rate.RemainingPercent))
+				rateParts = append(rateParts, fmt.Sprintf("%s %.2f%%", label, rate.RemainingPercent))
 				continue
 			}
-			rateParts = append(rateParts, fmt.Sprintf("%s %.0f%%", strings.ToUpper(rate.LabelKey), 100-rate.UsedPercent))
+			rateParts = append(rateParts, fmt.Sprintf("%s %.2f%%", strings.ToUpper(rate.LabelKey), 100-rate.UsedPercent))
 		}
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		info.gaugePercent = 100 - worstRatePct
-		info.summary = fmt.Sprintf("%.0f%% used", 100-worstRatePct)
+		info.gaugePercent = worstRatePct
+		info.summary = fmt.Sprintf("%.2f%% remaining", worstRatePct)
 		if len(rateParts) > 0 {
 			sort.Strings(rateParts)
 			info.detail = strings.Join(rateParts, " · ")
@@ -453,8 +505,8 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	if hasUsage {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		info.gaugePercent = 100 - worstUsagePct
-		info.summary = fmt.Sprintf("%.0f%% used", 100-worstUsagePct)
+		info.gaugePercent = worstUsagePct
+		info.summary = fmt.Sprintf("%.2f%% remaining", worstUsagePct)
 		if snap.ProviderID == "gemini_cli" {
 			if m, ok := snap.Metrics["total_conversations"]; ok && m.Used != nil {
 				info.detail = fmt.Sprintf("%.0f conversations", *m.Used)
