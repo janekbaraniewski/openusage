@@ -93,7 +93,7 @@ func TestMouseWheelScrollsWidgetInSplitView(t *testing.T) {
 	}
 }
 
-func TestMouseLeftClickDoesNotChangeSelectionInGridView(t *testing.T) {
+func TestMouseLeftClickSelectsTileInGridView(t *testing.T) {
 	m := Model{
 		width:         220,
 		height:        40,
@@ -110,11 +110,8 @@ func TestMouseLeftClickDoesNotChangeSelectionInGridView(t *testing.T) {
 		Y:      5,
 	})
 	got := updated.(Model)
-	if got.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", got.cursor)
-	}
-	if got.tileOffset != 0 {
-		t.Fatalf("tileOffset = %d, want 0", got.tileOffset)
+	if got.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", got.cursor)
 	}
 }
 

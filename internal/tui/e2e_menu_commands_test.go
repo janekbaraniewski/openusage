@@ -124,6 +124,8 @@ func TestE2E_MenuAndKeyNavigationWithoutBugs(t *testing.T) {
 		{Type: tea.KeyRunes, Runes: []rune("w")}, // cycle time window
 		{Type: tea.KeyRunes, Runes: []rune("c")}, // toggle cost override
 		{Type: tea.KeyRunes, Runes: []rune("r")}, // refresh
+		{Type: tea.KeyRunes, Runes: []rune("v")}, // cycle view forward (Grid, Stacked, Tabs, Split, Compare)
+		{Type: tea.KeyRunes, Runes: []rune("V")}, // cycle view backward
 	}
 	curr := mDismissHelp.(Model)
 	for _, k := range allNavKeys {

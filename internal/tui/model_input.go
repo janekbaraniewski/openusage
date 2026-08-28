@@ -449,7 +449,6 @@ func (m Model) handleMouseLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Stacked tiles list mode:
 	ids := m.filteredIDs()
 	if len(ids) == 0 {
 		return m, nil
@@ -460,6 +459,82 @@ func (m Model) handleMouseLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	switch m.activeDashboardView() {
+	case dashboardViewSplit:
+		leftW := m.width / 3
+		if leftW < minLeftWidth {
+			leftW = minLeftWidth
+		}
+		if leftW > maxLeftWidth {
+			leftW = maxLeftWidth
+		}
+		if leftW > m.width-34 {
+			leftW = m.width - 34
+		}
+		if msg.X <= leftW {
+			// Clicked in the left navigator list
+			if clickContentY >= 0 && clickContentY < len(ids) {
+				m.cursor = clickContentY
+				m.detailOffset = 0
+				m.detailTab = 0
+				m.tileOffset = 0
+				m.invalidateRenderCaches()
+			}
+		} else {
+			// Clicked in the right focus pane -> enter detail mode
+			m = m.enterDetailMode()
+		}
+		return m, nil
+
+	case dashboardViewTabs:
+		if clickContentY == 0 {
+			// Clicked on tab header strip
+			tabW := 18
+			clickedTab := msg.X / tabW
+			if clickedTab >= 0 && clickedTab < len(ids) {
+				m.cursor = clickedTab
+				m.detailOffset = 0
+				m.detailTab = 0
+				m.tileOffset = 0
+				m.invalidateRenderCaches()
+			}
+		} else {
+			m = m.enterDetailMode()
+		}
+		return m, nil
+
+	case dashboardViewGrid:
+		cols := m.tileCols()
+		if cols > 1 {
+			colW := m.width / cols
+			col := msg.X / colW
+			if col >= cols {
+				col = cols - 1
+			}
+			contentH := m.height - headerLines - footerLines
+			_, _, tileMaxH := m.tileGrid(m.width, contentH, len(ids))
+			rowH := tileMaxH + tileBorderV + tileGapV
+			if rowH <= 0 {
+				rowH = 10
+			}
+			row := clickContentY / rowH
+			targetIdx := row*cols + col
+			if targetIdx >= 0 && targetIdx < len(ids) {
+				if m.cursor == targetIdx {
+					m = m.enterDetailMode()
+				} else {
+					m.cursor = targetIdx
+					m.detailOffset = 0
+					m.detailTab = 0
+					m.tileOffset = 0
+					m.invalidateRenderCaches()
+				}
+			}
+			return m, nil
+		}
+	}
+
+	// Default: Stacked view layout
 	tileW := m.width - 2 - tileBorderH
 	if tileW < tileMinWidth {
 		tileW = tileMinWidth
@@ -574,6 +649,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "w":
 			return m.cycleTimeWindow()
+		case "v":
+			if m.screen == screenDashboard {
+				m.setDashboardView(m.nextDashboardView(1))
+				return m, m.persistDashboardViewCmd()
+			}
+		case "V":
+			if m.screen == screenDashboard {
+				m.setDashboardView(m.nextDashboardView(-1))
+				return m, m.persistDashboardViewCmd()
+			}
 		}
 	}
 

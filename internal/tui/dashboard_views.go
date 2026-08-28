@@ -115,12 +115,17 @@ func (m Model) shouldForceStackedDashboardView() bool {
 	if len(m.filteredIDs()) <= 1 {
 		return false
 	}
-	return m.width < minTwoColumnDashboardWidth()
+	if m.configuredDashboardView() == dashboardViewGrid {
+		return m.width < minTwoColumnDashboardWidth()
+	}
+	return false
 }
 
 func (m Model) activeDashboardView() dashboardViewMode {
-	// Locked to stacked (single-column scrollable) view.
-	return dashboardViewStacked
+	if m.shouldForceStackedDashboardView() {
+		return dashboardViewStacked
+	}
+	return m.configuredDashboardView()
 }
 
 func (m Model) dashboardViewStatusLabel() string {
