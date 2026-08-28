@@ -232,19 +232,19 @@ func (m Model) renderFooterStatusLine(w int) string {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter.text)
 		}
 		if m.activeDashboardView() == dashboardViewTabs && m.mode == modeList {
-			return " " + dimStyle.Render("tabs view · ←/→ switch tab · PgUp/PgDn scroll widget · Enter detail")
+			return " " + dimStyle.Render("tabs view · ←/→ switch tab · Enter detail · p menu · ? help")
 		}
 		if m.activeDashboardView() == dashboardViewSplit && m.mode == modeList {
-			return " " + dimStyle.Render("split view · ↑/↓ select provider · PgUp/PgDn scroll pane · Enter detail")
+			return " " + dimStyle.Render("split view · ↑/↓ select · Enter detail · p menu · ? help")
 		}
 		if m.activeDashboardView() == dashboardViewCompare && m.mode == modeList {
-			return " " + dimStyle.Render("compare view · ←/→ switch provider · PgUp/PgDn scroll active pane")
+			return " " + dimStyle.Render("compare view · ←/→ switch · p menu · ? help")
 		}
 		if m.mode == modeList && m.shouldUseWidgetScroll() && m.tileOffset > 0 {
-			return " " + dimStyle.Render("widget scroll active · PgUp/PgDn · Ctrl+U/Ctrl+D")
+			return " " + dimStyle.Render("widget scroll active · PgUp/PgDn · Ctrl+U/Ctrl+D · p menu")
 		}
 		if m.mode == modeList && m.shouldUsePanelScroll() && m.tileOffset > 0 {
-			return " " + dimStyle.Render("panel scroll active · PgUp/PgDn · Home/End")
+			return " " + dimStyle.Render("panel scroll active · PgUp/PgDn · Home/End · p menu")
 		}
 	}
 
@@ -259,7 +259,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		return " " + yellowStyle.Render(msg)
 	}
 
-	return " " + helpStyle.Render("? help")
+	return " " + dimStyle.Render("p menu · v view · r refresh · ? help")
 }
 
 func (m Model) hasAppUpdateNotice() bool {

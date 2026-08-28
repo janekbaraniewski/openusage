@@ -123,6 +123,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 	navKeys = append(navKeys, struct{ key, desc string }{"Tab / Shift+Tab", "Switch screen"})
 
 	actionKeys := []struct{ key, desc string }{
+		{"p", "Toggle provider visibility menu"},
 		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
 		{"v / Shift+V", "Cycle dashboard view"},
