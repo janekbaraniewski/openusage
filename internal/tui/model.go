@@ -418,7 +418,9 @@ type integrationInstallResultMsg struct {
 	Err           error
 }
 
-func (m Model) Init() tea.Cmd { return tickCmd() }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(tickCmd(), autoRefreshCmd())
+}
 
 // nextTickInterval determines the appropriate tick interval based on activity.
 // Returns 0 when the tick chain should stop (fully idle).

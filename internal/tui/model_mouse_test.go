@@ -118,7 +118,7 @@ func TestMouseLeftClickDoesNotChangeSelectionInGridView(t *testing.T) {
 	}
 }
 
-func TestMouseLeftClickDoesNotChangeSelectionInStackedView(t *testing.T) {
+func TestMouseLeftClickSelectsTileInStackedView(t *testing.T) {
 	m := Model{
 		width:         90,
 		height:        40,
@@ -128,6 +128,7 @@ func TestMouseLeftClickDoesNotChangeSelectionInStackedView(t *testing.T) {
 		snapshots:     testSnapshots("a", "b", "c", "d"),
 	}
 
+	// Click on second tile
 	updated, _ := m.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonLeft,
@@ -135,11 +136,20 @@ func TestMouseLeftClickDoesNotChangeSelectionInStackedView(t *testing.T) {
 		Y:      14,
 	})
 	got := updated.(Model)
-	if got.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", got.cursor)
+	if got.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", got.cursor)
 	}
-	if got.tileOffset != 0 {
-		t.Fatalf("tileOffset = %d, want 0", got.tileOffset)
+
+	// Click on already selected tile to enter detail mode
+	updated2, _ := got.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      20,
+		Y:      14,
+	})
+	got2 := updated2.(Model)
+	if got2.mode != modeDetail {
+		t.Fatalf("mode = %v, want modeDetail (%v)", got2.mode, modeDetail)
 	}
 }
 

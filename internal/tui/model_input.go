@@ -27,6 +27,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m.handleTickMsg(msg)
 
+	case autoRefreshMsg:
+		return m.handleAutoRefresh()
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -225,6 +228,13 @@ func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
 	return m, scheduleTickCmd(interval)
 }
 
+func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
+	if !m.refreshing {
+		m = m.requestRefresh()
+	}
+	return m, autoRefreshCmd()
+}
+
 func (m Model) handleDaemonInstallResultMsg(msg daemonInstallResultMsg) (tea.Model, tea.Cmd) {
 	m.daemon.installing = false
 	if msg.err != nil {
@@ -358,57 +368,137 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	scroll := 0
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		scroll = -m.mouseScrollStep()
+		return m.handleMouseScroll(-m.mouseScrollStep()), nil
 	case tea.MouseButtonWheelDown:
-		scroll = m.mouseScrollStep()
+		return m.handleMouseScroll(m.mouseScrollStep()), nil
+	case tea.MouseButtonLeft:
+		return m.handleMouseLeftClick(msg)
 	default:
+		return m, nil
+	}
+}
+
+func (m Model) handleMouseScroll(scroll int) Model {
+	if m.screen != screenDashboard {
+		if m.screen == screenAnalytics {
+			m.analyticsScrollY += scroll
+			if m.analyticsScrollY < 0 {
+				m.analyticsScrollY = 0
+			}
+		}
+		return m
+	}
+	if m.mode == modeDetail {
+		m.detailOffset += scroll
+		if m.detailOffset < 0 {
+			m.detailOffset = 0
+		}
+		return m
+	}
+	if m.mode == modeList {
+		m.tileOffset += scroll
+		if m.tileOffset < 0 {
+			m.tileOffset = 0
+		}
+	}
+	return m
+}
+
+func (m Model) handleMouseLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	headerLines := 2
+	footerLines := 2
+
+	// Check if click is on header (e.g. screen tabs)
+	if msg.Y < headerLines {
+		if m.experimentalAnalytics {
+			if msg.X >= 15 && msg.X <= 30 {
+				m.screen = screenAnalytics
+				m.mode = modeList
+				m.detailOffset = 0
+				m.tileOffset = 0
+				return m, nil
+			}
+			if msg.X < 15 {
+				m.screen = screenDashboard
+				m.mode = modeList
+				m.detailOffset = 0
+				m.tileOffset = 0
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+
+	// Check if click is on footer
+	if msg.Y >= m.height-footerLines {
 		return m, nil
 	}
 
 	if m.screen != screenDashboard {
 		return m, nil
 	}
+
 	if m.mode == modeDetail {
-		// Detail view uses plain content scrolling only.
-		m.detailOffset += scroll
-		if m.detailOffset < 0 {
-			m.detailOffset = 0
+		// Clicking at the top header area exits detail view
+		if msg.Y <= headerLines+1 {
+			m = m.exitDetailMode()
+			return m, nil
 		}
 		return m, nil
 	}
-	if m.mode == modeList && (m.shouldUseWidgetScroll() || m.shouldUsePanelScroll()) {
-		m.tileOffset += scroll
-		if m.tileOffset < 0 {
-			m.tileOffset = 0
-		}
+
+	// Stacked tiles list mode:
+	ids := m.filteredIDs()
+	if len(ids) == 0 {
 		return m, nil
 	}
-	if m.mode == modeList && m.activeDashboardView() == dashboardViewSplit {
-		step := 1
-		if scroll < 0 {
-			step = -1
-		}
-		next := m.cursor + step
-		ids := m.filteredIDs()
-		if next < 0 {
-			next = 0
-		}
-		if next >= len(ids) {
-			next = len(ids) - 1
-		}
-		if next < 0 {
-			next = 0
-		}
-		m.cursor = next
+
+	clickContentY := msg.Y - headerLines
+	if clickContentY < 0 {
+		return m, nil
 	}
+
+	tileW := m.width - 2 - tileBorderH
+	if tileW < tileMinWidth {
+		tileW = tileMinWidth
+	}
+
+	adjustedY := clickContentY + m.tileOffset
+	cumY := 0
+
+	for i, id := range ids {
+		snap, ok := m.snapshots[id]
+		if !ok {
+			continue
+		}
+		selected := (i == m.cursor)
+		modelMixExpanded := selected && m.expandedModelMixTiles[id]
+		rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, 0, 0)
+		tileH := strings.Count(rendered, "\n") + 1
+
+		if adjustedY >= cumY && adjustedY < cumY+tileH {
+			if m.cursor == i {
+				// Clicking an already-selected tile enters full detail view
+				m = m.enterDetailMode()
+			} else {
+				// Select clicked tile
+				m.cursor = i
+				m.detailOffset = 0
+				m.detailTab = 0
+				m.invalidateRenderCaches()
+			}
+			return m, nil
+		}
+		cumY += tileH + tileGapV
+	}
+
 	return m, nil
 }
 
 func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Action != tea.MouseActionPress || m.settings.tab != settingsTabWidgetSections {
+	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
 
@@ -422,9 +512,16 @@ func (m Model) handleSettingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.settings.previewOffset += scroll
-	if m.settings.previewOffset < 0 {
-		m.settings.previewOffset = 0
+	if m.settings.tab == settingsTabWidgetSections {
+		m.settings.previewOffset += scroll
+		if m.settings.previewOffset < 0 {
+			m.settings.previewOffset = 0
+		}
+	} else {
+		m.settings.bodyOffset += scroll
+		if m.settings.bodyOffset < 0 {
+			m.settings.bodyOffset = 0
+		}
 	}
 	return m, nil
 }
