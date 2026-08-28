@@ -19,10 +19,17 @@ $masterKey = [System.Security.Cryptography.ProtectedData]::Unprotect(
 )
 $b64 = [Convert]::ToBase64String($masterKey)
 
+# 1. Save to Windows UserProfile (.openusage_chrome_key)
+$userDest = "$env:USERPROFILE\.openusage_chrome_key"
+Set-Content -Path $userDest -Value $b64 -Encoding ascii -NoNewline
+
+# 2. Also try writing to WSL directly
 $dest = "\\wsl$\Ubuntu\home\nurul\.config\openusage\chrome_key"
 if (-not (Test-Path "\\wsl$\Ubuntu\home\nurul\.config\openusage")) {
     $dest = "\\wsl.localhost\Ubuntu\home\nurul\.config\openusage\chrome_key"
 }
+if (Test-Path (Split-Path $dest -Parent)) {
+    Set-Content -Path $dest -Value $b64 -Encoding ascii -NoNewline
+}
 
-Set-Content -Path $dest -Value $b64 -Encoding ascii -NoNewline
 Write-Host "✓ Successfully exported browser key to OpenUsage!" -ForegroundColor Green

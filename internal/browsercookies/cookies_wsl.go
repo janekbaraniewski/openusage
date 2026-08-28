@@ -16,20 +16,38 @@ import (
 
 func (r *kookyReader) readCookieWSL(ctx context.Context, domain, name, browser string) (Cookie, error) {
 	home, _ := os.UserHomeDir()
-	if home == "" {
+	var keyData []byte
+	var err error
+
+	if home != "" {
+		keyFile := filepath.Join(home, ".config", "openusage", "chrome_key")
+		keyData, err = os.ReadFile(keyFile)
+	}
+
+	usersDir := "/mnt/c/Users"
+	if len(keyData) == 0 {
+		if entries, err2 := os.ReadDir(usersDir); err2 == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					uKeyPath := filepath.Join(usersDir, entry.Name(), ".openusage_chrome_key")
+					if kd, kErr := os.ReadFile(uKeyPath); kErr == nil && len(kd) > 0 {
+						keyData = kd
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if len(keyData) == 0 {
 		return Cookie{}, ErrNoCookieFound
 	}
-	keyFile := filepath.Join(home, ".config", "openusage", "chrome_key")
-	keyData, err := os.ReadFile(keyFile)
-	if err != nil {
-		return Cookie{}, ErrNoCookieFound
-	}
+
 	masterKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(keyData)))
 	if err != nil || len(masterKey) != 32 {
 		return Cookie{}, ErrNoCookieFound
 	}
 
-	usersDir := "/mnt/c/Users"
 	if _, err := os.Stat(usersDir); err != nil {
 		return Cookie{}, ErrNoCookieFound
 	}
