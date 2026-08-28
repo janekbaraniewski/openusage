@@ -239,39 +239,18 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagLabel = "Usage"
 		info.reason = "antigravity_quota"
 
-		var parts []string
-		worstRem := 100.0
-		hasAny := false
-
-		// Gemini pool
+		rem := 100.0
 		if g5h, ok := snap.Metrics["quota_gemini_5h"]; ok && g5h.Remaining != nil {
-			parts = append(parts, fmt.Sprintf("5h %.2f%%", *g5h.Remaining))
-			if *g5h.Remaining < worstRem {
-				worstRem = *g5h.Remaining
-			}
-			hasAny = true
+			rem = *g5h.Remaining
 		} else if gWk, ok := snap.Metrics["quota_gemini_weekly"]; ok && gWk.Remaining != nil {
-			parts = append(parts, fmt.Sprintf("wk %.2f%%", *gWk.Remaining))
-			if *gWk.Remaining < worstRem {
-				worstRem = *gWk.Remaining
-			}
-			hasAny = true
+			rem = *gWk.Remaining
+		} else if c5h, ok := snap.Metrics["quota_3p_5h"]; ok && c5h.Remaining != nil {
+			rem = *c5h.Remaining
 		}
 
-		// 3P / Claude pool
-		if c5h, ok := snap.Metrics["quota_3p_5h"]; ok && c5h.Remaining != nil {
-			parts = append(parts, fmt.Sprintf("3p %.2f%%", *c5h.Remaining))
-			if *c5h.Remaining < worstRem {
-				worstRem = *c5h.Remaining
-			}
-			hasAny = true
-		}
-
-		if hasAny {
-			info.summary = strings.Join(parts, " · ") + " rem"
-			info.gaugePercent = worstRem
-			return info
-		}
+		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		info.gaugePercent = rem
+		return info
 	}
 
 	quotaKey := ""
@@ -340,15 +319,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "usage_five_hour"
-		info.gaugePercent = *fh.Used
-		parts := []string{fmt.Sprintf("5h %.0f%%", *fh.Used)}
-		if sd, ok2 := snap.Metrics["usage_seven_day"]; ok2 && sd.Used != nil {
-			parts = append(parts, fmt.Sprintf("7d %.0f%%", *sd.Used))
-			if *sd.Used > info.gaugePercent {
-				info.gaugePercent = *sd.Used
-			}
+		rem := 100 - *fh.Used
+		if fh.Remaining != nil {
+			rem = *fh.Remaining
 		}
-		info.summary = strings.Join(parts, " · ")
+		info.gaugePercent = rem
+		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
 
 		var detailParts []string
 		if dc, ok2 := snap.Metrics["today_api_cost"]; ok2 && dc.Used != nil && !hideCosts {
@@ -376,21 +352,12 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "rolling_usage"
-		info.gaugePercent = *ru.Used
-		parts := []string{fmt.Sprintf("5h %.0f%%", *ru.Used)}
-		if wu, ok2 := snap.Metrics["weekly_usage"]; ok2 && wu.Used != nil {
-			parts = append(parts, fmt.Sprintf("7d %.0f%%", *wu.Used))
-			if *wu.Used > info.gaugePercent {
-				info.gaugePercent = *wu.Used
-			}
+		rem := 100 - *ru.Used
+		if ru.Remaining != nil {
+			rem = *ru.Remaining
 		}
-		if mu, ok2 := snap.Metrics["monthly_usage_pct"]; ok2 && mu.Used != nil {
-			parts = append(parts, fmt.Sprintf("mo %.0f%%", *mu.Used))
-			if *mu.Used > info.gaugePercent {
-				info.gaugePercent = *mu.Used
-			}
-		}
-		info.summary = strings.Join(parts, " · ")
+		info.gaugePercent = rem
+		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
 		if bal, ok2 := snap.Metrics["console_balance"]; ok2 && bal.Remaining != nil && !hideCosts {
 			info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
 		}
