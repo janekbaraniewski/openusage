@@ -237,7 +237,7 @@ func RenderMiniGauge(remainingPercent float64, width int) string {
 	case remainingPercent <= 50:
 		color = colorWarn // medium remaining -> yellow
 	default:
-		color = colorOK   // high remaining -> green
+		color = colorOK // high remaining -> green
 	}
 	return renderGaugeBar(remainingPercent, width, color)
 }

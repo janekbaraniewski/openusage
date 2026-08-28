@@ -57,6 +57,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Hub.ListenAddr != "" {
 		t.Errorf("default hub.listen_addr should be empty (runtime default applied later), got %q", cfg.Hub.ListenAddr)
 	}
+	if cfg.Serve.ListenAddr != "" {
+		t.Errorf("default serve.listen_addr should be empty (runtime default applied later), got %q", cfg.Serve.ListenAddr)
+	}
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {

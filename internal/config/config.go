@@ -152,6 +152,17 @@ type HubConfig struct {
 	AuthToken string `json:"-"`
 }
 
+// ServeConfig configures the local web dashboard started by `openusage serve`.
+type ServeConfig struct {
+	// ListenAddr is the TCP address to bind. Empty means 127.0.0.1:8080 at
+	// runtime. Overridden by --listen.
+	ListenAddr string `json:"listen_addr"`
+	// AuthToken is the optional Bearer token required on /api/v1/* endpoints.
+	// It must NOT be persisted to settings.json — supply it via
+	// OPENUSAGE_SERVE_TOKEN at runtime. Empty disables auth.
+	AuthToken string `json:"-"`
+}
+
 type IntegrationState struct {
 	Installed   bool   `json:"installed"`
 	Version     string `json:"version,omitempty"`
@@ -214,6 +225,7 @@ type Config struct {
 	Integrations         map[string]IntegrationState   `json:"integrations,omitempty"`
 	Export               ExportConfig                  `json:"export,omitempty"`
 	Hub                  HubConfig                     `json:"hub,omitempty"`
+	Serve                ServeConfig                   `json:"serve,omitempty"`
 	Tmux                 TmuxConfig                    `json:"tmux,omitempty"`
 }
 

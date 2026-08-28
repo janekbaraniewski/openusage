@@ -81,6 +81,7 @@ Run `brew trust janekbaraniewski/tap` once so OpenUsage stays linked across `bre
 | Track which AI tool is burning budget | [Cost attribution guide](./guides/cost-attribution.md) |
 | Track multiple keys for the same provider | [Multi-account guide](./guides/multi-account.md) |
 | Run on a headless server | [Headless servers guide](./guides/headless-servers.md) |
+| Open a browser dashboard | [Web dashboard guide](./guides/web-dashboard.md) |
 | Customize the look | [Themes](./customization/themes.md) |
 | Add a provider that doesn't exist yet | [Contributing — add a provider](./contributing/add-provider.md) |
 

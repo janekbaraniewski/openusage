@@ -101,5 +101,6 @@ See the [Daemon overview](../daemon/overview.md) for what each integration captu
 ## What's next
 
 - [First-run walkthrough](./first-run.md) — annotated tour of the UI
+- [Local web dashboard](../guides/web-dashboard.md) — same data in a browser (`openusage serve`)
 - [Concepts](../concepts/architecture.md) — mental model
 - [Customization](../customization/themes.md) — themes, keybindings, widget layout

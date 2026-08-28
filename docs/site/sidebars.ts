@@ -142,6 +142,7 @@ const sidebars: SidebarsConfig = {
         'guides/tmux-integration',
         'guides/claude-code-statusline',
         'guides/headless-servers',
+        'guides/web-dashboard',
         'guides/multi-machine',
       ],
     },

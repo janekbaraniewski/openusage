@@ -27,6 +27,7 @@ The TUI reads the file on startup and writes it back when you change settings in
 | [`integrations`](#integrations) | object | Install state for tool hooks. |
 | [`export`](#export) | object | Daemon push to a remote hub (multi-machine aggregation). |
 | [`hub`](#hub) | object | Hub server bind address and stale-timeout. |
+| [`serve`](#serve) | object | Local web dashboard bind address. |
 | [`accounts`](#accounts) | array | Manually configured provider accounts. |
 | [`auto_detected_accounts`](#auto_detected_accounts) | array | Read-only mirror of accounts found by the detector. |
 
@@ -310,6 +311,26 @@ Configures the **hub server** started by `openusage hub`. See [`openusage hub` i
 The hub honors a Bearer token only when supplied via the `OPENUSAGE_HUB_TOKEN` environment variable. The field has no JSON representation and cannot be persisted to disk. When the env var is unset, all endpoints except `/healthz` are open — and the hub refuses to bind to a non-loopback interface unless `--allow-public` is passed.
 :::
 
+## `serve`
+
+Configures the **local web dashboard** started by `openusage serve`. See the [web dashboard guide](../guides/web-dashboard.md) and [`openusage serve` in the CLI reference](./cli.md#openusage-serve).
+
+```json
+{
+  "serve": {
+    "listen_addr": "127.0.0.1:8080"
+  }
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `listen_addr` | string | `127.0.0.1:8080` | TCP address to bind. Overridden by `--listen`. Empty in a fresh config means the runtime default. |
+
+:::warning Auth token is not stored in settings.json
+`openusage serve` honors a Bearer token only when supplied via the `OPENUSAGE_SERVE_TOKEN` environment variable. The field has no JSON representation and cannot be persisted to disk. Without a token the server refuses to bind a non-loopback interface unless `--allow-public` is passed.
+:::
+
 ## `accounts`
 
 Manually configured provider accounts. Account `id` must be unique across `accounts` and `auto_detected_accounts`.
@@ -433,6 +454,9 @@ Read-only mirror of accounts the detector found at startup. Format is identical 
     "listen_addr": ":9190",
     "stale_timeout_seconds": 300
   },
+  "serve": {
+    "listen_addr": "127.0.0.1:8080"
+  },
   "accounts": [
     {
       "id": "openai-personal",
@@ -520,3 +544,4 @@ Overrides are loaded once at startup; restart `openusage` or the daemon after ed
 - [Themes](../customization/themes.md) — values for the `theme` field
 - [Widgets](../customization/widgets.md) — values for `dashboard.widget_sections`
 - [Multi-machine aggregation](../guides/multi-machine.md) — `export` + `hub` setup walkthrough
+- [Local web dashboard](../guides/web-dashboard.md) — `serve.listen_addr`

@@ -3,7 +3,7 @@ title: Architecture
 description: How OpenUsage discovers tools, polls providers via the daemon, and renders snapshots in the TUI.
 ---
 
-OpenUsage is a single Go binary with one runtime: a background daemon that collects data, persists it to SQLite, and serves a unified read model to a thin TUI client. The TUI never talks to provider APIs directly — it always reads from the daemon.
+OpenUsage is a single Go binary with two local UIs and one runtime: a background daemon that collects data, persists it to SQLite, and serves a unified read model. The TUI and `openusage serve` both read that read model — they never talk to provider APIs directly when the daemon is running.
 
 ## Mental model
 
@@ -13,7 +13,7 @@ At the highest level there are five moving parts:
 2. **Providers** — one per AI service, each knows how to fetch a snapshot of usage for an account.
 3. **Daemon** — long-running service that drives the polling loop, accepts hook events from agent integrations, and persists everything to SQLite.
 4. **Snapshots** — a normalized data structure (`UsageSnapshot`) that captures spend, tokens, models, rate limits, and status for one account at one point in time. The daemon's `ReadModel` rebuilds these from stored events on each TUI request.
-5. **TUI** — a Bubble Tea app that connects to the daemon over a Unix domain socket and renders snapshots into tiles, gauges, and detail views.
+5. **TUI / web** — a Bubble Tea app (or `openusage serve` in the browser) that reads snapshots from the daemon and renders them.
 
 ## Dataflow
 
@@ -21,14 +21,14 @@ At the highest level there are five moving parts:
 ┌──────────────────────────┐         ┌─────────────────────────┐
 │ openusage telemetry      │         │ openusage (TUI)         │
 │   daemon (background)    │         │                         │
-│                          │         │ ViewRuntime client      │
+│                          │         │ ViewRuntime / export    │
 │  Pipeline                │   UDS   │      ▲                  │
 │   ├─ Collectors ─────────┤◄────────┤      │ /v1/read-model   │
 │   │   poll providers     │  HTTP   │      │                  │
 │   ├─ Hooks (POST)        │         │      ▼                  │
-│   │   from agents        │         │  SnapshotsMsg → render  │
-│   └─ Spool (disk queue)  │         └─────────────────────────┘
-│         │                │
+│   │   from agents        │         │  TUI tiles  or          │
+│   └─ Spool (disk queue)  │         │  openusage serve (HTTP) │
+│         │                │         └─────────────────────────┘
 │         ▼                │
 │   telemetry.Store        │
 │   (SQLite, WAL)          │
@@ -83,13 +83,14 @@ type UsageProvider interface {
 | Daemon | Run pipeline, expose UDS endpoints | `internal/daemon/` |
 | Telemetry | Store/query events, build read models | `internal/telemetry/` |
 | TUI | Render snapshots, handle keys | `internal/tui/` |
+| Web dashboard | Browser UI over local HTTP | `internal/webserve/` |
 
 ## Key invariants
 
-- The TUI never talks to an AI provider directly — only to the daemon over its Unix socket.
+- The TUI never talks to an AI provider directly — only to the daemon over its Unix socket. `openusage serve --source auto` uses the same daemon path, with a direct-poll fallback when the daemon is down.
 - API keys are referenced by env-var name in config (`api_key_env`), never stored.
 - `AccountConfig.Token` has `json:"-"` so runtime tokens never persist.
-- The daemon and the TUI communicate over a Unix domain socket only — no TCP, no remote attach.
+- The daemon listens on a Unix domain socket only. `openusage serve` is an optional loopback HTTP server for the browser dashboard; it is not a remote attach to the daemon.
 
 ## Where to read next
 

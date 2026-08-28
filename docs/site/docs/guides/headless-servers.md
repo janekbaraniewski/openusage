@@ -67,6 +67,20 @@ tmux attach -t usage
 
 The TUI keeps rendering whether anyone is attached or not.
 
+## Pattern 4: browser dashboard over SSH
+
+If you would rather use a browser than a terminal UI, run `openusage serve` on the server (loopback only) and forward the port:
+
+```bash
+# on the server
+openusage serve --no-open --listen 127.0.0.1:8080
+
+# on your laptop
+ssh -L 8080:127.0.0.1:8080 build-host
+```
+
+Open `http://127.0.0.1:8080` locally. See the [web dashboard guide](./web-dashboard.md).
+
 ## Disabling Analytics on small servers
 
 The Analytics screen is opt-in (`cfg.Experimental.Analytics`). On a server you may want to leave it off to keep the rendering loop tight:

@@ -1,6 +1,6 @@
 ---
 title: Ways to use OpenUsage
-description: The surfaces OpenUsage exposes — live terminal dashboard, headless CLI reports, the Claude Code statusline, a tmux status segment, an always-on background daemon, multi-machine aggregation, and machine-readable export.
+description: The surfaces OpenUsage exposes — live terminal dashboard, local web dashboard, headless CLI reports, the Claude Code statusline, a tmux status segment, an always-on background daemon, multi-machine aggregation, and machine-readable export.
 sidebar_position: 2
 sidebar_label: Ways to use it
 ---
@@ -12,6 +12,7 @@ providers and (optionally) the same local history.
 | Surface | Command | Use it when |
 | --- | --- | --- |
 | [Live dashboard](#live-terminal-dashboard) | `openusage` | You want the full interactive view |
+| [Web dashboard](#local-web-dashboard) | `openusage serve` | You want the same data in a browser |
 | [CLI reports](#headless-cli-reports) | `openusage daily` (`--json`) | Scripting, CI, a quick check |
 | [Claude Code statusline](#claude-code-statusline) | `openusage statusline --install` | You live in Claude Code |
 | [tmux status bar](#tmux-status-bar) | `openusage tmux install` | You live in tmux |
@@ -29,6 +30,17 @@ openusage
 ```
 
 See [first run](./first-run.md).
+
+## Local web dashboard
+
+The same snapshots in a browser: KPI cards, spend charts, provider tiles, and a detail drawer. Defaults to loopback only.
+
+```bash
+openusage serve
+openusage serve --demo    # preview with synthetic data
+```
+
+See the [web dashboard guide](../guides/web-dashboard.md).
 
 ## Headless CLI reports
 

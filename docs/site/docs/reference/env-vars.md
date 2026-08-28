@@ -16,6 +16,7 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 | `OPENUSAGE_TELEMETRY_SOCKET` | Override the daemon Unix socket path. Equivalent to `--socket-path`, but inherited by every process (daemon, TUI, hooks). |
 | `OPENUSAGE_GITHUB_TOKEN` | Token used for the in-app update check against GitHub. Optional; used to avoid anonymous rate limits. |
 | `OPENUSAGE_HUB_TOKEN` | Bearer token shared by `openusage hub`, `openusage hub-view`, and the daemon exporter for multi-machine aggregation. Never persisted to `settings.json`. See [Multi-machine aggregation](../guides/multi-machine.md). |
+| `OPENUSAGE_SERVE_TOKEN` | Bearer token required on `openusage serve` JSON API endpoints (`/api/v1/snapshots`, `/api/v1/meta`) when set. Never persisted to `settings.json`. See [Local web dashboard](../guides/web-dashboard.md). |
 | `OPENUSAGE_THEME_DIR` | Colon-separated list (semicolon on Windows) of extra directories scanned for theme JSON files. See [External themes](../customization/external-themes.md). |
 | `OPENUSAGE_MOONSHOT_STATE_PATH` | Override the path Moonshot's state file is read from. |
 | `OPENUSAGE_CUSTOM_PRICING` | Override the path to `custom-pricing.json` (default: `$XDG_CONFIG_HOME/openusage/custom-pricing.json` or `~/.config/openusage/custom-pricing.json`). See [Custom pricing overrides](./configuration.md#custom-pricing-overrides). |

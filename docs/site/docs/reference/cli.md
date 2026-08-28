@@ -25,6 +25,7 @@ openusage export [flags]                         # export current snapshots (JSO
 openusage pricing <model> [flags]                # resolve model pricing
 openusage hub [flags]                           # aggregate snapshots from multiple machines
 openusage hub-view <url> [flags]                # read-only TUI over a remote hub
+openusage serve [flags]                         # local web dashboard in the browser
 ```
 
 ## `openusage`
@@ -443,6 +444,28 @@ openusage integrations upgrade --all
 
 Reinstalls integrations whose embedded version is newer than the installed version.
 
+## `openusage export`
+
+Collects the current usage snapshots and writes them as a versioned JSON envelope (or a flattened CSV). Prefers the telemetry daemon and falls back to a one-shot direct provider poll — the same collection path `openusage serve` uses.
+
+```
+openusage export --output PATH [--format json|csv] [--source auto|direct|daemon]
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--output`, `-o` | (required) | File path. Use `-` for stdout. |
+| `--format` | `json` | `json` or `csv`. |
+| `--source` | `auto` | `auto`, `direct`, or `daemon`. |
+
+API keys and snapshot `Raw` maps are stripped. The envelope includes `schema_version`, `generated_at`, `openusage_version`, `source`, and `snapshots`.
+
+```bash
+openusage export --output ~/usage.json
+openusage export --output - --format json
+openusage export --output /tmp/usage.csv --format csv --source direct
+```
+
 ## `openusage hub`
 
 Runs an HTTP server that aggregates `UsageSnapshot` batches pushed from one or more worker machines, then renders the merged view in the same TUI as the local dashboard. See [Multi-machine aggregation](../guides/multi-machine.md) for the end-to-end setup.
@@ -524,6 +547,49 @@ OPENUSAGE_HUB_TOKEN=s3cret openusage hub-view http://hub:9190
 
 The TUI shows `hub <url> · N machine snapshots` in its status line, and switches to an error state if the hub becomes unreachable.
 
+## `openusage serve`
+
+Starts a local HTTP server and a browser dashboard for the current usage snapshots. Same collection path as [`openusage export`](#openusage-export): daemon when available, otherwise a direct provider poll. See the [local web dashboard guide](../guides/web-dashboard.md).
+
+```
+openusage serve [--listen ADDR] [--source auto|direct|daemon] [--demo] [--open|--no-open] [--allow-public]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--listen` | `127.0.0.1:8080` (or `serve.listen_addr`) | TCP address to bind. |
+| `--source` | `auto` | Snapshot source: `auto`, `direct`, or `daemon`. |
+| `--demo` | off | Serve synthetic snapshots (no daemon or API keys). |
+| `--open` | on when stdout is a TTY | Open the default browser. |
+| `--no-open` | off | Do not open a browser. |
+| `--allow-public` | off | Allow a non-loopback bind without `OPENUSAGE_SERVE_TOKEN`. |
+
+### Endpoints
+
+| Endpoint | Method | Auth required |
+|---|---|---|
+| `/` | GET | never (static dashboard) |
+| `/api/v1/snapshots` | GET | Bearer (if a token is configured) |
+| `/api/v1/meta` | GET | Bearer (if a token is configured) |
+| `/healthz` | GET | never (liveness probe) |
+
+### Auth posture
+
+- Export `OPENUSAGE_SERVE_TOKEN` to require `Authorization: Bearer <token>` on `/api/v1/snapshots` and `/api/v1/meta`. `/healthz` stays unauthenticated.
+- The token is **never persisted** to `settings.json`.
+- Without a token the server refuses to bind a non-loopback interface unless you pass `--allow-public`. Loopback (`127.0.0.1`, `localhost`, `[::1]`) is always allowed.
+
+### Examples
+
+```bash
+openusage serve                                 # http://127.0.0.1:8080
+openusage serve --demo                          # synthetic data, no daemon required
+openusage serve --listen 127.0.0.1:9090 --no-open
+OPENUSAGE_SERVE_TOKEN=s3cret openusage serve --listen :8080
+```
+
 ## Exit codes
 
 | Code | Meaning |
@@ -540,6 +606,7 @@ The CLI honors the following — see [environment variables](./env-vars.md) for 
 - `OPENUSAGE_BIN` — override the binary path used by hook scripts
 - `OPENUSAGE_TELEMETRY_SOCKET` — override socket path
 - `OPENUSAGE_HUB_TOKEN` — Bearer token shared by `hub`, `hub-view`, and the daemon exporter
+- `OPENUSAGE_SERVE_TOKEN` — Bearer token for `openusage serve` JSON API
 - `OPENUSAGE_THEME_DIR` — extra theme search paths
 - `XDG_CONFIG_HOME`, `XDG_STATE_HOME` — base directories
 - `CLAUDE_SETTINGS_FILE`, `CODEX_CONFIG_DIR` — tool-specific overrides
