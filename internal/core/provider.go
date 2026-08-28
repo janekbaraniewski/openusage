@@ -180,6 +180,39 @@ func (c AccountConfig) ResolveAPIKey() string {
 			}
 		}
 	}
+	// Fallback for Command Code:
+	if c.Provider == "command_code" || strings.HasPrefix(c.ID, "command_code") || strings.HasPrefix(c.ID, "cmdc") {
+		if envVal := os.Getenv("COMMAND_CODE_API_KEY"); strings.TrimSpace(envVal) != "" {
+			return strings.TrimSpace(envVal)
+		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			authPath := filepath.Join(home, ".commandcode", "auth.json")
+			if raw, err := os.ReadFile(authPath); err == nil {
+				var payload map[string]any
+				if json.Unmarshal(raw, &payload) == nil {
+					if k, ok := payload["apiKey"].(string); ok && strings.TrimSpace(k) != "" {
+						return strings.TrimSpace(k)
+					} else if k, ok := payload["key"].(string); ok && strings.TrimSpace(k) != "" {
+						return strings.TrimSpace(k)
+					}
+				}
+			}
+			secPath := filepath.Join(home, ".secrets", "commandcode.env")
+			if raw, err := os.ReadFile(secPath); err == nil {
+				for _, line := range strings.Split(string(raw), "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "COMMAND_CODE_API_KEY=") {
+						k := strings.TrimPrefix(line, "COMMAND_CODE_API_KEY=")
+						k = strings.Trim(k, `"' `)
+						if k != "" {
+							return k
+						}
+					}
+				}
+			}
+		}
+	}
 	return ""
 }
 

@@ -20,6 +20,8 @@ func providerThemeColor(providerID string) lipgloss.Color {
 		return colorPeach
 	case "copilot", "github-copilot":
 		return colorGreen
+	case "command_code", "cmdc":
+		return colorTeal
 	case "gemini_cli", "google":
 		return colorSapphire
 	default:

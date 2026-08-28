@@ -394,6 +394,46 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		return info
 	}
 
+	if snap.ProviderID == "command_code" {
+		if wu, ok := snap.Metrics["weekly_usage"]; ok && (wu.Used != nil || wu.Remaining != nil) {
+			info.tagEmoji = "⚡"
+			info.tagLabel = "Usage"
+			info.reason = "command_code_usage"
+
+			weeklyExhausted := (wu.Used != nil && *wu.Used >= 100) || (wu.Remaining != nil && *wu.Remaining <= 0)
+			fiveHourExhausted := false
+			if fh, ok2 := snap.Metrics["five_hour_usage"]; ok2 {
+				if (fh.Used != nil && *fh.Used >= 100) || (fh.Remaining != nil && *fh.Remaining <= 0) {
+					fiveHourExhausted = true
+				}
+			}
+
+			rem := 100.0
+			if weeklyExhausted || fiveHourExhausted {
+				rem = 0.0
+			} else {
+				if wu.Remaining != nil {
+					rem = *wu.Remaining
+				} else if wu.Used != nil {
+					rem = 100 - *wu.Used
+				}
+			}
+			if rem < 0 {
+				rem = 0
+			}
+			if rem > 100 {
+				rem = 100
+			}
+			info.gaugePercent = rem
+			info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+			if bal, ok2 := snap.Metrics["balance"]; ok2 && bal.Remaining != nil && !hideCosts {
+				info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
+			}
+			core.Tracef("[display] %s: branch=command_code_usage rem=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, rem, info.gaugePercent)
+			return info
+		}
+	}
+
 	if _, hasBillingBlock := snap.Resets["billing_block"]; hasBillingBlock {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"

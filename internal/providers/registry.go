@@ -12,6 +12,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/codebuff"
 	"github.com/janekbaraniewski/openusage/internal/providers/codex"
+	"github.com/janekbaraniewski/openusage/internal/providers/command_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/copilot"
 	"github.com/janekbaraniewski/openusage/internal/providers/crush"
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
@@ -81,6 +82,7 @@ func AllProviders() []core.UsageProvider {
 		openclaw.New(),
 		pi.New(),
 		qwen_cli.New(),
+		command_code.New(),
 	}
 }
 

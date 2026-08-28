@@ -195,6 +195,11 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 			return ocLines
 		}
 	}
+	if snap.ProviderID == "command_code" {
+		if ccLines := buildCommandCodeDetailUsageSection(snap, innerW, warnThresh, critThresh, now); len(ccLines) > 0 {
+			return ccLines
+		}
+	}
 
 	var lines []string
 
@@ -364,6 +369,89 @@ func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnTh
 	renderItem("Five Hour Limit Remaining", "rolling_usage")
 	renderItem("Weekly Limit Remaining", "weekly_usage")
 	renderItem("Monthly Limit Remaining", "monthly_usage_pct")
+
+	return lines
+}
+
+func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+	var lines []string
+
+	barW := innerW - 14
+	if barW < 20 {
+		barW = 20
+	}
+	if barW > 50 {
+		barW = 50
+	}
+
+	nowTime := now
+
+	planName := "Command Code"
+	if planID := snap.Attributes["plan_id"]; planID != "" {
+		planName = fmt.Sprintf("Command Code (%s)", strings.ReplaceAll(planID, "-", " "))
+	}
+
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(strings.ToUpper(planName)))
+
+	weeklyCap := snap.Attributes["weekly_cap"]
+	descParts := []string{"Unlimited Turns"}
+	if weeklyCap != "" {
+		descParts = append(descParts, fmt.Sprintf("Sliding Cap: %s/wk", weeklyCap))
+	}
+	lines = append(lines, "  "+dimStyle.Render(strings.Join(descParts, " · ")))
+	lines = append(lines, "")
+
+	renderItem := func(label string, metricKey string, capAttr string, usedAttr string) {
+		met, ok := snap.Metrics[metricKey]
+		if !ok {
+			return
+		}
+
+		remaining := 0.0
+		if met.Remaining != nil {
+			remaining = *met.Remaining
+		} else if met.Used != nil {
+			remaining = 100 - *met.Used
+		}
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+
+		resetStr := ""
+		if resetAt, hasReset := snap.Resets[metricKey]; hasReset && !resetAt.IsZero() {
+			diff := resetAt.Sub(nowTime)
+			if diff > 0 {
+				resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
+			}
+		}
+
+		capInfo := ""
+		if capVal := snap.Attributes[capAttr]; capVal != "" {
+			if usedVal := snap.Attributes[usedAttr]; usedVal != "" {
+				capInfo = fmt.Sprintf(" (%s / %s used)", usedVal, capVal)
+			} else {
+				capInfo = fmt.Sprintf(" (%s cap)", capVal)
+			}
+		}
+
+		gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label+capInfo))
+		lines = append(lines, "    "+gaugeBar)
+		lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
+		lines = append(lines, "")
+	}
+
+	renderItem("Five Hour Limit Remaining", "five_hour_usage", "five_hour_cap", "five_hour_used")
+	renderItem("Weekly Limit Remaining", "weekly_usage", "weekly_cap", "weekly_used")
+
+	if bal, ok := snap.Metrics["balance"]; ok && bal.Remaining != nil {
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render("Credit Balance"))
+		lines = append(lines, "    "+lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(fmt.Sprintf("$%.2f monthly balance", *bal.Remaining)))
+		lines = append(lines, "")
+	}
 
 	return lines
 }
