@@ -230,11 +230,13 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 		barW = 50
 	}
 
-	renderQuotaBlock := func(title string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
+	renderQuotaBlock := func(groupTitle string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(title))
+		bullet := lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Render("◈ ")
+		title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(groupTitle)
+		lines = append(lines, bullet+title)
 		lines = append(lines, "  "+dimStyle.Render(modelsDesc))
 		lines = append(lines, "")
 
@@ -256,24 +258,19 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 				remaining = *met.Remaining
 			}
 
-			resetStr := ""
+			var resetAt time.Time
 			if matchedKey != "" {
-				resetAt, hasReset := snap.Resets[matchedKey]
-				if !hasReset {
-					resetAt, hasReset = snap.Resets[matchedKey+"_reset"]
-				}
-				if hasReset && !resetAt.IsZero() {
-					diff := resetAt.Sub(now)
-					if diff > 0 {
-						resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
-					}
+				if r, hasReset := snap.Resets[matchedKey]; hasReset {
+					resetAt = r
+				} else if r, hasReset := snap.Resets[matchedKey+"_reset"]; hasReset {
+					resetAt = r
 				}
 			}
 
 			gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 			lines = append(lines, "    "+gaugeBar)
-			lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
+			lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, now))
 			lines = append(lines, "")
 		}
 
@@ -328,7 +325,9 @@ func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnTh
 		modelsCount = "63"
 	}
 
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("OPENCODE GO SUBSCRIPTION"))
+	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("◈ ")
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("OPENCODE GO SUBSCRIPTION")
+	lines = append(lines, bullet+title)
 	lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("Models within this tier: Claude, GPT, DeepSeek, MiMo, Minimax (%s models)", modelsCount)))
 	lines = append(lines, "")
 
@@ -351,18 +350,17 @@ func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnTh
 			remaining = 100
 		}
 
-		resetStr := ""
-		if resetAt, hasReset := snap.Resets[metricKey]; hasReset && !resetAt.IsZero() {
-			diff := resetAt.Sub(now)
-			if diff > 0 {
-				resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
-			}
+		var resetAt time.Time
+		if r, hasReset := snap.Resets[metricKey]; hasReset {
+			resetAt = r
+		} else if r, hasReset := snap.Resets[metricKey+"_reset"]; hasReset {
+			resetAt = r
 		}
 
 		gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 		lines = append(lines, "    "+gaugeBar)
-		lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
+		lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, now))
 		lines = append(lines, "")
 	}
 
@@ -391,7 +389,9 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 		planName = fmt.Sprintf("Command Code (%s)", strings.ReplaceAll(planID, "-", " "))
 	}
 
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(strings.ToUpper(planName)))
+	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render("◈ ")
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(strings.ToUpper(planName))
+	lines = append(lines, bullet+title)
 
 	weeklyCap := snap.Attributes["weekly_cap"]
 	descParts := []string{"Unlimited Turns"}
@@ -420,12 +420,11 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			remaining = 100
 		}
 
-		resetStr := ""
-		if resetAt, hasReset := snap.Resets[metricKey]; hasReset && !resetAt.IsZero() {
-			diff := resetAt.Sub(nowTime)
-			if diff > 0 {
-				resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
-			}
+		var resetAt time.Time
+		if r, hasReset := snap.Resets[metricKey]; hasReset {
+			resetAt = r
+		} else if r, hasReset := snap.Resets[metricKey+"_reset"]; hasReset {
+			resetAt = r
 		}
 
 		capInfo := ""
@@ -440,7 +439,7 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 		gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label+capInfo))
 		lines = append(lines, "    "+gaugeBar)
-		lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
+		lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, nowTime))
 		lines = append(lines, "")
 	}
 

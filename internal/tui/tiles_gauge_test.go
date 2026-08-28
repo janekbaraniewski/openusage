@@ -390,3 +390,77 @@ func TestTileGaugeProjectionAnnotation_PaceOnlyWhenResetInPast(t *testing.T) {
 		t.Errorf("expected pace projection when reset has passed but pace is meaningful, got %q", out)
 	}
 }
+
+func TestRenderQuotaStatusAndTimerLine(t *testing.T) {
+	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+
+	// Case 1: Healthy quota with countdown
+	resetAt := now.Add(2*time.Hour + 30*time.Minute)
+	out := RenderQuotaStatusAndTimerLine(100.0, resetAt, now)
+	if !strings.Contains(out, "100.00% remaining") {
+		t.Errorf("expected 100.00%% remaining, got %q", out)
+	}
+	if !strings.Contains(out, "Resets in 2h 30m") {
+		t.Errorf("expected Resets in 2h 30m, got %q", out)
+	}
+
+	// Case 2: Exhausted quota with prominent countdown
+	outExhausted := RenderQuotaStatusAndTimerLine(0.0, resetAt, now)
+	if !strings.Contains(outExhausted, "0.00% remaining") {
+		t.Errorf("expected 0.00%% remaining, got %q", outExhausted)
+	}
+	if !strings.Contains(outExhausted, "Resets in 2h 30m") {
+		t.Errorf("expected Resets in 2h 30m, got %q", outExhausted)
+	}
+}
+
+func TestBuildTileGaugeLines_CustomProviders(t *testing.T) {
+	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	m := tileGaugeTestModel(now)
+	widget := tileGaugeTestWidget()
+
+	// 1. Antigravity
+	snapAg := core.UsageSnapshot{
+		ProviderID: "antigravity",
+		Metrics: map[string]core.Metric{
+			"quota_gemini_weekly": {Remaining: func(f float64) *float64 { return &f }(100)},
+		},
+		Resets: map[string]time.Time{
+			"quota_gemini_weekly": now.Add(24 * time.Hour),
+		},
+	}
+	linesAg := m.buildTileGaugeLines(snapAg, widget, 60)
+	if len(linesAg) == 0 || !strings.Contains(strings.Join(linesAg, "\n"), "GEMINI MODELS") {
+		t.Errorf("expected GEMINI MODELS in antigravity lines, got %v", linesAg)
+	}
+
+	// 2. OpenCode
+	snapOc := core.UsageSnapshot{
+		ProviderID: "opencode",
+		Metrics: map[string]core.Metric{
+			"rolling_usage": {Remaining: func(f float64) *float64 { return &f }(80)},
+		},
+		Resets: map[string]time.Time{
+			"rolling_usage": now.Add(4 * time.Hour),
+		},
+	}
+	linesOc := m.buildTileGaugeLines(snapOc, widget, 60)
+	if len(linesOc) == 0 || !strings.Contains(strings.Join(linesOc, "\n"), "OPENCODE GO SUBSCRIPTION") {
+		t.Errorf("expected OPENCODE GO SUBSCRIPTION in opencode lines, got %v", linesOc)
+	}
+
+	// 3. Command Code
+	snapCc := core.UsageSnapshot{
+		ProviderID: "command_code",
+		Metrics: map[string]core.Metric{
+			"weekly_usage": {Remaining: func(f float64) *float64 { return &f }(0)},
+		},
+		Resets: map[string]time.Time{
+			"weekly_usage": now.Add(36 * time.Hour),
+		},
+	}
+	linesCc := m.buildTileGaugeLines(snapCc, widget, 60)
+	if len(linesCc) == 0 || !strings.Contains(strings.Join(linesCc, "\n"), "COMMAND CODE") {
+		t.Errorf("expected COMMAND CODE in command_code lines, got %v", linesCc)
+	}
+}

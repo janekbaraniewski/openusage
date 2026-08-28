@@ -355,3 +355,43 @@ func RenderShimmerGauge(width, frame int) string {
 
 	return b.String() + dimStyle.Render("   ···")
 }
+
+// RenderQuotaStatusAndTimerLine formats a prominent quota status line with a bold, obvious reset countdown.
+func RenderQuotaStatusAndTimerLine(remaining float64, resetAt time.Time, now time.Time) string {
+	pctStyle := lipgloss.NewStyle().Bold(true)
+	if remaining <= 0 {
+		pctStyle = pctStyle.Foreground(colorRed)
+	} else if remaining < 20 {
+		pctStyle = pctStyle.Foreground(colorPeach)
+	} else if remaining < 50 {
+		pctStyle = pctStyle.Foreground(colorYellow)
+	} else {
+		pctStyle = pctStyle.Foreground(colorText)
+	}
+
+	pctText := pctStyle.Render(fmt.Sprintf("%.2f%% remaining", remaining))
+	if resetAt.IsZero() {
+		return pctText
+	}
+
+	diff := resetAt.Sub(now)
+	if diff <= 0 {
+		return pctText
+	}
+
+	formattedDur := formatDurationShort(diff)
+	var timerTag string
+	if remaining <= 0 {
+		// When quota is exhausted, highlight the reset timer in bold bright yellow so it stands out immediately!
+		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render(fmt.Sprintf("⏳ Resets in %s", formattedDur))
+	} else if diff < time.Hour {
+		// Imminent reset in under an hour: highlight in bold teal with lightning icon
+		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render(fmt.Sprintf("⚡ Resets in %s", formattedDur))
+	} else {
+		// Active healthy quota reset countdown: bold sky blue
+		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorSky).Render(fmt.Sprintf("⏱  Resets in %s", formattedDur))
+	}
+
+	sep := lipgloss.NewStyle().Foreground(colorOverlay).Render(" · ")
+	return pctText + sep + timerTag
+}
