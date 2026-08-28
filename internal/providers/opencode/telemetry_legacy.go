@@ -177,6 +177,16 @@ func discoverOpenCodeChannelDBs(homeDir string) []string {
 		filepath.Join(homeDir, ".local", "share", "opencode-nightly", "opencode.db"),
 		filepath.Join(homeDir, "Library", "Application Support", "opencode", "opencode.db"),
 	}
+
+	// Also scan all container profiles in ~/.opencode-containers
+	containersDir := filepath.Join(homeDir, ".opencode-containers")
+	if entries, err := os.ReadDir(containersDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				candidates = append(candidates, filepath.Join(containersDir, entry.Name(), "share", "opencode.db"))
+			}
+		}
+	}
 	var out []string
 	seen := map[string]bool{}
 	for _, p := range candidates {

@@ -2,6 +2,7 @@ package detect
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -167,5 +168,50 @@ func detectOpenCodeAuth(result *Result) {
 	}
 	if matched > 0 || skipped > 0 {
 		log.Printf("[detect] OpenCode auth.json: %d api-key accounts adopted, %d oauth/other entries skipped", matched, skipped)
+	}
+
+	// Auto-detect all active opencode-box container profiles in ~/.opencode-containers
+	containersDir := filepath.Join(homeDir(), ".opencode-containers")
+	if dirExists(containersDir) {
+		entries, err := os.ReadDir(containersDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				boxName := entry.Name()
+				boxAuthFile := filepath.Join(containersDir, boxName, "share", "auth.json")
+				boxDBFile := filepath.Join(containersDir, boxName, "share", "opencode.db")
+
+				acct := core.AccountConfig{
+					ID:           fmt.Sprintf("opencode-%s", boxName),
+					Provider:     "opencode",
+					Auth:         "api_key",
+					RuntimeHints: make(map[string]string),
+				}
+				acct.SetHint("db_path", boxDBFile)
+				acct.SetHint("auth_path", boxAuthFile)
+				acct.SetHint("container", boxName)
+
+				if fileExists(boxAuthFile) {
+					if authData, err := os.ReadFile(boxAuthFile); err == nil {
+						var boxRaw map[string]json.RawMessage
+						if err := json.Unmarshal(authData, &boxRaw); err == nil {
+							for _, keyName := range []string{"opencode-go", "opencode"} {
+								if slot, ok := boxRaw[keyName]; ok {
+									var boxEntry opencodeAuthEntry
+									if err := json.Unmarshal(slot, &boxEntry); err == nil && boxEntry.Key != "" {
+										acct.Token = boxEntry.Key
+										acct.SetHint("credential_source", "opencode_box_auth_json")
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+				addAccount(result, acct)
+			}
+		}
 	}
 }
