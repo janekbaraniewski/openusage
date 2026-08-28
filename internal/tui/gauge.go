@@ -219,27 +219,27 @@ func formatDurationShort(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
-func RenderMiniGauge(usedPercent float64, width int) string {
+func RenderMiniGauge(remainingPercent float64, width int) string {
 	if width < 3 {
 		width = 3
 	}
-	if usedPercent < 0 {
+	if remainingPercent < 0 {
 		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
 	}
-	if usedPercent > 100 {
-		usedPercent = 100
+	if remainingPercent > 100 {
+		remainingPercent = 100
 	}
 
 	var color lipgloss.Color
 	switch {
-	case usedPercent >= 80:
-		color = colorCrit
-	case usedPercent >= 50:
-		color = colorWarn
+	case remainingPercent <= 20:
+		color = colorCrit // low remaining -> red
+	case remainingPercent <= 50:
+		color = colorWarn // medium remaining -> yellow
 	default:
-		color = colorOK
+		color = colorOK   // high remaining -> green
 	}
-	return renderGaugeBar(usedPercent, width, color)
+	return renderGaugeBar(remainingPercent, width, color)
 }
 
 // GaugeSegment represents one colored segment of a stacked gauge bar.
