@@ -59,7 +59,8 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			prevProvider = providerID
 		}
 
-		if i == cursor {
+		isSelected := (i == cursor)
+		if isSelected {
 			cursorLineIdx = len(itemLines)
 		}
 
@@ -68,14 +69,20 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		if isEnabled {
 			checkMark = lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("[✓]")
 		} else {
-			checkMark = dimStyle.Render("[ ]")
+			if isSelected {
+				checkMark = lipgloss.NewStyle().Bold(true).Foreground(colorRed).Render("[ ]")
+			} else {
+				checkMark = dimStyle.Render("[ ]")
+			}
 		}
 
 		prefix := "    "
 		nameStyle := lipgloss.NewStyle().Foreground(colorText)
-		if i == cursor {
+		infoStyle := dimStyle
+		if isSelected {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("  ➤ ")
-			nameStyle = nameStyle.Bold(true).Foreground(colorLavender)
+			nameStyle = lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+			infoStyle = lipgloss.NewStyle().Foreground(colorSubtext)
 		}
 
 		accountW := 24
@@ -87,7 +94,7 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		infoStr := ""
 		if modelInfo != "" && w > 45 {
 			infoW := max(10, w-accountW-18)
-			infoStr = " " + dimStyle.Render(truncateToWidth(modelInfo, infoW))
+			infoStr = " " + infoStyle.Render(truncateToWidth(modelInfo, infoW))
 		}
 
 		itemLines = append(itemLines, fmt.Sprintf("%s%s %-*s%s",
@@ -99,15 +106,53 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		availableH = 3
 	}
 
-	start, end := listWindow(len(itemLines), cursorLineIdx, availableH)
-	visibleLines := make([]string, len(itemLines[start:end]))
-	copy(visibleLines, itemLines[start:end])
+	var start, end int
+	var hasAbove, hasBelow bool
 
-	if start > 0 && len(visibleLines) > 0 {
-		visibleLines[0] = dimStyle.Render(fmt.Sprintf("  ▲ %d more above", start))
+	if len(itemLines) <= availableH {
+		start = 0
+		end = len(itemLines)
+		hasAbove = false
+		hasBelow = false
+	} else {
+		contentCap := availableH - 2
+		if contentCap < 1 {
+			contentCap = 1
+		}
+
+		half := contentCap / 2
+		start = cursorLineIdx - half
+		if start < 0 {
+			start = 0
+		}
+		end = start + contentCap
+		if end > len(itemLines) {
+			end = len(itemLines)
+			start = end - contentCap
+			if start < 0 {
+				start = 0
+			}
+		}
+
+		hasAbove = (start > 0)
+		hasBelow = (end < len(itemLines))
+
+		if !hasAbove && hasBelow {
+			end = min(len(itemLines), start+availableH-1)
+			hasBelow = (end < len(itemLines))
+		} else if hasAbove && !hasBelow {
+			start = max(0, len(itemLines)-(availableH-1))
+			hasAbove = (start > 0)
+		}
 	}
-	if end < len(itemLines) && len(visibleLines) > 1 {
-		visibleLines[len(visibleLines)-1] = dimStyle.Render(fmt.Sprintf("  ▼ %d more below", len(itemLines)-end))
+
+	var visibleLines []string
+	if hasAbove {
+		visibleLines = append(visibleLines, dimStyle.Render(fmt.Sprintf("  ▲ %d more above", start)))
+	}
+	visibleLines = append(visibleLines, itemLines[start:end]...)
+	if hasBelow {
+		visibleLines = append(visibleLines, dimStyle.Render(fmt.Sprintf("  ▼ %d more below", len(itemLines)-end)))
 	}
 
 	allLines := append(headerLines, visibleLines...)
