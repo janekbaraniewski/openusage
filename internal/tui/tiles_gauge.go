@@ -15,6 +15,11 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 	if snap.ProviderID == "antigravity" {
 		return m.buildAntigravityTileGaugeLines(snap, innerW)
 	}
+	if snap.ProviderID == "opencode" {
+		if ocLines := m.buildOpenCodeTileGaugeLines(snap, innerW); len(ocLines) > 0 {
+			return ocLines
+		}
+	}
 
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
@@ -421,6 +426,81 @@ func (m Model) buildAntigravityTileGaugeLines(snap core.UsageSnapshot, innerW in
 		[]string{"quota_claude_weekly", "quota_3p_weekly", "quota_3p_7d", "quota_opus_sonnet_weekly", "quota_claude", "quota_3p", "quota_opus_sonnet"},
 		[]string{"quota_claude_5h", "quota_3p_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_3p", "quota_opus_sonnet"},
 	)
+
+	return lines
+}
+
+func (m Model) buildOpenCodeTileGaugeLines(snap core.UsageSnapshot, innerW int) []string {
+	var lines []string
+
+	barW := innerW - 14
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 50 {
+		barW = 50
+	}
+
+	now := m.viewNow()
+
+	hasGoMetrics := false
+	for _, k := range []string{"rolling_usage", "weekly_usage", "monthly_usage_pct"} {
+		if _, ok := snap.Metrics[k]; ok {
+			hasGoMetrics = true
+			break
+		}
+	}
+
+	if !hasGoMetrics {
+		return nil
+	}
+
+	modelsCount := snap.Attributes["available_models_count"]
+	if modelsCount == "" {
+		modelsCount = "63"
+	}
+
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("OPENCODE GO SUBSCRIPTION"))
+	lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("Models within this tier: Claude, GPT, DeepSeek, MiMo, Minimax (%s models)", modelsCount)))
+	lines = append(lines, "")
+
+	renderItem := func(label string, metricKey string) {
+		met, ok := snap.Metrics[metricKey]
+		if !ok {
+			return
+		}
+
+		remaining := 0.0
+		if met.Remaining != nil {
+			remaining = *met.Remaining
+		} else if met.Used != nil {
+			remaining = 100 - *met.Used
+		}
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+
+		resetStr := ""
+		if resetAt, hasReset := snap.Resets[metricKey]; hasReset && !resetAt.IsZero() {
+			diff := resetAt.Sub(now)
+			if diff > 0 {
+				resetStr = fmt.Sprintf(" · Refreshes in %s", formatDurationShort(diff))
+			}
+		}
+
+		gaugeBar := RenderGauge(remaining, barW, m.warnThreshold, m.critThreshold)
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
+		lines = append(lines, "    "+gaugeBar)
+		lines = append(lines, "    "+dimStyle.Render(fmt.Sprintf("%.2f%% remaining%s", remaining, resetStr)))
+		lines = append(lines, "")
+	}
+
+	renderItem("Five Hour Limit Remaining", "rolling_usage")
+	renderItem("Weekly Limit Remaining", "weekly_usage")
+	renderItem("Monthly Limit Remaining", "monthly_usage_pct")
 
 	return lines
 }
