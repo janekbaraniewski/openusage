@@ -394,19 +394,48 @@ func detectAntigravity(result *Result) {
 	if home == "" {
 		return
 	}
+
+	// 1. Auto-detect all active agy-box container profiles in ~/.agy-containers
+	containersDir := filepath.Join(home, ".agy-containers")
+	hasBoxes := false
+	if dirExists(containersDir) {
+		entries, err := os.ReadDir(containersDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				boxName := entry.Name()
+				boxConfigDir := filepath.Join(containersDir, boxName, ".gemini", "antigravity-cli")
+				boxStatusFile := filepath.Join(home, ".local", "state", "openusage", fmt.Sprintf("antigravity-%s-status.json", boxName))
+
+				acct := core.AccountConfig{
+					ID:           fmt.Sprintf("antigravity-%s", boxName),
+					Provider:     "antigravity",
+					Auth:         "local",
+					Binary:       bin,
+					RuntimeHints: make(map[string]string),
+				}
+				acct.SetHint("config_dir", boxConfigDir)
+				acct.SetHint("status_file", boxStatusFile)
+				addAccount(result, acct)
+				hasBoxes = true
+			}
+		}
+	}
+
+	// 2. Default single-profile Antigravity CLI config dir
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
 		configDir = filepath.Join(home, ".gemini", "antigravity-cli")
 	}
 	if !dirExists(configDir) {
-		log.Printf("[detect] Antigravity CLI config dir %s not found, skipping", configDir)
 		return
 	}
 
 	settingsFile := filepath.Join(configDir, "settings.json")
 	brainDir := filepath.Join(configDir, "brain")
 	if !fileExists(settingsFile) && !dirExists(brainDir) {
-		log.Printf("[detect] Antigravity CLI config dir exists but no settings.json or brain directory found, skipping")
 		return
 	}
 
@@ -418,15 +447,17 @@ func detectAntigravity(result *Result) {
 		Type:       "cli",
 	})
 
-	acct := core.AccountConfig{
-		ID:           "antigravity",
-		Provider:     "antigravity",
-		Auth:         "local",
-		Binary:       bin,
-		RuntimeHints: make(map[string]string),
+	if !hasBoxes {
+		acct := core.AccountConfig{
+			ID:           "antigravity",
+			Provider:     "antigravity",
+			Auth:         "local",
+			Binary:       bin,
+			RuntimeHints: make(map[string]string),
+		}
+		acct.SetHint("config_dir", configDir)
+		addAccount(result, acct)
 	}
-	acct.SetHint("config_dir", configDir)
-	addAccount(result, acct)
 }
 
 // envKeyMappingEntry is the single source of truth for "this env var name
