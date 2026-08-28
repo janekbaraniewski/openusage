@@ -33,7 +33,28 @@ var (
 const (
 	defaultBaseURL = "https://opencode.ai"
 	modelsPath     = "/zen/v1/models"
+	goUsagePath    = "/zen/go/v1/usage"
 )
+
+type goUsageResponse struct {
+	Usage struct {
+		Rolling struct {
+			Percent  float64 `json:"percent"`
+			Status   string  `json:"status"`
+			ResetsAt string  `json:"resetsAt"`
+		} `json:"rolling"`
+		Weekly struct {
+			Percent  float64 `json:"percent"`
+			Status   string  `json:"status"`
+			ResetsAt string  `json:"resetsAt"`
+		} `json:"weekly"`
+		Monthly struct {
+			Percent  float64 `json:"percent"`
+			Status   string  `json:"status"`
+			ResetsAt string  `json:"resetsAt"`
+		} `json:"monthly"`
+	} `json:"usage"`
+}
 
 type Provider struct {
 	providerbase.Base
@@ -160,6 +181,55 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			}
 			snap.SetAttribute("available_models", strings.Join(ids, ", "))
 			snap.SetAttribute("available_models_count", fmt.Sprintf("%d", len(ids)))
+		}
+
+		// Query native OpenCode Go usage API endpoint directly via the API key
+		var goUsage goUsageResponse
+		if _, _, err := shared.FetchJSON(ctx, baseURL+goUsagePath, apiKey, &goUsage, p.Client()); err == nil {
+			rUsed := goUsage.Usage.Rolling.Percent
+			rRem := 100 - rUsed
+			if rRem < 0 {
+				rRem = 0
+			}
+			snap.Metrics["rolling_usage"] = core.Metric{
+				Used:      &rUsed,
+				Remaining: &rRem,
+				Unit:      "percent",
+				Window:    "rolling-5h",
+			}
+			if resetsAt, parseErr := time.Parse(time.RFC3339, goUsage.Usage.Rolling.ResetsAt); parseErr == nil {
+				snap.Resets["rolling_usage"] = resetsAt
+			}
+
+			wUsed := goUsage.Usage.Weekly.Percent
+			wRem := 100 - wUsed
+			if wRem < 0 {
+				wRem = 0
+			}
+			snap.Metrics["weekly_usage"] = core.Metric{
+				Used:      &wUsed,
+				Remaining: &wRem,
+				Unit:      "percent",
+				Window:    "7d",
+			}
+			if resetsAt, parseErr := time.Parse(time.RFC3339, goUsage.Usage.Weekly.ResetsAt); parseErr == nil {
+				snap.Resets["weekly_usage"] = resetsAt
+			}
+
+			mUsed := goUsage.Usage.Monthly.Percent
+			mRem := 100 - mUsed
+			if mRem < 0 {
+				mRem = 0
+			}
+			snap.Metrics["monthly_usage_pct"] = core.Metric{
+				Used:      &mUsed,
+				Remaining: &mRem,
+				Unit:      "percent",
+				Window:    "month",
+			}
+			if resetsAt, parseErr := time.Parse(time.RFC3339, goUsage.Usage.Monthly.ResetsAt); parseErr == nil {
+				snap.Resets["monthly_usage"] = resetsAt
+			}
 		}
 	}
 
