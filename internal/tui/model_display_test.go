@@ -481,14 +481,38 @@ func TestComputeDisplayInfo_RollingUsageBranchClassifiesAsUsageNotCredits(t *tes
 	if got.tagEmoji != "⚡" {
 		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
 	}
-	if got.gaugePercent != 51.0 {
-		t.Fatalf("gaugePercent = %v, want 51.0 (100 - monthly 49%%)", got.gaugePercent)
+	if got.gaugePercent != 85.0 {
+		t.Fatalf("gaugePercent = %v, want 85.0 (100 - rolling 15%%)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "51.00% remaining") {
-		t.Fatalf("summary = %q, want 51.00%% remaining", got.summary)
+	if !strings.Contains(got.summary, "85.00% remaining") {
+		t.Fatalf("summary = %q, want 85.00%% remaining", got.summary)
 	}
 	if got.reason != "rolling_usage" {
 		t.Fatalf("reason = %q, want rolling_usage", got.reason)
+	}
+}
+
+func TestComputeDisplayInfo_OpenCodeGoExhaustedWeeklyMonthly(t *testing.T) {
+	rollingUsed := 0.0
+	monthlyUsed := 100.0
+	weeklyUsed := 68.0
+
+	snap := core.UsageSnapshot{
+		ProviderID: "opencode",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rolling_usage":     {Used: &rollingUsed, Unit: "percent", Window: "rolling-5h"},
+			"weekly_usage":      {Used: &weeklyUsed, Unit: "percent", Window: "7d"},
+			"monthly_usage_pct": {Used: &monthlyUsed, Unit: "percent", Window: "month"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.gaugePercent != 0.0 {
+		t.Fatalf("gaugePercent = %v, want 0.0 (monthly 100%% exhausted)", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "0.00% remaining") {
+		t.Fatalf("summary = %q, want '0.00%% remaining'", got.summary)
 	}
 }
 

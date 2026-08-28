@@ -352,43 +352,45 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "rolling_usage"
-		worstRem := 100.0
-		if ru.Remaining != nil {
-			worstRem = *ru.Remaining
-		} else if ru.Used != nil {
-			worstRem = 100 - *ru.Used
-		}
-		if wu, ok2 := snap.Metrics["weekly_usage"]; ok2 {
-			wRem := 100.0
-			if wu.Remaining != nil {
-				wRem = *wu.Remaining
-			} else if wu.Used != nil {
-				wRem = 100 - *wu.Used
-			}
-			if wRem < worstRem {
-				worstRem = wRem
-			}
-		}
+
+		monthlyExhausted := false
 		if mu, ok2 := snap.Metrics["monthly_usage_pct"]; ok2 {
-			mRem := 100.0
-			if mu.Remaining != nil {
-				mRem = *mu.Remaining
-			} else if mu.Used != nil {
-				mRem = 100 - *mu.Used
-			}
-			if mRem < worstRem {
-				worstRem = mRem
+			if (mu.Used != nil && *mu.Used >= 100) || (mu.Remaining != nil && *mu.Remaining <= 0) {
+				monthlyExhausted = true
 			}
 		}
-		if worstRem < 0 {
-			worstRem = 0
+
+		weeklyExhausted := false
+		if wu, ok2 := snap.Metrics["weekly_usage"]; ok2 {
+			if (wu.Used != nil && *wu.Used >= 100) || (wu.Remaining != nil && *wu.Remaining <= 0) {
+				weeklyExhausted = true
+			}
 		}
-		info.gaugePercent = worstRem
-		info.summary = fmt.Sprintf("%.2f%% remaining", worstRem)
+
+		rem := 100.0
+		if monthlyExhausted || weeklyExhausted {
+			rem = 0.0
+		} else {
+			if ru.Remaining != nil {
+				rem = *ru.Remaining
+			} else if ru.Used != nil {
+				rem = 100 - *ru.Used
+			}
+		}
+
+		if rem < 0 {
+			rem = 0
+		}
+		if rem > 100 {
+			rem = 100
+		}
+
+		info.gaugePercent = rem
+		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
 		if bal, ok2 := snap.Metrics["console_balance"]; ok2 && bal.Remaining != nil && !hideCosts {
 			info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
 		}
-		core.Tracef("[display] %s: branch=rolling_usage worstRem=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, worstRem, info.gaugePercent)
+		core.Tracef("[display] %s: branch=rolling_usage rem=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, rem, info.gaugePercent)
 		return info
 	}
 
