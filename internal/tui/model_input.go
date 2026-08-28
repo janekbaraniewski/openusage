@@ -477,16 +477,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "w":
 			return m.cycleTimeWindow()
-		case "v":
-			if m.screen == screenDashboard {
-				m.setDashboardView(m.nextDashboardView(1))
-				return m, m.persistDashboardViewCmd()
-			}
-		case "V":
-			if m.screen == screenDashboard {
-				m.setDashboardView(m.nextDashboardView(-1))
-				return m, m.persistDashboardViewCmd()
-			}
 		}
 	}
 

@@ -13,6 +13,9 @@ import (
 
 type tickMsg time.Time
 
+// autoRefreshMsg triggers a periodic data re-fetch.
+type autoRefreshMsg time.Time
+
 // Adaptive tick intervals to reduce CPU/power when idle.
 const (
 	tickFast   = 150 * time.Millisecond // loading: spinner/shimmer animations
@@ -22,6 +25,10 @@ const (
 
 	idleAfterInteraction = 5 * time.Second  // fast→normal→slow after no user input
 	idleAfterData        = 15 * time.Second // slow→paused after no data change
+
+	// autoRefreshInterval controls how often usage data is automatically
+	// re-fetched so the dashboard stays live without user interaction.
+	autoRefreshInterval = 10 * time.Second
 )
 
 func tickCmd() tea.Cmd {
@@ -31,6 +38,12 @@ func tickCmd() tea.Cmd {
 func scheduleTickCmd(interval time.Duration) tea.Cmd {
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
+	})
+}
+
+func autoRefreshCmd() tea.Cmd {
+	return tea.Tick(autoRefreshInterval, func(t time.Time) tea.Msg {
+		return autoRefreshMsg(t)
 	})
 }
 

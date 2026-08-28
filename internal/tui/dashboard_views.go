@@ -119,10 +119,8 @@ func (m Model) shouldForceStackedDashboardView() bool {
 }
 
 func (m Model) activeDashboardView() dashboardViewMode {
-	if m.shouldForceStackedDashboardView() {
-		return dashboardViewStacked
-	}
-	return m.configuredDashboardView()
+	// Locked to stacked (single-column scrollable) view.
+	return dashboardViewStacked
 }
 
 func (m Model) dashboardViewStatusLabel() string {
