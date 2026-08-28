@@ -238,12 +238,19 @@ var loadStoredSession = func(accountID string) (config.BrowserSession, bool, err
 // metrics + attributes. Returns errNoCookieConfigured when the user hasn't
 // opted in to browser-session auth.
 func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) error {
-	// Load directly from stored credentials to avoid the browser refresh
-	// in LoadOrRefreshBrowserSession, which can overwrite stored sessions
-	// when multiple accounts use different browsers for the same domain.
 	session, ok, err := loadStoredSession(acct.ID)
 	if err != nil || !ok || session.Value == "" {
-		return errNoCookieConfigured
+		if acct.BrowserCookie == nil {
+			acct.BrowserCookie = &core.BrowserCookieRef{
+				Domain:     "opencode.ai",
+				CookieName: "auth",
+			}
+		}
+		var autoErr error
+		session, ok, autoErr = loadBrowserSession(ctx, acct, nil)
+		if autoErr != nil || !ok || session.Value == "" {
+			return errNoCookieConfigured
+		}
 	}
 
 	client := newConsoleClient(session.Value, session.CookieName, "")
