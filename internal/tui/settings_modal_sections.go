@@ -17,22 +17,24 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 		}
 	}
 
-	lines := settingsBodyHeaderLines(
+	headerLines := settingsBodyHeaderLines(
 		"Provider & Account Visibility",
 		fmt.Sprintf("%d/%d enabled · Space/Enter toggle · Shift+J/K reorder · Esc close", enabledCount, len(ids)),
 	)
-	lines = append(lines, settingsBodyRule(w))
+	headerLines = append(headerLines, settingsBodyRule(w))
 	if len(ids) == 0 {
-		lines = append(lines, dimStyle.Render("No accounts or providers detected."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
+		headerLines = append(headerLines, dimStyle.Render("No accounts or providers detected."))
+		return padToSize(strings.Join(headerLines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
-	start, end := listWindow(len(ids), cursor, max(1, h-len(lines)))
 
+	// Build all visual rows
+	var itemLines []string
+	cursorLineIdx := 0
 	prevProvider := ""
-	for i := start; i < end; i++ {
-		id := ids[i]
+
+	for i, id := range ids {
 		providerID := m.accountProviders[id]
 		modelInfo := ""
 		if snap, ok := m.snapshots[id]; ok {
@@ -49,9 +51,16 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 
 		pColor := providerThemeColor(providerID)
 		if providerID != prevProvider {
+			if len(itemLines) > 0 {
+				itemLines = append(itemLines, "")
+			}
 			groupHeader := lipgloss.NewStyle().Bold(true).Foreground(pColor).Render("✦ " + strings.ToUpper(providerID))
-			lines = append(lines, "  "+groupHeader)
+			itemLines = append(itemLines, "  "+groupHeader)
 			prevProvider = providerID
+		}
+
+		if i == cursor {
+			cursorLineIdx = len(itemLines)
 		}
 
 		isEnabled := m.isProviderEnabled(id)
@@ -81,10 +90,28 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			infoStr = " " + dimStyle.Render(truncateToWidth(modelInfo, infoW))
 		}
 
-		lines = append(lines, fmt.Sprintf("%s%s %-*s%s",
+		itemLines = append(itemLines, fmt.Sprintf("%s%s %-*s%s",
 			prefix, checkMark, accountW, nameStyle.Render(accountName), infoStr))
 	}
-	return padToSize(strings.Join(lines, "\n"), w, h)
+
+	availableH := h - len(headerLines)
+	if availableH < 3 {
+		availableH = 3
+	}
+
+	start, end := listWindow(len(itemLines), cursorLineIdx, availableH)
+	visibleLines := make([]string, len(itemLines[start:end]))
+	copy(visibleLines, itemLines[start:end])
+
+	if start > 0 && len(visibleLines) > 0 {
+		visibleLines[0] = dimStyle.Render(fmt.Sprintf("  ▲ %d more above", start))
+	}
+	if end < len(itemLines) && len(visibleLines) > 1 {
+		visibleLines[len(visibleLines)-1] = dimStyle.Render(fmt.Sprintf("  ▼ %d more below", len(itemLines)-end))
+	}
+
+	allLines := append(headerLines, visibleLines...)
+	return padToSize(strings.Join(allLines, "\n"), w, h)
 }
 
 func (m Model) renderSettingsWidgetSectionsBody(w, h int) string {
