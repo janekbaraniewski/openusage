@@ -450,8 +450,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch msg.String() {
-		case ",", "S":
+		case "p", "P", ",", "S":
 			m.openSettingsModal()
+			m.settings.tab = settingsTabProviders
 			return m, nil
 		case "tab":
 			m.screen = m.nextScreen(1)

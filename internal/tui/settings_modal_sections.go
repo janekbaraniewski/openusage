@@ -18,44 +18,71 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 	}
 
 	lines := settingsBodyHeaderLines(
-		"Provider Visibility & Order",
-		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle", enabledCount, len(ids)),
+		"Provider & Account Visibility",
+		fmt.Sprintf("%d/%d enabled · Space/Enter toggle · Shift+J/K reorder · Esc close", enabledCount, len(ids)),
 	)
-	accountW := 26
-	providerW := max(10, w-accountW-16)
-	if accountW = max(12, w-providerW-16); accountW < 12 {
-		accountW = 12
-	}
-	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %-*s", "#", "ON", accountW, "ACCOUNT", providerW, "PROVIDER")))
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
-		lines = append(lines, dimStyle.Render("No providers available."))
+		lines = append(lines, dimStyle.Render("No accounts or providers detected."))
 		return padToSize(strings.Join(lines, "\n"), w, h)
 	}
 
 	cursor := clamp(m.settings.cursor, 0, len(ids)-1)
 	start, end := listWindow(len(ids), cursor, max(1, h-len(lines)))
+
+	prevProvider := ""
 	for i := start; i < end; i++ {
 		id := ids[i]
 		providerID := m.accountProviders[id]
-		if snap, ok := m.snapshots[id]; ok && snap.ProviderID != "" {
-			providerID = snap.ProviderID
+		modelInfo := ""
+		if snap, ok := m.snapshots[id]; ok {
+			if snap.ProviderID != "" {
+				providerID = snap.ProviderID
+			}
+			if snap.Message != "" {
+				modelInfo = snap.Message
+			}
 		}
 		if providerID == "" {
-			providerID = "unknown"
+			providerID = "other"
 		}
-		onText := "OFF"
-		onStyle := lipgloss.NewStyle().Foreground(colorRed)
-		if m.isProviderEnabled(id) {
-			onText = "ON "
-			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
+
+		pColor := providerThemeColor(providerID)
+		if providerID != prevProvider {
+			groupHeader := lipgloss.NewStyle().Bold(true).Foreground(pColor).Render("✦ " + strings.ToUpper(providerID))
+			lines = append(lines, "  "+groupHeader)
+			prevProvider = providerID
 		}
-		prefix := "  "
+
+		isEnabled := m.isProviderEnabled(id)
+		var checkMark string
+		if isEnabled {
+			checkMark = lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("[✓]")
+		} else {
+			checkMark = dimStyle.Render("[ ]")
+		}
+
+		prefix := "    "
+		nameStyle := lipgloss.NewStyle().Foreground(colorText)
 		if i == cursor {
-			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
+			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("  ➤ ")
+			nameStyle = nameStyle.Bold(true).Foreground(colorLavender)
 		}
-		lines = append(lines, fmt.Sprintf("%s%-3d %s %-*s %-*s",
-			prefix, i+1, onStyle.Render(onText), accountW, truncateToWidth(id, accountW), providerW, truncateToWidth(providerID, providerW)))
+
+		accountW := 24
+		if w > 60 {
+			accountW = 28
+		}
+		accountName := truncateToWidth(id, accountW)
+
+		infoStr := ""
+		if modelInfo != "" && w > 45 {
+			infoW := max(10, w-accountW-18)
+			infoStr = " " + dimStyle.Render(truncateToWidth(modelInfo, infoW))
+		}
+
+		lines = append(lines, fmt.Sprintf("%s%s %-*s%s",
+			prefix, checkMark, accountW, nameStyle.Render(accountName), infoStr))
 	}
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
