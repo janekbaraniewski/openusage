@@ -12,6 +12,7 @@ type AccountConfig struct {
 	Provider   string `json:"provider"`
 	Auth       string `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token", "browser_session"
 	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
+	APIKey     string `json:"api_key,omitempty"`     // direct inline API key
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
 	// BrowserCookie identifies the (domain, cookie_name, source_browser)
@@ -132,10 +133,16 @@ func (c AccountConfig) PathMap() map[string]string {
 }
 
 func (c AccountConfig) ResolveAPIKey() string {
+	if c.APIKey != "" {
+		return c.APIKey
+	}
 	if c.Token != "" {
 		return c.Token
 	}
-	return os.Getenv(c.APIKeyEnv)
+	if c.APIKeyEnv != "" {
+		return os.Getenv(c.APIKeyEnv)
+	}
+	return ""
 }
 
 type ProviderInfo struct {
