@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -141,7 +143,42 @@ func (c AccountConfig) ResolveAPIKey() string {
 		return c.Token
 	}
 	if c.APIKeyEnv != "" {
-		return os.Getenv(c.APIKeyEnv)
+		if v := os.Getenv(c.APIKeyEnv); v != "" {
+			return v
+		}
+	}
+	// Automatic fallback for OpenCode container boxes & standard install:
+	if c.Provider == "opencode" || strings.HasPrefix(c.ID, "opencode-") {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			var candidatePaths []string
+			if strings.HasPrefix(c.ID, "opencode-") {
+				box := strings.TrimPrefix(c.ID, "opencode-")
+				candidatePaths = append(candidatePaths, filepath.Join(home, ".opencode-containers", box, "share", "auth.json"))
+			}
+			candidatePaths = append(candidatePaths,
+				filepath.Join(home, ".local", "share", "opencode", "auth.json"),
+				filepath.Join(home, ".opencode-containers", "mohammed", "share", "auth.json"),
+				filepath.Join(home, ".opencode-containers", "nurulz", "share", "auth.json"),
+			)
+			for _, p := range candidatePaths {
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					continue
+				}
+				var payload map[string]struct {
+					Type string `json:"type"`
+					Key  string `json:"key"`
+				}
+				if err := json.Unmarshal(raw, &payload); err == nil {
+					for _, k := range []string{"opencode-go", "opencode"} {
+						if entry, ok := payload[k]; ok && strings.TrimSpace(entry.Key) != "" {
+							return strings.TrimSpace(entry.Key)
+						}
+					}
+				}
+			}
+		}
 	}
 	return ""
 }
