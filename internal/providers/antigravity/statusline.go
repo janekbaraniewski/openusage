@@ -135,16 +135,37 @@ func CaptureStatusLine(data []byte, path string) (string, error) {
 		return "AGY", err
 	}
 
-	// Safely auto-route to specific account status files when email or identifier is present
+	// Dynamically auto-route to specific account status files based on active account email
 	dir := filepath.Dir(path)
-	emailLower := strings.ToLower(payload.Email)
-	if strings.Contains(emailLower, "mohammed") {
-		_ = writeStatusFile(filepath.Join(dir, "antigravity-mohammed-status.json"), state)
-	} else if strings.Contains(emailLower, "nurul") {
-		_ = writeStatusFile(filepath.Join(dir, "antigravity-nurulz-status.json"), state)
+	if slug := extractAccountSlug(payload.Email); slug != "" {
+		_ = writeStatusFile(filepath.Join(dir, fmt.Sprintf("antigravity-%s-status.json", slug)), state)
+
+		// Backward-compatible alias mappings for common account identifiers
+		if strings.Contains(slug, "mohammed") && slug != "mohammed" {
+			_ = writeStatusFile(filepath.Join(dir, "antigravity-mohammed-status.json"), state)
+		}
+		if strings.Contains(slug, "nurul") && slug != "nurulz" {
+			_ = writeStatusFile(filepath.Join(dir, "antigravity-nurulz-status.json"), state)
+		}
 	}
 
 	return renderStatusLine(payload), nil
+}
+
+func extractAccountSlug(email string) string {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return ""
+	}
+	parts := strings.Split(email, "@")
+	username := parts[0]
+	var b strings.Builder
+	for _, r := range username {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // RenderStatusLine returns a safe fallback line for a raw payload. It is kept
