@@ -248,6 +248,14 @@ var loadStoredSession = func(accountID string) (config.BrowserSession, bool, err
 // opted in to browser-session auth.
 func (p *Provider) enrichFromConsole(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) error {
 	session, ok, err := loadStoredSession(acct.ID)
+	if (err != nil || !ok || session.Value == "") && strings.TrimSpace(acct.Cookie) != "" {
+		session = config.BrowserSession{
+			Domain:     "opencode.ai",
+			CookieName: "auth",
+			Value:      strings.TrimSpace(acct.Cookie),
+		}
+		ok = true
+	}
 	if err != nil || !ok || session.Value == "" {
 		if acct.BrowserCookie == nil {
 			acct.BrowserCookie = &core.BrowserCookieRef{

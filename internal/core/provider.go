@@ -13,6 +13,7 @@ type AccountConfig struct {
 	Auth       string `json:"auth,omitempty"`        // "api_key", "oauth", "cli", "local", "token", "browser_session"
 	APIKeyEnv  string `json:"api_key_env,omitempty"` // env var name holding the API key
 	APIKey     string `json:"api_key,omitempty"`     // direct inline API key
+	Cookie     string `json:"cookie,omitempty"`      // direct inline session cookie (e.g. for web console enrichment)
 	ProbeModel string `json:"probe_model,omitempty"` // model to use for probe requests
 
 	// BrowserCookie identifies the (domain, cookie_name, source_browser)
