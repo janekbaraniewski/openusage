@@ -239,15 +239,17 @@ func (r *kookyReader) ReadCookie(ctx context.Context, domain, name, browser stri
 	}()
 
 	picked := pickStoresForBrowser(all, browser)
-	if len(picked) == 0 {
-		return Cookie{}, ErrNoCookieFound
+	if len(picked) > 0 {
+		if cookie, ok := readFromStores(picked, domain, name); ok {
+			return cookie, nil
+		}
 	}
 
-	cookie, ok := readFromStores(picked, domain, name)
-	if !ok {
-		return Cookie{}, ErrNoCookieFound
+	if wslCookie, err := r.readCookieWSL(ctx, domain, name, browser); err == nil && wslCookie.Value != "" {
+		return wslCookie, nil
 	}
-	return cookie, nil
+
+	return Cookie{}, ErrNoCookieFound
 }
 
 // pickStoresForBrowser filters the discovered stores down to a single browser.
