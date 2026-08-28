@@ -338,6 +338,40 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		}
 	}
 
+	// Synthesize 5h window if only weekly was emitted by Antigravity CLI statusline.
+	// When an account is fresh or hasn't made calls in the rolling 5h window, 5h remaining is 100%.
+	if _, hasGemini5h := snap.Metrics["quota_gemini_5h"]; !hasGemini5h {
+		if gWk, hasGeminiWk := snap.Metrics["quota_gemini_weekly"]; hasGeminiWk && gWk.Remaining != nil {
+			rem := 100.0
+			if *gWk.Remaining <= 0 {
+				rem = 0.0
+			}
+			snap.Metrics["quota_gemini_5h"] = core.Metric{
+				Limit:     core.Float64Ptr(100),
+				Used:      core.Float64Ptr(100 - rem),
+				Remaining: core.Float64Ptr(rem),
+				Unit:      "%",
+				Window:    "5h",
+			}
+		}
+	}
+	if _, hasClaude5h := snap.Metrics["quota_claude_5h"]; !hasClaude5h {
+		if cWk, hasClaudeWk := snap.Metrics["quota_claude_weekly"]; hasClaudeWk && cWk.Remaining != nil {
+			rem := 100.0
+			if *cWk.Remaining <= 0 {
+				rem = 0.0
+			}
+			snap.Metrics["quota_claude_5h"] = core.Metric{
+				Limit:     core.Float64Ptr(100),
+				Used:      core.Float64Ptr(100 - rem),
+				Remaining: core.Float64Ptr(rem),
+				Unit:      "%",
+				Window:    "5h",
+			}
+			snap.Metrics["quota_3p_5h"] = snap.Metrics["quota_claude_5h"]
+		}
+	}
+
 	if !found {
 		return
 	}

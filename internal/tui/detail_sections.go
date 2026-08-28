@@ -274,8 +274,21 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			lines = append(lines, "")
 		}
 
-		renderItem("Weekly Limit Remaining", weeklyKeys, 0)
-		renderItem("Five Hour Limit Remaining", fiveHourKeys, 0)
+		weeklyRemaining := 100.0
+		for _, k := range weeklyKeys {
+			if m, ok := snap.Metrics[k]; ok && m.Remaining != nil {
+				weeklyRemaining = *m.Remaining
+				break
+			}
+		}
+
+		fiveHourDefault := 100.0
+		if weeklyRemaining <= 0 {
+			fiveHourDefault = 0.0
+		}
+
+		renderItem("Weekly Limit Remaining", weeklyKeys, weeklyRemaining)
+		renderItem("Five Hour Limit Remaining", fiveHourKeys, fiveHourDefault)
 	}
 
 	// 1. GEMINI MODELS
