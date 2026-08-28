@@ -481,11 +481,11 @@ func TestComputeDisplayInfo_RollingUsageBranchClassifiesAsUsageNotCredits(t *tes
 	if got.tagEmoji != "⚡" {
 		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
 	}
-	if got.gaugePercent != 85.0 {
-		t.Fatalf("gaugePercent = %v, want 85.0 (100 - rolling 15%%)", got.gaugePercent)
+	if got.gaugePercent != 51.0 {
+		t.Fatalf("gaugePercent = %v, want 51.0 (100 - monthly 49%%)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "85.00% remaining") {
-		t.Fatalf("summary = %q, want 85.00%% remaining", got.summary)
+	if !strings.Contains(got.summary, "51.00% remaining") {
+		t.Fatalf("summary = %q, want 51.00%% remaining", got.summary)
 	}
 	if got.reason != "rolling_usage" {
 		t.Fatalf("reason = %q, want rolling_usage", got.reason)

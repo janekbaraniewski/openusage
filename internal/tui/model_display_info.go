@@ -348,20 +348,47 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	// monthly_usage_pct vs usage_five_hour/usage_seven_day) — same "quota
 	// window usage" concept, so it gets the same Usage tag treatment
 	// rather than falling through to a cost-based Credits branch below.
-	if ru, ok := snap.Metrics["rolling_usage"]; ok && ru.Used != nil {
+	if ru, ok := snap.Metrics["rolling_usage"]; ok && (ru.Used != nil || ru.Remaining != nil) {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "rolling_usage"
-		rem := 100 - *ru.Used
+		worstRem := 100.0
 		if ru.Remaining != nil {
-			rem = *ru.Remaining
+			worstRem = *ru.Remaining
+		} else if ru.Used != nil {
+			worstRem = 100 - *ru.Used
 		}
-		info.gaugePercent = rem
-		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		if wu, ok2 := snap.Metrics["weekly_usage"]; ok2 {
+			wRem := 100.0
+			if wu.Remaining != nil {
+				wRem = *wu.Remaining
+			} else if wu.Used != nil {
+				wRem = 100 - *wu.Used
+			}
+			if wRem < worstRem {
+				worstRem = wRem
+			}
+		}
+		if mu, ok2 := snap.Metrics["monthly_usage_pct"]; ok2 {
+			mRem := 100.0
+			if mu.Remaining != nil {
+				mRem = *mu.Remaining
+			} else if mu.Used != nil {
+				mRem = 100 - *mu.Used
+			}
+			if mRem < worstRem {
+				worstRem = mRem
+			}
+		}
+		if worstRem < 0 {
+			worstRem = 0
+		}
+		info.gaugePercent = worstRem
+		info.summary = fmt.Sprintf("%.2f%% remaining", worstRem)
 		if bal, ok2 := snap.Metrics["console_balance"]; ok2 && bal.Remaining != nil && !hideCosts {
 			info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
 		}
-		core.Tracef("[display] %s: branch=rolling_usage used=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, *ru.Used, info.gaugePercent)
+		core.Tracef("[display] %s: branch=rolling_usage worstRem=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, worstRem, info.gaugePercent)
 		return info
 	}
 

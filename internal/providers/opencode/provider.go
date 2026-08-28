@@ -230,6 +230,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			if resetsAt, parseErr := time.Parse(time.RFC3339, goUsage.Usage.Monthly.ResetsAt); parseErr == nil {
 				snap.Resets["monthly_usage"] = resetsAt
 			}
+			if goUsage.Usage.Monthly.Status == "rate-limited" || goUsage.Usage.Rolling.Status == "rate-limited" || goUsage.Usage.Weekly.Status == "rate-limited" || mRem <= 0 || rRem <= 0 || wRem <= 0 {
+				snap.Status = core.StatusLimited
+			}
 		}
 	}
 
@@ -267,7 +270,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	shared.FinalizeStatus(&snap)
-	if snap.Status == core.StatusOK {
+	if snap.Status == core.StatusOK || snap.Status == core.StatusLimited {
 		modelCount := snap.Attributes["available_models_count"]
 		if bal, ok := snap.Metrics["console_balance"]; ok && bal.Remaining != nil {
 			msg := fmt.Sprintf("$%.2f balance", *bal.Remaining)
@@ -283,13 +286,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			}
 			snap.Message = msg
 		} else if rolling, ok := snap.Metrics["rolling_usage"]; ok && (rolling.Remaining != nil || rolling.Used != nil) {
-			rRem := 100.0
-			if rolling.Remaining != nil {
-				rRem = *rolling.Remaining
-			} else if rolling.Used != nil {
-				rRem = 100 - *rolling.Used
+			worstRem := 100.0
+			for _, key := range []string{"rolling_usage", "weekly_usage", "monthly_usage_pct"} {
+				if m, ok := snap.Metrics[key]; ok {
+					if m.Remaining != nil && *m.Remaining < worstRem {
+						worstRem = *m.Remaining
+					}
+				}
 			}
-			snap.Message = fmt.Sprintf("OpenCode Go · 5h %.2f%% rem", rRem)
+			snap.Message = fmt.Sprintf("OpenCode Go · %.2f%% rem", worstRem)
 		} else if modelCount != "" {
 			snap.Message = fmt.Sprintf("OpenCode Go (%s models)", modelCount)
 		} else {
