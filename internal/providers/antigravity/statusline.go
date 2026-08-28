@@ -135,8 +135,12 @@ func CaptureStatusLine(data []byte, path string) (string, error) {
 		return "AGY", err
 	}
 
-	// Dynamically auto-route to specific account status files based on active account email
+	// Dynamically auto-route to specific account status files based on active account email or AGY_ACCOUNT env
 	dir := filepath.Dir(path)
+	if envAccount := strings.TrimSpace(strings.ToLower(os.Getenv("AGY_ACCOUNT"))); envAccount != "" {
+		_ = writeStatusFile(filepath.Join(dir, fmt.Sprintf("antigravity-%s-status.json", envAccount)), state)
+	}
+
 	if slug := extractAccountSlug(payload.Email); slug != "" {
 		_ = writeStatusFile(filepath.Join(dir, fmt.Sprintf("antigravity-%s-status.json", slug)), state)
 
