@@ -96,6 +96,7 @@ func TestFetch_Success_AuthOKExposesModels(t *testing.T) {
 }
 
 func TestFetch_AuthRequired_NoKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	acct := core.AccountConfig{
 		ID:        "opencode",
 		Provider:  "opencode",
@@ -219,6 +220,7 @@ func TestFetch_ConsoleEnrichmentAutoDiscoversWorkspaceID(t *testing.T) {
 // it to a false StatusOK. It must now surface the underlying auth-required
 // status instead.
 func TestFetch_BrowserSessionOnlyNoAPIKey_ConsoleFailureSurfacesAuthNotOK(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	origLoadStoredSession := loadStoredSession
 	t.Cleanup(func() { loadStoredSession = origLoadStoredSession })
 
