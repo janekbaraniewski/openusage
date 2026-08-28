@@ -201,20 +201,29 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		modelCount := snap.Attributes["available_models_count"]
 		if bal, ok := snap.Metrics["console_balance"]; ok && bal.Remaining != nil {
 			msg := fmt.Sprintf("$%.2f balance", *bal.Remaining)
-			if modelCount != "" {
-				msg += fmt.Sprintf(" · %s Zen models", modelCount)
+			if rolling, ok := snap.Metrics["rolling_usage"]; ok && rolling.Remaining != nil {
+				msg += fmt.Sprintf(" · %.2f%% 5h", *rolling.Remaining)
+			} else if rolling, ok := snap.Metrics["rolling_usage"]; ok && rolling.Used != nil {
+				msg += fmt.Sprintf(" · %.2f%% 5h", 100-*rolling.Used)
 			}
-			if rolling, ok := snap.Metrics["rolling_usage"]; ok && rolling.Used != nil {
-				msg += fmt.Sprintf(" · %.0f%% 5h", *rolling.Used)
-			}
-			if weekly, ok := snap.Metrics["weekly_usage"]; ok && weekly.Used != nil {
-				msg += fmt.Sprintf(" · %.0f%% weekly", *weekly.Used)
+			if weekly, ok := snap.Metrics["weekly_usage"]; ok && weekly.Remaining != nil {
+				msg += fmt.Sprintf(" · %.2f%% weekly", *weekly.Remaining)
+			} else if weekly, ok := snap.Metrics["weekly_usage"]; ok && weekly.Used != nil {
+				msg += fmt.Sprintf(" · %.2f%% weekly", 100-*weekly.Used)
 			}
 			snap.Message = msg
+		} else if rolling, ok := snap.Metrics["rolling_usage"]; ok && (rolling.Remaining != nil || rolling.Used != nil) {
+			rRem := 100.0
+			if rolling.Remaining != nil {
+				rRem = *rolling.Remaining
+			} else if rolling.Used != nil {
+				rRem = 100 - *rolling.Used
+			}
+			snap.Message = fmt.Sprintf("OpenCode Go · 5h %.2f%% rem", rRem)
 		} else if modelCount != "" {
-			snap.Message = fmt.Sprintf("Auth OK · %s Zen models", modelCount)
+			snap.Message = fmt.Sprintf("OpenCode Go (%s models)", modelCount)
 		} else {
-			snap.Message = "Auth OK"
+			snap.Message = "OpenCode Go"
 		}
 	}
 	return snap, nil
