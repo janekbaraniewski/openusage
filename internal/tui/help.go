@@ -126,7 +126,6 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"p", "Toggle provider visibility menu"},
 		{", / Shift+S", "Open settings modal"},
 		{"/", "Filter providers"},
-		{"v / Shift+V", "Cycle dashboard view"},
 		{"Mouse wheel", "Scroll panels/details/widgets"},
 		{"PgUp/PgDn", "Scroll panel or selected widget"},
 		{"Ctrl+U / Ctrl+D", "Fast tile scroll"},
@@ -147,6 +146,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		struct{ key, desc string }{"r", "Refresh"},
 		struct{ key, desc string }{"t", "Cycle theme"},
 		struct{ key, desc string }{"w", "Cycle time window"},
+		struct{ key, desc string }{"u / Shift+U", "Toggle usage mode (remaining / used)"},
 		struct{ key, desc string }{"c", "toggle hide-costs for focused account (auto/hide/show)"},
 	)
 

@@ -14,7 +14,7 @@ reads that manifest and never invents glyphs of its own; to add or change a
 glyph, edit the JSON.
 
 For each glyph entry the matching SVG is read from
-``website/public/icons/<svg>.svg``. The SVGs are monochrome
+``internal/tmux/assets/icons/<svg>.svg``. The SVGs are monochrome
 (``fill="currentColor"``), use ``viewBox="0 0 24 24"`` and ``fill-rule="evenodd"``,
 and contain one or more ``<path d="...">`` elements. All paths in a single SVG
 are merged into one glyph.
@@ -72,7 +72,7 @@ except ImportError as exc:  # pragma: no cover - environment guard
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 MANIFEST_PATH = os.path.join(REPO_ROOT, "internal", "tmux", "assets", "icons.json")
-ICONS_DIR = os.path.join(REPO_ROOT, "website", "public", "icons")
+ICONS_DIR = os.path.join(REPO_ROOT, "internal", "tmux", "assets", "icons")
 OUTPUT_PATH = os.path.join(REPO_ROOT, "internal", "tmux", "assets", "openusage-icons.ttf")
 
 # SVG_VIEWBOX and INK_FILL come from _iconfont_common.

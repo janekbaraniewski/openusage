@@ -104,7 +104,7 @@ func TestRenderToolMixBarNtcharts(t *testing.T) {
 	if out == "" {
 		t.Fatal("expected stacked tool bar output")
 	}
-	if got := len(stripANSI(out)); got != 20 {
+	if got := len(StripANSI(out)); got != 20 {
 		t.Fatalf("expected visible width 20, got %d", got)
 	}
 }
@@ -277,7 +277,7 @@ func TestRenderNTStackedBarUsesRequestedWidth(t *testing.T) {
 	if strings.Contains(out, "\n") {
 		t.Fatalf("expected single-line output, got %q", out)
 	}
-	if got := len(stripANSI(out)); got != 24 {
-		t.Fatalf("expected visible width 24, got %d (%q)", got, stripANSI(out))
+	if got := len(StripANSI(out)); got != 24 {
+		t.Fatalf("expected visible width 24, got %d (%q)", got, StripANSI(out))
 	}
 }

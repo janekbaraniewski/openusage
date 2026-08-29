@@ -178,6 +178,7 @@ type Services interface {
 	SaveDashboardProviders(providers []config.DashboardProviderConfig) error
 	SaveDashboardProviderHideCosts(accountID string, hide *bool) error
 	SaveDashboardView(view string) error
+	SaveDashboardUsageMode(mode string) error
 	SaveDashboardWidgetSections(sections []config.DashboardWidgetSection) error
 	SaveDetailWidgetSections(sections []config.DetailWidgetSection) error
 	SaveDashboardHideSectionsWithNoData(hide bool) error
@@ -219,6 +220,7 @@ type Model struct {
 	screen screenTab
 
 	dashboardView dashboardViewMode
+	usageMode     string
 
 	analyticsFilter      filterState
 	analyticsSortBy      int             // 0=cost↓, 1=name↑, 2=tokens↓
@@ -340,6 +342,9 @@ type dashboardProviderHideCostsPersistedMsg struct {
 	err       error
 }
 type dashboardViewPersistedMsg struct {
+	err error
+}
+type dashboardUsageModePersistedMsg struct {
 	err error
 }
 type dashboardWidgetSectionsPersistedMsg struct {
@@ -502,31 +507,20 @@ func (m Model) shouldUseWidgetScroll() bool {
 	if m.screen != screenDashboard || m.mode != modeList {
 		return false
 	}
-	switch m.activeDashboardView() {
-	case dashboardViewTabs, dashboardViewCompare, dashboardViewSplit:
-		return true
-	case dashboardViewGrid:
-		return m.tileCols() > 1
-	default:
-		return false
-	}
+	return true
 }
 
 func (m Model) shouldUsePanelScroll() bool {
-	if m.screen != screenDashboard || m.mode != modeList {
-		return false
-	}
-	if m.shouldUseWidgetScroll() {
-		return false
-	}
-	if m.activeDashboardView() == dashboardViewSplit {
-		return false
-	}
-	return m.tileCols() == 1
+	return false
 }
 
 func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accounts []core.AccountConfig) {
 	m.dashboardView = normalizeDashboardViewMode(dashboardCfg.View)
+	if dashboardCfg.UsageMode == config.UsageModeUsed {
+		m.usageMode = config.UsageModeUsed
+	} else {
+		m.usageMode = config.UsageModeRemaining
+	}
 
 	accountOrder := make([]string, 0, len(accounts))
 	seenAccounts := make(map[string]bool, len(accounts))
@@ -612,6 +606,26 @@ func (m *Model) cycleHideCostsOverride(accountID string) *bool {
 		m.hideCostsByAccount[accountID] = next
 	}
 	return next
+}
+
+func (m Model) isUsageModeUsed() bool {
+	return m.usageMode == config.UsageModeUsed
+}
+
+func (m *Model) toggleUsageMode() {
+	if m.isUsageModeUsed() {
+		m.usageMode = config.UsageModeRemaining
+	} else {
+		m.usageMode = config.UsageModeUsed
+	}
+	m.invalidateRenderCaches()
+}
+
+func (m Model) usageModeStatusLabel() string {
+	if m.isUsageModeUsed() {
+		return "Used"
+	}
+	return "Remaining"
 }
 
 func (m *Model) ensureSnapshotProvidersKnown() {

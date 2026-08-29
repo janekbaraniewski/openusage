@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -10,12 +9,6 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
-
-var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-func stripANSI(s string) string {
-	return ansiPattern.ReplaceAllString(s, "")
-}
 
 func TestHandleSettingsModalKey_WidgetSectionsToggle(t *testing.T) {
 	t.Cleanup(func() { setDashboardWidgetSectionOverrides(nil) })
@@ -137,7 +130,7 @@ func TestRenderSettingsWidgetSectionsBody_RendersListOnly(t *testing.T) {
 	m.settings.show = true
 	m.settings.tab = settingsTabWidgetSections
 
-	body := stripANSI(m.renderSettingsWidgetSectionsBody(96, 20))
+	body := StripANSI(m.renderSettingsWidgetSectionsBody(96, 20))
 	if !strings.Contains(body, "Global Widget Sections") {
 		t.Fatalf("expected widget sections list in body, got: %q", body)
 	}
@@ -165,7 +158,7 @@ func TestRenderSettingsModalOverlay_WidgetSectionsIncludesSeparatePreviewPanel(t
 	m.width = 180
 	m.height = 50
 
-	overlay := stripANSI(m.renderSettingsModalOverlay())
+	overlay := StripANSI(m.renderSettingsModalOverlay())
 	if !strings.Contains(overlay, "Settings") {
 		t.Fatalf("expected settings panel in overlay, got: %q", overlay)
 	}
@@ -227,7 +220,7 @@ func TestRenderSettingsModalTabs_AlwaysSingleRow(t *testing.T) {
 		settings: settingsState{show: true, tab: settingsTabWidgetSections},
 	}
 
-	tabs := stripANSI(m.renderSettingsModalTabs(72))
+	tabs := StripANSI(m.renderSettingsModalTabs(72))
 	if strings.Contains(tabs, "\n") {
 		t.Fatalf("expected tabs in a single row, got: %q", tabs)
 	}
@@ -250,7 +243,7 @@ func TestRenderSettingsWidgetSectionsPreview_ReflectsSectionVisibility(t *testin
 		core.TimeWindow7d,
 	)
 
-	defaultPreview := stripANSI(m.renderSettingsWidgetSectionsPreview(60, 16))
+	defaultPreview := StripANSI(m.renderSettingsWidgetSectionsPreview(60, 16))
 	if !strings.Contains(defaultPreview, "Usage 5h") {
 		t.Fatalf("expected top usage section in default preview, got: %q", defaultPreview)
 	}
@@ -260,7 +253,7 @@ func TestRenderSettingsWidgetSectionsPreview_ReflectsSectionVisibility(t *testin
 		{ID: core.DashboardSectionModelBurn, Enabled: true},
 		{ID: core.DashboardSectionOtherData, Enabled: true},
 	})
-	updatedPreview := stripANSI(m.renderSettingsWidgetSectionsPreview(60, 16))
+	updatedPreview := StripANSI(m.renderSettingsWidgetSectionsPreview(60, 16))
 	if strings.Contains(updatedPreview, "Usage 5h") {
 		t.Fatalf("expected top usage section to be hidden after disabling it, got: %q", updatedPreview)
 	}
@@ -318,7 +311,7 @@ func TestRenderSettingsDetailSectionsPreview_ShowsTrendCharts(t *testing.T) {
 		{ID: core.DetailSectionTrends, Enabled: true},
 	})
 
-	preview := stripANSI(m.renderSettingsDetailSectionsPreview(110, 32))
+	preview := StripANSI(m.renderSettingsDetailSectionsPreview(110, 32))
 	if !strings.Contains(preview, "Daily Usage") {
 		t.Fatalf("expected daily trend summary in detail preview, got: %q", preview)
 	}

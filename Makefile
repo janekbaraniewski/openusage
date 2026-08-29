@@ -66,11 +66,21 @@ test-verbose: ## Run unit tests with verbose output
 
 .PHONY: run
 run: ## Run the application locally
-	$(GO) run $(CMD_DIR)/main.go
+	$(GO) run $(CMD_DIR)
 
 .PHONY: build
 build: deps ## Build the binary
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME)$(EXE) $(CMD_DIR)
+
+.PHONY: install
+install: build ## Install binary to ~/.local/bin and restart daemon if running
+	install -d $(HOME)/.local/bin
+	install -m 755 $(BIN_DIR)/$(APP_NAME)$(EXE) $(HOME)/.local/bin/$(APP_NAME)$(EXE)
+	@if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet openusage-telemetry.service 2>/dev/null; then \
+		echo "Restarting openusage-telemetry.service..."; \
+		systemctl --user restart openusage-telemetry.service; \
+	fi
+
 
 .PHONY: demo
 demo: deps ## Build and run the demo with dummy data (for screenshots)
@@ -87,24 +97,6 @@ icon-font: ## Regenerate the provider icon font (internal/tmux/assets/openusage-
 	@.venv-font/bin/pip install --quiet 'fonttools==4.63.0'
 	@.venv-font/bin/python scripts/gen-icon-font.py
 
-.PHONY: docs-install
-docs-install: ## Install the docs site dependencies
-	cd docs/site && npm install
-
-.PHONY: docs-dev
-docs-dev: ## Run the docs site dev server (http://localhost:3000/docs/)
-	cd docs/site && npm run start
-
-.PHONY: docs-build
-docs-build: ## Build the docs site to docs/site/build
-	cd docs/site && npm run build
-
-.PHONY: docs-deploy
-docs-deploy: docs-build ## Build the docs site and copy into website/public/docs
-	rm -rf website/public/docs
-	cp -r docs/site/build website/public/docs
-
 .PHONY: clean
 clean: ## Clean build artifacts
 	@rm -rf $(BIN_DIR) dist coverage.out
-	@rm -rf docs/site/build docs/site/.docusaurus

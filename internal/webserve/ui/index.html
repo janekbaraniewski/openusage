@@ -1,89 +1,47 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="deep-space">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenUsage</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23cba6f7'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%237EB8F7'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div id="app">
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <div>
-          <h1>OpenUsage</h1>
-          <p class="brand-sub">Local usage dashboard</p>
-        </div>
-      </div>
-      <nav class="tabs" aria-label="Views">
-        <button class="tab is-active" data-view="overview" type="button">Overview</button>
-        <button class="tab" data-view="providers" type="button">Providers</button>
-      </nav>
-      <div class="top-actions">
-        <span id="source-pill" class="pill">connecting</span>
-        <button id="theme-toggle" class="ghost" type="button" title="Toggle theme">Theme</button>
-        <button id="refresh-btn" class="ghost" type="button">Refresh</button>
-      </div>
-    </header>
-
-    <main>
-      <section id="kpis" class="kpi-row"></section>
-      <section id="overview-grid" class="overview-grid">
-        <article class="panel">
-          <header>
-            <h2>Spend</h2>
-            <p class="muted">Daily series across providers</p>
-          </header>
-          <div id="spend-chart" class="chart"></div>
-        </article>
-        <article class="panel">
-          <header>
-            <h2>Model mix</h2>
-            <p class="muted">Cost share from model usage</p>
-          </header>
-          <div id="model-mix" class="chart"></div>
-        </article>
-      </section>
-      <section>
-        <div class="section-head">
-          <h2>Providers</h2>
-          <p id="provider-count" class="muted"></p>
-        </div>
-        <div id="provider-grid" class="card-grid"></div>
-      </section>
-    </main>
+  <div id="app" class="dash" hidden>
+    <header id="header" class="dash-header" aria-label="Dashboard header"></header>
+    <div class="dash-body">
+      <nav id="nav" class="dash-nav" aria-label="Providers"></nav>
+      <div class="dash-vsep" aria-hidden="true"></div>
+      <main id="panel" class="dash-panel" aria-label="Provider detail"></main>
+    </div>
+    <footer id="footer" class="dash-footer" aria-label="Status bar"></footer>
   </div>
 
-  <aside id="drawer" class="drawer" hidden>
-    <div class="drawer-scrim" data-close></div>
-    <div class="drawer-panel" role="dialog" aria-labelledby="drawer-title">
-      <header>
-        <div>
-          <p id="drawer-status" class="pill"></p>
-          <h2 id="drawer-title"></h2>
-          <p id="drawer-sub" class="muted"></p>
-        </div>
-        <button class="ghost" type="button" data-close>Close</button>
-      </header>
-      <div id="drawer-body"></div>
-    </div>
-  </aside>
+  <div id="splash" class="splash">
+    <pre class="splash-logo" aria-hidden="true"> █▀█ █▀█ █▀▀ █▄░█   █░█ █▀ ▄▀█ █▀▀ █▀▀
+ █▄█ █▀▀ ██▄ █░▀█   █▄█ ▄█ █▀█ █▄█ ██▄</pre>
+    <p class="splash-text">Loading usage snapshots…</p>
+  </div>
+
+  <div id="empty-state" class="empty" hidden>
+    <pre class="splash-logo dim" aria-hidden="true"> █▀█ █▀█ █▀▀ █▄░█   █░█ █▀ ▄▀█ █▀▀ █▀▀
+ █▄█ █▀▀ ██▄ █░▀█   █▄█ ▄█ █▀█ █▄█ ██▄</pre>
+    <h2>No snapshots yet</h2>
+    <p>Start the telemetry daemon, configure providers, or run <code>openusage serve --demo</code>.</p>
+  </div>
 
   <div id="token-modal" class="modal" hidden>
     <form id="token-form" class="modal-card">
       <h2>Unlock dashboard</h2>
-      <p class="muted">This server requires a bearer token. It is stored in this tab only.</p>
+      <p class="muted">This server requires a bearer token. Stored in this tab only.</p>
       <input id="token-input" type="password" autocomplete="off" placeholder="OPENUSAGE_SERVE_TOKEN">
       <p id="token-error" class="error" hidden></p>
       <button type="submit">Continue</button>
     </form>
-  </div>
-
-  <div id="empty-state" class="empty" hidden>
-    <h2>No snapshots yet</h2>
-    <p>Start the telemetry daemon, or run <code>openusage serve --demo</code> to preview the layout.</p>
   </div>
 
   <script src="/app.js"></script>

@@ -84,18 +84,7 @@ func (m Model) tileGrid(contentW, contentH, n int) (cols, tileW, tileMaxHeight i
 }
 
 func (m Model) tileCols() int {
-	switch m.activeDashboardView() {
-	case dashboardViewStacked, dashboardViewTabs, dashboardViewSplit, dashboardViewCompare:
-		return 1
-	}
-
-	n := len(m.filteredIDs())
-	contentH := m.height - 3
-	if contentH < 5 {
-		contentH = 5
-	}
-	cols, _, _ := m.tileGrid(m.width, contentH, n)
-	return cols
+	return 1
 }
 
 func tableLabelMaxLen(innerW int) int {
@@ -144,9 +133,6 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 		selected := i == m.cursor
 		modelMixExpanded := selected && m.expandedModelMixTiles[id]
 		bodyOffset := 0
-		if selected && m.activeDashboardView() == dashboardViewGrid && cols > 1 {
-			bodyOffset = m.tileOffset
-		}
 		rendered := m.renderTile(snap, selected, modelMixExpanded, tileW, tileMaxHeight, bodyOffset)
 		tiles = append(tiles, strings.Split(rendered, "\n"))
 	}
@@ -366,15 +352,8 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	if innerW < 10 {
 		innerW = 10
 	}
-	truncate := func(s string) string {
-		if lipgloss.Width(s) > innerW {
-			return s[:innerW-1] + "…"
-		}
-		return s
-	}
-
 	widget := dashboardWidget(snap.ProviderID)
-	di := computeDisplayInfo(snap, widget, m.resolveHideCosts(snap))
+	di := computeDisplayInfo(snap, widget, m.resolveHideCosts(snap), m.usageMode)
 	provColor := ProviderColor(snap.ProviderID)
 	accentSep := lipgloss.NewStyle().Foreground(provColor).Render(strings.Repeat("━", innerW))
 	dimSep := surface1Style.Render(strings.Repeat("─", innerW))
@@ -385,17 +364,13 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	if selected {
 		nameStyle = tileNameSelectedStyle
 	}
-	badge := StatusBadge(snap.Status)
-	badgeW := lipgloss.Width(badge)
-
-	// Time window pill for top-right corner (next to status badge).
-	twPill := lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("⏱ " + m.timeWindow.Label())
+	badge := SnapshotStatusBadge(snap)
+	rightPart := badge
 	if m.refreshing {
 		frame := m.animFrame % len(SpinnerFrames)
-		twPill += " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
+		rightPart = lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame]) + " " + badge
 	}
-	twPillW := lipgloss.Width(twPill)
-	rightW := twPillW + 1 + badgeW // pill + space + badge
+	rightW := lipgloss.Width(rightPart)
 
 	name := snap.AccountID
 	maxName := innerW - rightW - 4
@@ -410,27 +385,11 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	if gap < 1 {
 		gap = 1
 	}
-	hdrLine1 := hdrLeft + strings.Repeat(" ", gap) + twPill + " " + badge
+	hdrLine1 := hdrLeft + strings.Repeat(" ", gap) + rightPart
 
-	var hdrLine2 string
-	provID := snap.ProviderID
-	if di.tagEmoji != "" && di.tagLabel != "" {
-		tc := tagColor(di.tagLabel)
-		tag := lipgloss.NewStyle().Foreground(tc).Bold(true).Render(di.tagEmoji + " " + di.tagLabel)
-		maxProv := innerW - lipgloss.Width(tag) - 4
-		if maxProv < 1 {
-			maxProv = 1
-		}
-		if len(provID) > maxProv {
-			provID = provID[:maxProv-1] + "…"
-		}
-		hdrLine2 = tag + " " + dimStyle.Render("· "+provID)
-	} else {
-		hdrLine2 = dimStyle.Render(truncate(provID))
-	}
 	headerMeta := buildTileHeaderMetaLines(snap, widget, innerW, m.animFrame)
 
-	header := []string{hdrLine1, hdrLine2}
+	header := []string{hdrLine1}
 	if len(headerMeta) > 0 {
 		header = append(header, headerMeta...)
 	}
@@ -512,14 +471,16 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 
 	if bodyBudget > 0 && len(fullBody) > bodyBudget && len(body) > 0 {
+		bodyCopy := append([]string(nil), body...)
 		if offset > 0 {
-			body[0] = dimStyle.Render("  ▲ more above")
+			bodyCopy[0] = dimStyle.Render("  ▲ more above")
 		}
 		if bar := renderVerticalScrollBarLine(innerW, offset, bodyBudget, len(fullBody)); bar != "" {
-			body[len(body)-1] = bar
+			bodyCopy[len(bodyCopy)-1] = bar
 		} else if offset+bodyBudget < len(fullBody) {
-			body[len(body)-1] = dimStyle.Render("  ▼ more below")
+			bodyCopy[len(bodyCopy)-1] = dimStyle.Render("  ▼ more below")
 		}
+		body = bodyCopy
 	}
 
 	return renderWithBody(body)

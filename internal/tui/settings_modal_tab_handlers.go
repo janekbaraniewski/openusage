@@ -152,31 +152,6 @@ func (m Model) handleSettingsTabThemeKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) 
 	return m, nil, false
 }
 
-func (m Model) handleSettingsTabViewKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	switch msg.String() {
-	case "up", "k":
-		if m.settings.viewCursor > 0 {
-			m.settings.viewCursor--
-		}
-		return m, nil, true
-	case "down", "j":
-		if m.settings.viewCursor < len(dashboardViewOptions)-1 {
-			m.settings.viewCursor++
-		}
-		return m, nil, true
-	case " ", "enter":
-		if len(dashboardViewOptions) == 0 {
-			return m, nil, true
-		}
-		selected := dashboardViewByIndex(m.settings.viewCursor)
-		m.setDashboardView(selected)
-		m.settings.viewCursor = dashboardViewIndex(selected)
-		m.settings.status = "saving view..."
-		return m, m.persistDashboardViewCmd(), true
-	}
-	return m, nil, false
-}
-
 func (m Model) handleSettingsTabAPIKeysKey(msg tea.KeyMsg, ids []string) (Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "up", "k":

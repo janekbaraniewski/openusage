@@ -3,657 +3,393 @@ package cursor
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"math"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-func TestProvider_ID(t *testing.T) {
-	p := New()
-	if p.ID() != "cursor" {
-		t.Errorf("Expected ID 'cursor', got %q", p.ID())
-	}
-}
+const sampleCursorStatusLineJSON = `{
+  "session_id": "9e1e136b0c36226ebf417f5af0faeb11",
+  "session_name": "feature-task",
+  "transcript_path": "/home/user/.agent-containers/physics/.cursor/chats/9e1e136b0c36226ebf417f5af0faeb11/transcript.jsonl",
+  "render_width_chars": 120,
+  "cwd": "/tmp/cursor-project",
+  "autorun": false,
+  "model": {
+    "id": "claude-4-opus",
+    "display_name": "Claude 4 Opus",
+    "param_summary": "(Thinking)",
+    "max_mode": true
+  },
+  "workspace": {
+    "current_dir": "/tmp/cursor-project",
+    "project_dir": "/tmp/cursor-project/.cursor/transcripts",
+    "added_dirs": []
+  },
+  "version": "1.2.3",
+  "output_style": {
+    "name": "default"
+  },
+  "context_window": {
+    "total_input_tokens": 1200,
+    "total_output_tokens": 300,
+    "context_window_size": 200000,
+    "used_percentage": 15.0,
+    "remaining_percentage": 85.0,
+    "current_usage": {
+      "input_tokens": 100,
+      "output_tokens": 47,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_write_tokens": 0
+    }
+  },
+  "quota": {
+    "pro": {
+      "remaining_fraction": 0.12,
+      "reset_time": "2026-08-29T23:59:59Z"
+    }
+  },
+  "vim": {
+    "mode": "NORMAL"
+  },
+  "worktree": {
+    "name": "my-branch",
+    "path": "/tmp/cursor-project"
+  },
+  "auth_info": {
+    "email": "physicsxd2izi@gmail.com",
+    "displayName": "Nurul Islam"
+  }
+}`
 
-func TestProvider_Describe(t *testing.T) {
-	p := New()
-	info := p.Describe()
-	if info.Name != "Cursor IDE" {
-		t.Errorf("Expected name 'Cursor IDE', got %q", info.Name)
-	}
-	if info.DocURL != "https://www.cursor.com/" {
-		t.Errorf("Expected DocURL 'https://www.cursor.com/', got %q", info.DocURL)
-	}
-	if len(info.Capabilities) == 0 {
-		t.Error("Expected non-empty capabilities")
-	}
-}
-
-func TestProvider_Fetch_NoData(t *testing.T) {
-	p := New()
-	snap, err := p.Fetch(context.Background(), testCursorAccount("test-cursor", "", map[string]string{
-		"tracking_db": "/nonexistent/ai-code-tracking.db",
-		"state_db":    "/nonexistent/state.vscdb",
-	}))
+func TestCaptureStatusLineAndFetch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cursor-status.json")
+	line, err := CaptureStatusLine([]byte(sampleCursorStatusLineJSON), path)
 	if err != nil {
-		t.Fatalf("Fetch should not error, got: %v", err)
+		t.Fatalf("CaptureStatusLine() error = %v", err)
+	}
+	if want := "Cursor · Claude 4 Opus (Thinking) · quota 12% · context 15%"; line != want {
+		t.Fatalf("CaptureStatusLine() = %q, want %q", line, want)
 	}
 
-	if snap.Status != core.StatusError {
-		t.Errorf("Expected StatusError when no data, got %v", snap.Status)
-	}
-}
-
-func TestProvider_Fetch_WithMockAPI(t *testing.T) {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat state file: %v", err)
 		}
-		json.NewEncoder(w).Encode(currentPeriodUsageResp{
-			BillingCycleStart: "1768055295000",
-			BillingCycleEnd:   "1770733695000",
-			PlanUsage: planUsage{
-				TotalSpend:       4500,
-				IncludedSpend:    2000,
-				BonusSpend:       2500,
-				Limit:            2000,
-				AutoPercentUsed:  50,
-				APIPercentUsed:   75,
-				TotalPercentUsed: 65,
-			},
-			SpendLimitUsage: spendLimitUsage{
-				TotalSpend:      10000,
-				PooledLimit:     50000,
-				PooledUsed:      10000,
-				PooledRemaining: 40000,
-				IndividualUsed:  8000,
-				LimitType:       "team",
-			},
-			DisplayThreshold: 200,
-			DisplayMessage:   "You've used 65% of your plan",
-		})
-	})
-
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(planInfoResp{
-			PlanInfo: struct {
-				PlanName            string  `json:"planName"`
-				IncludedAmountCents float64 `json:"includedAmountCents"`
-				Price               string  `json:"price"`
-				BillingCycleEnd     string  `json:"billingCycleEnd"`
-			}{
-				PlanName:            "Team",
-				IncludedAmountCents: 2000,
-				Price:               "$40/mo",
-				BillingCycleEnd:     "1770733695000",
-			},
-		})
-	})
-
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(aggregatedUsageResp{
-			Aggregations: []modelAggregation{
-				{
-					ModelIntent:  "claude-4.5-opus-high-thinking",
-					InputTokens:  "2343133",
-					OutputTokens: "1629263",
-					TotalCents:   17109.57,
-					Tier:         1,
-				},
-				{
-					ModelIntent:  "gpt-5.2-codex",
-					InputTokens:  "1794263",
-					OutputTokens: "92146",
-					TotalCents:   1098.95,
-					Tier:         1,
-				},
-			},
-		})
-	})
-
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetHardLimit", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(hardLimitResp{NoUsageBasedAllowed: true})
-	})
-
-	mux.HandleFunc("/auth/full_stripe_profile", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(stripeProfileResp{
-			MembershipType:           "enterprise",
-			IsTeamMember:             true,
-			TeamID:                   6648893,
-			TeamMembershipType:       "SELF_SERVE",
-			IndividualMembershipType: "free",
-		})
-	})
-
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetUsageLimitPolicyStatus", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(usageLimitPolicyResp{
-			CanConfigureSpendLimit: true,
-			LimitType:              "user-team",
-		})
-	})
-
-	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	p := &Provider{}
-
-	snap := core.UsageSnapshot{
-		ProviderID: p.ID(),
-		AccountID:  "test-cursor-api",
-		Metrics:    make(map[string]core.Metric),
-		Raw:        make(map[string]string),
-	}
-
-	var periodUsage currentPeriodUsageResp
-	err := p.doPost(context.Background(), "test-token",
-		fmt.Sprintf("%s/aiserver.v1.DashboardService/GetCurrentPeriodUsage", server.URL),
-		&periodUsage)
-	if err != nil {
-		t.Fatalf("GetCurrentPeriodUsage failed: %v", err)
-	}
-
-	if periodUsage.PlanUsage.TotalPercentUsed != 65 {
-		t.Errorf("Expected TotalPercentUsed=65, got %f", periodUsage.PlanUsage.TotalPercentUsed)
-	}
-	if periodUsage.SpendLimitUsage.PooledRemaining != 40000 {
-		t.Errorf("Expected PooledRemaining=40000, got %f", periodUsage.SpendLimitUsage.PooledRemaining)
-	}
-	if periodUsage.DisplayMessage != "You've used 65% of your plan" {
-		t.Errorf("Unexpected display message: %s", periodUsage.DisplayMessage)
-	}
-
-	var planInfo planInfoResp
-	err = p.doPost(context.Background(), "test-token",
-		fmt.Sprintf("%s/aiserver.v1.DashboardService/GetPlanInfo", server.URL),
-		&planInfo)
-	if err != nil {
-		t.Fatalf("GetPlanInfo failed: %v", err)
-	}
-	if planInfo.PlanInfo.PlanName != "Team" {
-		t.Errorf("Expected PlanName='Team', got %q", planInfo.PlanInfo.PlanName)
-	}
-	if planInfo.PlanInfo.Price != "$40/mo" {
-		t.Errorf("Expected Price='$40/mo', got %q", planInfo.PlanInfo.Price)
-	}
-
-	var aggUsage aggregatedUsageResp
-	err = p.doPost(context.Background(), "test-token",
-		fmt.Sprintf("%s/aiserver.v1.DashboardService/GetAggregatedUsageEvents", server.URL),
-		&aggUsage)
-	if err != nil {
-		t.Fatalf("GetAggregatedUsageEvents failed: %v", err)
-	}
-	if len(aggUsage.Aggregations) != 2 {
-		t.Fatalf("Expected 2 aggregations, got %d", len(aggUsage.Aggregations))
-	}
-	if aggUsage.Aggregations[0].ModelIntent != "claude-4.5-opus-high-thinking" {
-		t.Errorf("Expected first model 'claude-4.5-opus-high-thinking', got %q", aggUsage.Aggregations[0].ModelIntent)
-	}
-	if aggUsage.Aggregations[0].TotalCents != 17109.57 {
-		t.Errorf("Expected TotalCents=17109.57, got %f", aggUsage.Aggregations[0].TotalCents)
-	}
-
-	var profile stripeProfileResp
-	err = p.callRESTAPI(context.Background(), server.URL, "test-token",
-		"", &profile) // Won't work with test server directly
-	req, _ := http.NewRequest("GET", server.URL+"/auth/full_stripe_profile", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Stripe profile request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	json.NewDecoder(resp.Body).Decode(&profile)
-	if profile.MembershipType != "enterprise" {
-		t.Errorf("Expected membership 'enterprise', got %q", profile.MembershipType)
-	}
-	if !profile.IsTeamMember {
-		t.Error("Expected IsTeamMember=true")
-	}
-
-	_ = snap // We've verified the individual API responses parse correctly
-}
-
-func TestProvider_Fetch_APIUnauthorized(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"code":"unauthenticated"}`, http.StatusUnauthorized)
-	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	p := New()
-
-	var result map[string]interface{}
-	err := p.doPost(context.Background(), "invalid-token",
-		fmt.Sprintf("%s/aiserver.v1.DashboardService/GetCurrentPeriodUsage", server.URL),
-		&result)
-
-	if err == nil {
-		t.Error("Expected error for unauthorized request")
-	}
-}
-
-func TestProvider_Fetch_ExposesPlanSplitAndCacheTokenMetrics(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(currentPeriodUsageResp{
-			BillingCycleStart: "1768055295000",
-			BillingCycleEnd:   "1770733695000",
-			PlanUsage: planUsage{
-				TotalSpend:       4500,
-				IncludedSpend:    2000,
-				BonusSpend:       2500,
-				Limit:            2000,
-				AutoPercentUsed:  12.5,
-				APIPercentUsed:   87.5,
-				TotalPercentUsed: 65,
-			},
-			SpendLimitUsage: spendLimitUsage{
-				PooledLimit:     50000,
-				PooledUsed:      10000,
-				PooledRemaining: 40000,
-				IndividualUsed:  8000,
-				LimitType:       "team",
-			},
-			DisplayThreshold: 200,
-			DisplayMessage:   "You've used 65% of your plan",
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(planInfoResp{
-			PlanInfo: struct {
-				PlanName            string  `json:"planName"`
-				IncludedAmountCents float64 `json:"includedAmountCents"`
-				Price               string  `json:"price"`
-				BillingCycleEnd     string  `json:"billingCycleEnd"`
-			}{
-				PlanName:            "Team",
-				IncludedAmountCents: 2000,
-				Price:               "$40/mo",
-				BillingCycleEnd:     "1770733695000",
-			},
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(aggregatedUsageResp{
-			Aggregations: []modelAggregation{
-				{
-					ModelIntent:      "claude-4.5-opus",
-					InputTokens:      "1200",
-					OutputTokens:     "300",
-					CacheWriteTokens: "100",
-					CacheReadTokens:  "50",
-					TotalCents:       987.0,
-					Tier:             1,
-				},
-			},
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetHardLimit", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(hardLimitResp{NoUsageBasedAllowed: true})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetUsageLimitPolicyStatus", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(usageLimitPolicyResp{
-			CanConfigureSpendLimit: true,
-			LimitType:              "user-team",
-		})
-	})
-	mux.HandleFunc("/auth/full_stripe_profile", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(stripeProfileResp{
-			MembershipType:     "enterprise",
-			IsTeamMember:       true,
-			TeamID:             6648893,
-			TeamMembershipType: "SELF_SERVE",
-		})
-	})
-
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	p := New()
-	snap, err := p.Fetch(context.Background(), testCursorAccountWithBase("cursor-split-test", "test-token", server.URL, nil))
-	if err != nil {
-		t.Fatalf("Fetch returned error: %v", err)
-	}
-
-	if m, ok := snap.Metrics["plan_auto_percent_used"]; !ok || m.Used == nil || *m.Used != 12.5 {
-		t.Fatalf("plan_auto_percent_used missing or invalid: %+v", m)
-	}
-	if m, ok := snap.Metrics["plan_api_percent_used"]; !ok || m.Used == nil || *m.Used != 87.5 {
-		t.Fatalf("plan_api_percent_used missing or invalid: %+v", m)
-	}
-	if m, ok := snap.Metrics["model_claude-4.5-opus_cached_tokens"]; !ok || m.Used == nil || *m.Used != 150 {
-		t.Fatalf("model cached tokens missing or invalid: %+v", m)
-	}
-	if m, ok := snap.Metrics["model_claude-4.5-opus_input_tokens"]; !ok || m.Used == nil || *m.Used != 1200 {
-		t.Fatalf("model input tokens missing or invalid: %+v", m)
-	}
-	if m, ok := snap.Metrics["model_claude-4.5-opus_output_tokens"]; !ok || m.Used == nil || *m.Used != 300 {
-		t.Fatalf("model output tokens missing or invalid: %+v", m)
-	}
-	if _, ok := snap.Resets["billing_cycle_end"]; !ok {
-		t.Fatalf("billing_cycle_end reset missing from snapshot")
-	}
-	if snap.Raw["can_configure_spend_limit"] != "true" {
-		t.Fatalf("can_configure_spend_limit = %q, want true", snap.Raw["can_configure_spend_limit"])
-	}
-
-	// team_budget metric: pooled limit/used in dollars (50000/100=500, 10000/100=100)
-	if m, ok := snap.Metrics["team_budget"]; !ok {
-		t.Fatal("team_budget metric missing")
-	} else {
-		if m.Limit == nil || *m.Limit != 500 {
-			t.Fatalf("team_budget.Limit = %v, want 500", m.Limit)
-		}
-		if m.Used == nil || *m.Used != 100 {
-			t.Fatalf("team_budget.Used = %v, want 100", m.Used)
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("state file mode = %o, want 600", got)
 		}
 	}
-	// team_budget_self metric: individual spend in dollars (8000/100=80)
-	if m, ok := snap.Metrics["team_budget_self"]; !ok {
-		t.Fatal("team_budget_self metric missing")
-	} else if m.Used == nil || *m.Used != 80 {
-		t.Fatalf("team_budget_self.Used = %v, want 80", m.Used)
-	}
-	// team_budget_others metric: others spend in dollars ((10000-8000)/100=20)
-	if m, ok := snap.Metrics["team_budget_others"]; !ok {
-		t.Fatal("team_budget_others metric missing")
-	} else if m.Used == nil || *m.Used != 20 {
-		t.Fatalf("team_budget_others.Used = %v, want 20", m.Used)
-	}
-}
-
-func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointErrors(t *testing.T) {
-	var aggCalls int
-	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
-		aggCalls++
-		if aggCalls == 1 {
-			json.NewEncoder(w).Encode(aggregatedUsageResp{
-				Aggregations: []modelAggregation{
-					{
-						ModelIntent:  "claude-4.5-opus",
-						InputTokens:  "12345",
-						OutputTokens: "678",
-						TotalCents:   987.0,
-					},
-				},
-			})
-			return
-		}
-		http.Error(w, "temporary upstream error", http.StatusInternalServerError)
-	}))
-	defer server.Close()
-	p := New()
-	acct := testCursorAccountWithBase("cursor-cache-error", "test-token", server.URL, nil)
-
-	first, err := p.Fetch(context.Background(), acct)
-	if err != nil {
-		t.Fatalf("first Fetch returned error: %v", err)
-	}
-	if _, ok := first.Metrics["model_claude-4.5-opus_cost"]; !ok {
-		t.Fatalf("first Fetch missing model cost metric")
-	}
-
-	second, err := p.Fetch(context.Background(), acct)
-	if err != nil {
-		t.Fatalf("second Fetch returned error: %v", err)
-	}
-	metric, ok := second.Metrics["model_claude-4.5-opus_cost"]
-	if !ok {
-		t.Fatalf("second Fetch missing cached model cost metric")
-	}
-	if metric.Used == nil || *metric.Used != 9.87 {
-		t.Fatalf("second Fetch model cost = %v, want 9.87", metric.Used)
-	}
-	if second.Raw["model_claude-4.5-opus_input_tokens"] != "12345" {
-		t.Fatalf("second Fetch missing cached input tokens, got %q", second.Raw["model_claude-4.5-opus_input_tokens"])
-	}
-}
-
-func TestProvider_Fetch_UsesCachedModelAggregationWhenAggregationEndpointReturnsEmpty(t *testing.T) {
-	var aggCalls int
-	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
-		aggCalls++
-		if aggCalls == 1 {
-			json.NewEncoder(w).Encode(aggregatedUsageResp{
-				Aggregations: []modelAggregation{
-					{
-						ModelIntent:  "gemini-2.5-pro",
-						InputTokens:  "23456",
-						OutputTokens: "789",
-						TotalCents:   123.0,
-					},
-				},
-			})
-			return
-		}
-		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
-	}))
-	defer server.Close()
-	p := New()
-	acct := testCursorAccountWithBase("cursor-cache-empty", "test-token", server.URL, nil)
-
-	first, err := p.Fetch(context.Background(), acct)
-	if err != nil {
-		t.Fatalf("first Fetch returned error: %v", err)
-	}
-	if _, ok := first.Metrics["model_gemini-2.5-pro_cost"]; !ok {
-		t.Fatalf("first Fetch missing model cost metric")
-	}
-
-	second, err := p.Fetch(context.Background(), acct)
-	if err != nil {
-		t.Fatalf("second Fetch returned error: %v", err)
-	}
-	metric, ok := second.Metrics["model_gemini-2.5-pro_cost"]
-	if !ok {
-		t.Fatalf("second Fetch missing cached model cost metric")
-	}
-	if metric.Used == nil || *metric.Used != 1.23 {
-		t.Fatalf("second Fetch model cost = %v, want 1.23", metric.Used)
-	}
-	if second.Raw["model_gemini-2.5-pro_output_tokens"] != "789" {
-		t.Fatalf("second Fetch missing cached output tokens, got %q", second.Raw["model_gemini-2.5-pro_output_tokens"])
-	}
-}
-
-func TestProvider_Fetch_MergesAPIWithLocalTrackingBreakdowns(t *testing.T) {
-	now := time.Now().In(time.Local)
-	anchor := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
-	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
-		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: anchor.Add(-2 * time.Hour).UnixMilli()},
-		{Hash: "h2", Source: "composer", Model: "claude-4.5-opus", CreatedAt: anchor.AddDate(0, 0, -1).UnixMilli()},
-		{Hash: "h3", Source: "tab", Model: "claude-4.5-opus", CreatedAt: anchor.Add(-1 * time.Hour).UnixMilli()},
-		{Hash: "h4", Source: "cli", Model: "gpt-4o", CreatedAt: anchor.Add(-90 * time.Minute).UnixMilli()},
-	})
-
-	server := httptest.NewServer(newCursorAPITestMux(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
-	}))
-	defer server.Close()
 
 	p := New()
 	snap, err := p.Fetch(context.Background(), core.AccountConfig{
-		ID:       "cursor-api-local-merge",
+		ID:       "cursor",
 		Provider: "cursor",
-		Token:    "test-token",
-		BaseURL:  server.URL,
-		RuntimeHints: map[string]string{
-			"tracking_db": trackingDBPath,
+		ProviderPaths: map[string]string{
+			"status_file": path,
 		},
 	})
 	if err != nil {
-		t.Fatalf("Fetch returned error: %v", err)
+		t.Fatalf("Fetch() error = %v", err)
 	}
-
-	if _, ok := snap.Metrics["plan_spend"]; !ok {
-		t.Fatalf("expected API plan_spend metric to be present")
+	if snap.Status != core.StatusNearLimit {
+		t.Fatalf("Fetch() status = %q, want %q", snap.Status, core.StatusNearLimit)
 	}
-	if m, ok := snap.Metrics["source_composer_requests"]; !ok || m.Used == nil || *m.Used != 2 {
-		t.Fatalf("source_composer_requests missing or invalid: %+v", m)
+	if got := metricUsed(t, snap, "quota"); got != 88 {
+		t.Fatalf("quota used = %v, want 88", got)
 	}
-	if m, ok := snap.Metrics["source_tab_requests"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("source_tab_requests missing or invalid: %+v", m)
+	if got := metricRemaining(t, snap, "context_window"); got != 85 {
+		t.Fatalf("context remaining = %v, want 85", got)
 	}
-	if m, ok := snap.Metrics["source_cli_requests"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("source_cli_requests missing or invalid: %+v", m)
+	if got := metricUsed(t, snap, "total_tokens"); got != 1500 {
+		t.Fatalf("total tokens = %v, want 1500", got)
 	}
-	// Verify interface_* metrics are emitted from source breakdown.
-	if m, ok := snap.Metrics["interface_composer"]; !ok || m.Used == nil || *m.Used != 2 {
-		t.Fatalf("interface_composer missing or invalid: %+v", m)
+	if got := metricUsed(t, snap, "current_tokens"); got != 147 {
+		t.Fatalf("current tokens = %v, want 147", got)
 	}
-	if m, ok := snap.Metrics["interface_tab"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("interface_tab missing or invalid: %+v", m)
+	if got := snap.Attributes["workspace"]; got != "/tmp/cursor-project" {
+		t.Fatalf("workspace = %q, want project path", got)
 	}
-	if m, ok := snap.Metrics["interface_cli"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("interface_cli missing or invalid: %+v", m)
+	if got := snap.Attributes["model"]; got != "Claude 4 Opus" {
+		t.Fatalf("model = %q, want Claude 4 Opus", got)
 	}
-	if m, ok := snap.Metrics["client_ide_sessions"]; !ok || m.Used == nil || *m.Used != 3 {
-		t.Fatalf("client_ide_sessions missing or invalid: %+v", m)
+	if got := snap.Attributes["model_param"]; got != "(Thinking)" {
+		t.Fatalf("model_param = %q, want (Thinking)", got)
 	}
-	if m, ok := snap.Metrics["client_cli_agents_sessions"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("client_cli_agents_sessions missing or invalid: %+v", m)
+	if got := snap.Attributes["worktree"]; got != "my-branch" {
+		t.Fatalf("worktree = %q, want my-branch", got)
 	}
-	if m, ok := snap.Metrics["model_claude_4_5_opus_requests"]; !ok || m.Used == nil || *m.Used != 3 {
-		t.Fatalf("model_claude_4_5_opus_requests missing or invalid: %+v", m)
+	if len(snap.ModelUsage) != 1 || snap.ModelUsage[0].RawModelID != "Claude 4 Opus" {
+		t.Fatalf("model usage = %+v, want one Claude 4 Opus row", snap.ModelUsage)
 	}
-	if m, ok := snap.Metrics["model_gpt_4o_requests"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("model_gpt_4o_requests missing or invalid: %+v", m)
-	}
-	if len(snap.DailySeries["usage_source_composer"]) < 2 {
-		t.Fatalf("expected usage_source_composer daily series with at least 2 points")
-	}
-	if len(snap.DailySeries["usage_model_claude_4_5_opus"]) < 2 {
-		t.Fatalf("expected usage_model_claude_4_5_opus daily series with at least 2 points")
-	}
-	if snap.Message == "Local Cursor IDE usage tracking (API unavailable)" {
-		t.Fatalf("expected API message to be preserved when API succeeds")
+	if snap.Resets["quota_pro_reset"].IsZero() || snap.Resets["quota_reset"].IsZero() {
+		t.Fatal("expected quota reset timestamps")
 	}
 }
 
-func TestProvider_Fetch_PreservesLocalMetricsWhenOptionalAPICallsTimeout(t *testing.T) {
-	now := time.Now()
-	trackingDBPath := createCursorTrackingDBForTest(t, []cursorTrackingRow{
-		{Hash: "h1", Source: "composer", Model: "claude-4.5-opus", CreatedAt: now.Add(-1 * time.Hour).UnixMilli()},
+func TestFetchMissingStatusLineIsNonFatal(t *testing.T) {
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "cursor",
+		Provider: "cursor",
+		ProviderPaths: map[string]string{
+			"status_file": filepath.Join(t.TempDir(), "missing.json"),
+		},
 	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if snap.Status != core.StatusAuth {
+		t.Fatalf("status = %q, want %q", snap.Status, core.StatusAuth)
+	}
+	if !strings.Contains(snap.Message, "No Cursor") {
+		t.Fatalf("message = %q, want setup guidance", snap.Message)
+	}
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(currentPeriodUsageResp{
-			BillingCycleStart: "1768055295000",
-			BillingCycleEnd:   "1770733695000",
-			PlanUsage: planUsage{
-				TotalSpend:       4500,
-				IncludedSpend:    2000,
-				BonusSpend:       2500,
-				Limit:            2000,
-				TotalPercentUsed: 65,
-			},
-			SpendLimitUsage: spendLimitUsage{
-				PooledLimit:     50000,
-				PooledUsed:      10000,
-				PooledRemaining: 40000,
-				IndividualUsed:  8000,
-				LimitType:       "team",
-			},
-			DisplayMessage: "You've used 65% of your plan",
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		json.NewEncoder(w).Encode(planInfoResp{})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(aggregatedUsageResp{Aggregations: []modelAggregation{}})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetHardLimit", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(hardLimitResp{})
-	})
-	mux.HandleFunc("/auth/full_stripe_profile", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(stripeProfileResp{})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetUsageLimitPolicyStatus", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(usageLimitPolicyResp{})
-	})
+func TestFetchCanceledContextKeepsStatusFileDiagnostic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	path := filepath.Join(t.TempDir(), "cursor-status.json")
 
-	server := httptest.NewServer(mux)
-	defer server.Close()
+	snap, err := New().Fetch(ctx, core.AccountConfig{
+		ID:       "cursor",
+		Provider: "cursor",
+		ProviderPaths: map[string]string{
+			"status_file": path,
+		},
+	})
+	if err == nil {
+		t.Fatal("Fetch() error = nil, want canceled context error")
+	}
+	if got := snap.Raw["status_file"]; got != path {
+		t.Fatalf("status_file diagnostic = %q, want %q", got, path)
+	}
+}
+
+func TestTelemetryRevisionAndCurrentUsage(t *testing.T) {
+	p := New()
+	events, err := p.ParseHookPayload([]byte(sampleCursorStatusLineJSON), shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("ParseHookPayload() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ParseHookPayload() returned %d events, want 1", len(events))
+	}
+	event := events[0]
+	if event.EventType != shared.TelemetryEventTypeMessageUsage {
+		t.Fatalf("event type = %q, want message usage", event.EventType)
+	}
+	if event.InputTokens == nil || *event.InputTokens != 100 {
+		t.Fatalf("input tokens = %v, want 100", event.InputTokens)
+	}
+	if event.TotalTokens == nil || *event.TotalTokens != 147 {
+		t.Fatalf("total tokens = %v, want 147", event.TotalTokens)
+	}
+	if event.TurnID == "" || !strings.Contains(event.TurnID, ":status:") {
+		t.Fatalf("turn ID = %q, want stable status revision", event.TurnID)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(sampleCursorStatusLineJSON), &payload); err != nil {
+		t.Fatalf("unmarshal sample: %v", err)
+	}
+	contextWindow := payload["context_window"].(map[string]any)
+	contextWindow["total_output_tokens"] = float64(450)
+	changed, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal changed payload: %v", err)
+	}
+	changedEvents, err := p.ParseHookPayload(changed, shared.TelemetryCollectOptions{})
+	if err != nil {
+		t.Fatalf("ParseHookPayload(changed) error = %v", err)
+	}
+	if changedEvents[0].TurnID == event.TurnID {
+		t.Fatalf("turn ID did not advance when token counts changed: %q", event.TurnID)
+	}
+}
+
+func TestHasChanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cursor-status.json")
+	if err := os.WriteFile(path, []byte(sampleCursorStatusLineJSON), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+	p := New()
+	acct := core.AccountConfig{
+		ID:            "cursor",
+		Provider:      "cursor",
+		ProviderPaths: map[string]string{"status_file": path},
+	}
+	changed, err := p.HasChanged(acct, time.Now().Add(-1*time.Minute))
+	if err != nil {
+		t.Fatalf("HasChanged() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("HasChanged() = false, want true for modified file")
+	}
+
+	changed, err = p.HasChanged(acct, time.Now().Add(1*time.Minute))
+	if err != nil {
+		t.Fatalf("HasChanged() error = %v", err)
+	}
+	if changed {
+		t.Fatal("HasChanged() = true, want false for future timestamp")
+	}
+}
+
+func TestProvider_ID_and_Describe(t *testing.T) {
+	p := New()
+	if got := p.ID(); got != "cursor" {
+		t.Errorf("ID() = %q, want 'cursor'", got)
+	}
+	spec := p.Spec()
+	if spec.ID != "cursor" {
+		t.Errorf("Spec.ID = %q, want 'cursor'", spec.ID)
+	}
+	if spec.Info.Name != "Cursor IDE" {
+		t.Errorf("Spec.Info.Name = %q, want 'Cursor IDE'", spec.Info.Name)
+	}
+}
+
+func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
+	t.Helper()
+	m, ok := snap.Metrics[key]
+	if !ok || m.Used == nil {
+		t.Fatalf("metric %q missing Used value: %+v", key, snap.Metrics)
+	}
+	return *m.Used
+}
+
+func metricRemaining(t *testing.T, snap core.UsageSnapshot, key string) float64 {
+	t.Helper()
+	m, ok := snap.Metrics[key]
+	if !ok || m.Remaining == nil {
+		t.Fatalf("metric %q missing Remaining value: %+v", key, snap.Metrics)
+	}
+	return *m.Remaining
+}
+
+func TestPhysicsAndNurulzMultiAccountIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Setup physics container (unused, 100% capacity remaining)
+	physicsConfigDir := filepath.Join(tempDir, ".agent-containers", "physics", ".cursor")
+	if err := os.MkdirAll(physicsConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	physicsCLIConfig := `{
+		"authInfo": {
+			"email": "physicsxd2izi@gmail.com",
+			"displayName": "Physics Profile"
+		},
+		"model": {
+			"displayName": "Claude 3.7 Sonnet"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(physicsConfigDir, "cli-config.json"), []byte(physicsCLIConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Setup nurulz container (active usage)
+	nurulzConfigDir := filepath.Join(tempDir, ".agent-containers", "nurulz", ".cursor")
+	if err := os.MkdirAll(nurulzConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nurulzCLIConfig := `{
+		"authInfo": {
+			"email": "nurulislamz2600@gmail.com",
+			"displayName": "Nurul Profile"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(nurulzConfigDir, "cli-config.json"), []byte(nurulzCLIConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nurulzStatusFile := filepath.Join(tempDir, "cursor-nurulz-status.json")
+	nurulzStatusJSON := `{
+		"session_id": "nurulz-active-session",
+		"email": "nurulislamz2600@gmail.com",
+		"context_window": {
+			"total_input_tokens": 50000,
+			"total_output_tokens": 12000,
+			"used_percentage": 45.0,
+			"remaining_percentage": 55.0
+		},
+		"quota": {
+			"pro": {
+				"remaining_fraction": 0.55
+			}
+		}
+	}`
+	if err := os.WriteFile(nurulzStatusFile, []byte(nurulzStatusJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	p := New()
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
 
-	snap, err := p.Fetch(ctx, core.AccountConfig{
-		ID:       "cursor-optional-timeout",
+	acctPhysics := core.AccountConfig{
+		ID:       "cursor-physics",
 		Provider: "cursor",
-		Token:    "test-token",
-		BaseURL:  server.URL,
-		RuntimeHints: map[string]string{
-			"tracking_db": trackingDBPath,
+		Auth:     "local",
+		ProviderPaths: map[string]string{
+			"config_dir":  physicsConfigDir,
+			"status_file": filepath.Join(tempDir, "cursor-physics-status.json"), // does not exist yet
 		},
-	})
+	}
+	acctNurulz := core.AccountConfig{
+		ID:       "cursor-nurulz",
+		Provider: "cursor",
+		Auth:     "local",
+		ProviderPaths: map[string]string{
+			"config_dir":  nurulzConfigDir,
+			"status_file": nurulzStatusFile,
+		},
+	}
+
+	ctx := context.Background()
+	snapPhysics, err := p.Fetch(ctx, acctPhysics)
 	if err != nil {
-		t.Fatalf("Fetch returned error: %v", err)
+		t.Fatalf("Fetch(physics) error = %v", err)
+	}
+	snapNurulz, err := p.Fetch(ctx, acctNurulz)
+	if err != nil {
+		t.Fatalf("Fetch(nurulz) error = %v", err)
 	}
 
-	if _, ok := snap.Metrics["plan_spend"]; !ok {
-		t.Fatalf("expected API plan_spend metric to be present")
+	// Verify physics is ready and 100% remaining (never used)
+	if snapPhysics.Status != core.StatusOK {
+		t.Fatalf("expected physics status OK, got %v (%s)", snapPhysics.Status, snapPhysics.Message)
+	}
+	if rem := *snapPhysics.Metrics["cursor_plan_usage"].Remaining; rem != 100.0 {
+		t.Errorf("expected physics plan remaining 100%%, got %.2f%%", rem)
+	}
+	if used := *snapPhysics.Metrics["cursor_plan_usage"].Used; used != 0.0 {
+		t.Errorf("expected physics plan used 0%%, got %.2f%%", used)
 	}
 
-	if m, ok := snap.Metrics["total_ai_requests"]; !ok || m.Used == nil || *m.Used != 1 {
-		t.Fatalf("expected local total_ai_requests to be preserved, got %+v", m)
+	// Verify nurulz is ready with actual usage (45% used / 55% remaining)
+	if snapNurulz.Status != core.StatusOK {
+		t.Fatalf("expected nurulz status OK, got %v (%s)", snapNurulz.Status, snapNurulz.Message)
+	}
+	if rem := *snapNurulz.Metrics["cursor_plan_usage"].Remaining; math.Abs(rem-55.0) > 0.001 {
+		t.Errorf("expected nurulz plan remaining 55%%, got %.2f%%", rem)
+	}
+	if used := *snapNurulz.Metrics["cursor_plan_usage"].Used; math.Abs(used-45.0) > 0.001 {
+		t.Errorf("expected nurulz plan used 45%%, got %.2f%%", used)
 	}
 
-	if _, ok := snap.Raw["tracking_db_error"]; ok {
-		t.Fatalf("did not expect tracking_db_error when local data is available")
+	// Strict assertion: physics and nurulz must NOT have the same values!
+	if *snapPhysics.Metrics["cursor_plan_usage"].Used == *snapNurulz.Metrics["cursor_plan_usage"].Used {
+		t.Fatalf("Multi-account isolation failure: physics and nurulz have identical used value %.2f%%",
+			*snapPhysics.Metrics["cursor_plan_usage"].Used)
 	}
-}
-
-func newCursorAPITestMux(aggregateHandler http.HandlerFunc) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetCurrentPeriodUsage", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(currentPeriodUsageResp{
-			BillingCycleStart: "1768055295000",
-			BillingCycleEnd:   "1770733695000",
-			PlanUsage: planUsage{
-				TotalSpend:       4500,
-				IncludedSpend:    2000,
-				BonusSpend:       2500,
-				Limit:            2000,
-				TotalPercentUsed: 65,
-			},
-			SpendLimitUsage: spendLimitUsage{
-				PooledLimit:     50000,
-				PooledUsed:      10000,
-				PooledRemaining: 40000,
-				IndividualUsed:  8000,
-				LimitType:       "team",
-			},
-			DisplayMessage: "You've used 65% of your plan",
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetPlanInfo", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(planInfoResp{
-			PlanInfo: struct {
-				PlanName            string  `json:"planName"`
-				IncludedAmountCents float64 `json:"includedAmountCents"`
-				Price               string  `json:"price"`
-				BillingCycleEnd     string  `json:"billingCycleEnd"`
-			}{
-				PlanName:            "Team",
-				IncludedAmountCents: 2000,
-				Price:               "$40/mo",
-				BillingCycleEnd:     "1770733695000",
-			},
-		})
-	})
-	mux.HandleFunc("/aiserver.v1.DashboardService/GetAggregatedUsageEvents", aggregateHandler)
-	return mux
 }

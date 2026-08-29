@@ -45,37 +45,6 @@ func (m Model) renderSettingsThemeBody(w, h int) string {
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }
 
-func (m Model) renderSettingsViewBody(w, h int) string {
-	configured := m.configuredDashboardView()
-	active := m.activeDashboardView()
-	lines := settingsBodyHeaderLines("Dashboard View Mode", fmt.Sprintf("configured: %s · active: %s", configured, active))
-	lines = append(lines, dimStyle.Render("    CUR  MODE"), settingsBodyRule(w))
-	if len(dashboardViewOptions) == 0 {
-		lines = append(lines, dimStyle.Render("No dashboard views available."))
-		return padToSize(strings.Join(lines, "\n"), w, h)
-	}
-
-	cursor := clamp(m.settings.viewCursor, 0, len(dashboardViewOptions)-1)
-	start, end := listWindow(len(dashboardViewOptions), cursor, max(1, h-len(lines)))
-	for i := start; i < end; i++ {
-		option := dashboardViewOptions[i]
-		prefix := "  "
-		if i == cursor {
-			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
-		}
-		current := "  "
-		if option.ID == configured {
-			current = lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("● ")
-		}
-		label := option.Label
-		if option.ID == active && option.ID != configured {
-			label += " (auto)"
-		}
-		lines = append(lines, fmt.Sprintf("%s%s%s", prefix, current, label), "    "+dimStyle.Render(option.Description))
-	}
-	return padToSize(strings.Join(lines, "\n"), w, h)
-}
-
 func (m Model) apiKeysTabIDs() []string {
 	registered := make(map[string]bool)
 	var ids []string

@@ -44,6 +44,7 @@ func resolveDBPath(acct core.AccountConfig) string {
 		if fileExists(override) {
 			return override
 		}
+		return ""
 	}
 	for _, candidate := range defaultStateDBPaths() {
 		if candidate == "" {

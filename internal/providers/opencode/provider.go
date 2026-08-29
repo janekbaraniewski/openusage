@@ -229,6 +229,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			}
 			if resetsAt, parseErr := time.Parse(time.RFC3339, goUsage.Usage.Monthly.ResetsAt); parseErr == nil {
 				snap.Resets["monthly_usage"] = resetsAt
+				snap.Resets["monthly_usage_pct"] = resetsAt
 			}
 			if goUsage.Usage.Monthly.Status == "rate-limited" || goUsage.Usage.Rolling.Status == "rate-limited" || goUsage.Usage.Weekly.Status == "rate-limited" || mRem <= 0 || rRem <= 0 || wRem <= 0 {
 				snap.Status = core.StatusLimited

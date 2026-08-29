@@ -29,6 +29,76 @@ func providerThemeColor(providerID string) lipgloss.Color {
 	}
 }
 
+type listItemHeightInfo struct {
+	hasHeader bool
+	height    int
+}
+
+func listVisibleWindow(snapshots map[string]core.UsageSnapshot, ids []string, cursor, h int) (int, int) {
+	if len(ids) == 0 {
+		return 0, 0
+	}
+	if h <= 0 {
+		return 0, len(ids)
+	}
+
+	cursor = clamp(cursor, 0, len(ids)-1)
+	infos := make([]listItemHeightInfo, len(ids))
+	for i, id := range ids {
+		snap := snapshots[id]
+		pID := snap.ProviderID
+		hasHeader := (i == 0) || (i > 0 && snapshots[ids[i-1]].ProviderID != pID)
+		ht := 3
+		if hasHeader {
+			ht = 4
+		}
+		infos[i] = listItemHeightInfo{hasHeader: hasHeader, height: ht}
+	}
+
+	calcTotal := func(s, e int) int {
+		linesCount := 0
+		if s > 0 {
+			linesCount++
+		}
+		for idx := s; idx < e; idx++ {
+			linesCount += infos[idx].height
+		}
+		if e < len(ids) {
+			linesCount++
+		}
+		return linesCount
+	}
+
+	totalAll := calcTotal(0, len(ids))
+	if totalAll <= h {
+		return 0, len(ids)
+	}
+
+	start := cursor
+	end := cursor + 1
+
+	for {
+		expanded := false
+		if start > 0 {
+			if calcTotal(start-1, end) <= h {
+				start--
+				expanded = true
+			}
+		}
+		if end < len(ids) {
+			if calcTotal(start, end+1) <= h {
+				end++
+				expanded = true
+			}
+		}
+		if !expanded {
+			break
+		}
+	}
+
+	return start, end
+}
+
 func (m Model) renderList(w, h int) string {
 	ids := m.filteredIDs()
 	if len(ids) == 0 {
@@ -55,27 +125,14 @@ func (m Model) renderList(w, h int) string {
 		}
 	}
 
-	itemHeight := 3
-	visibleItems := h / itemHeight
-	if visibleItems < 1 {
-		visibleItems = 1
-	}
-
-	scrollStart := 0
-	if m.cursor >= visibleItems {
-		scrollStart = m.cursor - visibleItems + 1
-	}
-	scrollEnd := scrollStart + visibleItems
-	if scrollEnd > len(ids) {
-		scrollEnd = len(ids)
-		scrollStart = scrollEnd - visibleItems
-		if scrollStart < 0 {
-			scrollStart = 0
-		}
-	}
+	start, end := listVisibleWindow(m.snapshots, ids, m.cursor, h)
 
 	var lines []string
-	for i := scrollStart; i < scrollEnd; i++ {
+	if start > 0 {
+		lines = append(lines, dimStyle.Render("  ▲ "+fmt.Sprintf("%d more", start)))
+	}
+
+	for i := start; i < end; i++ {
 		snap, ok := m.snapshots[ids[i]]
 		if !ok {
 			continue
@@ -86,7 +143,7 @@ func (m Model) renderList(w, h int) string {
 		hasMultiple := providerCounts[pID] > 1
 
 		// Group header when entering a provider category
-		isFirstInGroup := (i == scrollStart) || (i > 0 && m.snapshots[ids[i-1]].ProviderID != pID)
+		isFirstInGroup := (i == 0) || (i > 0 && m.snapshots[ids[i-1]].ProviderID != pID)
 		if isFirstInGroup {
 			var headerStr string
 			groupName := strings.ToUpper(pID)
@@ -105,19 +162,16 @@ func (m Model) renderList(w, h int) string {
 		lines = append(lines, m.renderListItemWithGroup(snap, i == m.cursor, isGroupActive && hasMultiple, pColor, w))
 	}
 
-	if scrollStart > 0 {
-		lines = append([]string{dimStyle.Render("  ▲ " + fmt.Sprintf("%d more", scrollStart))}, lines...)
-	}
-	if scrollEnd < len(ids) {
-		lines = append(lines, dimStyle.Render("  ▼ "+fmt.Sprintf("%d more", len(ids)-scrollEnd)))
+	if end < len(ids) {
+		lines = append(lines, dimStyle.Render("  ▼ "+fmt.Sprintf("%d more", len(ids)-end)))
 	}
 
 	content := strings.Join(lines, "\n")
 	out := padToSize(content, w, h)
-	if len(ids) > visibleItems && h > 0 {
+	if len(ids) > (end-start) && h > 0 {
 		rendered := strings.Split(out, "\n")
 		if len(rendered) > 0 {
-			rendered[len(rendered)-1] = renderVerticalScrollBarLine(w, scrollStart, visibleItems, len(ids))
+			rendered[len(rendered)-1] = renderVerticalScrollBarLine(w, start, end-start, len(ids))
 			out = strings.Join(rendered, "\n")
 		}
 	}
@@ -125,10 +179,6 @@ func (m Model) renderList(w, h int) string {
 }
 
 func (m Model) renderSplitPanes(w, h int) string {
-	if w < 70 {
-		return m.renderTilesTabs(w, h)
-	}
-
 	leftW := w / 3
 	if leftW < minLeftWidth {
 		leftW = minLeftWidth
@@ -139,12 +189,15 @@ func (m Model) renderSplitPanes(w, h int) string {
 	if leftW > w-34 {
 		leftW = w - 34
 	}
-	if leftW < minLeftWidth || w-leftW-1 < 30 {
-		return m.renderTilesTabs(w, h)
+	if leftW < 10 {
+		leftW = w / 2
+	}
+	rightW := w - leftW - 1
+	if rightW < 10 {
+		rightW = 10
 	}
 
 	left := m.renderList(leftW, h)
-	rightW := w - leftW - 1
 	right := m.renderWidgetPanelByIndex(m.cursor, rightW, h, m.tileOffset, true)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, renderVerticalSep(h), right)
 }
@@ -207,7 +260,7 @@ func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) str
 }
 
 func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, inActiveGroup bool, pColor lipgloss.Color, w int) string {
-	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID), m.resolveHideCosts(snap))
+	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID), m.resolveHideCosts(snap), m.usageMode)
 
 	iconStr := lipgloss.NewStyle().Foreground(StatusColor(snap.Status)).Render(StatusIcon(snap.Status))
 	nameStyle := lipgloss.NewStyle().Foreground(colorText)
@@ -217,12 +270,8 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 		nameStyle = nameStyle.Foreground(colorText)
 	}
 
-	badge := StatusBadge(snap.Status)
-	tagRendered := ""
-	if di.tagEmoji != "" && di.tagLabel != "" {
-		tagRendered = lipgloss.NewStyle().Foreground(tagColor(di.tagLabel)).Render(di.tagEmoji+" "+di.tagLabel) + " "
-	}
-	rightPart := tagRendered + badge
+	badge := SnapshotStatusBadge(snap)
+	rightPart := badge
 	rightW := lipgloss.Width(rightPart)
 
 	name := snap.AccountID
@@ -248,7 +297,11 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 		if w < 35 {
 			gaugeW = 5
 		}
-		miniGauge = " " + RenderMiniGauge(di.gaugePercent, gaugeW)
+		if m.isUsageModeUsed() {
+			miniGauge = " " + RenderMiniUsageGauge(di.gaugePercent, gaugeW)
+		} else {
+			miniGauge = " " + RenderMiniGauge(di.gaugePercent, gaugeW)
+		}
 	}
 	summaryMaxW := w - 5 - lipgloss.Width(miniGauge)
 	if summaryMaxW < 5 {

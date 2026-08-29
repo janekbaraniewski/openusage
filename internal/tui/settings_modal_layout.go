@@ -112,7 +112,7 @@ func (m Model) renderSettingsModalTabs(w int) string {
 		cellW = w / n
 	}
 
-	tabTokens := []string{"PROV", "SECT", "THEME", "VIEW", "KEYS", "TELEM", "INTEG"}
+	tabTokens := []string{"PROV", "SECT", "THEME", "KEYS", "TELEM", "INTEG"}
 	if len(tabTokens) < n {
 		tabTokens = append(tabTokens, settingsTabNames[len(tabTokens):]...)
 	}
@@ -159,8 +159,6 @@ func (m Model) settingsModalHint() string {
 			return "Up/Down: select  ·  Enter: edit key  ·  c: read browser cookie  ·  b: open site  ·  x: disconnect browser  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
 		}
 		return "Up/Down: select  ·  Enter: edit key  ·  d: delete key  ·  Left/Right: switch tab  ·  Esc: close"
-	case settingsTabView:
-		return "Up/Down: select view  ·  Space/Enter: apply  ·  v/Shift+V: cycle outside settings  ·  Esc: close"
 	case settingsTabTelemetry:
 		return "Up/Down: select  ·  Space/Enter: apply time window  ·  Left/Right: switch tab  ·  Esc: close"
 	case settingsTabIntegrations:
@@ -178,8 +176,6 @@ func (m Model) renderSettingsModalBody(w, h int) string {
 		return m.renderSettingsWidgetSectionsBody(w, h)
 	case settingsTabAPIKeys:
 		return m.renderSettingsAPIKeysBody(w, h)
-	case settingsTabView:
-		return m.renderSettingsViewBody(w, h)
 	case settingsTabTelemetry:
 		return m.renderSettingsTelemetryBody(w, h)
 	case settingsTabIntegrations:

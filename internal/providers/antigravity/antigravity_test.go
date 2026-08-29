@@ -3,11 +3,13 @@ package antigravity
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
@@ -181,6 +183,35 @@ func metricRemaining(t *testing.T, snap core.UsageSnapshot, key string) float64 
 	return *metric.Remaining
 }
 
+func TestProjectQuotaMetrics_AdvancesPastReset(t *testing.T) {
+	past := time.Now().UTC().Add(-10 * time.Minute)
+	payload := statusLinePayload{
+		ReceivedAt: past.Add(-5 * time.Minute),
+		Quota: map[string]statusLineQuota{
+			"gemini-weekly": {
+				RemainingFraction: core.Float64Ptr(0),
+				ResetTime:         past.Format(time.RFC3339Nano),
+			},
+		},
+	}
+	var snap core.UsageSnapshot
+	snap.Metrics = make(map[string]core.Metric)
+	snap.Resets = make(map[string]time.Time)
+
+	projectQuotaMetrics(&snap, payload)
+
+	if rem := metricRemaining(t, snap, "quota_gemini_weekly"); rem != 100 {
+		t.Fatalf("quota_gemini_weekly remaining = %v, want 100 after reset passed", rem)
+	}
+	reset, ok := snap.Resets["quota_gemini_weekly"]
+	if !ok {
+		t.Fatal("missing quota_gemini_weekly reset")
+	}
+	if !reset.After(time.Now().UTC()) {
+		t.Fatalf("reset time = %v, expected future timestamp after advancing weekly period", reset)
+	}
+}
+
 const sampleStatusLineJSON = `{
   "cwd": "/tmp/antigravity-project",
   "session_id": "session-1",
@@ -209,4 +240,121 @@ const sampleStatusLineJSON = `{
   "agent_state": "working",
   "plan_tier": "pro",
   "email": "amanda@example.com"
-}`
+}
+`
+
+func TestFetchGemini5hExhaustedWeeklyAvailable(t *testing.T) {
+	const jsonPayload = `{
+		"agent_state": "idle",
+		"email": "nurulislamz2600@gmail.com",
+		"model": {"id": "Gemini 3.7 Flash (High)", "display_name": "Gemini 3.7 Flash (High)", "effort": "high"},
+		"plan_tier": "Google AI Pro",
+		"product": "antigravity",
+		"quota": {
+			"3p-5h": {"remaining_fraction": 0.6616888, "reset_time": "2030-08-29T19:39:50Z", "disabled": true},
+			"3p-weekly": {"remaining_fraction": 0, "reset_time": "2030-09-02T23:42:57Z"},
+			"gemini-5h": {"remaining_fraction": 0, "reset_time": "2030-08-29T16:49:43Z"},
+			"gemini-weekly": {"remaining_fraction": 0.3787134, "reset_time": "2030-09-02T03:31:19Z"}
+		}
+	}`
+
+	path := filepath.Join(t.TempDir(), "antigravity-nurulz-status.json")
+	if err := os.WriteFile(path, []byte(jsonPayload), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "antigravity-nurulz",
+		Provider: "antigravity",
+		ProviderPaths: map[string]string{
+			"status_file": path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	if snap.Status != core.StatusLimited {
+		t.Fatalf("snap.Status = %q, want %q", snap.Status, core.StatusLimited)
+	}
+	if got := *snap.Metrics["quota_gemini_weekly"].Remaining; math.Abs(got-37.87134) > 0.001 {
+		t.Errorf("quota_gemini_weekly = %v, want 37.87134", got)
+	}
+	if got := *snap.Metrics["quota_gemini_5h"].Remaining; got != 0 {
+		t.Errorf("quota_gemini_5h = %v, want 0", got)
+	}
+	// Reset time for quota should be the active model's limiting reset (gemini-5h reset at 16:49:43Z), NOT 3p-weekly
+	wantReset, _ := time.Parse(time.RFC3339, "2030-08-29T16:49:43Z")
+	if !snap.Resets["quota"].Equal(wantReset) {
+		t.Errorf("snap.Resets[\"quota\"] = %v, want %v", snap.Resets["quota"], wantReset)
+	}
+}
+
+func TestFetchChaosUsageShowsAllModels(t *testing.T) {
+	const jsonPayload = `{
+		"agent_state": "working",
+		"artifact_count": 1,
+		"context_window": {
+			"total_input_tokens": 122927,
+			"total_output_tokens": 129250,
+			"context_window_size": 1048576,
+			"used_percentage": 11.72323226928711,
+			"remaining_percentage": 88.27676773071289
+		},
+		"email": "chaosfury935@gmail.com",
+		"model": {"id": "Gemini 3.7 Flash (High)", "display_name": "Gemini 3.7 Flash (High)", "effort": "high"},
+		"plan_tier": "Google AI Pro",
+		"product": "antigravity",
+		"quota": {
+			"3p-5h": {"remaining_fraction": 1, "reset_time": "2026-08-29T21:33:37Z", "reset_in_seconds": 17722},
+			"3p-weekly": {"remaining_fraction": 1, "reset_time": "2026-09-05T16:33:37Z", "reset_in_seconds": 604522},
+			"gemini-5h": {"remaining_fraction": 0.7652325, "reset_time": "2026-08-29T20:25:53Z", "reset_in_seconds": 13658},
+			"gemini-weekly": {"remaining_fraction": 0.96087205, "reset_time": "2026-09-05T15:25:53Z", "reset_in_seconds": 600458}
+		}
+	}`
+
+	path := filepath.Join(t.TempDir(), "antigravity-chaos-status.json")
+	if err := os.WriteFile(path, []byte(jsonPayload), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "antigravity-chaos",
+		Provider: "antigravity",
+		ProviderPaths: map[string]string{
+			"status_file": path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+
+	if snap.Status != core.StatusOK {
+		t.Fatalf("snap.Status = %q, want %q", snap.Status, core.StatusOK)
+	}
+	if snap.Attributes["claude_disabled"] == "true" {
+		t.Errorf("claude_disabled should not be set for chaos account")
+	}
+
+	// Verify both Gemini and Claude/GPT 3P quotas are present and populated
+	if m, ok := snap.Metrics["quota_3p_weekly"]; !ok || m.Remaining == nil || *m.Remaining != 100 {
+		t.Errorf("quota_3p_weekly = %v, want 100", m)
+	}
+	if m, ok := snap.Metrics["quota_3p_5h"]; !ok || m.Remaining == nil || *m.Remaining != 100 {
+		t.Errorf("quota_3p_5h = %v, want 100", m)
+	}
+	if m, ok := snap.Metrics["quota_claude_weekly"]; !ok || m.Remaining == nil || *m.Remaining != 100 {
+		t.Errorf("quota_claude_weekly = %v, want 100", m)
+	}
+	if m, ok := snap.Metrics["quota_claude_5h"]; !ok || m.Remaining == nil || *m.Remaining != 100 {
+		t.Errorf("quota_claude_5h = %v, want 100", m)
+	}
+	if m, ok := snap.Metrics["quota_gemini_weekly"]; !ok || m.Remaining == nil || math.Abs(*m.Remaining-96.0872) > 0.01 {
+		t.Errorf("quota_gemini_weekly = %v, want ~96.09", m)
+	}
+	if m, ok := snap.Metrics["quota_gemini_5h"]; !ok || m.Remaining == nil || math.Abs(*m.Remaining-76.5232) > 0.01 {
+		t.Errorf("quota_gemini_5h = %v, want ~76.52", m)
+	}
+}

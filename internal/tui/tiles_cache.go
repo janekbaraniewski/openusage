@@ -17,7 +17,7 @@ func (m *Model) cachedTileBodyLines(
 	modelMixExpanded bool,
 ) []string {
 	hideCosts := m.resolveHideCosts(snap)
-	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData, hideCosts)
+	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData, hideCosts, m.usageMode)
 	if lines, ok := m.tileBodyCache[key]; ok {
 		return lines
 	}
@@ -38,6 +38,7 @@ func tileBodyCacheKey(
 	modelMixExpanded bool,
 	hideEmpty bool,
 	hideCosts bool,
+	usageMode string,
 ) string {
 	return strings.Join([]string{
 		snap.ProviderID,
@@ -53,6 +54,7 @@ func tileBodyCacheKey(
 		strconv.FormatBool(modelMixExpanded),
 		strconv.FormatBool(hideEmpty),
 		strconv.FormatBool(hideCosts),
+		usageMode,
 		tileWidgetCacheKey(widget),
 	}, "|")
 }

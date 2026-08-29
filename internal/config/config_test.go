@@ -29,8 +29,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Experimental.Analytics {
 		t.Error("expected experimental analytics to be false by default")
 	}
-	if cfg.Dashboard.View != DashboardViewGrid {
-		t.Errorf("default dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
+	if cfg.Dashboard.View != DashboardViewSplit {
+		t.Errorf("default dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
+	}
+	if cfg.Dashboard.UsageMode != UsageModeRemaining {
+		t.Errorf("default dashboard.usage_mode = %q, want %q", cfg.Dashboard.UsageMode, UsageModeRemaining)
 	}
 	if cfg.Dashboard.HideSectionsWithNoData {
 		t.Error("default dashboard.hide_sections_with_no_data should be false")
@@ -705,8 +708,8 @@ func TestLoadFrom_DashboardProviders(t *testing.T) {
 	if second.Enabled {
 		t.Error("expected anthropic-work enabled=false")
 	}
-	if cfg.Dashboard.View != DashboardViewStacked {
-		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewStacked)
+	if cfg.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
 	}
 }
 
@@ -757,7 +760,7 @@ func TestSaveDashboardProvidersTo(t *testing.T) {
 	}
 }
 
-func TestLoadFrom_DashboardViewDefaultsToGrid(t *testing.T) {
+func TestLoadFrom_DashboardViewDefaultsToSplit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(path, []byte(`{"dashboard":{"view":"unknown"}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -767,8 +770,8 @@ func TestLoadFrom_DashboardViewDefaultsToGrid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Dashboard.View != DashboardViewGrid {
-		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewGrid)
+	if cfg.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
 	}
 }
 
@@ -973,8 +976,8 @@ func TestSaveDashboardHideSectionsWithNoDataTo(t *testing.T) {
 
 func TestLoadFrom_DashboardViewTabs(t *testing.T) {
 	cfg := loadConfigJSON(t, `{"dashboard":{"view":"tabs"}}`)
-	if cfg.Dashboard.View != DashboardViewTabs {
-		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewTabs)
+	if cfg.Dashboard.View != DashboardViewSplit {
+		t.Errorf("dashboard.view = %q, want %q", cfg.Dashboard.View, DashboardViewSplit)
 	}
 }
 
@@ -1369,5 +1372,59 @@ func TestExportTargetPreservedAcrossModifyConfig(t *testing.T) {
 	}
 	if cfg.Export.MachineName != "mybox" {
 		t.Errorf("export.machine_name = %q after SaveAutoDetected, want mybox", cfg.Export.MachineName)
+	}
+}
+
+func TestNormalizeDashboardUsageMode(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", UsageModeRemaining},
+		{"remaining", UsageModeRemaining},
+		{"REMAINING", UsageModeRemaining},
+		{"  remaining  ", UsageModeRemaining},
+		{"used", UsageModeUsed},
+		{"USED", UsageModeUsed},
+		{"  used  ", UsageModeUsed},
+		{"invalid", UsageModeRemaining},
+	}
+
+	for _, tt := range tests {
+		got := normalizeDashboardUsageMode(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeDashboardUsageMode(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSaveDashboardUsageModeTo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := SaveDashboardUsageModeTo(path, UsageModeUsed); err != nil {
+		t.Fatalf("SaveDashboardUsageModeTo: %v", err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	if cfg.Dashboard.UsageMode != UsageModeUsed {
+		t.Errorf("usage_mode = %q, want %q", cfg.Dashboard.UsageMode, UsageModeUsed)
+	}
+
+	if err := SaveDashboardUsageModeTo(path, UsageModeRemaining); err != nil {
+		t.Fatalf("SaveDashboardUsageModeTo: %v", err)
+	}
+
+	cfg, err = LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	if cfg.Dashboard.UsageMode != UsageModeRemaining {
+		t.Errorf("usage_mode = %q, want %q", cfg.Dashboard.UsageMode, UsageModeRemaining)
 	}
 }

@@ -20,7 +20,7 @@ make build                    # binary -> ./bin/openusage (with version ldflags)
 go build ./cmd/openusage      # quick build without ldflags
 
 # Run
-make run                      # go run cmd/openusage/main.go
+make run                      # go run ./cmd/openusage
 OPENUSAGE_DEBUG=1 make run    # enable debug logging to stderr
 make demo                     # run demo binary with simulated data
 

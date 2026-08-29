@@ -64,6 +64,10 @@ func (s *Service) SaveDashboardView(view string) error {
 	return config.SaveDashboardView(view)
 }
 
+func (s *Service) SaveDashboardUsageMode(mode string) error {
+	return config.SaveDashboardUsageMode(mode)
+}
+
 func (s *Service) SaveDashboardWidgetSections(sections []config.DashboardWidgetSection) error {
 	return config.SaveDashboardWidgetSections(sections)
 }

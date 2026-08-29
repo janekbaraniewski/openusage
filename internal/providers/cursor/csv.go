@@ -335,3 +335,11 @@ func applyCursorCSVToSnapshot(records []cursorCSVRecord, snap *core.UsageSnapsho
 	}
 	snap.Raw["csv_record_count"] = strconv.Itoa(len(records))
 }
+
+func sanitizeCursorMetricName(name string) string {
+	name = strings.ToLower(name)
+	name = strings.ReplaceAll(name, "-", "_")
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, "/", "_")
+	return name
+}

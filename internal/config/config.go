@@ -55,6 +55,9 @@ const (
 	DashboardViewTabs    = "tabs"
 	DashboardViewSplit   = "split"
 	DashboardViewCompare = "compare"
+
+	UsageModeRemaining = "remaining"
+	UsageModeUsed      = "used"
 )
 
 func (p *DashboardProviderConfig) UnmarshalJSON(data []byte) error {
@@ -124,6 +127,7 @@ func (s *DetailWidgetSection) UnmarshalJSON(data []byte) error {
 type DashboardConfig struct {
 	Providers              []DashboardProviderConfig `json:"providers"`
 	View                   string                    `json:"view"`
+	UsageMode              string                    `json:"usage_mode,omitempty"`
 	WidgetSections         []DashboardWidgetSection  `json:"widget_sections,omitempty"`
 	DetailSections         []DetailWidgetSection     `json:"detail_sections,omitempty"`
 	HideSectionsWithNoData bool                      `json:"hide_sections_with_no_data,omitempty"`
@@ -261,7 +265,7 @@ func DefaultConfig() Config {
 		Data:               DataConfig{TimeWindow: "30d", RetentionDays: defaultRetentionDays},
 		Experimental:       ExperimentalConfig{Analytics: false},
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
-		Dashboard:          DashboardConfig{View: DashboardViewGrid},
+		Dashboard:          DashboardConfig{View: DashboardViewSplit, UsageMode: UsageModeRemaining},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
 	}
 }
@@ -338,6 +342,7 @@ func loadFrom(path string) (Config, bool, error) {
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
 	cfg.Dashboard.View = normalizeDashboardView(cfg.Dashboard.View)
+	cfg.Dashboard.UsageMode = normalizeDashboardUsageMode(cfg.Dashboard.UsageMode)
 	cfg.Dashboard.WidgetSections = normalizeDashboardWidgetSections(cfg.Dashboard.WidgetSections)
 	cfg.Dashboard.DetailSections = normalizeDetailWidgetSections(cfg.Dashboard.DetailSections)
 
@@ -515,14 +520,15 @@ func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProvid
 }
 
 func normalizeDashboardView(view string) string {
-	switch strings.ToLower(strings.TrimSpace(view)) {
-	case DashboardViewGrid, DashboardViewStacked, DashboardViewTabs, DashboardViewSplit, DashboardViewCompare:
-		return strings.ToLower(strings.TrimSpace(view))
-	case DashboardViewList:
-		// Legacy view id: map to split navigator/detail layout.
-		return DashboardViewSplit
+	return DashboardViewSplit
+}
+
+func normalizeDashboardUsageMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case UsageModeUsed:
+		return UsageModeUsed
 	default:
-		return DashboardViewGrid
+		return UsageModeRemaining
 	}
 }
 
@@ -675,6 +681,17 @@ func SaveDashboardView(view string) error {
 func SaveDashboardViewTo(path string, view string) error {
 	return modifyConfig(path, func(cfg *Config) {
 		cfg.Dashboard.View = normalizeDashboardView(view)
+	})
+}
+
+// SaveDashboardUsageMode persists dashboard usage mode preference into the config file (read-modify-write).
+func SaveDashboardUsageMode(mode string) error {
+	return SaveDashboardUsageModeTo(ConfigPath(), mode)
+}
+
+func SaveDashboardUsageModeTo(path string, mode string) error {
+	return modifyConfig(path, func(cfg *Config) {
+		cfg.Dashboard.UsageMode = normalizeDashboardUsageMode(mode)
 	})
 }
 

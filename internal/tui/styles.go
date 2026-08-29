@@ -454,6 +454,170 @@ func StatusBadge(s core.Status) string {
 	return style.Render(text)
 }
 
+// SnapshotStatusBadge returns a styled status badge that specifies the exact limit window
+// (e.g. WEEKLY LIMIT, MONTHLY LIMIT, 5H LIMIT) when an account is limited.
+func SnapshotStatusBadge(snap core.UsageSnapshot) string {
+	if snap.Status != core.StatusLimited {
+		return StatusBadge(snap.Status)
+	}
+
+	limitType := resolveExhaustedLimitType(snap)
+	text := "LIMIT"
+	if limitType != "" {
+		text = limitType + " LIMIT"
+	}
+	return badgeCritStyle.Render(text)
+}
+
+func resolveExhaustedLimitType(snap core.UsageSnapshot) string {
+	model := strings.ToLower(snap.Attributes["model"])
+	if model == "" {
+		model = strings.ToLower(snap.Attributes["model_id"])
+	}
+
+	activePool := ""
+	if strings.Contains(model, "gemini") {
+		activePool = "gemini"
+	} else if strings.Contains(model, "claude") || strings.Contains(model, "sonnet") || strings.Contains(model, "opus") || strings.Contains(model, "3p") || strings.Contains(model, "gpt") {
+		activePool = "claude"
+	}
+
+	claudeDisabled := snap.Attributes["claude_disabled"] == "true" || snap.Attributes["3p_disabled"] == "true"
+
+	isRelevantKey := func(key string) bool {
+		k := strings.ToLower(key)
+		if claudeDisabled && (strings.Contains(k, "claude") || strings.Contains(k, "3p") || strings.Contains(k, "opus") || strings.Contains(k, "sonnet")) {
+			return false
+		}
+		if activePool == "gemini" && (strings.Contains(k, "claude") || strings.Contains(k, "3p") || strings.Contains(k, "opus") || strings.Contains(k, "sonnet")) {
+			return false
+		}
+		if activePool == "claude" && strings.Contains(k, "gemini") {
+			return false
+		}
+		return true
+	}
+
+	// 1. Check metrics for exhausted windows
+	exhausted := make(map[string]bool)
+	for key, met := range snap.Metrics {
+		if !isRelevantKey(key) {
+			continue
+		}
+
+		isExhausted := false
+		if met.Remaining != nil && *met.Remaining <= 0 {
+			isExhausted = true
+		} else if met.Used != nil && *met.Used >= 100 && met.Unit == "%" {
+			isExhausted = true
+		} else if met.Limit != nil && met.Used != nil && *met.Limit > 0 && *met.Used >= *met.Limit {
+			isExhausted = true
+		}
+
+		if isExhausted {
+			k := strings.ToLower(key)
+			w := strings.ToLower(met.Window)
+			if strings.Contains(k, "month") || strings.Contains(w, "month") || strings.Contains(w, "30d") {
+				exhausted["MONTHLY"] = true
+			} else if strings.Contains(k, "weekly") || strings.Contains(k, "week") || strings.Contains(k, "7d") || strings.Contains(w, "weekly") || strings.Contains(w, "7d") {
+				exhausted["WEEKLY"] = true
+			} else if strings.Contains(k, "5h") || strings.Contains(k, "five_hour") || strings.Contains(k, "rolling") || strings.Contains(w, "5h") {
+				exhausted["5H"] = true
+			} else if strings.Contains(k, "daily") || strings.Contains(k, "day") || strings.Contains(k, "1d") || strings.Contains(k, "24h") || strings.Contains(w, "daily") || strings.Contains(w, "1d") {
+				exhausted["DAILY"] = true
+			}
+		}
+	}
+
+	// Safeguard: If exhausted["WEEKLY"] is set, but there is ANY relevant weekly metric
+	// with Remaining > 0 (e.g. quota_gemini_weekly has 37.87% remaining), do NOT report WEEKLY limit!
+	if exhausted["WEEKLY"] {
+		for key, met := range snap.Metrics {
+			if !isRelevantKey(key) {
+				continue
+			}
+			k := strings.ToLower(key)
+			w := strings.ToLower(met.Window)
+			if strings.Contains(k, "weekly") || strings.Contains(k, "week") || strings.Contains(k, "7d") || strings.Contains(w, "weekly") || strings.Contains(w, "7d") {
+				if met.Remaining != nil && *met.Remaining > 0 {
+					exhausted["WEEKLY"] = false
+					break
+				}
+			}
+		}
+	}
+
+	// Priority order: MONTHLY > WEEKLY > DAILY > 5H
+	if exhausted["MONTHLY"] {
+		return "MONTHLY"
+	}
+	if exhausted["WEEKLY"] {
+		return "WEEKLY"
+	}
+	if exhausted["DAILY"] {
+		return "DAILY"
+	}
+	if exhausted["5H"] {
+		return "5H"
+	}
+
+	// 2. Check message or attributes
+	msg := strings.ToLower(snap.Message + " " + snap.Attributes["limit_type"] + " " + snap.Attributes["rate_limit"])
+	if strings.Contains(msg, "monthly") || strings.Contains(msg, "month") {
+		return "MONTHLY"
+	}
+	if strings.Contains(msg, "weekly") || strings.Contains(msg, "week") || strings.Contains(msg, "7d") {
+		return "WEEKLY"
+	}
+	if strings.Contains(msg, "5h") || strings.Contains(msg, "5 hour") || strings.Contains(msg, "five hour") {
+		return "5H"
+	}
+	if strings.Contains(msg, "daily") || strings.Contains(msg, "day") {
+		return "DAILY"
+	}
+
+	// 3. Check reset keys if any window has an active reset
+	hasResetFor := func(target string) bool {
+		for rKey, resetTime := range snap.Resets {
+			if resetTime.IsZero() {
+				continue
+			}
+			if !isRelevantKey(rKey) {
+				continue
+			}
+			rk := strings.ToLower(rKey)
+			matches := false
+			switch target {
+			case "MONTHLY":
+				matches = strings.Contains(rk, "monthly")
+			case "WEEKLY":
+				matches = strings.Contains(rk, "weekly") || strings.Contains(rk, "7d")
+			case "5H":
+				matches = strings.Contains(rk, "5h") || strings.Contains(rk, "rolling")
+			}
+			if matches {
+				if m, ok := snap.Metrics[rKey]; ok && m.Remaining != nil && *m.Remaining > 0 {
+					continue
+				}
+				return true
+			}
+		}
+		return false
+	}
+
+	if hasResetFor("MONTHLY") {
+		return "MONTHLY"
+	}
+	if hasResetFor("WEEKLY") {
+		return "WEEKLY"
+	}
+	if hasResetFor("5H") {
+		return "5H"
+	}
+
+	return ""
+}
+
 func StatusBorderColor(s core.Status) lipgloss.Color {
 	switch s {
 	case core.StatusOK:

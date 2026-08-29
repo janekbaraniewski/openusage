@@ -13,22 +13,42 @@ import (
 var blockChars = []string{" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
 
 func gaugeColor(percent, warnThresh, critThresh float64) lipgloss.Color {
+	critCutoff := critThresh * 100
+	warnCutoff := warnThresh * 100
+	if warnCutoff < 25 {
+		warnCutoff = 25
+	}
+	if critCutoff > 10 {
+		critCutoff = 10
+	}
 	switch {
-	case percent <= critThresh*100:
+	case percent <= critCutoff:
 		return colorCrit
-	case percent <= warnThresh*100:
-		return colorWarn
+	case percent <= warnCutoff:
+		return colorPeach
+	case percent <= 50:
+		return colorYellow
 	default:
 		return colorOK
 	}
 }
 
 func usageGaugeColor(usedPercent, warnThresh, critThresh float64) lipgloss.Color {
+	critCutoff := (1 - critThresh) * 100
+	warnCutoff := (1 - warnThresh) * 100
+	if warnCutoff > 75 {
+		warnCutoff = 75
+	}
+	if critCutoff < 90 {
+		critCutoff = 90
+	}
 	switch {
-	case usedPercent >= (1-critThresh)*100:
+	case usedPercent >= critCutoff:
 		return colorCrit
-	case usedPercent >= (1-warnThresh)*100:
-		return colorWarn
+	case usedPercent >= warnCutoff:
+		return colorPeach
+	case usedPercent >= 50:
+		return colorYellow
 	default:
 		return colorOK
 	}
@@ -232,14 +252,41 @@ func RenderMiniGauge(remainingPercent float64, width int) string {
 
 	var color lipgloss.Color
 	switch {
-	case remainingPercent <= 20:
+	case remainingPercent <= 10:
 		color = colorCrit // low remaining -> red
+	case remainingPercent <= 25:
+		color = colorPeach // low remaining -> orange
 	case remainingPercent <= 50:
-		color = colorWarn // medium remaining -> yellow
+		color = colorYellow // medium remaining -> yellow
 	default:
 		color = colorOK // high remaining -> green
 	}
 	return renderGaugeBar(remainingPercent, width, color)
+}
+
+func RenderMiniUsageGauge(usedPercent float64, width int) string {
+	if width < 3 {
+		width = 3
+	}
+	if usedPercent < 0 {
+		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+	}
+	if usedPercent > 100 {
+		usedPercent = 100
+	}
+
+	var color lipgloss.Color
+	switch {
+	case usedPercent >= 90:
+		color = colorCrit // high used -> red
+	case usedPercent >= 75:
+		color = colorPeach // high used -> orange
+	case usedPercent >= 50:
+		color = colorYellow // medium used -> yellow
+	default:
+		color = colorOK // low used -> green
+	}
+	return renderGaugeBar(usedPercent, width, color)
 }
 
 // GaugeSegment represents one colored segment of a stacked gauge bar.
@@ -358,38 +405,64 @@ func RenderShimmerGauge(width, frame int) string {
 
 // RenderQuotaStatusAndTimerLine formats a prominent quota status line with a bold, obvious reset countdown.
 func RenderQuotaStatusAndTimerLine(remaining float64, resetAt time.Time, now time.Time) string {
+	return RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, now, false)
+}
+
+// RenderQuotaStatusAndTimerLineWithMode formats a prominent quota status line in either remaining or used mode.
+func RenderQuotaStatusAndTimerLineWithMode(remaining float64, resetAt time.Time, now time.Time, isUsedMode bool) string {
 	pctStyle := lipgloss.NewStyle().Bold(true)
-	if remaining <= 0 {
-		pctStyle = pctStyle.Foreground(colorRed)
-	} else if remaining < 20 {
-		pctStyle = pctStyle.Foreground(colorPeach)
-	} else if remaining < 50 {
-		pctStyle = pctStyle.Foreground(colorYellow)
+	var pctText string
+
+	if isUsedMode {
+		used := 100 - remaining
+		if used < 0 {
+			used = 0
+		} else if used > 100 {
+			used = 100
+		}
+		if used >= 90 {
+			pctStyle = pctStyle.Foreground(colorRed)
+		} else if used >= 75 {
+			pctStyle = pctStyle.Foreground(colorPeach)
+		} else if used >= 50 {
+			pctStyle = pctStyle.Foreground(colorYellow)
+		} else {
+			pctStyle = pctStyle.Foreground(colorText)
+		}
+		pctText = pctStyle.Render(fmt.Sprintf("%.2f%% used", used))
 	} else {
-		pctStyle = pctStyle.Foreground(colorText)
+		if remaining <= 10 {
+			pctStyle = pctStyle.Foreground(colorRed)
+		} else if remaining <= 25 {
+			pctStyle = pctStyle.Foreground(colorPeach)
+		} else if remaining <= 50 {
+			pctStyle = pctStyle.Foreground(colorYellow)
+		} else {
+			pctStyle = pctStyle.Foreground(colorText)
+		}
+		pctText = pctStyle.Render(fmt.Sprintf("%.2f%% remaining", remaining))
 	}
 
-	pctText := pctStyle.Render(fmt.Sprintf("%.2f%% remaining", remaining))
 	if resetAt.IsZero() {
 		return pctText
 	}
 
 	diff := resetAt.Sub(now)
-	if diff <= 0 {
-		return pctText
-	}
-
-	formattedDur := formatDurationShort(diff)
 	var timerTag string
-	if remaining <= 0 {
-		// When quota is exhausted, highlight the reset timer in bold bright yellow so it stands out immediately!
-		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render(fmt.Sprintf("⏳ Resets in %s", formattedDur))
-	} else if diff < time.Hour {
-		// Imminent reset in under an hour: highlight in bold teal with lightning icon
-		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render(fmt.Sprintf("⚡ Resets in %s", formattedDur))
+	if diff <= 0 {
+		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render("⚡ Resets now")
 	} else {
-		// Active healthy quota reset countdown: bold sky blue
-		timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorSky).Render(fmt.Sprintf("⏱  Resets in %s", formattedDur))
+		formattedDur := formatDurationShort(diff)
+		if remaining <= 0 {
+			// When quota is exhausted, highlight the reset timer in bold bright yellow so it stands out immediately!
+			timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render(fmt.Sprintf("⏳ Resets in %s", formattedDur))
+		} else if diff < time.Hour {
+			// Imminent reset in under an hour: highlight in bold teal with lightning icon
+			timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render(fmt.Sprintf("⚡ Resets in %s", formattedDur))
+		} else {
+			// Active healthy quota reset countdown: bold sky blue
+			timerTag = lipgloss.NewStyle().Bold(true).Foreground(colorSky).Render(fmt.Sprintf("⏱  Resets in %s", formattedDur))
+		}
 	}
 
 	sep := lipgloss.NewStyle().Foreground(colorOverlay).Render(" · ")

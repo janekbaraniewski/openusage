@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func TestRenderUsageGaugeWithProjection(t *testing.T) {
@@ -258,5 +259,151 @@ func TestRenderStackedUsageGauge_NarrowWidth(t *testing.T) {
 	}
 	if !strings.Contains(out, "50.0%") {
 		t.Fatalf("narrow width output should still contain '50.0%%', got %q", out)
+	}
+}
+
+func TestRenderMiniUsageGauge(t *testing.T) {
+	out := RenderMiniUsageGauge(30.0, 10)
+	if out == "" {
+		t.Fatal("expected non-empty output for 30% used")
+	}
+
+	outWarn := RenderMiniUsageGauge(60.0, 10)
+	if outWarn == "" {
+		t.Fatal("expected non-empty output for 60% used")
+	}
+
+	outCrit := RenderMiniUsageGauge(90.0, 10)
+	if outCrit == "" {
+		t.Fatal("expected non-empty output for 90% used")
+	}
+
+	outNeg := RenderMiniUsageGauge(-1, 10)
+	if !strings.Contains(outNeg, "░") {
+		t.Errorf("expected track characters for negative percent, got %q", outNeg)
+	}
+}
+
+func TestRenderQuotaStatusAndTimerLineWithMode(t *testing.T) {
+	now := time.Now()
+	resetAt := now.Add(2 * time.Hour)
+
+	// Remaining mode (default)
+	remLine := RenderQuotaStatusAndTimerLineWithMode(75.0, resetAt, now, false)
+	if !strings.Contains(remLine, "75.00% remaining") {
+		t.Errorf("expected 75.00%% remaining, got %q", remLine)
+	}
+	if !strings.Contains(remLine, "Resets in") {
+		t.Errorf("expected Resets in tag, got %q", remLine)
+	}
+
+	// Used mode
+	usedLine := RenderQuotaStatusAndTimerLineWithMode(75.0, resetAt, now, true)
+	if !strings.Contains(usedLine, "25.00% used") {
+		t.Errorf("expected 25.00%% used, got %q", usedLine)
+	}
+	if !strings.Contains(usedLine, "Resets in") {
+		t.Errorf("expected Resets in tag, got %q", usedLine)
+	}
+}
+
+func TestSnapshotStatusBadge_SpecificLimits(t *testing.T) {
+	zero := 0.0
+	hundred := 100.0
+
+	// Weekly limit
+	wkSnap := core.UsageSnapshot{
+		Status: core.StatusLimited,
+		Metrics: map[string]core.Metric{
+			"weekly_usage": {Remaining: &zero, Window: "7d"},
+		},
+	}
+	wkBadge := SnapshotStatusBadge(wkSnap)
+	if !strings.Contains(wkBadge, "WEEKLY LIMIT") {
+		t.Errorf("expected WEEKLY LIMIT in badge, got %q", wkBadge)
+	}
+
+	// Monthly limit
+	moSnap := core.UsageSnapshot{
+		Status: core.StatusLimited,
+		Metrics: map[string]core.Metric{
+			"monthly_usage_pct": {Used: &hundred, Unit: "%", Window: "30d"},
+		},
+	}
+	moBadge := SnapshotStatusBadge(moSnap)
+	if !strings.Contains(moBadge, "MONTHLY LIMIT") {
+		t.Errorf("expected MONTHLY LIMIT in badge, got %q", moBadge)
+	}
+
+	// 5h limit
+	fiveSnap := core.UsageSnapshot{
+		Status: core.StatusLimited,
+		Metrics: map[string]core.Metric{
+			"rolling_usage": {Remaining: &zero, Window: "5h"},
+		},
+	}
+	fiveBadge := SnapshotStatusBadge(fiveSnap)
+	if !strings.Contains(fiveBadge, "5H LIMIT") {
+		t.Errorf("expected 5H LIMIT in badge, got %q", fiveBadge)
+	}
+
+	// Generic limit fallback
+	genSnap := core.UsageSnapshot{
+		Status: core.StatusLimited,
+	}
+	genBadge := SnapshotStatusBadge(genSnap)
+	if !strings.Contains(genBadge, "LIMIT") {
+		t.Errorf("expected LIMIT in badge, got %q", genBadge)
+	}
+
+	// Antigravity with Gemini active: 5h limit hit (0% remaining), but weekly limit has 37.87% remaining.
+	// Claude weekly has 0% remaining, but active model is Gemini.
+	// Must display 5H LIMIT, NOT WEEKLY LIMIT!
+	thirtySeven := 37.87
+	agSnap := core.UsageSnapshot{
+		ProviderID: "antigravity",
+		Status:     core.StatusLimited,
+		Attributes: map[string]string{
+			"model":           "Gemini 3.7 Flash (High)",
+			"claude_disabled": "true",
+		},
+		Metrics: map[string]core.Metric{
+			"quota_gemini_5h":     {Remaining: &zero, Window: "5h"},
+			"quota_gemini_weekly": {Remaining: &thirtySeven, Window: "7d"},
+			"quota_claude_weekly": {Remaining: &zero, Window: "7d"},
+			"quota_3p_weekly":     {Remaining: &zero, Window: "7d"},
+		},
+	}
+	agBadge := SnapshotStatusBadge(agSnap)
+	if !strings.Contains(agBadge, "5H LIMIT") {
+		t.Errorf("expected 5H LIMIT in badge when Gemini weekly has remaining quota, got %q", agBadge)
+	}
+	if strings.Contains(agBadge, "WEEKLY LIMIT") {
+		t.Errorf("did NOT expect WEEKLY LIMIT when Gemini weekly has 37.87%% remaining, got %q", agBadge)
+	}
+}
+
+func TestUsageGaugeColor_Tiers(t *testing.T) {
+	const warn = 0.20
+	const crit = 0.05
+
+	// 77.88% used is high usage — must be orange (colorPeach)
+	if c := usageGaugeColor(77.88, warn, crit); c != colorPeach {
+		t.Errorf("expected colorPeach (orange) for 77.88%% used, got %v", c)
+	}
+
+	// 30% used is low/healthy — green (colorOK)
+	if c := usageGaugeColor(30.0, warn, crit); c != colorOK {
+		t.Errorf("expected colorOK (green) for 30%% used, got %v", c)
+	}
+
+	// 60% used is medium — yellow (colorYellow)
+	if c := usageGaugeColor(60.0, warn, crit); c != colorYellow {
+		t.Errorf("expected colorYellow for 60%% used, got %v", c)
+	}
+
+	// 95% used is critical — red (colorCrit)
+	if c := usageGaugeColor(95.0, warn, crit); c != colorCrit {
+		t.Errorf("expected colorCrit for 95%% used, got %v", c)
 	}
 }

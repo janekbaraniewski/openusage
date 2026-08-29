@@ -277,6 +277,33 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 	}
 	sort.Strings(keys)
 
+	now := time.Now().UTC()
+	receivedAt := payloadReceivedAt(payload)
+
+	modelID := strings.TrimSpace(payload.Model.ID)
+	modelName := strings.TrimSpace(payload.Model.DisplayName)
+	if modelName == "" {
+		modelName = modelID
+	}
+	modelLower := strings.ToLower(modelName)
+	activePool := ""
+	if strings.Contains(modelLower, "gemini") {
+		activePool = "gemini"
+	} else if strings.Contains(modelLower, "claude") || strings.Contains(modelLower, "sonnet") || strings.Contains(modelLower, "opus") || strings.Contains(modelLower, "3p") || strings.Contains(modelLower, "gpt") {
+		activePool = "claude"
+	}
+
+	isForActivePool := func(name string) bool {
+		lower := strings.ToLower(name)
+		if activePool == "gemini" {
+			return strings.Contains(lower, "gemini")
+		}
+		if activePool == "claude" {
+			return strings.Contains(lower, "claude") || strings.Contains(lower, "3p") || strings.Contains(lower, "opus") || strings.Contains(lower, "sonnet")
+		}
+		return true
+	}
+
 	worst := 1.0
 	worstName := ""
 	found := false
@@ -286,18 +313,31 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 			continue
 		}
 		remaining := clamp(*quota.RemainingFraction, 0, 1)
-		if quota.Disabled {
-			remaining = 0
-		}
-		remainingPercent := remaining * 100
 		cleanName := sanitizeMetricName(name)
 
 		window := "quota"
+		var period time.Duration
 		if strings.Contains(cleanName, "5h") {
 			window = "5h"
+			period = 5 * time.Hour
 		} else if strings.Contains(cleanName, "weekly") || strings.Contains(cleanName, "7d") {
 			window = "7d"
+			period = 7 * 24 * time.Hour
 		}
+
+		reset := quotaResetTime(quota, receivedAt)
+
+		// If the quota reset timestamp is in the past, the reset event has already occurred.
+		// Advance the reset timestamp by the window period until it represents the upcoming reset,
+		// and reset the remaining fraction to 1.0 (100% remaining).
+		if !reset.IsZero() && period > 0 && reset.Before(now) {
+			for reset.Before(now) {
+				reset = reset.Add(period)
+			}
+			remaining = 1.0
+		}
+
+		remainingPercent := remaining * 100
 
 		metric := core.Metric{
 			Limit:     core.Float64Ptr(100),
@@ -310,7 +350,6 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		key := "quota_" + cleanName
 		snap.Metrics[key] = metric
 
-		reset := quotaResetTime(quota, payloadReceivedAt(payload))
 		if !reset.IsZero() {
 			snap.Resets[key] = reset
 			snap.Resets[key+"_reset"] = reset
@@ -331,10 +370,12 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 			}
 		}
 
-		if !found || remaining < worst {
-			worst = remaining
-			worstName = name
-			found = true
+		if !quota.Disabled {
+			if !found || (isForActivePool(name) && !isForActivePool(worstName)) || (isForActivePool(name) == isForActivePool(worstName) && remaining < worst) {
+				worst = remaining
+				worstName = name
+				found = true
+			}
 		}
 	}
 
@@ -384,8 +425,18 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
 
 	if hasGemini && hasClaude {
-		// If either pool has remaining capacity, use the max remaining so available pool is shown
-		overallRemaining = math.Max(geminiRem, claudeRem)
+		if activePool == "gemini" {
+			overallRemaining = geminiRem
+		} else if activePool == "claude" {
+			overallRemaining = claudeRem
+		} else {
+			// If either pool has remaining capacity, use the max remaining so available pool is shown
+			overallRemaining = math.Max(geminiRem, claudeRem)
+		}
+	} else if hasGemini {
+		overallRemaining = geminiRem
+	} else if hasClaude {
+		overallRemaining = claudeRem
 	} else if found {
 		overallRemaining = worst
 	} else {
@@ -412,7 +463,7 @@ func getPoolRemainingFraction(payload statusLinePayload, poolKeywords ...string)
 	worst := 1.0
 	found := false
 	for name, quota := range payload.Quota {
-		if quota.RemainingFraction == nil {
+		if quota.RemainingFraction == nil || quota.Disabled {
 			continue
 		}
 		cleanName := strings.ToLower(sanitizeMetricName(name))
@@ -427,9 +478,6 @@ func getPoolRemainingFraction(payload statusLinePayload, poolKeywords ...string)
 			continue
 		}
 		fraction := clamp(*quota.RemainingFraction, 0, 1)
-		if quota.Disabled {
-			fraction = 0
-		}
 		if !found || fraction < worst {
 			worst = fraction
 			found = true
@@ -439,6 +487,32 @@ func getPoolRemainingFraction(payload statusLinePayload, poolKeywords ...string)
 }
 
 func statusFromQuota(payload statusLinePayload) core.Status {
+	model := strings.ToLower(payload.Model.DisplayName)
+	if model == "" {
+		model = strings.ToLower(payload.Model.ID)
+	}
+	if strings.Contains(model, "gemini") {
+		if rem, has := getPoolRemainingFraction(payload, "gemini"); has {
+			if rem <= 0 {
+				return core.StatusLimited
+			}
+			if rem < quotaNearLimitRatio {
+				return core.StatusNearLimit
+			}
+			return core.StatusOK
+		}
+	} else if strings.Contains(model, "claude") || strings.Contains(model, "sonnet") || strings.Contains(model, "opus") || strings.Contains(model, "3p") || strings.Contains(model, "gpt") {
+		if rem, has := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet"); has {
+			if rem <= 0 {
+				return core.StatusLimited
+			}
+			if rem < quotaNearLimitRatio {
+				return core.StatusNearLimit
+			}
+			return core.StatusOK
+		}
+	}
+
 	geminiRem, hasGemini := getPoolRemainingFraction(payload, "gemini")
 	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
 
@@ -471,7 +545,7 @@ func worstQuotaFraction(payload statusLinePayload) (float64, bool) {
 	worst := 1.0
 	found := false
 	for _, quota := range payload.Quota {
-		if quota.RemainingFraction == nil {
+		if quota.RemainingFraction == nil || quota.Disabled {
 			continue
 		}
 		fraction := clamp(*quota.RemainingFraction, 0, 1)

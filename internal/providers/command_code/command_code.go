@@ -2,8 +2,11 @@ package command_code
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +22,113 @@ const (
 	subscriptionPath = "/alpha/billing/subscriptions"
 	summaryPath      = "/alpha/usage/summary"
 )
+
+var planCredits = map[string]float64{
+	"individual-goat":     70.0,
+	"individual-go":       10.0,
+	"individual-pro":      30.0,
+	"individual-pro-v1":   80.0,
+	"individual-provider": 15.0,
+	"individual-max":      150.0,
+	"individual-ultra":    300.0,
+	"teams-pro":           40.0,
+}
+
+var planDisplayNames = map[string]string{
+	"individual-goat":     "GOAT",
+	"individual-go":       "Go",
+	"individual-pro":      "Pro",
+	"individual-pro-v1":   "Pro",
+	"individual-provider": "Provider",
+	"individual-max":      "Max",
+	"individual-ultra":    "Ultra",
+	"teams-pro":           "Teams Pro",
+}
+
+func getPlanCap(planID string) float64 {
+	p := strings.ToLower(strings.ReplaceAll(planID, "_", "-"))
+	if v, ok := planCredits[p]; ok {
+		return v
+	}
+	type kv struct {
+		k string
+		v float64
+	}
+	keys := make([]kv, 0, len(planCredits))
+	for k, v := range planCredits {
+		keys = append(keys, kv{k, v})
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i].k) > len(keys[j].k)
+	})
+	for _, item := range keys {
+		if strings.HasPrefix(p, item.k) {
+			return item.v
+		}
+	}
+	return 0
+}
+
+func getPlanDisplayName(planID string) string {
+	p := strings.ToLower(strings.ReplaceAll(planID, "_", "-"))
+	if v, ok := planDisplayNames[p]; ok {
+		return v
+	}
+	type kv struct {
+		k string
+		v string
+	}
+	keys := make([]kv, 0, len(planDisplayNames))
+	for k, v := range planDisplayNames {
+		keys = append(keys, kv{k, v})
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i].k) > len(keys[j].k)
+	})
+	for _, item := range keys {
+		if strings.HasPrefix(p, item.k) {
+			return item.v
+		}
+	}
+	cleaned := strings.TrimPrefix(planID, "individual-")
+	cleaned = strings.TrimPrefix(cleaned, "teams-")
+	return strings.ToUpper(strings.ReplaceAll(cleaned, "-", " "))
+}
+
+func fetchCommandCodeJSON(ctx context.Context, url, apiKey string, out any, client *http.Client) (int, http.Header, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("User-Agent", "cli")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, resp.Header, fmt.Errorf("reading body: %w", err)
+	}
+
+	if out != nil && len(body) > 0 {
+		if err := json.Unmarshal(body, out); err != nil {
+			return resp.StatusCode, resp.Header, fmt.Errorf("parsing response: %w", err)
+		}
+	}
+	return resp.StatusCode, resp.Header, nil
+}
 
 type Provider struct {
 	providerbase.Base
@@ -38,9 +148,14 @@ func New() *Provider {
 			},
 			Dashboard: providerbase.DefaultDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
-				providerbase.WithGaugePriority("five_hour_usage", "weekly_usage", "balance"),
-				providerbase.WithGaugeMaxLines(2),
+				providerbase.WithGaugePriority("monthly_subscription", "weekly_usage", "five_hour_usage", "balance"),
+				providerbase.WithGaugeMaxLines(3),
 				providerbase.WithCompactRows(
+					core.DashboardCompactRow{
+						Label:       "Subscription",
+						Keys:        []string{"monthly_subscription", "monthly_credits"},
+						MaxSegments: 2,
+					},
 					core.DashboardCompactRow{
 						Label:       "Quota",
 						Keys:        []string{"five_hour_usage", "weekly_usage"},
@@ -53,18 +168,22 @@ func New() *Provider {
 					},
 				),
 				providerbase.WithMetricLabels(map[string]string{
-					"five_hour_usage": "5h Limit",
-					"weekly_usage":    "Weekly Limit",
-					"balance":         "Balance",
-					"total_cost":      "Period Spend",
-					"total_tokens":    "Period Tokens",
+					"monthly_subscription": "Monthly Subscription",
+					"monthly_credits":      "Monthly Credits",
+					"five_hour_usage":      "5h Limit",
+					"weekly_usage":         "Weekly Limit",
+					"balance":              "Balance",
+					"total_cost":           "Period Spend",
+					"total_tokens":         "Period Tokens",
 				}),
 				providerbase.WithCompactLabels(map[string]string{
-					"five_hour_usage": "5h",
-					"weekly_usage":    "wk",
-					"balance":         "bal",
-					"total_cost":      "cost",
-					"total_tokens":    "tok",
+					"monthly_subscription": "sub",
+					"monthly_credits":      "credits",
+					"five_hour_usage":      "5h",
+					"weekly_usage":         "wk",
+					"balance":              "bal",
+					"total_cost":           "cost",
+					"total_tokens":         "tok",
 				}),
 			),
 		}),
@@ -114,7 +233,7 @@ type whoamiResponse struct {
 		UserName string `json:"userName"`
 		Email    string `json:"email"`
 	} `json:"user"`
-	Org struct {
+	Org *struct {
 		ID    string `json:"id"`
 		Name  string `json:"name"`
 		Login string `json:"login"`
@@ -137,9 +256,28 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 	snap.SetAttribute("api_base_url", baseURL)
 
-	// 1. Fetch Credits & Window Limits
+	// 1. Fetch Whoami (User / Org)
+	var who whoamiResponse
+	orgQuery := ""
+	if _, _, err := fetchCommandCodeJSON(ctx, baseURL+whoamiPath, apiKey, &who, p.Client()); err == nil && who.Success {
+		if who.User.Name != "" {
+			snap.SetAttribute("user_name", who.User.Name)
+		}
+		if who.User.Email != "" {
+			snap.SetAttribute("user_email", who.User.Email)
+		}
+		if who.User.UserName != "" {
+			snap.SetAttribute("user_handle", who.User.UserName)
+		}
+		if who.Org != nil && who.Org.ID != "" {
+			snap.SetAttribute("org_id", who.Org.ID)
+			orgQuery = "?orgId=" + who.Org.ID
+		}
+	}
+
+	// 2. Fetch Credits & Window Limits
 	var creds creditsResponse
-	statusCode, _, err := shared.FetchJSON(ctx, baseURL+creditsPath, apiKey, &creds, p.Client())
+	statusCode, _, err := fetchCommandCodeJSON(ctx, baseURL+creditsPath+orgQuery, apiKey, &creds, p.Client())
 	if err != nil {
 		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
 			snap.Status = core.StatusAuth
@@ -200,37 +338,41 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	// 2. Fetch Subscription
+	// 3. Fetch Subscription
 	var sub subscriptionResponse
-	if _, _, err := shared.FetchJSON(ctx, baseURL+subscriptionPath, apiKey, &sub, p.Client()); err == nil && sub.Success {
+	if _, _, err := fetchCommandCodeJSON(ctx, baseURL+subscriptionPath+orgQuery, apiKey, &sub, p.Client()); err == nil && sub.Success {
 		if sub.Data.PlanID != "" {
 			snap.SetAttribute("plan_id", sub.Data.PlanID)
+			snap.SetAttribute("plan_name", getPlanDisplayName(sub.Data.PlanID))
 		}
 		if sub.Data.Status != "" {
 			snap.SetAttribute("subscription_status", sub.Data.Status)
 		}
-		if periodEnd, parseErr := time.Parse(time.RFC3339, sub.Data.CurrentPeriodEnd); parseErr == nil {
-			snap.Resets["billing_period"] = periodEnd
+		if sub.Data.CurrentPeriodStart != "" {
+			snap.SetAttribute("billing_cycle_start", sub.Data.CurrentPeriodStart)
 		}
-	}
-
-	// 3. Fetch Whoami (User / Org)
-	var who whoamiResponse
-	if _, _, err := shared.FetchJSON(ctx, baseURL+whoamiPath, apiKey, &who, p.Client()); err == nil && who.Success {
-		if who.User.Name != "" {
-			snap.SetAttribute("user_name", who.User.Name)
-		}
-		if who.User.Email != "" {
-			snap.SetAttribute("user_email", who.User.Email)
-		}
-		if who.User.UserName != "" {
-			snap.SetAttribute("user_handle", who.User.UserName)
+		if sub.Data.CurrentPeriodEnd != "" {
+			snap.SetAttribute("billing_cycle_end", sub.Data.CurrentPeriodEnd)
+			if periodEnd, parseErr := time.Parse(time.RFC3339, sub.Data.CurrentPeriodEnd); parseErr == nil {
+				snap.Resets["billing_period"] = periodEnd
+				snap.Resets["billing_cycle_end"] = periodEnd
+				snap.Resets["monthly_subscription"] = periodEnd
+				snap.Resets["monthly_credits"] = periodEnd
+			}
 		}
 	}
 
 	// 4. Fetch Usage Summary (Spend & Tokens)
 	var sum summaryResponse
-	if _, _, err := shared.FetchJSON(ctx, baseURL+summaryPath, apiKey, &sum, p.Client()); err == nil {
+	summaryURL := baseURL + summaryPath + orgQuery
+	if sub.Data.CurrentPeriodStart != "" {
+		sep := "?"
+		if strings.Contains(summaryURL, "?") {
+			sep = "&"
+		}
+		summaryURL += sep + "since=" + sub.Data.CurrentPeriodStart
+	}
+	if _, _, err := fetchCommandCodeJSON(ctx, summaryURL, apiKey, &sum, p.Client()); err == nil {
 		cost := sum.TotalCost
 		snap.Metrics["total_cost"] = core.Metric{
 			Used:   &cost,
@@ -245,6 +387,45 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
+	// 5. Compute Monthly Subscription Plan & Credits
+	planCap := getPlanCap(sub.Data.PlanID)
+	if planCap <= 0 && (creds.Credits.MonthlyCredits > 0 || sum.TotalCost > 0) {
+		planCap = creds.Credits.MonthlyCredits + sum.TotalCost
+	}
+	if planCap > 0 {
+		monthlyRemaining := creds.Credits.MonthlyCredits
+		monthlyUsed := sum.TotalCost
+		if monthlyUsed <= 0 && planCap >= monthlyRemaining {
+			monthlyUsed = planCap - monthlyRemaining
+		}
+		usedPct := (monthlyUsed / planCap) * 100
+		if usedPct < 0 {
+			usedPct = 0
+		}
+		if usedPct > 100 {
+			usedPct = 100
+		}
+		remPct := 100 - usedPct
+
+		snap.Metrics["monthly_subscription"] = core.Metric{
+			Limit:     core.Float64Ptr(100),
+			Used:      core.Float64Ptr(usedPct),
+			Remaining: core.Float64Ptr(remPct),
+			Unit:      "percent",
+			Window:    "month",
+		}
+		snap.Metrics["monthly_credits"] = core.Metric{
+			Limit:     core.Float64Ptr(planCap),
+			Used:      core.Float64Ptr(monthlyUsed),
+			Remaining: core.Float64Ptr(monthlyRemaining),
+			Unit:      "USD",
+			Window:    "month",
+		}
+		snap.SetAttribute("monthly_cap", fmt.Sprintf("$%.2f", planCap))
+		snap.SetAttribute("monthly_used", fmt.Sprintf("$%.2f", monthlyUsed))
+		snap.SetAttribute("monthly_remaining", fmt.Sprintf("$%.2f", monthlyRemaining))
+	}
+
 	// Status calculation
 	if creds.WindowLimits.Limited || creds.WindowLimits.Exceeded != "" || (weeklyCap > 0 && weeklyUsedDollars >= weeklyCap) || (fiveHourCap > 0 && fiveHourUsedDollars >= fiveHourCap) {
 		snap.Status = core.StatusLimited
@@ -254,7 +435,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	// Message formatting
 	planLabel := "Command Code"
-	if planID := snap.Attributes["plan_id"]; planID != "" {
+	if pn := snap.Attributes["plan_name"]; pn != "" {
+		planLabel = fmt.Sprintf("Command Code (%s)", pn)
+	} else if planID := snap.Attributes["plan_id"]; planID != "" {
 		planLabel = fmt.Sprintf("Command Code (%s)", strings.ReplaceAll(planID, "-", " "))
 	}
 	if snap.Status == core.StatusLimited {

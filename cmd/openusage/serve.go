@@ -15,6 +15,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/tui"
 	"github.com/janekbaraniewski/openusage/internal/version"
 	"github.com/janekbaraniewski/openusage/internal/webserve"
 	"github.com/spf13/cobra"
@@ -65,10 +66,14 @@ func newServeCommand() *cobra.Command {
 				Source:         sourceFlag,
 				TimeWindow:     cfg.Data.TimeWindow,
 				Theme:          cfg.Theme,
+				UsageMode:      cfg.Dashboard.UsageMode,
+				WarnThreshold:  cfg.UI.WarnThreshold,
+				CritThreshold:  cfg.UI.CritThreshold,
 				RefreshSeconds: cfg.UI.RefreshIntervalSeconds,
 				Version:        version.Version,
 				Demo:           demo,
 				AllowPublic:    allowPublic,
+				Config:         &cfg,
 			}
 			shouldOpen := openBrowser
 			if noOpen {
@@ -91,6 +96,13 @@ func newServeCommand() *cobra.Command {
 }
 
 func runServe(opts webserve.Options, openBrowser bool) error {
+	if opts.Config != nil {
+		if err := tui.LoadThemes(config.ConfigDir()); err != nil && core.DebugEnabled() {
+			log.Printf("serve: theme load: %v", err)
+		}
+		tui.SetThemeByName(opts.Config.Theme)
+	}
+
 	srv, err := webserve.NewServer(opts)
 	if err != nil {
 		return err

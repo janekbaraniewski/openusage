@@ -179,6 +179,8 @@ func runDashboard(cfg config.Config) {
 		<-sigCh
 		cancel()
 		program.Quit()
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
 	}()
 
 	if _, err := program.Run(); err != nil {

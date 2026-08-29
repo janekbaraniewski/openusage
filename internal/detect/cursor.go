@@ -1,113 +1,85 @@
 package detect
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
-
-	_ "github.com/mattn/go-sqlite3"
+	"strings"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
 func detectCursor(result *Result) {
 	bin := findBinary("cursor")
-	if bin == "" {
-		return
-	}
 
 	home := homeDir()
-	configDir := filepath.Join(home, ".cursor")
-	appSupport := cursorAppSupportDir()
-
-	tool := DetectedTool{
-		Name:       "Cursor IDE",
-		BinaryPath: bin,
-		ConfigDir:  configDir,
-		Type:       "ide",
-	}
-	result.Tools = append(result.Tools, tool)
-
-	log.Printf("[detect] Found Cursor IDE at %s", bin)
-
-	trackingDB := filepath.Join(configDir, "ai-tracking", "ai-code-tracking.db")
-	stateDB := filepath.Join(appSupport, "User", "globalStorage", "state.vscdb")
-
-	hasTracking := fileExists(trackingDB)
-	hasState := fileExists(stateDB)
-
-	if !hasTracking && !hasState {
-		log.Printf("[detect] Cursor found but no tracking data at expected locations")
+	if home == "" {
 		return
 	}
 
-	log.Printf("[detect] Cursor tracking data found (tracking_db=%v, state_db=%v)", hasTracking, hasState)
-
-	acct := core.AccountConfig{
-		ID:           "cursor-ide",
-		Provider:     "cursor",
-		Auth:         "local",
-		RuntimeHints: make(map[string]string),
-	}
-
-	if hasTracking {
-		acct.SetPath("tracking_db", trackingDB)
-		acct.SetHint("tracking_db", trackingDB)
-		acct.RuntimeHints["tracking_db"] = trackingDB
-	}
-	if hasState {
-		acct.SetPath("state_db", stateDB)
-		acct.SetHint("state_db", stateDB)
-		acct.RuntimeHints["state_db"] = stateDB
-	}
-
-	if hasState {
-		token, email, membership := extractCursorAuth(stateDB)
-		if token != "" {
-			acct.Auth = "token"
-			acct.Token = token
-			log.Printf("[detect] Extracted Cursor auth token for API access")
+	// 1. Auto-detect all active cursor-box container profiles in ~/.agent-containers and ~/.cursor-containers
+	hasBoxes := false
+	for _, containersDirName := range []string{".agent-containers", ".cursor-containers"} {
+		containersDir := filepath.Join(home, containersDirName)
+		if !dirExists(containersDir) {
+			continue
 		}
-		if email != "" {
-			acct.RuntimeHints["email"] = email
-			log.Printf("[detect] Cursor account: %s", email)
+		entries, err := os.ReadDir(containersDir)
+		if err != nil {
+			continue
 		}
-		if membership != "" {
-			acct.RuntimeHints["membership"] = membership
-			log.Printf("[detect] Cursor membership: %s", membership)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			boxName := entry.Name()
+			boxConfigDir := filepath.Join(containersDir, boxName, ".cursor")
+			boxStatusFile := filepath.Join(home, ".local", "state", "openusage", fmt.Sprintf("cursor-%s-status.json", boxName))
+
+			acct := core.AccountConfig{
+				ID:           fmt.Sprintf("cursor-%s", boxName),
+				Provider:     "cursor",
+				Auth:         "local",
+				Binary:       bin,
+				RuntimeHints: make(map[string]string),
+			}
+			acct.SetHint("config_dir", boxConfigDir)
+			acct.SetHint("status_file", boxStatusFile)
+			addAccount(result, acct)
+			hasBoxes = true
 		}
 	}
 
-	addAccount(result, acct)
-}
-
-func extractCursorAuth(stateDBPath string) (token, email, membership string) {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", stateDBPath))
-	if err != nil {
-		log.Printf("[detect] Cannot open state.vscdb: %v", err)
-		return "", "", ""
+	// 2. Default single-profile Cursor config dir
+	configDir := strings.TrimSpace(os.Getenv("CURSOR_CONFIG_DIR"))
+	if configDir == "" {
+		configDir = filepath.Join(home, ".cursor")
 	}
-	defer db.Close()
+	defaultStatusFile := filepath.Join(home, ".local", "state", "openusage", "cursor-status.json")
 
-	err = db.QueryRow(
-		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'`).Scan(&token)
-	if err != nil {
-		log.Printf("[detect] No Cursor access token found: %v", err)
-		token = ""
+	if !dirExists(configDir) && bin == "" && !fileExists(defaultStatusFile) {
+		return
 	}
 
-	err = db.QueryRow(
-		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/cachedEmail'`).Scan(&email)
-	if err != nil {
-		email = ""
-	}
+	log.Printf("[detect] Found Cursor at %s", bin)
+	result.Tools = append(result.Tools, DetectedTool{
+		Name:       "Cursor CLI",
+		BinaryPath: bin,
+		ConfigDir:  configDir,
+		Type:       "cli",
+	})
 
-	err = db.QueryRow(
-		`SELECT value FROM ItemTable WHERE key = 'cursorAuth/stripeMembershipType'`).Scan(&membership)
-	if err != nil {
-		membership = ""
+	if !hasBoxes {
+		acct := core.AccountConfig{
+			ID:           "cursor",
+			Provider:     "cursor",
+			Auth:         "local",
+			Binary:       bin,
+			RuntimeHints: make(map[string]string),
+		}
+		acct.SetHint("config_dir", configDir)
+		acct.SetHint("status_file", defaultStatusFile)
+		addAccount(result, acct)
 	}
-
-	return token, email, membership
 }

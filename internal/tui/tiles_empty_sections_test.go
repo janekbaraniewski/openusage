@@ -37,7 +37,7 @@ func TestRenderTile_NoDataSectionsShownOrHiddenBySetting(t *testing.T) {
 		timeWindow:             core.TimeWindow7d,
 		hideSectionsWithNoData: false,
 	}
-	shownTile := stripANSI(shown.renderTile(snap, false, false, 100, 0, 0))
+	shownTile := StripANSI(shown.renderTile(snap, false, false, 100, 0, 0))
 	if !strings.Contains(shownTile, "No model data for this time range") {
 		t.Fatalf("expected no-data model section to be visible, got: %q", shownTile)
 	}
@@ -49,7 +49,7 @@ func TestRenderTile_NoDataSectionsShownOrHiddenBySetting(t *testing.T) {
 		timeWindow:             core.TimeWindow7d,
 		hideSectionsWithNoData: true,
 	}
-	hiddenTile := stripANSI(hidden.renderTile(snap, false, false, 100, 0, 0))
+	hiddenTile := StripANSI(hidden.renderTile(snap, false, false, 100, 0, 0))
 	if strings.Contains(hiddenTile, "No model data for this time range") {
 		t.Fatalf("expected no-data model section to be hidden, got: %q", hiddenTile)
 	}

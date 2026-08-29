@@ -184,7 +184,7 @@ def main():
                     default=os.path.join(repo_root(), "internal", "tmux",
                                          "assets", "icons.json"))
     ap.add_argument("--svg-dir",
-                    default=os.path.join(repo_root(), "website", "public", "icons"))
+                    default=os.path.join(repo_root(), "internal", "tmux", "assets", "icons"))
     args = ap.parse_args()
 
     font = TTFont(args.base)

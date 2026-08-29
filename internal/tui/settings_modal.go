@@ -10,7 +10,6 @@ const (
 	settingsTabProviders settingsModalTab = iota
 	settingsTabWidgetSections
 	settingsTabTheme
-	settingsTabView
 	settingsTabAPIKeys
 	settingsTabTelemetry
 	settingsTabIntegrations
@@ -26,7 +25,6 @@ var settingsTabNames = []string{
 	"Providers",
 	"Widget Sections",
 	"Theme",
-	"View",
 	"API Keys",
 	"Telemetry",
 	"Integrations",
@@ -52,7 +50,7 @@ func (m *Model) openSettingsModal() {
 	} else {
 		m.settings.themeCursor = 0
 	}
-	m.settings.viewCursor = dashboardViewIndex(m.configuredDashboardView())
+	m.settings.viewCursor = 0
 	m.refreshIntegrationStatuses()
 }
 

@@ -430,8 +430,12 @@ func TestBuildTileGaugeLines_CustomProviders(t *testing.T) {
 		},
 	}
 	linesAg := m.buildTileGaugeLines(snapAg, widget, 60)
-	if len(linesAg) == 0 || !strings.Contains(strings.Join(linesAg, "\n"), "GEMINI MODELS") {
+	joinedAg := strings.Join(linesAg, "\n")
+	if len(linesAg) == 0 || !strings.Contains(joinedAg, "GEMINI MODELS") {
 		t.Errorf("expected GEMINI MODELS in antigravity lines, got %v", linesAg)
+	}
+	if !strings.Contains(joinedAg, "CLAUDE AND GPT MODELS") {
+		t.Errorf("expected CLAUDE AND GPT MODELS in antigravity lines, got %v", linesAg)
 	}
 
 	// 2. OpenCode
@@ -452,15 +456,30 @@ func TestBuildTileGaugeLines_CustomProviders(t *testing.T) {
 	// 3. Command Code
 	snapCc := core.UsageSnapshot{
 		ProviderID: "command_code",
+		Attributes: map[string]string{
+			"plan_id":      "individual-goat",
+			"plan_name":    "GOAT",
+			"monthly_cap":  "$70.00",
+			"monthly_used": "$35.84",
+		},
 		Metrics: map[string]core.Metric{
+			"monthly_subscription": {
+				Remaining: func(f float64) *float64 { return &f }(48.8),
+				Used:      func(f float64) *float64 { return &f }(51.2),
+			},
 			"weekly_usage": {Remaining: func(f float64) *float64 { return &f }(0)},
 		},
 		Resets: map[string]time.Time{
-			"weekly_usage": now.Add(36 * time.Hour),
+			"monthly_subscription": now.Add(24 * 24 * time.Hour),
+			"weekly_usage":         now.Add(36 * time.Hour),
 		},
 	}
 	linesCc := m.buildTileGaugeLines(snapCc, widget, 60)
-	if len(linesCc) == 0 || !strings.Contains(strings.Join(linesCc, "\n"), "COMMAND CODE") {
-		t.Errorf("expected COMMAND CODE in command_code lines, got %v", linesCc)
+	joinedCc := strings.Join(linesCc, "\n")
+	if len(linesCc) == 0 || !strings.Contains(joinedCc, "COMMAND CODE (GOAT)") {
+		t.Errorf("expected COMMAND CODE (GOAT) in command_code lines, got %v", linesCc)
+	}
+	if !strings.Contains(joinedCc, "Monthly Subscription Remaining") {
+		t.Errorf("expected Monthly Subscription Remaining in command_code lines, got %v", linesCc)
 	}
 }

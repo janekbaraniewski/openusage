@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
@@ -18,8 +19,8 @@ type providerDisplayInfo struct {
 	reason       string
 }
 
-func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool) providerDisplayInfo {
-	return normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget, hideCosts))
+func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool, usageMode ...string) providerDisplayInfo {
+	return normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget, hideCosts, usageMode...))
 }
 
 func normalizeProviderDisplayInfoType(info providerDisplayInfo) providerDisplayInfo {
@@ -36,7 +37,8 @@ func normalizeProviderDisplayInfoType(info providerDisplayInfo) providerDisplayI
 	return info
 }
 
-func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool) providerDisplayInfo {
+func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool, usageMode ...string) providerDisplayInfo {
+	isUsedMode := len(usageMode) > 0 && usageMode[0] == config.UsageModeUsed
 	info := providerDisplayInfo{gaugePercent: -1}
 	costSummary := core.ExtractAnalyticsCostSummary(snap)
 	if hideCosts {
@@ -159,10 +161,18 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if pu.Remaining != nil {
 			remaining = *pu.Remaining
 		}
-		info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
-		info.gaugePercent = remaining
-		if pu.Remaining != nil {
-			info.detail = fmt.Sprintf("%.2f%% remaining", *pu.Remaining)
+		if isUsedMode {
+			info.summary = fmt.Sprintf("%.2f%% used", *pu.Used)
+			info.gaugePercent = *pu.Used
+			if pu.Remaining != nil {
+				info.detail = fmt.Sprintf("%.2f%% used", 100-*pu.Remaining)
+			}
+		} else {
+			info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
+			info.gaugePercent = remaining
+			if pu.Remaining != nil {
+				info.detail = fmt.Sprintf("%.2f%% remaining", *pu.Remaining)
+			}
 		}
 		return info
 	}
@@ -179,7 +189,11 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			if pu.Remaining != nil {
 				rem = *pu.Remaining
 			}
-			info.detail = fmt.Sprintf("%.2f%% remaining", rem)
+			if isUsedMode {
+				info.detail = fmt.Sprintf("%.2f%% used", 100-rem)
+			} else {
+				info.detail = fmt.Sprintf("%.2f%% remaining", rem)
+			}
 		}
 		return info
 	}
@@ -248,8 +262,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			rem = *c5h.Remaining
 		}
 
-		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
-		info.gaugePercent = rem
+		if isUsedMode {
+			info.summary = fmt.Sprintf("%.2f%% used", 100-rem)
+			info.gaugePercent = 100 - rem
+		} else {
+			info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+			info.gaugePercent = rem
+		}
 		return info
 	}
 
@@ -270,10 +289,19 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		} else if m.Used != nil {
 			remaining = 100 - *m.Used
 		}
-		info.gaugePercent = remaining
-		info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
-		if m.Remaining != nil {
-			info.detail = fmt.Sprintf("%.2f%% remaining", *m.Remaining)
+		if isUsedMode {
+			used := 100 - remaining
+			info.gaugePercent = used
+			info.summary = fmt.Sprintf("%.2f%% used", used)
+			if m.Used != nil {
+				info.detail = fmt.Sprintf("%.2f%% used", *m.Used)
+			}
+		} else {
+			info.gaugePercent = remaining
+			info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
+			if m.Remaining != nil {
+				info.detail = fmt.Sprintf("%.2f%% remaining", *m.Remaining)
+			}
 		}
 		return info
 	}
@@ -282,8 +310,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		if pct := m.Percent(); pct >= 0 {
-			info.gaugePercent = pct
-			info.summary = fmt.Sprintf("%.2f%% remaining", pct)
+			if isUsedMode {
+				info.gaugePercent = 100 - pct
+				info.summary = fmt.Sprintf("%.2f%% used", 100-pct)
+			} else {
+				info.gaugePercent = pct
+				info.summary = fmt.Sprintf("%.2f%% remaining", pct)
+			}
 		}
 		info.detail = fmt.Sprintf("%s / %s tokens", shortCompact(*m.Used), shortCompact(*m.Limit))
 		return info
@@ -306,8 +339,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		}
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		info.gaugePercent = worstRatePct
-		info.summary = fmt.Sprintf("%.2f%% remaining", worstRatePct)
+		if isUsedMode {
+			info.gaugePercent = 100 - worstRatePct
+			info.summary = fmt.Sprintf("%.2f%% used", 100-worstRatePct)
+		} else {
+			info.gaugePercent = worstRatePct
+			info.summary = fmt.Sprintf("%.2f%% remaining", worstRatePct)
+		}
 		if len(rateParts) > 0 {
 			sort.Strings(rateParts)
 			info.detail = strings.Join(rateParts, " · ")
@@ -323,8 +361,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if fh.Remaining != nil {
 			rem = *fh.Remaining
 		}
-		info.gaugePercent = rem
-		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		if isUsedMode {
+			info.gaugePercent = 100 - rem
+			info.summary = fmt.Sprintf("%.2f%% used", 100-rem)
+		} else {
+			info.gaugePercent = rem
+			info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		}
 
 		var detailParts []string
 		if dc, ok2 := snap.Metrics["today_api_cost"]; ok2 && dc.Used != nil && !hideCosts {
@@ -385,8 +428,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			rem = 100
 		}
 
-		info.gaugePercent = rem
-		info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		if isUsedMode {
+			info.gaugePercent = 100 - rem
+			info.summary = fmt.Sprintf("%.2f%% used", 100-rem)
+		} else {
+			info.gaugePercent = rem
+			info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+		}
 		if bal, ok2 := snap.Metrics["console_balance"]; ok2 && bal.Remaining != nil && !hideCosts {
 			info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
 		}
@@ -424,8 +472,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			if rem > 100 {
 				rem = 100
 			}
-			info.gaugePercent = rem
-			info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+			if isUsedMode {
+				info.gaugePercent = 100 - rem
+				info.summary = fmt.Sprintf("%.2f%% used", 100-rem)
+			} else {
+				info.gaugePercent = rem
+				info.summary = fmt.Sprintf("%.2f%% remaining", rem)
+			}
 			if bal, ok2 := snap.Metrics["balance"]; ok2 && bal.Remaining != nil && !hideCosts {
 				info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
 			}
@@ -541,8 +594,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	if hasUsage {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
-		info.gaugePercent = worstUsagePct
-		info.summary = fmt.Sprintf("%.2f%% remaining", worstUsagePct)
+		if isUsedMode {
+			info.gaugePercent = 100 - worstUsagePct
+			info.summary = fmt.Sprintf("%.2f%% used", 100-worstUsagePct)
+		} else {
+			info.gaugePercent = worstUsagePct
+			info.summary = fmt.Sprintf("%.2f%% remaining", worstUsagePct)
+		}
 		if snap.ProviderID == "gemini_cli" {
 			if m, ok := snap.Metrics["total_conversations"]; ok && m.Used != nil {
 				info.detail = fmt.Sprintf("%.0f conversations", *m.Used)

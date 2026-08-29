@@ -20,7 +20,10 @@ func detectCommandCode(result *Result) {
 		}
 	}
 
-	binPath, _ := exec.LookPath("cmdc")
+	binPath, _ := exec.LookPath("command-code")
+	if binPath == "" {
+		binPath, _ = exec.LookPath("cmdc")
+	}
 	if binPath == "" {
 		binPath, _ = exec.LookPath("commandcode")
 	}

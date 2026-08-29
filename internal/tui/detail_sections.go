@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/samber/lo"
 )
@@ -14,17 +15,19 @@ import (
 // Sections are filtered and ordered according to effectiveDetailSectionOrder().
 //
 // hideCosts suppresses the Spending and Forecast cards entirely.
-func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w int, warnThresh, critThresh float64, timeWindow core.TimeWindow, hideCosts bool, now time.Time) []detailSection {
+func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w int, warnThresh, critThresh float64, timeWindow core.TimeWindow, hideCosts bool, now time.Time, usageMode ...string) []detailSection {
 	innerW := w - 8 // card borders + margins + padding
 	if innerW < 30 {
 		innerW = 30
 	}
 
+	isUsedMode := len(usageMode) > 0 && usageMode[0] == config.UsageModeUsed
+
 	// Build all candidate sections keyed by their DetailStandardSection ID.
 	candidates := make(map[core.DetailStandardSection][]detailSection)
 
 	// 1. Usage Overview — gauges and key metrics (NO summary/detail text — that's in compact header).
-	if usageLines := buildDetailUsageSection(snap, widget, innerW, warnThresh, critThresh, hideCosts, now); len(usageLines) > 0 {
+	if usageLines := buildDetailUsageSection(snap, widget, innerW, warnThresh, critThresh, hideCosts, now, isUsedMode); len(usageLines) > 0 {
 		candidates[core.DetailSectionUsage] = append(candidates[core.DetailSectionUsage],
 			detailSection{id: "Usage", title: "Usage", icon: "⚡", color: colorYellow, lines: usageLines})
 	}
@@ -186,17 +189,17 @@ func buildDetailSections(snap core.UsageSnapshot, widget core.DashboardWidget, w
 
 // buildDetailUsageSection builds the usage overview — gauges + compact metrics.
 // Does NOT include summary/detail text (that's in the compact header now).
-func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, hideCosts bool, now time.Time) []string {
+func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, hideCosts bool, now time.Time, isUsedMode bool) []string {
 	if snap.ProviderID == "antigravity" {
-		return buildAntigravityDetailUsageSection(snap, innerW, warnThresh, critThresh, now)
+		return buildAntigravityDetailUsageSection(snap, innerW, warnThresh, critThresh, now, isUsedMode)
 	}
 	if snap.ProviderID == "opencode" {
-		if ocLines := buildOpenCodeDetailUsageSection(snap, innerW, warnThresh, critThresh, now); len(ocLines) > 0 {
+		if ocLines := buildOpenCodeDetailUsageSection(snap, innerW, warnThresh, critThresh, now, isUsedMode); len(ocLines) > 0 {
 			return ocLines
 		}
 	}
 	if snap.ProviderID == "command_code" {
-		if ccLines := buildCommandCodeDetailUsageSection(snap, innerW, warnThresh, critThresh, now); len(ccLines) > 0 {
+		if ccLines := buildCommandCodeDetailUsageSection(snap, innerW, warnThresh, critThresh, now, isUsedMode); len(ccLines) > 0 {
 			return ccLines
 		}
 	}
@@ -204,7 +207,7 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 	var lines []string
 
 	// Usage gauge bars.
-	gaugeLines := buildDetailGaugeLines(snap, widget, innerW, warnThresh, critThresh, now)
+	gaugeLines := buildDetailGaugeLines(snap, widget, innerW, warnThresh, critThresh, now, isUsedMode)
 	lines = append(lines, gaugeLines...)
 
 	// Compact metric summary rows (credits, messages, sessions, etc.).
@@ -219,15 +222,12 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 	return lines
 }
 
-func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
 	var lines []string
 
 	barW := innerW - 14
 	if barW < 20 {
 		barW = 20
-	}
-	if barW > 50 {
-		barW = 50
 	}
 
 	renderQuotaBlock := func(groupTitle string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
@@ -237,7 +237,9 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 		bullet := lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Render("◈ ")
 		title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(groupTitle)
 		lines = append(lines, bullet+title)
-		lines = append(lines, "  "+dimStyle.Render(modelsDesc))
+		if strings.TrimSpace(modelsDesc) != "" {
+			lines = append(lines, "  "+dimStyle.Render(modelsDesc))
+		}
 		lines = append(lines, "")
 
 		renderItem := func(label string, candidateKeys []string, defaultRemaining float64) {
@@ -266,11 +268,38 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 					resetAt = r
 				}
 			}
+			if resetAt.IsZero() {
+				for _, k := range candidateKeys {
+					if r, hasReset := snap.Resets[k]; hasReset && !r.IsZero() {
+						resetAt = r
+						break
+					} else if r, hasReset := snap.Resets[k+"_reset"]; hasReset && !r.IsZero() {
+						resetAt = r
+						break
+					}
+				}
+			}
+			if !resetAt.IsZero() && resetAt.Before(now) {
+				if strings.Contains(label, "Weekly") {
+					for resetAt.Before(now) {
+						resetAt = resetAt.Add(7 * 24 * time.Hour)
+					}
+				} else if strings.Contains(label, "Five Hour") {
+					for resetAt.Before(now) {
+						resetAt = resetAt.Add(5 * time.Hour)
+					}
+				}
+			}
 
-			gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
+			var gaugeBar string
+			if isUsedMode {
+				gaugeBar = RenderUsageGauge(100-remaining, barW, warnThresh, critThresh)
+			} else {
+				gaugeBar = RenderGauge(remaining, barW, warnThresh, critThresh)
+			}
 			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 			lines = append(lines, "    "+gaugeBar)
-			lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, now))
+			lines = append(lines, "    "+RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, now, isUsedMode))
 			lines = append(lines, "")
 		}
 
@@ -287,14 +316,19 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			fiveHourDefault = 0.0
 		}
 
-		renderItem("Weekly Limit Remaining", weeklyKeys, weeklyRemaining)
-		renderItem("Five Hour Limit Remaining", fiveHourKeys, fiveHourDefault)
+		if isUsedMode {
+			renderItem("Weekly Limit Used", weeklyKeys, weeklyRemaining)
+			renderItem("Five Hour Limit Used", fiveHourKeys, fiveHourDefault)
+		} else {
+			renderItem("Weekly Limit Remaining", weeklyKeys, weeklyRemaining)
+			renderItem("Five Hour Limit Remaining", fiveHourKeys, fiveHourDefault)
+		}
 	}
 
 	// 1. GEMINI MODELS
 	renderQuotaBlock(
 		"GEMINI MODELS",
-		"Models within this group: Gemini 2.5 Flash, Gemini 2.5 Pro, Gemini 3.7 Flash",
+		"",
 		[]string{"quota_gemini_weekly", "quota_gemini_7d", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
 		[]string{"quota_gemini_5h", "quota_gemini", "quota_gemini_flash", "quota_gemini_pro"},
 	)
@@ -302,7 +336,7 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 	// 2. CLAUDE AND GPT MODELS
 	renderQuotaBlock(
 		"CLAUDE AND GPT MODELS",
-		"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+		"",
 		[]string{"quota_claude_weekly", "quota_3p_weekly", "quota_3p_7d", "quota_opus_sonnet_weekly", "quota_claude", "quota_3p", "quota_opus_sonnet"},
 		[]string{"quota_claude_5h", "quota_3p_5h", "quota_opus_sonnet_5h", "quota_claude", "quota_3p", "quota_opus_sonnet"},
 	)
@@ -310,15 +344,12 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 	return lines
 }
 
-func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
 	var lines []string
 
 	barW := innerW - 14
 	if barW < 20 {
 		barW = 20
-	}
-	if barW > 50 {
-		barW = 50
 	}
 
 	hasGoMetrics := false
@@ -333,15 +364,9 @@ func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnTh
 		return nil
 	}
 
-	modelsCount := snap.Attributes["available_models_count"]
-	if modelsCount == "" {
-		modelsCount = "63"
-	}
-
 	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("◈ ")
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("OPENCODE GO SUBSCRIPTION")
 	lines = append(lines, bullet+title)
-	lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("Models within this tier: Claude, GPT, DeepSeek, MiMo, Minimax (%s models)", modelsCount)))
 	lines = append(lines, "")
 
 	renderItem := func(label string, metricKey string) {
@@ -368,50 +393,70 @@ func buildOpenCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnTh
 			resetAt = r
 		} else if r, hasReset := snap.Resets[metricKey+"_reset"]; hasReset {
 			resetAt = r
+		} else if r, hasReset := snap.Resets[strings.TrimSuffix(metricKey, "_pct")]; hasReset {
+			resetAt = r
+		} else if r, hasReset := snap.Resets[strings.TrimSuffix(metricKey, "_pct")+"_reset"]; hasReset {
+			resetAt = r
 		}
 
-		gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
+		var gaugeBar string
+		if isUsedMode {
+			gaugeBar = RenderUsageGauge(100-remaining, barW, warnThresh, critThresh)
+		} else {
+			gaugeBar = RenderGauge(remaining, barW, warnThresh, critThresh)
+		}
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
 		lines = append(lines, "    "+gaugeBar)
-		lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, now))
+		lines = append(lines, "    "+RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, now, isUsedMode))
 		lines = append(lines, "")
 	}
 
-	renderItem("Five Hour Limit Remaining", "rolling_usage")
-	renderItem("Weekly Limit Remaining", "weekly_usage")
-	renderItem("Monthly Limit Remaining", "monthly_usage_pct")
+	if isUsedMode {
+		renderItem("Five Hour Limit Used", "rolling_usage")
+		renderItem("Weekly Limit Used", "weekly_usage")
+		renderItem("Monthly Limit Used", "monthly_usage_pct")
+	} else {
+		renderItem("Five Hour Limit Remaining", "rolling_usage")
+		renderItem("Weekly Limit Remaining", "weekly_usage")
+		renderItem("Monthly Limit Remaining", "monthly_usage_pct")
+	}
 
 	return lines
 }
 
-func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
 	var lines []string
 
 	barW := innerW - 14
 	if barW < 20 {
 		barW = 20
 	}
-	if barW > 50 {
-		barW = 50
-	}
 
 	nowTime := now
 
 	planName := "Command Code"
-	if planID := snap.Attributes["plan_id"]; planID != "" {
-		planName = fmt.Sprintf("Command Code (%s)", strings.ReplaceAll(planID, "-", " "))
+	if pn := snap.Attributes["plan_name"]; pn != "" {
+		planName = fmt.Sprintf("Command Code (%s)", pn)
+	} else if planID := snap.Attributes["plan_id"]; planID != "" {
+		cleaned := strings.TrimPrefix(planID, "individual-")
+		cleaned = strings.TrimPrefix(cleaned, "teams-")
+		planName = fmt.Sprintf("Command Code (%s)", strings.ToUpper(cleaned))
 	}
 
 	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorTeal).Render("◈ ")
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(strings.ToUpper(planName))
 	lines = append(lines, bullet+title)
 
-	weeklyCap := snap.Attributes["weekly_cap"]
-	descParts := []string{"Unlimited Turns"}
-	if weeklyCap != "" {
-		descParts = append(descParts, fmt.Sprintf("Sliding Cap: %s/wk", weeklyCap))
+	var subtitles []string
+	if monthlyCap := snap.Attributes["monthly_cap"]; monthlyCap != "" {
+		subtitles = append(subtitles, fmt.Sprintf("Plan: %s/mo", monthlyCap))
 	}
-	lines = append(lines, "  "+dimStyle.Render(strings.Join(descParts, " · ")))
+	if weeklyCap := snap.Attributes["weekly_cap"]; weeklyCap != "" {
+		subtitles = append(subtitles, fmt.Sprintf("Sliding Cap: %s/wk", weeklyCap))
+	}
+	if len(subtitles) > 0 {
+		lines = append(lines, "  "+dimStyle.Render(strings.Join(subtitles, " · ")))
+	}
 	lines = append(lines, "")
 
 	renderItem := func(label string, metricKey string, capAttr string, usedAttr string) {
@@ -438,6 +483,12 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			resetAt = r
 		} else if r, hasReset := snap.Resets[metricKey+"_reset"]; hasReset {
 			resetAt = r
+		} else if metricKey == "monthly_subscription" {
+			if r, hasReset := snap.Resets["billing_cycle_end"]; hasReset {
+				resetAt = r
+			} else if r, hasReset := snap.Resets["billing_period"]; hasReset {
+				resetAt = r
+			}
 		}
 
 		capInfo := ""
@@ -449,15 +500,33 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 			}
 		}
 
-		gaugeBar := RenderGauge(remaining, barW, warnThresh, critThresh)
+		var gaugeBar string
+		if isUsedMode {
+			gaugeBar = RenderUsageGauge(100-remaining, barW, warnThresh, critThresh)
+		} else {
+			gaugeBar = RenderGauge(remaining, barW, warnThresh, critThresh)
+		}
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label+capInfo))
 		lines = append(lines, "    "+gaugeBar)
-		lines = append(lines, "    "+RenderQuotaStatusAndTimerLine(remaining, resetAt, nowTime))
+		lines = append(lines, "    "+RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, nowTime, isUsedMode))
 		lines = append(lines, "")
 	}
 
-	renderItem("Five Hour Limit Remaining", "five_hour_usage", "five_hour_cap", "five_hour_used")
-	renderItem("Weekly Limit Remaining", "weekly_usage", "weekly_cap", "weekly_used")
+	if _, ok := snap.Metrics["monthly_subscription"]; ok {
+		if isUsedMode {
+			renderItem("Monthly Subscription Used", "monthly_subscription", "monthly_cap", "monthly_used")
+		} else {
+			renderItem("Monthly Subscription Remaining", "monthly_subscription", "monthly_cap", "monthly_used")
+		}
+	}
+
+	if isUsedMode {
+		renderItem("Weekly Limit Used", "weekly_usage", "weekly_cap", "weekly_used")
+		renderItem("Five Hour Limit Used", "five_hour_usage", "five_hour_cap", "five_hour_used")
+	} else {
+		renderItem("Weekly Limit Remaining", "weekly_usage", "weekly_cap", "weekly_used")
+		renderItem("Five Hour Limit Remaining", "five_hour_usage", "five_hour_cap", "five_hour_used")
+	}
 
 	if bal, ok := snap.Metrics["balance"]; ok && bal.Remaining != nil {
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render("Credit Balance"))
@@ -469,14 +538,11 @@ func buildCommandCodeDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 }
 
 // buildDetailGaugeLines builds gauge bars for the detail view.
-func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
 	maxLabelW := 18
 	gaugeW := innerW - maxLabelW - 10
 	if gaugeW < 8 {
 		gaugeW = 8
-	}
-	if gaugeW > 50 {
-		gaugeW = 50
 	}
 	maxLines := 6
 
@@ -504,16 +570,28 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if usedPct < 0 {
 			continue
 		}
-		label := gaugeLabel(widget, key, met.Window)
+		label := gaugeLabelWithMode(widget, key, isUsedMode, met.Window)
 		if len(label) > maxLabelW {
 			label = label[:maxLabelW-1] + "…"
 		}
 
 		var gauge string
-		if strings.HasPrefix(key, "quota") && met.Remaining != nil {
-			gauge = RenderGauge(*met.Remaining, gaugeW, warnThresh, critThresh)
-		} else {
+		if isUsedMode {
 			gauge = RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
+		} else {
+			remainingPct := 100 - usedPct
+			if met.Remaining != nil && (met.Limit == nil || *met.Limit <= 0) {
+				remainingPct = *met.Remaining
+			} else if met.Limit != nil && met.Remaining != nil && *met.Limit > 0 {
+				remainingPct = *met.Remaining / *met.Limit * 100
+			}
+			if remainingPct < 0 {
+				remainingPct = 0
+			}
+			if remainingPct > 100 {
+				remainingPct = 100
+			}
+			gauge = RenderGauge(remainingPct, gaugeW, warnThresh, critThresh)
 		}
 		resetAt, hasReset := snap.Resets[key]
 		if !hasReset {
@@ -531,10 +609,22 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 					}
 				}
 			}
-			if strings.HasPrefix(key, "quota") && met.Remaining != nil {
-				gauge = RenderGaugeWithProjection(*met.Remaining, gaugeW, warnThresh, critThresh, resetIn)
-			} else {
+			if isUsedMode {
 				gauge = RenderUsageGaugeWithProjection(usedPct, gaugeW, warnThresh, critThresh, paceFraction, resetIn)
+			} else {
+				remainingPct := 100 - usedPct
+				if met.Remaining != nil && (met.Limit == nil || *met.Limit <= 0) {
+					remainingPct = *met.Remaining
+				} else if met.Limit != nil && met.Remaining != nil && *met.Limit > 0 {
+					remainingPct = *met.Remaining / *met.Limit * 100
+				}
+				if remainingPct < 0 {
+					remainingPct = 0
+				}
+				if remainingPct > 100 {
+					remainingPct = 100
+				}
+				gauge = RenderGaugeWithProjection(remainingPct, gaugeW, warnThresh, critThresh, resetIn)
 			}
 		}
 

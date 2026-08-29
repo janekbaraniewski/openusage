@@ -39,18 +39,7 @@ func (m Model) renderDashboardContent(w, contentH int) string {
 	if m.mode == modeDetail {
 		return m.renderDetailPanel(w, contentH)
 	}
-	switch m.activeDashboardView() {
-	case dashboardViewTabs:
-		return m.renderTilesTabs(w, contentH)
-	case dashboardViewSplit:
-		return m.renderSplitPanes(w, contentH)
-	case dashboardViewCompare:
-		return m.renderComparePanes(w, contentH)
-	case dashboardViewStacked:
-		return m.renderTilesSingleColumn(w, contentH)
-	default:
-		return m.renderTiles(w, contentH)
-	}
+	return m.renderSplitPanes(w, contentH)
 }
 
 func (m Model) renderHeader(w int) string {
@@ -104,7 +93,7 @@ func (m Model) renderHeader(w int) string {
 			if m.filter.text != "" {
 				info += " (filtered)"
 			}
-			info += " · " + m.dashboardViewStatusLabel()
+			info += " · " + m.usageModeStatusLabel()
 		}
 	}
 	if !m.settings.show {
@@ -231,21 +220,6 @@ func (m Model) renderFooterStatusLine(w int) string {
 		if m.filter.text != "" {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.filter.text)
 		}
-		if m.activeDashboardView() == dashboardViewTabs && m.mode == modeList {
-			return " " + dimStyle.Render("tabs view · ←/→ switch tab · Enter detail · v view · p menu · ? help")
-		}
-		if m.activeDashboardView() == dashboardViewSplit && m.mode == modeList {
-			return " " + dimStyle.Render("split view · ↑/↓ select · Enter detail · v view · p menu · ? help")
-		}
-		if m.activeDashboardView() == dashboardViewCompare && m.mode == modeList {
-			return " " + dimStyle.Render("compare view · ←/→ switch · v view · p menu · ? help")
-		}
-		if m.mode == modeList && m.shouldUseWidgetScroll() && m.tileOffset > 0 {
-			return " " + dimStyle.Render("widget scroll active · PgUp/PgDn · Ctrl+U/Ctrl+D · p menu")
-		}
-		if m.mode == modeList && m.shouldUsePanelScroll() && m.tileOffset > 0 {
-			return " " + dimStyle.Render("panel scroll active · PgUp/PgDn · Home/End · p menu")
-		}
 	}
 
 	if m.hasAppUpdateNotice() {
@@ -259,7 +233,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		return " " + yellowStyle.Render(msg)
 	}
 
-	return " " + dimStyle.Render("auto-refresh ⟳ 10s · p menu · v view · r refresh · ? help")
+	return " " + dimStyle.Render("auto-refresh ⟳ 10s · p menu · u mode · r refresh · ? help")
 }
 
 func (m Model) hasAppUpdateNotice() bool {

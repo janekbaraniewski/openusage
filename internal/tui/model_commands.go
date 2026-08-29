@@ -64,6 +64,20 @@ func (m Model) persistDashboardViewCmd() tea.Cmd {
 	}
 }
 
+func (m Model) persistDashboardUsageModeCmd() tea.Cmd {
+	mode := m.usageMode
+	return func() tea.Msg {
+		if m.services == nil {
+			return dashboardUsageModePersistedMsg{err: fmt.Errorf("dashboard usage mode service unavailable")}
+		}
+		err := m.services.SaveDashboardUsageMode(mode)
+		if err != nil {
+			log.Printf("dashboard usage mode persist: %v", err)
+		}
+		return dashboardUsageModePersistedMsg{err: err}
+	}
+}
+
 func (m Model) persistDashboardWidgetSectionsCmd() tea.Cmd {
 	sections := m.dashboardWidgetSectionConfigEntries()
 	return func() tea.Msg {

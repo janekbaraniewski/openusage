@@ -114,16 +114,23 @@ func TestE2E_LiveProvidersRender(t *testing.T) {
 		t.Errorf("cursor after click out of bounds: %d", mAfterClick.cursor)
 	}
 
-	// Click same tile again to enter detail mode
+	// Click same tile again -> stays in modeList without entering detail mode
 	detailModel, _ := mAfterClick.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonLeft,
 		X:      20,
 		Y:      5,
 	})
-	mDetail := detailModel.(Model)
+	mAfterClick2 := detailModel.(Model)
+	if mAfterClick2.mode != modeList {
+		t.Errorf("expected modeList after clicking tile, got %v", mAfterClick2.mode)
+	}
+
+	// Press Enter to enter detail mode
+	enterModel, _ := mAfterClick2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mDetail := enterModel.(Model)
 	if mDetail.mode != modeDetail {
-		t.Errorf("expected modeDetail after double-clicking tile, got %v", mDetail.mode)
+		t.Errorf("expected modeDetail after pressing Enter, got %v", mDetail.mode)
 	}
 	detailView := mDetail.View()
 	if detailView == "" {

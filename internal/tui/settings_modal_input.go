@@ -75,10 +75,6 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, handled := m.handleSettingsTabThemeKey(msg); handled {
 			return next, cmd
 		}
-	case settingsTabView:
-		if next, cmd, handled := m.handleSettingsTabViewKey(msg); handled {
-			return next, cmd
-		}
 	case settingsTabAPIKeys:
 		if next, cmd, handled := m.handleSettingsTabAPIKeysKey(msg, ids); handled {
 			return next, cmd
@@ -191,8 +187,6 @@ func (m *Model) resetSettingsCursorForTab() {
 		m.settings.previewOffset = 0
 	case settingsTabTheme:
 		m.settings.themeCursor = clamp(ActiveThemeIndex(), 0, max(0, len(AvailableThemes())-1))
-	case settingsTabView:
-		m.settings.viewCursor = dashboardViewIndex(m.configuredDashboardView())
 	}
 }
 

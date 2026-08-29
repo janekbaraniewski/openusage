@@ -105,7 +105,14 @@ func cursorAppSupportDir() string {
 	case "darwin":
 		return filepath.Join(home, "Library", "Application Support", "Cursor")
 	case "linux":
-		return filepath.Join(home, ".config", "Cursor")
+		dir := filepath.Join(home, ".config", "Cursor")
+		if fileExists(filepath.Join(dir, "User", "globalStorage", "state.vscdb")) {
+			return dir
+		}
+		if matches, err := filepath.Glob("/mnt/c/Users/*/AppData/Roaming/Cursor/User/globalStorage/state.vscdb"); err == nil && len(matches) > 0 {
+			return filepath.Dir(filepath.Dir(filepath.Dir(matches[0])))
+		}
+		return dir
 	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData != "" {

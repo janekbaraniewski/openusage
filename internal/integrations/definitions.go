@@ -27,6 +27,7 @@ func AllDefinitions() []Definition {
 		codexDef(),
 		opencodeDef(),
 		antigravityDef(),
+		cursorDef(),
 	}
 }
 
@@ -157,6 +158,37 @@ func antigravityDef() Definition {
 
 		MatchProviderIDs:  []string{"antigravity"},
 		MatchToolNameHint: "Antigravity CLI",
+		TemplateFileMode:  0o755,
+		EscapeBin:         escapeForShellString,
+	}
+}
+
+func cursorDef() Definition {
+	return Definition{
+		ID:          CursorID,
+		Name:        "Cursor Status Line",
+		Description: "Status-line bridge for Cursor CLI",
+		Type:        TypeHookScript,
+		WritesArtifact: func(Dirs) bool { return false },
+		TargetFileFunc: func(dirs Dirs) string {
+			return dirs.OpenusageBin
+		},
+		ConfigFileFunc: func(dirs Dirs) string {
+			if f := strings.TrimSpace(os.Getenv("CURSOR_SETTINGS_FILE")); f != "" {
+				return f
+			}
+			configDir := strings.TrimSpace(os.Getenv("CURSOR_CONFIG_DIR"))
+			if configDir == "" {
+				configDir = filepath.Join(dirs.Home, ".cursor")
+			}
+			return filepath.Join(configDir, "cli-config.json")
+		},
+		ConfigFormat:  ConfigJSON,
+		ConfigPatcher: patchCursorConfig,
+		Detector:      detectCursorStatus,
+
+		MatchProviderIDs:  []string{"cursor"},
+		MatchToolNameHint: "Cursor",
 		TemplateFileMode:  0o755,
 		EscapeBin:         escapeForShellString,
 	}
@@ -377,6 +409,60 @@ func isAntigravityOpenUsageCommand(command string) bool {
 	return strings.Contains(command, "antigravity statusline")
 }
 
+func patchCursorConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
+	if !install && len(bytes.TrimSpace(configData)) == 0 {
+		return configData, nil
+	}
+
+	cfg := map[string]any{}
+	if len(bytes.TrimSpace(configData)) > 0 {
+		if err := json.Unmarshal(configData, &cfg); err != nil {
+			return nil, fmt.Errorf("parse cursor config: %w", err)
+		}
+	}
+
+	statusLine, _ := cfg["statusLine"].(map[string]any)
+	existingCommand := ""
+	if statusLine != nil {
+		existingCommand = strings.TrimSpace(stringOrEmpty(statusLine["command"]))
+	}
+
+	if install {
+		if existingCommand != "" && !isCursorOpenUsageCommand(existingCommand) {
+			return nil, fmt.Errorf("cursor statusLine.command is already configured with another command")
+		}
+		if statusLine == nil {
+			statusLine = map[string]any{}
+		}
+		statusLine["type"] = "command"
+		statusLine["command"] = cursorStatuslineCommand(targetFile)
+		cfg["statusLine"] = statusLine
+	} else if isCursorOpenUsageCommand(existingCommand) {
+		delete(cfg, "statusLine")
+	} else {
+		return configData, nil
+	}
+
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("serialize cursor config: %w", err)
+	}
+	return append(payload, '\n'), nil
+}
+
+func cursorStatuslineCommand(targetFile string) string {
+	targetFile = strings.TrimSpace(targetFile)
+	if targetFile == "" {
+		targetFile = "openusage"
+	}
+	return fmt.Sprintf("\"%s\" cursor statusline", escapeForShellString(targetFile))
+}
+
+func isCursorOpenUsageCommand(command string) bool {
+	command = strings.ToLower(strings.TrimSpace(command))
+	return strings.Contains(command, "cursor statusline")
+}
+
 // --- Detectors ---
 
 func detectClaudeCodeStatus(dirs Dirs) Status {
@@ -509,6 +595,35 @@ func detectAntigravityStatus(dirs Dirs) Status {
 	}
 	// This integration registers the OpenUsage binary directly, so configured
 	// is the equivalent of an installed artifact.
+	st.Installed = st.Configured
+	if st.Installed {
+		st.InstalledVersion = IntegrationVersion
+	}
+	deriveState(&st)
+	return st
+}
+
+func detectCursorStatus(dirs Dirs) Status {
+	def := cursorDef()
+	st := Status{
+		ID:             CursorID,
+		Name:           def.Name,
+		DesiredVersion: IntegrationVersion,
+	}
+
+	configFile := def.ConfigFileFunc(dirs)
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		deriveState(&st)
+		return st
+	}
+
+	var cfg map[string]any
+	if json.Unmarshal(data, &cfg) == nil {
+		if statusLine, ok := cfg["statusLine"].(map[string]any); ok {
+			st.Configured = isCursorOpenUsageCommand(stringOrEmpty(statusLine["command"]))
+		}
+	}
 	st.Installed = st.Configured
 	if st.Installed {
 		st.InstalledVersion = IntegrationVersion

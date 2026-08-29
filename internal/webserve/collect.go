@@ -2,7 +2,6 @@ package webserve
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,7 @@ type collector struct {
 	source   export.Source
 	demo     bool
 	meta     collectorMeta
+	opts     Options
 	now      func() time.Time
 	collect  CollectFunc
 }
@@ -49,6 +49,7 @@ func newCollector(opts Options) *collector {
 		source: src,
 		demo:   opts.Demo,
 		now:    now,
+		opts:   opts,
 		meta: collectorMeta{
 			version:        strings.TrimSpace(opts.Version),
 			timeWindow:     strings.TrimSpace(opts.TimeWindow),
@@ -98,22 +99,15 @@ func (c *collector) envelope() (Envelope, error) {
 }
 
 func (c *collector) fetch() (Envelope, error) {
-	if c.demo {
-		return Envelope{
-			Source:    "demo",
-			Snapshots: demoSnapshots(c.now()),
-		}, nil
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	snaps, resolved, err := export.Collect(ctx, c.source)
+	snaps, source, err := c.fetchSnapshots(ctx)
 	if err != nil {
-		return Envelope{}, fmt.Errorf("serve: collecting snapshots: %w", err)
+		return Envelope{}, err
 	}
 	return Envelope{
-		Source:    string(resolved),
+		Source:    source,
 		Snapshots: snaps,
 	}, nil
 }
@@ -127,6 +121,11 @@ func (c *collector) decorate(env Envelope) Envelope {
 	out.Theme = c.meta.theme
 	out.RefreshIntervalSeconds = c.meta.refreshSeconds
 	out.Catalog = c.meta.catalog
+	if c.opts.UsageMode != "" {
+		out.UsageMode = c.opts.UsageMode
+	} else if c.opts.Config != nil && c.opts.Config.Dashboard.UsageMode != "" {
+		out.UsageMode = c.opts.Config.Dashboard.UsageMode
+	}
 	if strings.TrimSpace(out.Source) == "" {
 		if c.demo {
 			out.Source = "demo"
@@ -135,5 +134,8 @@ func (c *collector) decorate(env Envelope) Envelope {
 		}
 	}
 	out.Snapshots = stripRaw(out.Snapshots)
+	views, tokens := buildViews(c.opts, c.meta, out.Snapshots)
+	out.Views = views
+	out.ThemeTokens = tokens
 	return out
 }
