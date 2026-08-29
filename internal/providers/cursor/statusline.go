@@ -180,6 +180,12 @@ func CaptureStatusLine(data []byte, path string) (string, error) {
 	}
 	if slug := extractAccountSlug(email); slug != "" {
 		_ = writeStatusFile(filepath.Join(dir, fmt.Sprintf("cursor-%s-status.json", slug)), state)
+		if strings.Contains(slug, "physics") && slug != "physics" {
+			_ = writeStatusFile(filepath.Join(dir, "cursor-physics-status.json"), state)
+		}
+		if strings.Contains(slug, "nurul") && slug != "nurulz" {
+			_ = writeStatusFile(filepath.Join(dir, "cursor-nurulz-status.json"), state)
+		}
 	}
 
 	return renderStatusLine(payload), nil
@@ -191,6 +197,9 @@ func findContainerForPayload(payload statusLinePayload) string {
 	}
 	if curAcct := strings.TrimSpace(strings.ToLower(os.Getenv("CURSOR_ACCOUNT"))); curAcct != "" {
 		return curAcct
+	}
+	if agAcct := strings.TrimSpace(strings.ToLower(os.Getenv("AGENT_ACCOUNT"))); agAcct != "" {
+		return agAcct
 	}
 	for _, checkPath := range []string{payload.CWD, payload.Workspace.CurrentDir, payload.TranscriptPath} {
 		if box := extractContainerBox(checkPath); box != "" {

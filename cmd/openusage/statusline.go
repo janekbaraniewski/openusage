@@ -14,7 +14,9 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
+	"github.com/janekbaraniewski/openusage/internal/providers/antigravity"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
+	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
 
@@ -331,7 +333,35 @@ func writeJSONObjectWithBackup(path string, cfg map[string]any) error {
 }
 
 func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) error {
-	in := readStatuslineInput(stdin)
+	var in statuslineInput
+	var rawData []byte
+
+	if f, ok := stdin.(*os.File); ok {
+		if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+			// interactive terminal: nothing piped in
+		} else {
+			rawData, _ = io.ReadAll(stdin)
+		}
+	} else if stdin != nil {
+		rawData, _ = io.ReadAll(stdin)
+	}
+
+	if len(rawData) > 0 {
+		var raw map[string]any
+		if json.Unmarshal(rawData, &raw) == nil {
+			if _, hasCW := raw["context_window"]; hasCW {
+				line, captureErr := cursor.CaptureStatusLine(rawData, "")
+				fmt.Fprintln(stdout, line)
+				return captureErr
+			}
+			if prod, _ := raw["product"].(string); prod == "antigravity" || raw["conversation_id"] != nil {
+				line, captureErr := antigravity.CaptureStatusLine(rawData, "")
+				fmt.Fprintln(stdout, line)
+				return captureErr
+			}
+		}
+		_ = json.Unmarshal(rawData, &in)
+	}
 
 	// The 5h usage-window % is rate-limit data the daemon collects; resolve it
 	// only when the segment is shown (cache-first, so most renders are instant).
