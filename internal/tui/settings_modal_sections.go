@@ -19,14 +19,15 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 
 	lines := settingsBodyHeaderLines(
 		"Provider Visibility & Order",
-		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle", enabledCount, len(ids)),
+		fmt.Sprintf("%d/%d enabled · Shift+J/K reorder · Enter toggle · l edit Codex cap", enabledCount, len(ids)),
 	)
 	accountW := 26
-	providerW := max(10, w-accountW-16)
-	if accountW = max(12, w-providerW-16); accountW < 12 {
+	capW := 10
+	providerW := max(10, w-accountW-capW-17)
+	if accountW = max(12, w-providerW-capW-17); accountW < 12 {
 		accountW = 12
 	}
-	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %-*s", "#", "ON", accountW, "ACCOUNT", providerW, "PROVIDER")))
+	lines = append(lines, dimStyle.Render(fmt.Sprintf("    %-3s %-3s %-*s %-*s %-*s", "#", "ON", accountW, "ACCOUNT", providerW, "PROVIDER", capW, "CAP")))
 	lines = append(lines, settingsBodyRule(w))
 	if len(ids) == 0 {
 		lines = append(lines, dimStyle.Render("No providers available."))
@@ -50,12 +51,25 @@ func (m Model) renderSettingsProvidersBody(w, h int) string {
 			onText = "ON "
 			onStyle = lipgloss.NewStyle().Foreground(colorGreen)
 		}
+		capText := "n/a"
+		if providerID == "codex" {
+			capText = "--"
+			if limit := m.accountCreditLimits[id]; limit != nil {
+				capText = formatNumber(*limit)
+			}
+			if m.settings.creditLimitEditing && m.settings.creditLimitEditAccountID == id {
+				capText = m.settings.creditLimitInput + "▏"
+				if m.settings.creditLimitInput == "" {
+					capText = "▏"
+				}
+			}
+		}
 		prefix := "  "
 		if i == cursor {
 			prefix = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("➤ ")
 		}
-		lines = append(lines, fmt.Sprintf("%s%-3d %s %-*s %-*s",
-			prefix, i+1, onStyle.Render(onText), accountW, truncateToWidth(id, accountW), providerW, truncateToWidth(providerID, providerW)))
+		lines = append(lines, fmt.Sprintf("%s%-3d %s %-*s %-*s %-*s",
+			prefix, i+1, onStyle.Render(onText), accountW, truncateToWidth(id, accountW), providerW, truncateToWidth(providerID, providerW), capW, truncateToWidth(capText, capW)))
 	}
 	return padToSize(strings.Join(lines, "\n"), w, h)
 }

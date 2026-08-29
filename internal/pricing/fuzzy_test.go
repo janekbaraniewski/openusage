@@ -1,6 +1,9 @@
 package pricing
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeModelKey(t *testing.T) {
 	cases := []struct {
@@ -10,6 +13,7 @@ func TestNormalizeModelKey(t *testing.T) {
 		{"claude-3.5-sonnet", "claude-3-5-sonnet"},
 		{"claude-3-5-sonnet-20241022", "claude-3-5-sonnet"},
 		{"openai/gpt-4o", "gpt-4o"},
+		{"/ 0", "0"},
 		{"anthropic.claude-3-5-sonnet-20241022-v2:0", "claude-3-5-sonnet"},
 		{"GPT-4-Turbo-preview", "gpt-4-turbo"},
 		{"gpt-4.0-mini-2024-07-18", "gpt-4-0-mini-2024-07-18"}, // ymd-only suffix is not stripped (no -20yyMMdd)
@@ -69,4 +73,57 @@ func TestApplyAlias(t *testing.T) {
 	if got := applyAlias("unknown-key"); got != "unknown-key" {
 		t.Errorf("applyAlias should pass through unknowns; got %q", got)
 	}
+}
+
+func FuzzBestFuzzyMatch(f *testing.F) {
+	for _, seed := range []string{
+		"claude-3.5-sonnet",
+		"anthropic/claude-3-5-sonnet-20241022",
+		"openai/gpt-4o",
+		"gemini-1.5-pro-preview",
+		"unknown-model",
+		"",
+	} {
+		f.Add(seed)
+	}
+
+	keys := []string{
+		"claude-3-5-sonnet-20241022",
+		"claude-3-5-haiku-20241022",
+		"openai/gpt-4o",
+		"gemini-1.5-pro",
+		"deepseek-chat",
+	}
+
+	f.Fuzz(func(t *testing.T, model string) {
+		// Normalization is used as a cache/index key. It must not carry
+		// whitespace across its prefix and punctuation transformations.
+		normalized := normalizeModelKey(model)
+		if got := strings.TrimSpace(normalized); got != normalized {
+			t.Fatalf("normalization retained surrounding whitespace: %q", normalized)
+		}
+
+		candidates := fuzzyCandidates(model)
+		seen := make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			if strings.TrimSpace(candidate) == "" {
+				t.Fatal("fuzzyCandidates returned an empty candidate")
+			}
+			if _, ok := seen[candidate]; ok {
+				t.Fatalf("fuzzyCandidates returned duplicate %q", candidate)
+			}
+			seen[candidate] = struct{}{}
+		}
+
+		matched, ok := bestFuzzyMatch(model, keys)
+		if !ok {
+			return
+		}
+		for _, key := range keys {
+			if matched == key {
+				return
+			}
+		}
+		t.Fatalf("bestFuzzyMatch returned key not present in source table: %q", matched)
+	})
 }

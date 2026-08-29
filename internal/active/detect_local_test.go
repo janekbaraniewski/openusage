@@ -1,4 +1,4 @@
-package tmux
+package active
 
 import (
 	"context"

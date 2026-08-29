@@ -981,3 +981,83 @@ func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 	}
 	return *metric.Used
 }
+
+// Codex CLI 0.147.0 stopped emitting `model` / `model_id` in the session
+// header and no longer writes turn_context lines at all. The only record of
+// the session's model is base_instructions.provenance.model. Without reading
+// it every metric collapses into the "unknown" model bucket, which zeroes the
+// per-model cost breakdown.
+func TestFetchResolvesModelFromBaseInstructionsProvenance(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "08", "15")
+	if err := os.MkdirAll(dayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(dayDir, "rollout-provenance.jsonl")
+	content := `{"timestamp":"2026-08-15T00:00:01Z","type":"session_meta","payload":{"id":"sess-prov","source":"cli","originator":"codex_cli_rs","model_provider":"openai","base_instructions":{"text":"You are Codex.","provenance":{"type":"model","model":"gpt-5.6-luna"}}}}
+{"timestamp":"2026-08-15T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":80,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":100},"model_context_window":128000}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-provenance",
+		Provider: "codex",
+		Auth:     "local",
+		RuntimeHints: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "model_gpt_5_6_luna_total_tokens"); got != 100 {
+		t.Fatalf("model_gpt_5_6_luna_total_tokens = %.1f, want 100", got)
+	}
+	if _, ok := snap.Metrics["model_unknown_total_tokens"]; ok {
+		t.Errorf("usage was bucketed under the unknown model despite provenance carrying gpt-5.6-luna")
+	}
+}
+
+// An explicit model in the session header still wins over provenance, which is
+// only a last-resort fallback for CLI versions that omit the explicit field.
+func TestFetchPrefersExplicitModelOverProvenance(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsRoot := filepath.Join(tmpDir, "sessions")
+	dayDir := filepath.Join(sessionsRoot, "2026", "08", "15")
+	if err := os.MkdirAll(dayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionFile := filepath.Join(dayDir, "rollout-prov-precedence.jsonl")
+	content := `{"timestamp":"2026-08-15T00:00:01Z","type":"session_meta","payload":{"id":"sess-prec","source":"cli","originator":"codex_cli_rs","model":"gpt-5-codex","base_instructions":{"provenance":{"type":"model","model":"gpt-5.6-luna"}}}}
+{"timestamp":"2026-08-15T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":80,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":100},"model_context_window":128000}}}
+`
+	if err := os.WriteFile(sessionFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := New()
+	snap, err := p.Fetch(context.Background(), core.AccountConfig{
+		ID:       "codex-prov-precedence",
+		Provider: "codex",
+		Auth:     "local",
+		RuntimeHints: map[string]string{
+			"config_dir":   tmpDir,
+			"sessions_dir": sessionsRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+
+	if got := metricUsed(t, snap, "model_gpt_5_codex_total_tokens"); got != 100 {
+		t.Fatalf("model_gpt_5_codex_total_tokens = %.1f, want 100", got)
+	}
+}

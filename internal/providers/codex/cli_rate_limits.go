@@ -16,11 +16,27 @@ import (
 )
 
 type codexCLIRateLimitsSnapshot struct {
-	Credits           *usageCredits       `json:"credits,omitempty"`
-	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
-	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
-	PlanType          string              `json:"plan_type,omitempty"`
-	PlanTypeV2        string              `json:"planType,omitempty"`
+	Credits           *usageCredits            `json:"credits,omitempty"`
+	IndividualLimit   *creditLimitDetails      `json:"individual_limit,omitempty"`
+	IndividualLimitV2 *creditLimitDetails      `json:"individualLimit,omitempty"`
+	Primary           *codexCLIRateLimitWindow `json:"primary,omitempty"`
+	PrimaryWindow     *codexCLIRateLimitWindow `json:"primary_window,omitempty"`
+	Secondary         *codexCLIRateLimitWindow `json:"secondary,omitempty"`
+	SecondaryWindow   *codexCLIRateLimitWindow `json:"secondary_window,omitempty"`
+	PlanType          string                   `json:"plan_type,omitempty"`
+	PlanTypeV2        string                   `json:"planType,omitempty"`
+}
+
+// codexCLIRateLimitWindow is the current app-server shape. Codex has used
+// both camelCase and snake_case fields across app-server versions, so the
+// parser accepts both forms and flexible numeric values.
+type codexCLIRateLimitWindow struct {
+	UsedPercent         any `json:"usedPercent,omitempty"`
+	UsedPercentLegacy   any `json:"used_percent,omitempty"`
+	WindowDurationMins  any `json:"windowDurationMins,omitempty"`
+	WindowMinutesLegacy any `json:"window_minutes,omitempty"`
+	ResetsAt            any `json:"resetsAt,omitempty"`
+	ResetsAtLegacy      any `json:"resets_at,omitempty"`
 }
 
 type codexCLIRateLimitsResult struct {
@@ -28,6 +44,11 @@ type codexCLIRateLimitsResult struct {
 	RateLimitsV2          *codexCLIRateLimitsSnapshot           `json:"rateLimits,omitempty"`
 	RateLimitsByLimitID   map[string]codexCLIRateLimitsSnapshot `json:"rate_limits_by_limit_id,omitempty"`
 	RateLimitsByLimitIDV2 map[string]codexCLIRateLimitsSnapshot `json:"rateLimitsByLimitId,omitempty"`
+}
+
+type codexCLIRateLimitsCandidate struct {
+	limitID  string
+	snapshot codexCLIRateLimitsSnapshot
 }
 
 type codexRPCMessage struct {
@@ -59,34 +80,45 @@ func applyCodexCLIRateLimits(result codexCLIRateLimitsResult, snap *core.UsageSn
 		return false
 	}
 
-	candidates := make([]codexCLIRateLimitsSnapshot, 0, 1+len(result.RateLimitsByLimitID)+len(result.RateLimitsByLimitIDV2))
+	candidates := make([]codexCLIRateLimitsCandidate, 0, 1+len(result.RateLimitsByLimitID)+len(result.RateLimitsByLimitIDV2))
 	if result.RateLimitsV2 != nil {
-		candidates = append(candidates, *result.RateLimitsV2)
+		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: "codex", snapshot: *result.RateLimitsV2})
 	}
 	if result.RateLimits != nil {
-		candidates = append(candidates, *result.RateLimits)
+		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: "codex", snapshot: *result.RateLimits})
 	}
-	for _, candidate := range result.RateLimitsByLimitIDV2 {
-		candidates = append(candidates, candidate)
+	for limitID, candidate := range result.RateLimitsByLimitIDV2 {
+		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: limitID, snapshot: candidate})
 	}
-	for _, candidate := range result.RateLimitsByLimitID {
-		candidates = append(candidates, candidate)
+	for limitID, candidate := range result.RateLimitsByLimitID {
+		candidates = append(candidates, codexCLIRateLimitsCandidate{limitID: limitID, snapshot: candidate})
 	}
 
 	applied := false
 	creditLimitApplied := false
+	rateLimitMetricsApplied := false
 	for _, candidate := range candidates {
-		planType := core.FirstNonEmpty(candidate.PlanTypeV2, candidate.PlanType)
+		snapshot := candidate.snapshot
+		planType := core.FirstNonEmpty(snapshot.PlanTypeV2, snapshot.PlanType)
 		if planType != "" {
 			snap.Raw["plan_type"] = planType
 			applied = true
 		}
-		if candidate.Credits != nil {
-			applyUsageCredits(candidate.Credits, snap)
+		primaryKey, secondaryKey := "rate_limit_primary", "rate_limit_secondary"
+		if limitID := sanitizeMetricName(candidate.limitID); limitID != "" && limitID != "codex" {
+			primaryKey = "rate_limit_" + limitID + "_primary"
+			secondaryKey = "rate_limit_" + limitID + "_secondary"
+		}
+		if applyCodexCLIRateLimitWindows(snapshot, snap, primaryKey, secondaryKey) > 0 {
+			rateLimitMetricsApplied = true
+			applied = true
+		}
+		if snapshot.Credits != nil {
+			applyUsageCredits(snapshot.Credits, snap)
 			applied = true
 		}
 		if !creditLimitApplied {
-			details := firstCreditLimit(candidate.IndividualLimitV2, candidate.IndividualLimit)
+			details := firstCreditLimit(snapshot.IndividualLimitV2, snapshot.IndividualLimit)
 			if applyCreditLimitDetails(details, snap, "cli") {
 				creditLimitApplied = true
 				applied = true
@@ -96,7 +128,75 @@ func applyCodexCLIRateLimits(result codexCLIRateLimitsResult, snap *core.UsageSn
 	if applied {
 		snap.Raw["quota_api"] = "cli_rpc"
 	}
+	if rateLimitMetricsApplied {
+		snap.Raw["rate_limit_source"] = "cli_rpc"
+	}
 	return applied
+}
+
+func applyCodexCLIRateLimitWindows(
+	candidate codexCLIRateLimitsSnapshot,
+	snap *core.UsageSnapshot,
+	primaryKey, secondaryKey string,
+) int {
+	primary := candidate.Primary
+	if primary == nil {
+		primary = candidate.PrimaryWindow
+	}
+	secondary := candidate.Secondary
+	if secondary == nil {
+		secondary = candidate.SecondaryWindow
+	}
+
+	applied := 0
+	if applyCodexCLIRateLimitWindow(primary, primaryKey, snap) {
+		applied++
+	}
+	if applyCodexCLIRateLimitWindow(secondary, secondaryKey, snap) {
+		applied++
+	}
+	return applied
+}
+
+func applyCodexCLIRateLimitWindow(
+	window *codexCLIRateLimitWindow,
+	key string,
+	snap *core.UsageSnapshot,
+) bool {
+	if window == nil || snap == nil || key == "" {
+		return false
+	}
+	used, ok := parseFlexibleNumber(window.UsedPercent)
+	if !ok {
+		used, ok = parseFlexibleNumber(window.UsedPercentLegacy)
+	}
+	if !ok {
+		return false
+	}
+	used = clampPercent(used)
+	remaining := 100 - used
+	minutes, _ := parseFlexibleNumber(window.WindowDurationMins)
+	if minutes <= 0 {
+		minutes, _ = parseFlexibleNumber(window.WindowMinutesLegacy)
+	}
+	snap.EnsureMaps()
+	limit := float64(100)
+	snap.Metrics[key] = core.Metric{
+		Limit:     &limit,
+		Used:      &used,
+		Remaining: &remaining,
+		Unit:      "%",
+		Window:    formatWindow(int(minutes)),
+	}
+
+	resetAt, _ := parseFlexibleNumber(window.ResetsAt)
+	if resetAt <= 0 {
+		resetAt, _ = parseFlexibleNumber(window.ResetsAtLegacy)
+	}
+	if resetAt > 0 {
+		snap.Resets[key] = time.Unix(int64(resetAt), 0)
+	}
+	return true
 }
 
 func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig, configDir string) (codexCLIRateLimitsResult, error) {
@@ -110,7 +210,7 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 
 	rpcCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(rpcCtx, binary, "-s", "read-only", "-a", "untrusted", "app-server")
+	cmd := exec.CommandContext(rpcCtx, binary, "app-server")
 	cmd.Stderr = io.Discard
 	if configDir != "" {
 		cmd.Env = append(os.Environ(), "CODEX_HOME="+configDir)

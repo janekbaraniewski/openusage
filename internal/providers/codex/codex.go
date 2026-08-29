@@ -37,6 +37,12 @@ type Provider struct {
 	telemetryCache   map[string]*telemetryCacheEntry
 	creditHistoryMu  sync.Mutex
 	creditHistory    map[string][]creditUsageObservation
+	creditDailyMu    sync.Mutex
+	creditDaily      map[string]dailyCreditUsageCache
+	creditDailyFail  map[string]dailyCreditUsageFailure
+	// creditDailyNow is the clock used for daily-credit cache freshness.
+	// Tests swap it out to advance past the TTL deterministically.
+	creditDailyNow func() time.Time
 }
 
 type telemetryCacheEntry struct {
@@ -65,8 +71,11 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
-		telemetryCache: make(map[string]*telemetryCacheEntry),
-		creditHistory:  make(map[string][]creditUsageObservation),
+		telemetryCache:  make(map[string]*telemetryCacheEntry),
+		creditHistory:   make(map[string][]creditUsageObservation),
+		creditDaily:     make(map[string]dailyCreditUsageCache),
+		creditDailyFail: make(map[string]dailyCreditUsageFailure),
+		creditDailyNow:  time.Now,
 	}
 }
 
@@ -117,7 +126,20 @@ type usagePayload struct {
 	Credits              *usageCredits          `json:"credits,omitempty"`
 	IndividualLimit      *creditLimitDetails    `json:"individual_limit,omitempty"`
 	IndividualLimitV2    *creditLimitDetails    `json:"individualLimit,omitempty"`
+	SpendControl         *usageSpendControl     `json:"spend_control,omitempty"`
 	RateLimitStatus      *usageRateLimitStatus  `json:"rate_limit_status,omitempty"`
+}
+
+type usageSpendControl struct {
+	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
+	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
+}
+
+func (s *usageSpendControl) creditLimit() *creditLimitDetails {
+	if s == nil {
+		return nil
+	}
+	return firstCreditLimit(s.IndividualLimitV2, s.IndividualLimit)
 }
 
 type usageRateLimitStatus struct {
@@ -246,16 +268,10 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
-	snap := core.UsageSnapshot{
-		ProviderID:  p.ID(),
-		AccountID:   acct.ID,
-		Timestamp:   time.Now(),
-		Status:      core.StatusOK,
-		Metrics:     make(map[string]core.Metric),
-		Resets:      make(map[string]time.Time),
-		Raw:         make(map[string]string),
-		DailySeries: make(map[string][]core.TimePoint),
-	}
+	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
+	snap.Timestamp = time.Now()
+	snap.Status = core.StatusOK
+	ensureCodexSnapshotMaps(&snap)
 
 	configDir := acct.Hint("config_dir", "")
 	if configDir == "" {
@@ -287,26 +303,66 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if err := p.readDailySessionCounts(sessionsDir, &snap); err != nil {
 		snap.Raw["session_counts_error"] = err.Error()
 	}
-	if err := p.readSessionUsageBreakdowns(sessionsDir, &snap); err != nil {
-		snap.Raw["split_error"] = err.Error()
+	// The all-session breakdown is the expensive local operation. Keep it on
+	// an isolated snapshot so account/network fetches, especially daily credit
+	// history, do not wait for every JSONL file to be parsed first.
+	breakdownBase := core.NewUsageSnapshot(p.ID(), acct.ID)
+	breakdownBase.Timestamp = snap.Timestamp
+	ensureCodexSnapshotMaps(&breakdownBase)
+	// The breakdown emitter only needs the latest context window to derive its
+	// context percentage. Do not seed the worker with session quota metrics:
+	// the live/CLI paths may deliberately clear or replace those before the
+	// worker result is merged.
+	if metric, ok := snap.Metrics["context_window"]; ok {
+		breakdownBase.Metrics["context_window"] = metric
 	}
+	breakdownDone := startCodexSessionBreakdown(sessionsDir, breakdownBase, p.readSessionUsageBreakdowns)
 
-	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)
-	if liveErr != nil {
-		snap.Raw["quota_api_error"] = liveErr.Error()
-	}
-
-	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
-	if cliErr != nil {
-		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
-	}
-
+	// Read the CLI version before any network fetcher: they stamp it into
+	// their User-Agent, so reading it afterwards leaves that header bare.
 	versionFile := filepath.Join(configDir, "version.json")
 	if data, err := os.ReadFile(versionFile); err == nil {
 		var ver versionInfo
 		if json.Unmarshal(data, &ver) == nil && ver.LatestVersion != "" {
 			snap.Raw["cli_version"] = ver.LatestVersion
 		}
+	}
+
+	quotaFetches := p.startCodexQuotaFetches(ctx, acct, configDir, snap)
+	liveResult := <-quotaFetches.live
+	cliResult := <-quotaFetches.cli
+	hasLiveData := liveResult.available
+	liveErr := liveResult.err
+	if liveResult.err != nil {
+		snap.Raw["quota_api_error"] = liveResult.err.Error()
+	}
+	if liveResult.available {
+		mergeCodexQuotaSnapshot(&snap, &liveResult.snapshot, true)
+	}
+
+	hasCLIData := cliResult.available
+	if cliResult.err != nil {
+		snap.Raw["cli_rate_limits_error"] = cliResult.err.Error()
+	}
+	if cliResult.available {
+		mergeCodexQuotaSnapshot(&snap, &cliResult.snapshot, !liveResult.available)
+	}
+	// This request now has its own snapshot and goroutine. It can complete
+	// while the full session breakdown is still walking local history.
+	dailyCreditDone := startCodexDailyCreditFetch(ctx, acct, configDir, snap, p.fetchDailyCreditUsage)
+
+	breakdownResult := <-breakdownDone
+	if breakdownResult.err != nil {
+		snap.Raw["split_error"] = breakdownResult.err.Error()
+	} else {
+		mergeCodexSessionBreakdown(&snap, &breakdownResult.snapshot)
+	}
+
+	dailyCreditResult := <-dailyCreditDone
+	if dailyCreditResult.err != nil {
+		snap.Raw["credit_daily_usage_error"] = dailyCreditResult.err.Error()
+	} else {
+		mergeCodexDailyCreditSnapshot(&snap, &dailyCreditResult.snapshot)
 	}
 
 	if acct.RuntimeHints != nil {
@@ -334,7 +390,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	p.applyCursorCompatibilityMetrics(&snap)
+	applyCreditLimitOverride(acct.CreditLimitOverride, &snap)
 	p.applyCreditForecast(&snap, acct.ID)
+	p.applyRateLimitForecast(&snap)
 	p.applyRateLimitStatus(&snap)
 
 	switch {

@@ -50,6 +50,20 @@ func (m Model) persistDashboardProviderHideCostsCmd(accountID string, hide *bool
 	}
 }
 
+func (m Model) persistAccountCreditLimitCmd(accountID string, limit *float64) tea.Cmd {
+	limit = cloneOptionalFloat(limit)
+	return func() tea.Msg {
+		if m.services == nil {
+			return accountCreditLimitPersistedMsg{accountID: accountID, limit: limit, err: fmt.Errorf("credit limit service unavailable")}
+		}
+		err := m.services.SaveAccountCreditLimitOverride(accountID, limit)
+		if err != nil {
+			log.Printf("account credit limit persist (%s): %v", accountID, err)
+		}
+		return accountCreditLimitPersistedMsg{accountID: accountID, limit: limit, err: err}
+	}
+}
+
 func (m Model) persistDashboardViewCmd() tea.Cmd {
 	view := string(m.configuredDashboardView())
 	return func() tea.Msg {

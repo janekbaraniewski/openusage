@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -441,16 +442,43 @@ func buildDetailCodexCreditForecastSection(snap core.UsageSnapshot, innerW int) 
 		limit := *metric.Limit
 		percent := float64(0)
 		if limit > 0 {
-			percent = used / limit * 100
+			percent = math.Min(used/limit*100, 100)
 		}
 		lines = append(lines, renderDotLeaderRow("Credit Usage",
 			fmt.Sprintf("%s / %s credits (%.0f%%)", formatNumber(used), formatNumber(limit), percent), innerW))
+		if codexCreditOverrideActive(snap) {
+			lines = append(lines, renderDotLeaderRow("Personal Cap", fmt.Sprintf("%s credits (advisory)", formatNumber(limit)), innerW))
+		}
+	}
+
+	if reported, ok := snap.Metrics["codex_credit_reported_limit"]; ok && reported.Limit != nil {
+		lines = append(lines, renderDotLeaderRow("Reported Quota", fmt.Sprintf("%s credits", formatNumber(*reported.Limit)), innerW))
 	}
 
 	rateMetric, hasRate := snap.Metrics["codex_credit_burn_rate"]
 	if hasRate && rateMetric.Used != nil && *rateMetric.Used > 0 {
 		lines = append(lines, renderDotLeaderRow("Credit Rate",
 			fmt.Sprintf("%s credits/hour", formatNumber(*rateMetric.Used)), innerW))
+	}
+
+	if dailyAverage, ok := snap.Metrics["codex_credit_daily_average"]; ok && dailyAverage.Used != nil && *dailyAverage.Used > 0 {
+		lines = append(lines, renderDotLeaderRow("Daily Average",
+			fmt.Sprintf("%s credits/day", formatNumber(*dailyAverage.Used)), innerW))
+	}
+
+	if projected, ok := snap.Metrics["codex_credit_projected_credits_at_reset"]; ok && projected.Used != nil {
+		lines = append(lines, renderDotLeaderRow("Expected at Reset",
+			fmt.Sprintf("%s credits", formatNumber(*projected.Used)), innerW))
+	}
+	if reserve, ok := snap.Metrics["codex_credit_projected_reserve_at_reset"]; ok && reserve.Used != nil {
+		label := "Projected Reserve"
+		value := *reserve.Used
+		if value < 0 {
+			label = "Projected Deficit"
+			value = math.Abs(value)
+		}
+		lines = append(lines, renderDotLeaderRow(label,
+			fmt.Sprintf("%s credits", formatNumber(value)), innerW))
 	}
 
 	if runoutMetric, ok := snap.Metrics["codex_credit_runout_hours"]; ok && runoutMetric.Used != nil {
@@ -472,6 +500,14 @@ func buildDetailCodexCreditForecastSection(snap core.UsageSnapshot, innerW int) 
 	}
 
 	return lines
+}
+
+func codexCreditOverrideActive(snap core.UsageSnapshot) bool {
+	if snap.Raw["credit_limit_override_active"] == "true" {
+		return true
+	}
+	_, ok := snap.Metrics["codex_credit_reported_limit"]
+	return ok
 }
 
 // buildDetailToolSection builds the tool usage section.
@@ -527,7 +563,8 @@ func buildDetailOtherMetrics(snap core.UsageSnapshot, widget core.DashboardWidge
 		"all_time_api_cost", "total_cost_usd", "window_cost", "monthly_spend",
 		"credit_balance", "spend_limit", "plan_spend", "plan_total_spend_usd",
 		"plan_limit_usd", "plan_percent_used", "individual_spend", "burn_rate",
-		"codex_credit_limit", "codex_credit_percent_used", "codex_credit_burn_rate", "codex_credit_runout_hours"} {
+		"codex_credit_limit", "codex_credit_reported_limit", "codex_credit_percent_used", "codex_credit_burn_rate", "codex_credit_runout_hours",
+		"codex_credit_daily_average", "codex_credit_projected_credits_at_reset", "codex_credit_projected_reserve_at_reset"} {
 		skipKeys[ck] = true
 	}
 

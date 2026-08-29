@@ -14,6 +14,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -29,6 +30,7 @@ jobs:
   vet:
     name: Vet
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -37,13 +39,14 @@ jobs:
           go-version-file: go.mod
 
       - name: Install C compiler (CGO for sqlite3)
-        run: sudo apt-get update && sudo apt-get install -y gcc
+        run: .github/scripts/ensure-cc.sh
 
       - run: go vet ./...
 
   test:
     name: Test
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +62,7 @@ jobs:
 
       - name: Install C compiler (CGO for sqlite3)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc
+        run: .github/scripts/ensure-cc.sh
 
       # macOS ships clang; the windows-latest image ships mingw-w64 gcc on PATH.
 
@@ -81,6 +84,7 @@ jobs:
     # protection never sees the context it requires).
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +106,7 @@ jobs:
 
       - name: Install C compiler (CGO for sqlite3)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc
+        run: .github/scripts/ensure-cc.sh
 
       # macOS ships clang; the windows-latest image ships mingw-w64 gcc on PATH.
 
@@ -117,6 +121,7 @@ jobs:
   fmt:
     name: gofmt
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,6 +141,7 @@ jobs:
   tidy:
     name: Check go.mod tidiness
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -154,17 +160,18 @@ jobs:
   icon-font:
     name: Icon font up to date
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
 
       - name: Verify committed icon font matches its sources
         run: |
-          python -m pip install --quiet 'fonttools==4.63.0'
+          python -m pip install --quiet --require-hashes -r scripts/requirements-icon-font.txt
           python scripts/gen-icon-font.py
           git diff --exit-code internal/tmux/assets/openusage-icons.ttf \
             || (echo "::error::committed icon font is stale; run 'make icon-font' and commit the result" && exit 1)

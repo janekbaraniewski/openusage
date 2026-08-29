@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -200,6 +201,20 @@ type TmuxAlerts struct {
 	Mode                  string  `json:"mode,omitempty"` // message|bell|both|none
 }
 
+const (
+	SketchyBarTriggerClick = "click"
+	SketchyBarTriggerHover = "hover"
+)
+
+// SketchyBarConfig controls mouse interaction for OpenUsage's generated
+// SketchyBar items. Values are intentionally user-facing rather than raw
+// SketchyBar event names so the generated subscription and script behavior
+// cannot drift apart.
+type SketchyBarConfig struct {
+	UsageTrigger    string `json:"usage_trigger,omitempty"`
+	SwitcherTrigger string `json:"switcher_trigger,omitempty"`
+}
+
 type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
@@ -215,6 +230,7 @@ type Config struct {
 	Export               ExportConfig                  `json:"export,omitempty"`
 	Hub                  HubConfig                     `json:"hub,omitempty"`
 	Tmux                 TmuxConfig                    `json:"tmux,omitempty"`
+	SketchyBar           SketchyBarConfig              `json:"sketchybar,omitempty"`
 }
 
 // DefaultProviderLinks returns built-in telemetry provider-id to dashboard provider-id mappings.
@@ -251,6 +267,10 @@ func DefaultConfig() Config {
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		Dashboard:          DashboardConfig{View: DashboardViewGrid},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),
+		SketchyBar: SketchyBarConfig{
+			UsageTrigger:    SketchyBarTriggerClick,
+			SwitcherTrigger: SketchyBarTriggerClick,
+		},
 	}
 }
 
@@ -322,6 +342,7 @@ func loadFrom(path string) (Config, bool, error) {
 	cfg.Data = normalizeDataConfig(cfg.Data)
 	cfg.ModelNormalization = core.NormalizeModelNormalizationConfig(cfg.ModelNormalization)
 	cfg.Telemetry = normalizeTelemetryConfig(cfg.Telemetry)
+	cfg.SketchyBar = normalizeSketchyBarConfig(cfg.SketchyBar)
 	cfg.Accounts = normalizeAccounts(cfg.Accounts)
 	cfg.AutoDetectedAccounts = normalizeAccounts(cfg.AutoDetectedAccounts)
 	cfg.Dashboard.Providers = normalizeDashboardProviders(cfg.Dashboard.Providers)
@@ -485,6 +506,22 @@ func normalizeTelemetryConfig(in TelemetryConfig) TelemetryConfig {
 		out.ProviderLinks[source] = target
 	}
 	return out
+}
+
+func normalizeSketchyBarConfig(in SketchyBarConfig) SketchyBarConfig {
+	return SketchyBarConfig{
+		UsageTrigger:    normalizeSketchyBarTrigger(in.UsageTrigger),
+		SwitcherTrigger: normalizeSketchyBarTrigger(in.SwitcherTrigger),
+	}
+}
+
+func normalizeSketchyBarTrigger(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case SketchyBarTriggerHover:
+		return SketchyBarTriggerHover
+	default:
+		return SketchyBarTriggerClick
+	}
 }
 
 func normalizeDashboardProviders(in []DashboardProviderConfig) []DashboardProviderConfig {
@@ -745,6 +782,65 @@ func SaveDashboardProviderHideCostsTo(path string, accountID string, hide *bool)
 			})
 		}
 	})
+}
+
+// SaveAccountCreditLimitOverride persists an advisory credit cap for an
+// account. Auto-detected accounts are promoted to manual accounts so the
+// existing account merge rules carry the setting into provider polling.
+func SaveAccountCreditLimitOverride(accountID string, limit *float64) error {
+	return SaveAccountCreditLimitOverrideTo(ConfigPath(), accountID, limit)
+}
+
+func SaveAccountCreditLimitOverrideTo(path, accountID string, limit *float64) error {
+	accountID = normalizeAccountID(accountID)
+	if accountID == "" {
+		return fmt.Errorf("save account credit limit: account_id must be non-empty")
+	}
+	return modifyConfig(path, func(cfg *Config) {
+		manualIndex := -1
+		detectedIndex := -1
+		for i := range cfg.Accounts {
+			if normalizeAccountID(cfg.Accounts[i].ID) == accountID {
+				manualIndex = i
+				break
+			}
+		}
+		for i := range cfg.AutoDetectedAccounts {
+			if normalizeAccountID(cfg.AutoDetectedAccounts[i].ID) == accountID {
+				detectedIndex = i
+				break
+			}
+		}
+
+		if manualIndex >= 0 {
+			cfg.Accounts[manualIndex].CreditLimitOverride = cloneFloat64(limit)
+			if limit == nil && detectedIndex >= 0 && accountsEqualIgnoringCreditLimit(cfg.Accounts[manualIndex], cfg.AutoDetectedAccounts[detectedIndex]) {
+				cfg.Accounts = append(cfg.Accounts[:manualIndex], cfg.Accounts[manualIndex+1:]...)
+			}
+			return
+		}
+		if limit != nil && detectedIndex >= 0 {
+			account := cfg.AutoDetectedAccounts[detectedIndex]
+			account.CreditLimitOverride = cloneFloat64(limit)
+			cfg.Accounts = append(cfg.Accounts, account)
+		}
+	})
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func accountsEqualIgnoringCreditLimit(a, b core.AccountConfig) bool {
+	a.CreditLimitOverride = nil
+	b.CreditLimitOverride = nil
+	a.Token, b.Token = "", ""
+	a.RuntimeHints, b.RuntimeHints = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // SaveAutoDetected persists auto-detected accounts into the config file (read-modify-write).

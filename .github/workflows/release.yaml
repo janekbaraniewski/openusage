@@ -16,6 +16,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,13 +36,13 @@ jobs:
             gcc-mingw-w64-x86-64
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
 
       - name: Generate provider icon font
         run: |
-          python -m pip install --quiet 'fonttools==4.63.0'
+          python -m pip install --quiet --require-hashes -r scripts/requirements-icon-font.txt
           python scripts/gen-icon-font.py
           git diff --exit-code internal/tmux/assets/openusage-icons.ttf \
             || (echo "::error::committed icon font is stale; run 'make icon-font' and commit" && exit 1)
@@ -57,6 +59,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: /tmp/openusage-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Upload SPDX SBOM
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sbom="dist/openusage_${GITHUB_REF_NAME}.sbom.spdx.json"
+          cp "/tmp/openusage-${GITHUB_REF_NAME}.spdx.json" "$sbom"
+          gh release upload "${GITHUB_REF_NAME}" "$sbom" --clobber
+
+      - name: Generate SLSA provenance
+        id: attest-release
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Upload SLSA provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          provenance="dist/openusage_${GITHUB_REF_NAME}.intoto.jsonl"
+          cp "${{ steps.attest-release.outputs.bundle-path }}" "$provenance"
+          gh release upload "${GITHUB_REF_NAME}" "$provenance" --clobber
+
   release-macos:
     name: Release (macOS binaries)
     runs-on: macos-latest
@@ -64,6 +97,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,6 +158,15 @@ jobs:
           [ -f ../README* ] && cp ../README* openusage_${VERSION}_darwin_arm64/ || true
           tar czf openusage_${VERSION}_darwin_arm64.tar.gz openusage_${VERSION}_darwin_arm64
 
+      - name: Generate SLSA provenance
+        id: attest-macos
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+
+      - name: Materialize SLSA provenance
+        run: cp "${{ steps.attest-macos.outputs.bundle-path }}" "dist/openusage_${GITHUB_REF_NAME}_darwin.intoto.jsonl"
+
       - name: Sign macOS archives with cosign (keyless)
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -145,6 +189,7 @@ jobs:
             dist/openusage_${VERSION}_darwin_amd64.tar.gz.sigstore.json \
             dist/openusage_${VERSION}_darwin_arm64.tar.gz \
             dist/openusage_${VERSION}_darwin_arm64.tar.gz.sigstore.json \
+            dist/openusage_${GITHUB_REF_NAME}_darwin.intoto.jsonl \
             scripts/install.sh \
             --clobber
 
@@ -202,7 +247,7 @@ jobs:
       - name: Generate Homebrew formula
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          REPO="janekbaraniewski/openusage"
+          REPO="achappell/openusage"
           BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
           mkdir -p /tmp/homebrew-formula
@@ -243,16 +288,32 @@ jobs:
 
             def caveats
               <<~EOS
-                Homebrew 6.0+ requires third-party taps to be trusted. A trust grant
-                only covers the formula version it was made for, so each \`brew update\`
-                that bumps openusage can leave the keg installed-but-unlinked
-                ("command not found" until you run \`brew link\`).
+                If \`openusage\` is missing after an install or upgrade, the keg is
+                installed but unlinked. There are two known causes.
 
-                Trust the whole tap once to keep openusage linked across upgrades:
+                1. Tap trust. Homebrew 6.0+ requires third-party taps to be trusted,
+                   and a trust grant only covers the formula version it was made for,
+                   so each \`brew update\` that bumps openusage can leave the keg
+                   unlinked. Trust the whole tap once to keep it linked across
+                   upgrades:
 
-                  brew trust janekbaraniewski/tap
+                     brew trust achappell/tap
 
-                See https://docs.brew.sh/Tap-Trust for details.
+                   See https://docs.brew.sh/Tap-Trust for details.
+
+                2. Tap ambiguity. If another installed tap also defines a formula
+                   named "openusage", Homebrew cannot resolve the bare name and
+                   skips the link step. Check with:
+
+                     brew info --formula openusage
+
+                   An error reading "Formulae found in multiple taps" confirms it.
+                   Remove the tap you do not use, or always use the fully-qualified
+                   name.
+
+                Either way, this restores the command immediately:
+
+                  brew link achappell/tap/openusage
               EOS
             end
 
@@ -264,11 +325,23 @@ jobs:
 
           sed -i 's/^          //' /tmp/homebrew-formula/openusage.rb
 
-      - name: Push formula to Homebrew tap
+      - name: Configure Homebrew tap SSH access
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
-          git clone --branch master "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/janekbaraniewski/homebrew-tap.git" /tmp/homebrew-tap
+          test -n "${HOMEBREW_TAP_DEPLOY_KEY}" || {
+            echo "::error::HOMEBREW_TAP_DEPLOY_KEY is not configured"
+            exit 1
+          }
+          install -m 700 -d "${HOME}/.ssh"
+          printf '%s\n' "${HOMEBREW_TAP_DEPLOY_KEY}" > "${HOME}/.ssh/homebrew-tap-deploy-key"
+          chmod 600 "${HOME}/.ssh/homebrew-tap-deploy-key"
+          ssh-keyscan -H github.com >> "${HOME}/.ssh/known_hosts"
+
+      - name: Push formula to Homebrew tap
+        run: |
+          export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/homebrew-tap-deploy-key -o IdentitiesOnly=yes"
+          git clone --branch master "git@github.com:achappell/homebrew-tap.git" /tmp/homebrew-tap
           mkdir -p /tmp/homebrew-tap/Formula
           cp /tmp/homebrew-formula/openusage.rb /tmp/homebrew-tap/Formula/openusage.rb
 

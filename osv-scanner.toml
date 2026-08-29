@@ -1,0 +1,5 @@
+# OpenUsage reaches only golang.org/x/crypto/hkdf through browserutils/kooky.
+# The deprecated openpgp package covered by this advisory is never imported.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "OpenUsage does not import golang.org/x/crypto/openpgp; the module is retained only for the transitive hkdf package used by browserutils/kooky."

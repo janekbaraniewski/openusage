@@ -1,6 +1,10 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // Per-tab handlers extracted from handleSettingsModalKey, which used to be a
 // single 348-line function with seven nested switch blocks. Each handler
@@ -38,6 +42,22 @@ func (m Model) handleSettingsTabProvidersKey(msg tea.KeyMsg, ids []string) (Mode
 		m.rebuildSortedIDs()
 		m.settings.status = "saving settings..."
 		return m, m.persistDashboardPrefsCmd(), true
+	case "l":
+		if len(ids) == 0 {
+			return m, nil, false
+		}
+		id := ids[clamp(m.settings.cursor, 0, len(ids)-1)]
+		if m.accountProviders[id] != "codex" {
+			return m, nil, false
+		}
+		m.settings.creditLimitEditing = true
+		m.settings.creditLimitEditAccountID = id
+		m.settings.creditLimitInput = ""
+		if limit := m.accountCreditLimits[id]; limit != nil {
+			m.settings.creditLimitInput = fmt.Sprintf("%g", *limit)
+		}
+		m.settings.status = "enter a credit cap; empty clears"
+		return m, nil, true
 	}
 	return m, nil, false
 }

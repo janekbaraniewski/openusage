@@ -87,7 +87,8 @@ func (s *Service) pollProviders(ctx context.Context) {
 			_, hasDetector := provider.(core.ChangeDetector)
 
 			// Adaptive backoff: skip providers that are in a backoff window.
-			if !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
+			configChanged := s.creditLimitOverrideChanged(account)
+			if !configChanged && !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
 				s.pollStateMu.Lock()
 				state := s.pollState[account.ID]
 				s.pollStateMu.Unlock()
@@ -127,9 +128,10 @@ func (s *Service) pollProviders(ctx context.Context) {
 			// Record successful fetch for future change detection.
 			s.pollStateMu.Lock()
 			s.pollState[account.ID] = &providerPollState{
-				lastFetchAt: s.now(),
-				lastSnap:    snap,
-				hasSnap:     true,
+				lastFetchAt:         s.now(),
+				lastSnap:            snap,
+				creditLimitOverride: cloneCreditLimitOverride(account.CreditLimitOverride),
+				hasSnap:             true,
 			}
 			s.pollStateMu.Unlock()
 
@@ -199,6 +201,9 @@ func (s *Service) skipUnchangedProvider(provider core.UsageProvider, acct core.A
 	if state == nil || !state.hasSnap {
 		return nil // no previous fetch, must run
 	}
+	if !optionalFloatEqual(state.creditLimitOverride, acct.CreditLimitOverride) {
+		return nil
+	}
 
 	now := s.now()
 	if snapshotResetPassed(state.lastSnap, state.lastFetchAt, now) {
@@ -214,6 +219,28 @@ func (s *Service) skipUnchangedProvider(provider core.UsageProvider, acct core.A
 	core.Tracef("[poll] %s/%s: skipped (no change since %s)", acct.Provider, acct.ID, state.lastFetchAt.Format(time.RFC3339))
 	snap := state.lastSnap
 	return &snap
+}
+
+func (s *Service) creditLimitOverrideChanged(acct core.AccountConfig) bool {
+	s.pollStateMu.Lock()
+	state := s.pollState[acct.ID]
+	s.pollStateMu.Unlock()
+	return state != nil && state.hasSnap && !optionalFloatEqual(state.creditLimitOverride, acct.CreditLimitOverride)
+}
+
+func cloneCreditLimitOverride(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func optionalFloatEqual(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func snapshotResetPassed(snap core.UsageSnapshot, since, now time.Time) bool {

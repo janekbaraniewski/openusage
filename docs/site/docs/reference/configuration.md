@@ -27,6 +27,7 @@ The TUI reads the file on startup and writes it back when you change settings in
 | [`integrations`](#integrations) | object | Install state for tool hooks. |
 | [`export`](#export) | object | Daemon push to a remote hub (multi-machine aggregation). |
 | [`hub`](#hub) | object | Hub server bind address and stale-timeout. |
+| [`sketchybar`](#sketchybar) | object | Mouse interaction for the generated SketchyBar items. |
 | [`accounts`](#accounts) | array | Manually configured provider accounts. |
 | [`auto_detected_accounts`](#auto_detected_accounts) | array | Read-only mirror of accounts found by the detector. |
 
@@ -49,6 +50,47 @@ The active theme by name. Must match a built-in or external theme. See [Themes](
 ```
 
 Default: `"Gruvbox"`.
+
+## `sketchybar`
+
+Controls how the two OpenUsage-owned SketchyBar items open their popups:
+
+```json
+{
+  "sketchybar": {
+    "usage_trigger": "click",
+    "switcher_trigger": "click"
+  }
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `usage_trigger` | string | `"click"` | Gesture for the `ai` usage popup. |
+| `switcher_trigger` | string | `"click"` | Gesture for the `ai_switcher` provider picker. |
+
+Allowed values are `"click"` and `"hover"`. Click mode opens on the first
+click and closes on the second. Hover mode opens on pointer entry; the usage
+popup then closes when the pointer leaves the item, while the provider picker
+stays open until the pointer leaves the bar so its rows remain clickable.
+
+Both items previously opened on hover with no way to configure it. The default
+is now `"click"`, so an existing install changes behavior when the managed
+block is regenerated — set `usage_trigger` to `"hover"` to keep it.
+
+After changing these values, regenerate the managed block and reload
+SketchyBar:
+
+```bash
+openusage sketchybar install --write
+sketchybar --reload
+```
+
+Editing this file does not rewrite the already-generated scripts, so
+`openusage sketchybar doctor` compares the configured gesture against the one
+baked into each installed script and warns when they have drifted apart. Both
+values can also be overridden per-invocation with `--usage-trigger` and
+`--switcher-trigger`.
 
 ## `ui`
 
@@ -361,6 +403,9 @@ Manually configured provider accounts. Account `id` must be unique across `accou
 | `base_url` | string | Override the provider's base URL. Common for self-hosted Ollama or alternate Moonshot endpoints. |
 | `binary` | string | For non-API providers, the path or name of the local binary or file (e.g. `gh` for Copilot, the Gemini CLI binary, the Claude state file path). |
 | `probe_model` | string | For header-probing providers, the model to send a minimal request against. |
+| `credit_limit_override` | number | Optional advisory personal credit cap. Currently used by Codex for percentages, forecasts, and limit status. |
+
+For Codex, the cap can also be set from **Settings → Providers**: select the `codex-cli` row and press `l`. Saving a cap for an auto-detected account preserves its detected configuration automatically; clearing it restores normal auto-detection. This is a monitoring budget only and does not stop Codex requests.
 
 :::warning API keys are never stored
 The `api_key_env` field stores the **name** of the environment variable, not its value. The TUI reads the value from your shell at runtime. Don't put plaintext API keys in `settings.json`.

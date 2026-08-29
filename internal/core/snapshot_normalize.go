@@ -4,6 +4,7 @@ import "strings"
 
 func NormalizeUsageSnapshotWithConfig(s UsageSnapshot, modelCfg ModelNormalizationConfig) UsageSnapshot {
 	s.EnsureMaps()
+	ApplyQuotaForecast(&s)
 
 	for k, v := range s.Raw {
 		if k == "" || v == "" {

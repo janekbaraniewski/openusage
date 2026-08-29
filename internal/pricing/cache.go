@@ -20,6 +20,10 @@ const DefaultTTL = 24 * time.Hour
 type DiskCache struct {
 	dir string
 	ttl time.Duration
+	// now is the clock used for freshness arithmetic. Tests swap it out
+	// so cache expiry and the resolver's in-memory expiry advance
+	// together; in production it is time.Now.
+	now func() time.Time
 	mu  sync.Mutex
 }
 
@@ -32,13 +36,13 @@ func NewDiskCache() (*DiskCache, error) {
 		return nil, fmt.Errorf("pricing: resolving user cache dir: %w", err)
 	}
 	dir := filepath.Join(base, "openusage", "pricing")
-	return &DiskCache{dir: dir, ttl: ResolveTTL()}, nil
+	return &DiskCache{dir: dir, ttl: ResolveTTL(), now: time.Now}, nil
 }
 
 // NewDiskCacheAt returns a cache rooted at an explicit directory. Useful in
 // tests and for callers that want to share a fixture path.
 func NewDiskCacheAt(dir string) *DiskCache {
-	return &DiskCache{dir: dir, ttl: ResolveTTL()}
+	return &DiskCache{dir: dir, ttl: ResolveTTL(), now: time.Now}
 }
 
 // Dir returns the directory the cache writes to.
@@ -49,6 +53,22 @@ func (c *DiskCache) TTL() time.Duration { return c.ttl }
 
 // SetTTL overrides the freshness window. Provided mainly for tests.
 func (c *DiskCache) SetTTL(ttl time.Duration) { c.ttl = ttl }
+
+// setClock overrides the freshness clock. Test-only.
+func (c *DiskCache) setClock(fn func() time.Time) {
+	if fn != nil {
+		c.now = fn
+	}
+}
+
+// clock returns the configured clock, tolerating a zero-value DiskCache
+// built by a caller that bypassed the constructors.
+func (c *DiskCache) clock() func() time.Time {
+	if c.now == nil {
+		return time.Now
+	}
+	return c.now
+}
 
 // Path returns the on-disk path for a given cache slot.
 func (c *DiskCache) Path(name string) string {
@@ -72,7 +92,7 @@ func (c *DiskCache) Load(name string) ([]byte, time.Time, bool, error) {
 	if err != nil {
 		return nil, time.Time{}, false, fmt.Errorf("pricing: read cache %s: %w", path, err)
 	}
-	fresh := time.Since(info.ModTime()) < c.ttl
+	fresh := c.clock()().Sub(info.ModTime()) < c.ttl
 	return data, info.ModTime(), fresh, nil
 }
 

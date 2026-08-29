@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/pbkdf2"
 	"crypto/sha1"
 	"database/sql"
 	"encoding/json"
@@ -18,8 +19,6 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // already in go.mod for cursor provider
-
-	"golang.org/x/crypto/pbkdf2"
 )
 
 type usageResponse struct {
@@ -121,16 +120,29 @@ func getClaudeSessionCookies() (map[string]string, error) {
 	return cookies, nil
 }
 
-func getChromiumEncryptionKey() ([]byte, error) {
-	cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", "Claude")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("keychain lookup failed (is Claude desktop installed?): %w", err)
-	}
-	password := strings.TrimSpace(string(out))
+// claudeSafeStorageAccounts are the Keychain "account" values Claude
+// Desktop has stored its Chromium Safe Storage password under across
+// releases. Older builds used "Claude"; current builds use "Claude Key".
+// Try each in order so we work across versions.
+var claudeSafeStorageAccounts = []string{"Claude Key", "Claude"}
 
-	key := pbkdf2.Key([]byte(password), []byte("saltysalt"), 1003, 16, sha1.New)
-	return key, nil
+func getChromiumEncryptionKey() ([]byte, error) {
+	var lastErr error
+	for _, account := range claudeSafeStorageAccounts {
+		cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", account)
+		out, err := cmd.Output()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		password := strings.TrimSpace(string(out))
+		key, err := pbkdf2.Key(sha1.New, password, []byte("saltysalt"), 1003, 16)
+		if err != nil {
+			return nil, fmt.Errorf("deriving cookie key: %w", err)
+		}
+		return key, nil
+	}
+	return nil, fmt.Errorf("keychain lookup failed (is Claude desktop installed and signed in?): %w", lastErr)
 }
 
 func decryptChromiumCookie(encrypted []byte, key []byte) (string, error) {

@@ -33,6 +33,7 @@ type storedLimitMetric struct {
 	Used      *float64 `json:"used"`
 	Unit      string   `json:"unit"`
 	Window    string   `json:"window"`
+	ResetKey  string   `json:"reset_key"`
 }
 
 type storedLimitEnvelope struct {
@@ -327,6 +328,7 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 			Used:      metric.Used,
 			Unit:      strings.TrimSpace(metric.Unit),
 			Window:    strings.TrimSpace(metric.Window),
+			ResetKey:  strings.TrimSpace(metric.ResetKey),
 		}
 	}
 	for key, raw := range envelope.Snapshot.Resets {

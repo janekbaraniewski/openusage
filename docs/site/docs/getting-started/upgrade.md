@@ -22,18 +22,18 @@ brew upgrade openusage
 Re-running the script downloads the latest release and overwrites the binary in place:
 
 ```bash
-curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/achappell/openusage/releases/latest/download/install.sh | bash
 ```
 
 ### Go install
 
 ```bash
-go install github.com/janekbaraniewski/openusage/cmd/openusage@latest
+go install github.com/achappell/openusage/cmd/openusage@main
 ```
 
 ### Manual
 
-Download the new release archive from [GitHub releases](https://github.com/janekbaraniewski/openusage/releases) and replace the binary on your `PATH`.
+Download the new release archive from [GitHub releases](https://github.com/achappell/openusage/releases) and replace the binary on your `PATH`.
 
 ## Upgrade integrations
 

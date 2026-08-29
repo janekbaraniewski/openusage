@@ -228,7 +228,14 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 	if !ok {
 		return ""
 	}
+	// Providers store the reset timestamp under either the bare metric key
+	// (claude_code: snap.Resets["usage_five_hour"]) or a "_reset"-suffixed
+	// key (copilot, opencode: snap.Resets["rolling_usage_reset"]) — both are
+	// established conventions in this codebase, so check both.
 	resetAt, hasReset := snap.Resets[key]
+	if !hasReset {
+		resetAt, hasReset = snap.Resets[key+"_reset"]
+	}
 	if !hasReset {
 		return ""
 	}
@@ -289,23 +296,43 @@ func tileCodexCreditProjectionAnnotation(snap core.UsageSnapshot, usedPct float6
 	if resetIn > 0 {
 		resetPart = "resets " + formatDurationShort(resetIn)
 	}
+	capPart := ""
+	if codexCreditOverrideActive(snap) {
+		if creditMetric, ok := snap.Metrics["codex_credit_limit"]; ok && creditMetric.Limit != nil {
+			capPart = "cap " + formatNumber(*creditMetric.Limit)
+		}
+	}
 
 	rateMetric, hasRate := snap.Metrics["codex_credit_burn_rate"]
 	creditMetric, hasCredits := snap.Metrics["codex_credit_limit"]
+	projectedMetric, hasProjected := snap.Metrics["codex_credit_projected_credits_at_reset"]
+	if hasProjected && projectedMetric.Used != nil && creditMetric.Limit != nil && *creditMetric.Limit > 0 && resetIn > 0 {
+		projectedPct := *projectedMetric.Used / *creditMetric.Limit * 100
+		if projectedPct < 100 {
+			projected := int(math.Round(projectedPct))
+			if projected < 0 {
+				projected = 0
+			}
+			if projected >= 100 {
+				projected = 99
+			}
+			return joinAnnotationParts(capPart, resetPart, fmt.Sprintf("~%d%% by reset", projected))
+		}
+	}
 	if !hasRate || !hasCredits || rateMetric.Used == nil || creditMetric.Limit == nil || *rateMetric.Used <= 0 || *creditMetric.Limit <= 0 || usedPct >= 100 {
-		return resetPart
+		return joinAnnotationParts(capPart, resetPart)
 	}
 
 	// Convert the credit burn rate into percentage points per hour using the
 	// authoritative current-period credit limit.
 	pctPerHour := *rateMetric.Used / *creditMetric.Limit * 100
 	if pctPerHour <= 0 {
-		return resetPart
+		return joinAnnotationParts(capPart, resetPart)
 	}
 	remainingPct := 100 - usedPct
 	hoursTo100 := remainingPct / pctPerHour
 	if hoursTo100 <= 0 {
-		return resetPart
+		return joinAnnotationParts(capPart, resetPart)
 	}
 
 	var projection string
@@ -323,5 +350,5 @@ func tileCodexCreditProjectionAnnotation(snap core.UsageSnapshot, usedPct float6
 		projection = "100% in " + formatDurationShort(time.Duration(hoursTo100*float64(time.Hour)))
 	}
 
-	return joinAnnotationParts(resetPart, projection)
+	return joinAnnotationParts(capPart, resetPart, projection)
 }

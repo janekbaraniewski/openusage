@@ -42,6 +42,21 @@ func (s *Store) MetaSet(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// MetaClearIfValue clears a daemon_meta value only when it still matches the
+// value read by the caller. This makes concurrent auto-release decisions
+// idempotent without serializing the whole active-provider computation.
+func (s *Store) MetaClearIfValue(ctx context.Context, key, value string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE daemon_meta SET value = '' WHERE key = ? AND value = ?`, key, value)
+	if err != nil {
+		return fmt.Errorf("telemetry: conditionally clearing meta %q: %w", key, err)
+	}
+	return nil
+}
+
 // RollupWatermark returns the last fully-rolled day (YYYY-MM-DD), or "" if the
 // rollup has never run.
 func (s *Store) RollupWatermark(ctx context.Context) (string, error) {

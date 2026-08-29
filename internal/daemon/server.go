@@ -340,6 +340,11 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/v1/hook/", s.handleHook)
 	mux.HandleFunc("/v1/read-model", s.handleReadModel)
+	mux.HandleFunc("/v1/active", s.handleActive)
+	mux.HandleFunc("/v1/active/explain", s.handleActiveExplain)
+	mux.HandleFunc("/v1/active/list", s.handleActiveList)
+	mux.HandleFunc("/v1/active/detail", s.handleActiveDetail)
+	mux.HandleFunc("/v1/active/pin", s.handleActivePin)
 
 	server := &http.Server{
 		Handler:           mux,

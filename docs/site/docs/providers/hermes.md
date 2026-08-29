@@ -49,7 +49,7 @@ Either signal is sufficient: the `hermes` binary on `PATH`, or a `state.db` at o
 }
 ```
 
-`db_path` is the only path-hint key. The override is used only when the file exists; otherwise the provider falls back to the default candidates. To point OpenUsage at a custom profile directory, either set `$HERMES_HOME` or pin `db_path` directly.
+`db_path` is the only path-hint key, and it is authoritative: when set, the provider reads that database and no other. If the path does not exist the tile reports "Hermes state.db not found" rather than silently falling back to the default candidates — otherwise a pinned account could report another profile's usage as its own. Leave `db_path` unset to search the defaults. To point OpenUsage at a custom profile directory, either set `$HERMES_HOME` or pin `db_path` directly.
 
 ## Data sources & how each metric is computed
 
@@ -122,7 +122,7 @@ Per-model `ModelUsage` rows carry input / output / cached (cache-read) / reasoni
 
 ## Troubleshooting
 
-- **Tile shows "Hermes state.db not found"** — neither `$HERMES_HOME/state.db` nor `~/.hermes/state.db` exists. Run Hermes at least once, or set `db_path` explicitly to a non-default location.
+- **Tile shows "Hermes state.db not found"** — neither `$HERMES_HOME/state.db` nor `~/.hermes/state.db` exists. Run Hermes at least once, or set `db_path` explicitly to a non-default location. If you already set `db_path`, check that exact file exists: an override that points at a missing file reports not-found rather than falling back to the defaults.
 - **Tile says "No Hermes sessions recorded"** — the DB exists but every row was filtered out. Most common cause: every session has either an empty `model` column or no positive tokens/cost. Run a real session and re-check.
 - **`query_error` diagnostic present** — the SQLite open or scan failed. The diagnostic text is verbatim; check whether the file is corrupt or being held exclusively by another process.
 

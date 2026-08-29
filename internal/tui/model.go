@@ -123,10 +123,13 @@ type settingsState struct {
 	status            string
 	integrationStatus []integrations.Status
 
-	apiKeyEditing       bool
-	apiKeyInput         string
-	apiKeyEditAccountID string
-	apiKeyStatus        string // "validating...", "valid ✓", "invalid ✗", etc.
+	apiKeyEditing            bool
+	apiKeyInput              string
+	apiKeyEditAccountID      string
+	apiKeyStatus             string // "validating...", "valid ✓", "invalid ✗", etc.
+	creditLimitEditing       bool
+	creditLimitInput         string
+	creditLimitEditAccountID string
 
 	providerLinkPicker providerLinkPickerState
 	browserPicker      browserPickerState
@@ -164,6 +167,7 @@ type Services interface {
 	SaveTheme(themeName string) error
 	SaveDashboardProviders(providers []config.DashboardProviderConfig) error
 	SaveDashboardProviderHideCosts(accountID string, hide *bool) error
+	SaveAccountCreditLimitOverride(accountID string, limit *float64) error
 	SaveDashboardView(view string) error
 	SaveDashboardWidgetSections(sections []config.DashboardWidgetSection) error
 	SaveDetailWidgetSections(sections []config.DetailWidgetSection) error
@@ -231,9 +235,10 @@ type Model struct {
 
 	daemon daemonState
 
-	providerOrder    []string
-	providerEnabled  map[string]bool
-	accountProviders map[string]string
+	providerOrder       []string
+	providerEnabled     map[string]bool
+	accountProviders    map[string]string
+	accountCreditLimits map[string]*float64
 
 	settings               settingsState
 	widgetSections         []config.DashboardWidgetSection
@@ -271,6 +276,7 @@ func NewModel(
 		experimentalAnalytics: experimentalAnalytics,
 		providerEnabled:       make(map[string]bool),
 		accountProviders:      make(map[string]string),
+		accountCreditLimits:   make(map[string]*float64),
 		expandedModelMixTiles: make(map[string]bool),
 		tileBodyCache:         make(map[string][]string),
 		analyticsModelExpand:  make(map[string]bool),
@@ -324,6 +330,11 @@ type dashboardPrefsPersistedMsg struct {
 }
 type dashboardProviderHideCostsPersistedMsg struct {
 	accountID string
+	err       error
+}
+type accountCreditLimitPersistedMsg struct {
+	accountID string
+	limit     *float64
 	err       error
 }
 type dashboardViewPersistedMsg struct {
@@ -525,6 +536,7 @@ func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accoun
 			seenAccounts[account.ID] = true
 		}
 		m.accountProviders[account.ID] = account.Provider
+		m.accountCreditLimits[account.ID] = cloneOptionalFloat(account.CreditLimitOverride)
 		m.providerEnabled[account.ID] = true
 	}
 

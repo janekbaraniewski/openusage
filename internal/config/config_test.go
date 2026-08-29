@@ -57,6 +57,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Hub.ListenAddr != "" {
 		t.Errorf("default hub.listen_addr should be empty (runtime default applied later), got %q", cfg.Hub.ListenAddr)
 	}
+	if cfg.SketchyBar.UsageTrigger != SketchyBarTriggerClick {
+		t.Errorf("default sketchybar.usage_trigger = %q, want %q", cfg.SketchyBar.UsageTrigger, SketchyBarTriggerClick)
+	}
+	if cfg.SketchyBar.SwitcherTrigger != SketchyBarTriggerClick {
+		t.Errorf("default sketchybar.switcher_trigger = %q, want %q", cfg.SketchyBar.SwitcherTrigger, SketchyBarTriggerClick)
+	}
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
@@ -118,6 +124,22 @@ func TestLoadFrom_ValidFile(t *testing.T) {
 	}
 	if cfg.Accounts[0].ID != "openai-test" {
 		t.Errorf("first account ID = %s, want openai-test", cfg.Accounts[0].ID)
+	}
+}
+
+func TestLoadFrom_SketchyBarTriggersNormalize(t *testing.T) {
+	cfg := loadConfigJSON(t, `{
+  "sketchybar": {
+    "usage_trigger": " HOVER ",
+    "switcher_trigger": "not-a-trigger"
+  }
+}`)
+
+	if cfg.SketchyBar.UsageTrigger != SketchyBarTriggerHover {
+		t.Errorf("usage_trigger = %q, want %q", cfg.SketchyBar.UsageTrigger, SketchyBarTriggerHover)
+	}
+	if cfg.SketchyBar.SwitcherTrigger != SketchyBarTriggerClick {
+		t.Errorf("switcher_trigger = %q, want %q for invalid input", cfg.SketchyBar.SwitcherTrigger, SketchyBarTriggerClick)
 	}
 }
 
@@ -1366,5 +1388,61 @@ func TestExportTargetPreservedAcrossModifyConfig(t *testing.T) {
 	}
 	if cfg.Export.MachineName != "mybox" {
 		t.Errorf("export.machine_name = %q after SaveAutoDetected, want mybox", cfg.Export.MachineName)
+	}
+}
+
+func TestSaveAccountCreditLimitOverridePromotesAndClearsDetectedAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	detected := core.AccountConfig{ID: "codex-cli", Provider: "codex", Auth: "local", Binary: "/usr/local/bin/codex"}
+	if err := SaveTo(path, Config{AutoDetectedAccounts: []core.AccountConfig{detected}}); err != nil {
+		t.Fatal(err)
+	}
+
+	limit := 4000.0
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", &limit); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Accounts) != 1 || cfg.Accounts[0].CreditLimitOverride == nil || *cfg.Accounts[0].CreditLimitOverride != limit {
+		t.Fatalf("expected promoted account with %.0f cap, got %+v", limit, cfg.Accounts)
+	}
+	if cfg.Accounts[0].Binary != detected.Binary {
+		t.Fatalf("expected detected fields to be preserved, got %+v", cfg.Accounts[0])
+	}
+
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Accounts) != 0 {
+		t.Fatalf("expected promoted-only account to be removed after clear, got %+v", cfg.Accounts)
+	}
+}
+
+func TestSaveAccountCreditLimitOverrideKeepsCustomizedManualAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	limit := 2500.0
+	cfg := Config{
+		Accounts:             []core.AccountConfig{{ID: "codex-cli", Provider: "codex", Binary: "/custom/codex", CreditLimitOverride: &limit}},
+		AutoDetectedAccounts: []core.AccountConfig{{ID: "codex-cli", Provider: "codex", Binary: "/usr/bin/codex"}},
+	}
+	if err := SaveTo(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveAccountCreditLimitOverrideTo(path, "codex-cli", nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Accounts) != 1 || loaded.Accounts[0].CreditLimitOverride != nil || loaded.Accounts[0].Binary != "/custom/codex" {
+		t.Fatalf("expected customized manual account with cleared cap, got %+v", loaded.Accounts)
 	}
 }

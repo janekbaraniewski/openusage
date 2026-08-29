@@ -68,3 +68,6 @@ drafts/
 # Python bytecode (font scripts)
 scripts/__pycache__/
 __pycache__/
+
+# Local planning artifacts (superpowers skill output)
+docs/superpowers/

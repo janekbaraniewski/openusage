@@ -132,6 +132,7 @@ func TestQuotaSnapshotIngestor_StoresMetricPayload(t *testing.T) {
 
 	ingestor := NewQuotaSnapshotIngestor(store)
 	used := 5.5
+	resetKey := "credit_reset"
 	snaps := map[string]core.UsageSnapshot{
 		"openrouter": {
 			ProviderID: "openrouter",
@@ -140,9 +141,10 @@ func TestQuotaSnapshotIngestor_StoresMetricPayload(t *testing.T) {
 			Status:     core.StatusNearLimit,
 			Metrics: map[string]core.Metric{
 				"credit_used": {
-					Used:   &used,
-					Unit:   "USD",
-					Window: "month",
+					Used:     &used,
+					Unit:     "USD",
+					Window:   "month",
+					ResetKey: resetKey,
 				},
 			},
 		},
@@ -164,5 +166,18 @@ func TestQuotaSnapshotIngestor_StoresMetricPayload(t *testing.T) {
 	}
 	if !extracted.Valid || extracted.Float64 != 5.5 {
 		t.Fatalf("extracted credit_used.used = %#v, want 5.5", extracted)
+	}
+	var gotResetKey string
+	if err := db.QueryRow(`
+		SELECT json_extract(r.source_payload, '$.snapshot.metrics.credit_used.reset_key')
+		FROM usage_events e
+		JOIN usage_raw_events r ON r.raw_event_id = e.raw_event_id
+		WHERE e.event_type = ?
+		LIMIT 1
+	`, string(EventTypeLimitSnapshot)).Scan(&gotResetKey); err != nil {
+		t.Fatalf("query extracted reset key: %v", err)
+	}
+	if gotResetKey != resetKey {
+		t.Fatalf("extracted credit_used.reset_key = %q, want %q", gotResetKey, resetKey)
 	}
 }

@@ -57,6 +57,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyPersisted(msg.err, "save failed", "saved"), nil
 	case dashboardProviderHideCostsPersistedMsg:
 		return m.applyPersisted(msg.err, "hide_costs save failed", "hide_costs saved"), nil
+	case accountCreditLimitPersistedMsg:
+		if msg.err != nil {
+			m.settings.status = "credit cap save failed"
+			return m, nil
+		}
+		m.accountCreditLimits[msg.accountID] = cloneOptionalFloat(msg.limit)
+		m.settings.status = "credit cap saved"
+		if msg.limit == nil {
+			m.settings.status = "credit cap cleared"
+		}
+		m = m.requestRefresh()
+		return m, nil
 	case dashboardViewPersistedMsg:
 		return m.applyPersisted(msg.err, "view save failed", "view saved"), nil
 	case dashboardWidgetSectionsPersistedMsg:

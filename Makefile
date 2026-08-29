@@ -87,6 +87,10 @@ icon-font: ## Regenerate the provider icon font (internal/tmux/assets/openusage-
 	@.venv-font/bin/pip install --quiet 'fonttools==4.63.0'
 	@.venv-font/bin/python scripts/gen-icon-font.py
 
+.PHONY: docs-sketchybar
+docs-sketchybar: ## Regenerate the managed snippet block in the SketchyBar guide
+	go test ./internal/sketchybar/ -run TestDocsSnippetUpToDate -update-docs -count=1
+
 .PHONY: docs-install
 docs-install: ## Install the docs site dependencies
 	cd docs/site && npm install

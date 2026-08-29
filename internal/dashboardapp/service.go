@@ -60,6 +60,10 @@ func (s *Service) SaveDashboardProviderHideCosts(accountID string, hide *bool) e
 	return config.SaveDashboardProviderHideCosts(accountID, hide)
 }
 
+func (s *Service) SaveAccountCreditLimitOverride(accountID string, limit *float64) error {
+	return config.SaveAccountCreditLimitOverride(accountID, limit)
+}
+
 func (s *Service) SaveDashboardView(view string) error {
 	return config.SaveDashboardView(view)
 }

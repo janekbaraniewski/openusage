@@ -1,33 +1,85 @@
 # Changelog
 
-## 0.24.4 (2026-08-17)
+## 0.26.2 (2026-08-18)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
 
 ## What's Changed
-### Dependencies
-* deps(deps): bump the go-minor-and-patch group with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/320
-* deps(docs): bump posthog-js from 1.413.3 to 1.417.0 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/322
-* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/324
-* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/321
-
-
-**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.3...v0.24.4
-
-## 0.24.3 (2026-08-17)
-
-<!-- Release notes generated using configuration in .github/release.yml at main -->
-
-## What's Changed
-### Dependencies
-* deps(deps): bump github.com/klauspost/compress from 1.19.1 to 1.19.2 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/308
-* deps(website): bump the website-minor-and-patch group in /website with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/310
-* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/312
-* deps(docs): bump posthog-js from 1.409.3 to 1.413.3 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/309
 ### Other Changes
-* fix(config): recover a config left with stale trailing bytes by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/319
-* fix(deps): patch transitive npm advisories in docs and website locks by @achappell in https://github.com/janekbaraniewski/openusage/pull/316
+* fix(active): attach Claude Code hook events to their candidate by @achappell in https://github.com/achappell/openusage/pull/12
 
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.1...v0.26.2
+
+## 0.26.1 (2026-08-17)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(pricing): expire in-memory pricing tables instead of latching them by @achappell in https://github.com/achappell/openusage/pull/10
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.26.0...v0.26.1
+
+## 0.26.0 (2026-08-16)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.25.1...v0.26.0
+
+## 0.25.1 (2026-08-16)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(release): document tap ambiguity in the Homebrew caveats by @achappell in https://github.com/achappell/openusage/pull/7
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.25.0...v0.25.1
+
+## 0.25.0 (2026-08-16)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.5...v0.25.0
+
+## 0.24.5 (2026-08-15)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.4...v0.24.5
+
+## 0.24.4 (2026-08-05)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.24.3...v0.24.4
+
+## 0.24.3 (2026-08-03)
+
+### Features
+* **Codex** — add credit forecasting (burn rate projection, runout hours at current pace)
+* **Themes** — add Catppuccin Frappé theme variant
+
+### Bug Fixes
+* **core** — preserve full model lineage version in Canonical model identifier for Claude models
+* **tui** — scope browser-session footer hint to the selected row
+* **tui** — surface browser-session keybindings in the persistent Keys tab footer
+* **config** — follow symlink chain when saving config
+* **tests** — anchor time-dependent tests to a single instant to fix UTC midnight flakes
+
+### Performance
+* **daemon** — gate on-demand read-model refresh on new data arrival
 
 **Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.2...v0.24.3
 
@@ -120,6 +172,10 @@
 * @achappell made their first contribution in https://github.com/janekbaraniewski/openusage/pull/257
 
 **Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.23.0...v0.24.0
+
+## 0.24.0 (2026-07-16)
+
+**Full Changelog**: https://github.com/achappell/openusage/compare/v0.23.0...v0.24.0
 
 ## [0.23.0](https://github.com/janekbaraniewski/openusage/compare/v0.22.0...v0.23.0) (2026-07-05)
 

@@ -18,11 +18,15 @@ OpenUsage reads two kinds of environment variables: **runtime overrides** (debug
 | `OPENUSAGE_HUB_TOKEN` | Bearer token shared by `openusage hub`, `openusage hub-view`, and the daemon exporter for multi-machine aggregation. Never persisted to `settings.json`. See [Multi-machine aggregation](../guides/multi-machine.md). |
 | `OPENUSAGE_THEME_DIR` | Colon-separated list (semicolon on Windows) of extra directories scanned for theme JSON files. See [External themes](../customization/external-themes.md). |
 | `OPENUSAGE_MOONSHOT_STATE_PATH` | Override the path Moonshot's state file is read from. |
+| `OPENUSAGE_PRICING_TTL` | How long fetched pricing tables (LiteLLM, OpenRouter) stay fresh before OpenUsage re-validates them. Go duration syntax (`12h`, `30m`) or a plain number of seconds. Default `24h`. Applies to both the on-disk cache and the in-memory copy held by a running process, so a long-lived `openusage telemetry` daemon picks up new rates without a restart. |
 | `OPENUSAGE_CUSTOM_PRICING` | Override the path to `custom-pricing.json` (default: `$XDG_CONFIG_HOME/openusage/custom-pricing.json` or `~/.config/openusage/custom-pricing.json`). See [Custom pricing overrides](./configuration.md#custom-pricing-overrides). |
 | `XDG_CONFIG_HOME` | Honored when resolving `custom-pricing.json` and (on Linux/macOS) the integrations hooks directory. It is **not** honored for `settings.json`, whose directory is fixed at `~/.config/openusage` on Linux/macOS and `%APPDATA%\openusage` on Windows. |
 | `XDG_STATE_HOME` | Override the state base directory (telemetry db/socket/spools). Default `~/.local/state` on Linux/macOS; on Windows the state dir is `%APPDATA%\openusage\state` when this is unset. |
 | `CLAUDE_SETTINGS_FILE` | Override the path to `~/.claude/settings.json`. Used by the `claude_code` provider and integration. |
 | `CODEX_CONFIG_DIR` | Override the path to `~/.codex/`. Used by the `codex` provider and integration. |
+| `OPENUSAGE_SKETCHYBAR_CLOSE_SCRIPT` | Path to a script the generated SketchyBar items run instead of closing their own popups. See [SketchyBar integration](../guides/sketchybar-integration.md#closing-popups). |
+| `OPENUSAGE_SKETCHYBAR_STALE_AFTER` | Seconds before the cached SketchyBar usage payload is treated as stale. Default `600`. |
+| `OPENUSAGE_SKETCHYBAR_CACHE_DIR` | Override the SketchyBar cache directory. Default `~/.cache/openusage/sketchybar`. |
 | `CODEBUFF_DATA_DIR` | Additional channel root for the `codebuff` provider, appended to the default `manicode/`, `manicode-dev/`, and `manicode-staging/` channels under `~/.config/`. |
 
 ## API key environment variables

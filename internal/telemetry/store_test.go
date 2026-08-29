@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,43 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func TestOpenStoreRecoversMalformedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "telemetry.db")
+	if err := os.WriteFile(path, []byte("not a sqlite database"), 0o600); err != nil {
+		t.Fatalf("write malformed database: %v", err)
+	}
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore should recover malformed database: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := os.Stat(path + ".corrupt." + time.Now().Format("20060102T150405")); err != nil {
+		// The timestamp can roll over at the second boundary; inspect the
+		// directory instead of depending on the exact generated suffix.
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			t.Fatalf("read recovery directory: %v", readErr)
+		}
+		found := false
+		for _, entry := range entries {
+			if len(entry.Name()) > len("telemetry.db.corrupt.") && entry.Name()[:len("telemetry.db.corrupt.")] == "telemetry.db.corrupt." {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected malformed database backup in %s", dir)
+		}
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("fresh database missing: %v", err)
+	}
+}
 
 func TestStoreInit_CreatesTables(t *testing.T) {
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))

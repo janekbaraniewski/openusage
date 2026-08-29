@@ -23,6 +23,13 @@ OpenUsage ships a `tmux` subcommand that renders a one-line status segment of yo
 
 It is meant to live in `status-right` or `status-left` and update every few seconds. The renderer ships its own runtime budget so a slow daemon or a missing key can never freeze tmux.
 
+Active-provider selection now prefers daemon telemetry events, so the status
+bar can follow the tool that actually handled the latest turn instead of
+guessing from local file mtimes. If the daemon is unavailable, tmux falls back
+to the existing mtime detector and reports the degraded source. Use
+`openusage active --explain` or `openusage tmux doctor` when the displayed tool
+looks wrong; a forgotten active-provider pin is a common culprit.
+
 {/* TODO: asciinema cast */}
 
 ## Requirements

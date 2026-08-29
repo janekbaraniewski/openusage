@@ -99,6 +99,7 @@ func serializeMetrics(metrics map[string]core.Metric) map[string]any {
 			"used":      ptrFloat(metric.Used),
 			"unit":      metric.Unit,
 			"window":    metric.Window,
+			"reset_key": metric.ResetKey,
 		}
 	}
 	return out

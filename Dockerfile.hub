@@ -8,12 +8,12 @@
 # to run inside a container.
 #
 # See docs/site/docs/guides/multi-machine.md for the end-to-end flow.
-# Base images pin minor versions so security patches auto-flow; apk
-# packages stay unpinned because the alpine index moves frequently and
-# strict pins would break CI without bringing a real security win.
+# Base images are pinned by manifest digest for reproducible builds; update
+# the digest deliberately when taking a new base-image patch. apk packages
+# stay unpinned because the alpine index moves frequently.
 
 # ── builder ──────────────────────────────────────────────────────────────────
-FROM golang:1.25-alpine3.21 AS builder
+FROM golang:1.25-alpine3.21@sha256:b4dbd292a0852331c89dfd64e84d16811f3e3aae4c73c13d026c4d200715aff6 AS builder
 
 # CGO is required for mattn/go-sqlite3 (Cursor provider + telemetry store).
 RUN apk add --no-cache gcc musl-dev
@@ -36,7 +36,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -o /openusage ./cmd/openusage
 
 # ── runtime ───────────────────────────────────────────────────────────────────
-FROM alpine:3.21
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 # ca-certificates: HTTPS calls to provider APIs (worker mode reuse).
 # wget: minimal HTTP client for HEALTHCHECK.

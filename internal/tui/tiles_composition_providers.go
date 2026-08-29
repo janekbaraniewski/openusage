@@ -299,6 +299,7 @@ func buildProviderDailyTrendLinesWithHide(snap core.UsageSnapshot, innerW int, h
 		{label: "Cost", keys: []string{"analytics_cost", "cost"}, color: colorTeal, unit: "USD"},
 		{label: "Req", keys: []string{"analytics_requests", "requests"}, color: colorYellow, unit: "requests"},
 		{label: "Tokens", keys: []string{"analytics_tokens"}, color: colorSapphire, unit: "tokens"},
+		{label: "Credits", keys: []string{"codex_credit_usage"}, color: colorLavender, unit: "credits"},
 	}
 	if hideCosts {
 		// Strip the Cost row outright — the rendered "last" label is a $ value

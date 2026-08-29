@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,6 +11,9 @@ import (
 )
 
 func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settings.creditLimitEditing {
+		return m.handleCreditLimitEditKey(msg)
+	}
 	if m.settings.apiKeyEditing {
 		return m.handleAPIKeyEditKey(msg)
 	}
@@ -94,6 +99,56 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) handleCreditLimitEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.settings.creditLimitEditing = false
+		m.settings.creditLimitInput = ""
+		m.settings.status = "credit cap edit canceled"
+		return m, nil
+	case "enter":
+		input := strings.TrimSpace(m.settings.creditLimitInput)
+		var limit *float64
+		if input != "" {
+			value, err := strconv.ParseFloat(input, 64)
+			if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+				m.settings.status = "enter a positive credit cap"
+				return m, nil
+			}
+			limit = &value
+		}
+		accountID := m.settings.creditLimitEditAccountID
+		m.settings.creditLimitEditing = false
+		m.settings.creditLimitInput = ""
+		m.settings.status = "saving credit cap..."
+		return m, m.persistAccountCreditLimitCmd(accountID, limit)
+	case "backspace":
+		if len(m.settings.creditLimitInput) > 0 {
+			m.settings.creditLimitInput = m.settings.creditLimitInput[:len(m.settings.creditLimitInput)-1]
+		}
+		return m, nil
+	default:
+		if msg.Type == tea.KeyRunes {
+			for _, r := range msg.Runes {
+				if (r >= '0' && r <= '9') || (r == '.' && !strings.Contains(m.settings.creditLimitInput, ".")) {
+					m.settings.creditLimitInput += string(r)
+				}
+			}
+		}
+		return m, nil
+	}
+}
+
+func cloneOptionalFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (m *Model) moveSelectedProvider(ids []string, delta int) tea.Cmd {

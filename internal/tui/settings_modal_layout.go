@@ -148,7 +148,10 @@ func (m Model) renderSettingsModalTabs(w int) string {
 func (m Model) settingsModalHint() string {
 	switch m.settings.tab {
 	case settingsTabProviders:
-		return "Up/Down: select  ·  Shift+↑/↓ or Shift+J/K: move item  ·  Space/Enter: enable/disable  ·  Left/Right: switch tab  ·  Esc: close"
+		if m.settings.creditLimitEditing {
+			return "Type credit cap  ·  Enter: save  ·  Empty Enter: clear  ·  Esc: cancel"
+		}
+		return "Up/Down: select  ·  Shift+J/K: move  ·  Space/Enter: enable  ·  l: edit Codex cap  ·  Esc: close"
 	case settingsTabWidgetSections:
 		return "Up/Down: select section  ·  Shift+↑/↓ or Shift+J/K: reorder  ·  Space/Enter: show/hide  ·  < >: tile/detail sub-tab  ·  h: toggle hide empty  ·  PgUp/PgDn: scroll preview  ·  Esc: close"
 	case settingsTabAPIKeys:

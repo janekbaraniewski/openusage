@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO="janekbaraniewski/openusage"
+REPO="${OPENUSAGE_REPO:-achappell/openusage}"
 BINARY_NAME="openusage"
 INSTALL_DIR="${OPENUSAGE_INSTALL_DIR:-}"
 VERSION="${OPENUSAGE_VERSION:-}"
@@ -40,6 +40,7 @@ Environment variables:
   OPENUSAGE_VERSION      Same as --version
   OPENUSAGE_INSTALL_DIR  Same as --install-dir
   OPENUSAGE_GITHUB_TOKEN Optional GitHub token (helps avoid API rate limits)
+  OPENUSAGE_REPO         GitHub repository to install from (default: achappell/openusage)
 EOF
 }
 

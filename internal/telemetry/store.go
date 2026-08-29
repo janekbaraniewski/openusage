@@ -51,37 +51,29 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("telemetry: creating DB dir: %w", err)
 	}
 
-	// Remove the shared-memory file before opening the database.
-	// After an unclean shutdown (SIGKILL, OOM, crash), the -shm file
-	// retains stale WAL frame indexes and lock counters from the dead
-	// process. If a new process opens the DB and trusts the stale -shm,
-	// it can misread WAL frames, causing duplicate page references and
-	// B-tree corruption. Removing the -shm forces SQLite to rebuild the
-	// WAL index from the checksummed WAL file, which is crash-safe.
-	// If another process holds the DB open, the file is still
-	// referenced via its inode and that process is unaffected.
-	_ = os.Remove(path + "-shm")
-
 	db, err := openAndConfigureDB(path)
 	if err != nil {
-		return nil, err
+		// A malformed header makes PRAGMA journal_mode fail before the
+		// quick-check below gets a chance to classify the database. Rotate
+		// only definitive SQLite corruption; transient lock/configuration
+		// errors must remain errors and must never destroy a live database.
+		if _, statErr := os.Stat(path); statErr == nil && isDefinitiveDatabaseCorruption(err) {
+			db, err = rotateCorruptDatabase(path, err.Error())
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Quick integrity check before proceeding. If the database is corrupt
-	// (e.g. from a previous unclean shutdown that the -shm removal didn't
-	// fully recover), back it up and start fresh rather than serving bad data.
+	// Quick integrity check before proceeding. A database can open cleanly and
+	// still be corrupt past the header (e.g. after an unclean shutdown), so
+	// back it up and start fresh rather than serving bad data.
 	if corrupt, detail := quickIntegrityCheck(db); corrupt {
 		_ = db.Close()
-		backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
-		log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
-		if err := os.Rename(path, backupPath); err != nil {
-			return nil, fmt.Errorf("telemetry: backup corrupt DB: %w", err)
-		}
-		_ = os.Remove(path + "-wal")
-		_ = os.Remove(path + "-shm")
-		db, err = openAndConfigureDB(path)
+		// rotateCorruptDatabase already prefixes its own errors.
+		db, err = rotateCorruptDatabase(path, detail)
 		if err != nil {
-			return nil, fmt.Errorf("telemetry: opening fresh DB after corruption: %w", err)
+			return nil, err
 		}
 	}
 
@@ -98,6 +90,33 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func isDefinitiveDatabaseCorruption(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "file is not a database") ||
+		strings.Contains(lower, "database disk image is malformed")
+}
+
+func rotateCorruptDatabase(path, detail string) (*sql.DB, error) {
+	backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
+	log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
+	if err := os.Rename(path, backupPath); err != nil {
+		return nil, fmt.Errorf("telemetry: backup corrupt DB: %w", err)
+	}
+	// These sidecars belong to the old inode and cannot be used with the
+	// fresh database. Do this only after the main file has been moved, never
+	// as a pre-open repair while another process might still own the DB.
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
+	db, err := openAndConfigureDB(path)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: opening fresh DB after corruption: %w", err)
+	}
+	return db, nil
 }
 
 // pruneCorruptBackups removes old "<dbPath>.corrupt.*" snapshots, keeping the

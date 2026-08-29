@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/browsercookies"
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
@@ -30,7 +32,16 @@ import (
 // loadBrowserSession is a seam so tests can supply a session instead of reading
 // the developer's real browser cookie store, which on macOS blocks in a Keychain
 // prompt no test binary can answer.
-var loadBrowserSession = shared.LoadOrRefreshBrowserSession
+//
+// It deliberately reads the stored credential rather than calling
+// shared.LoadOrRefreshBrowserSession: that helper re-reads the live browser
+// cookie and rewrites the stored session on every poll, clobbering a sibling
+// account's session when two accounts share this provider's fixed cookie
+// domain but use different source browsers. Mirrors loadStoredSession in
+// internal/providers/opencode/provider.go.
+var loadBrowserSession = func(_ context.Context, acct core.AccountConfig, _ browsercookies.Reader) (config.BrowserSession, bool, error) {
+	return config.LoadSession(acct.ID)
+}
 
 const (
 	consoleBaseURL = "https://console.perplexity.ai"

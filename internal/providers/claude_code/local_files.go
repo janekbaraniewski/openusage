@@ -59,10 +59,11 @@ func applyUsageResponse(usage *usageResponse, snap *core.UsageSnapshot, now time
 		}
 
 		snap.Metrics[metricKey] = core.Metric{
-			Used:   &util,
-			Limit:  &limit,
-			Unit:   "%",
-			Window: window,
+			Used:     &util,
+			Limit:    &limit,
+			Unit:     "%",
+			Window:   window,
+			ResetKey: resetKey,
 		}
 	}
 

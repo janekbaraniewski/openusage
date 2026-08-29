@@ -3,6 +3,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -18,8 +19,12 @@ type creditLimitDetails struct {
 	Used               any `json:"used,omitempty"`
 	RemainingPercent   any `json:"remaining_percent,omitempty"`
 	RemainingPercentV2 any `json:"remainingPercent,omitempty"`
+	UsedPercent        any `json:"used_percent,omitempty"`
+	UsedPercentV2      any `json:"usedPercent,omitempty"`
 	ResetsAt           any `json:"resets_at,omitempty"`
 	ResetsAtV2         any `json:"resetsAt,omitempty"`
+	ResetAt            any `json:"reset_at,omitempty"`
+	ResetAtV2          any `json:"resetAt,omitempty"`
 }
 
 type creditUsageObservation struct {
@@ -28,11 +33,13 @@ type creditUsageObservation struct {
 	limit float64
 }
 
-func firstCreditLimit(primary, alternate *creditLimitDetails) *creditLimitDetails {
-	if primary != nil {
-		return primary
+func firstCreditLimit(candidates ...*creditLimitDetails) *creditLimitDetails {
+	for _, candidate := range candidates {
+		if candidate != nil {
+			return candidate
+		}
 	}
-	return alternate
+	return nil
 }
 
 func parseFlexibleNumber(value any) (float64, bool) {
@@ -77,14 +84,22 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 
 	used, hasUsed := parseFlexibleNumber(details.Used)
 	if !hasUsed {
-		remainingPercent, hasRemainingPercent := parseFlexibleNumber(details.RemainingPercent)
-		if !hasRemainingPercent {
-			remainingPercent, hasRemainingPercent = parseFlexibleNumber(details.RemainingPercentV2)
+		usedPercent, hasUsedPercent := parseFlexibleNumber(details.UsedPercent)
+		if !hasUsedPercent {
+			usedPercent, hasUsedPercent = parseFlexibleNumber(details.UsedPercentV2)
 		}
-		if !hasRemainingPercent {
-			return false
+		if hasUsedPercent {
+			used = limit * clampPercent(usedPercent) / 100
+		} else {
+			remainingPercent, hasRemainingPercent := parseFlexibleNumber(details.RemainingPercent)
+			if !hasRemainingPercent {
+				remainingPercent, hasRemainingPercent = parseFlexibleNumber(details.RemainingPercentV2)
+			}
+			if !hasRemainingPercent {
+				return false
+			}
+			used = limit * (100 - clampPercent(remainingPercent)) / 100
 		}
-		used = limit * (100 - clampPercent(remainingPercent)) / 100
 	}
 
 	if used < 0 {
@@ -117,6 +132,12 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 	if !hasReset {
 		resetAt, hasReset = parseFlexibleNumber(details.ResetsAtV2)
 	}
+	if !hasReset {
+		resetAt, hasReset = parseFlexibleNumber(details.ResetAt)
+	}
+	if !hasReset {
+		resetAt, hasReset = parseFlexibleNumber(details.ResetAtV2)
+	}
 	if hasReset && resetAt > 0 {
 		snap.Resets["codex_credit_limit"] = time.Unix(int64(resetAt), 0)
 	}
@@ -124,6 +145,50 @@ func applyCreditLimitDetails(details *creditLimitDetails, snap *core.UsageSnapsh
 		snap.Raw["credit_limit_source"] = source
 	}
 	return true
+}
+
+func applyCreditLimitOverride(limitOverride *float64, snap *core.UsageSnapshot) {
+	if limitOverride == nil || snap == nil {
+		return
+	}
+	snap.EnsureMaps()
+	configured := *limitOverride
+	snap.Raw["credit_limit_override_configured"] = strconv.FormatFloat(configured, 'f', -1, 64)
+	snap.Raw["credit_limit_override_active"] = "false"
+	if configured <= 0 || math.IsNaN(configured) || math.IsInf(configured, 0) {
+		snap.Diagnostics["credit_limit_override"] = "ignored invalid personal credit cap"
+		return
+	}
+
+	metric, ok := snap.Metrics["codex_credit_limit"]
+	if !ok || metric.Limit == nil || metric.Used == nil || *metric.Limit <= 0 {
+		snap.Diagnostics["credit_limit_override"] = "personal credit cap configured but no reported quota is available"
+		return
+	}
+	reportedLimit := *metric.Limit
+	snap.Raw["credit_limit_reported"] = strconv.FormatFloat(reportedLimit, 'f', -1, 64)
+	snap.Raw["credit_limit_effective"] = strconv.FormatFloat(reportedLimit, 'f', -1, 64)
+	if configured >= reportedLimit {
+		return
+	}
+
+	reportedMetric := metric
+	snap.Metrics["codex_credit_reported_limit"] = reportedMetric
+	used := *metric.Used
+	remaining := math.Max(configured-used, 0)
+	metric.Limit = &configured
+	metric.Remaining = &remaining
+	snap.Metrics["codex_credit_limit"] = metric
+
+	usedPercent := math.Min(math.Max(used/configured*100, 0), 100)
+	remainingPercent := 100 - usedPercent
+	hundred := float64(100)
+	snap.Metrics["codex_credit_percent_used"] = core.Metric{
+		Limit: &hundred, Used: &usedPercent, Remaining: &remainingPercent,
+		Unit: "%", Window: metric.Window,
+	}
+	snap.Raw["credit_limit_override_active"] = "true"
+	snap.Raw["credit_limit_effective"] = strconv.FormatFloat(configured, 'f', -1, 64)
 }
 
 func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID string) {
@@ -142,12 +207,57 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 		key = snap.AccountID
 	}
 
+	// Record every poll before branching. A richer source (account daily
+	// history) returns early, and if that source later drops out the
+	// observed-usage fallback must already hold samples rather than starting
+	// cold and going quiet for two polls.
+	history := p.recordCreditObservation(key, creditUsageObservation{at: snap.Timestamp, used: used, limit: limit})
+
 	// Codex exposes the effective individual limit as a monthly quota and
 	// gives us the next reset, but not the current period start. When the next
 	// reset is available, use the corresponding calendar-month boundary so the
 	// rate includes usage that happened before OpenUsage began observing it.
 	if resetAt, ok := snap.Resets["codex_credit_limit"]; ok {
 		if periodStart, ok := inferCreditPeriodStart(resetAt, snap.Timestamp); ok {
+			if daily, ok := buildDailyCreditProjection(snap, periodStart, resetAt); ok {
+				remaining := limit - used
+				averageDayDuration := resetAt.Sub(periodStart).Hours() / float64(daily.periodDayCount)
+				if averageDayDuration > 0 && daily.averageCredits > 0 {
+					rate := daily.averageCredits / averageDayDuration
+					applyCreditForecastMetrics(snap, rate, remaining, "account daily average")
+				}
+				applyCreditProjectionMetrics(
+					snap,
+					daily.projectedCreditsAtReset,
+					daily.projectedReserveAtReset,
+					daily.averageCredits,
+					daily.observedDayCount,
+					daily.periodDayCount,
+					"account_daily_history",
+				)
+				snap.Raw["credit_forecast_source"] = "account_daily_history"
+				snap.Raw["credit_forecast_period_start"] = periodStart.UTC().Format(time.RFC3339)
+				if rateMetric, ok := snap.Metrics["codex_credit_burn_rate"]; ok && rateMetric.Used != nil && *rateMetric.Used > 0 {
+					rate := *rateMetric.Used
+					if remaining <= 0 {
+						snap.Raw["credit_forecast_summary"] = fmt.Sprintf("%.2f credits/hour; 0.00 hours remaining", rate)
+					} else {
+						snap.Raw["credit_forecast_summary"] = fmt.Sprintf("%.2f credits/hour; %.2f hours remaining", rate, remaining/rate)
+					}
+				}
+				return
+			}
+
+			elapsedFraction := float64(snap.Timestamp.Sub(periodStart)) / float64(resetAt.Sub(periodStart))
+			if elapsedFraction > 0 {
+				elapsedFraction = math.Min(1, elapsedFraction)
+				projected := math.Max(0, used/elapsedFraction)
+				reserve := math.Min(limit, limit-projected)
+				applyCreditProjectionMetrics(snap, projected, reserve, 0, 0, 0, "inferred_period_start")
+				snap.Raw["credit_forecast_source"] = "inferred_period_start"
+				snap.Raw["credit_forecast_period_start"] = periodStart.UTC().Format(time.RFC3339)
+			}
+
 			elapsed := snap.Timestamp.Sub(periodStart)
 			if elapsed > time.Minute && used > 0 {
 				rate := used / elapsed.Hours()
@@ -167,38 +277,11 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 		}
 	}
 
-	p.creditHistoryMu.Lock()
-	defer p.creditHistoryMu.Unlock()
-	if p.creditHistory == nil {
-		p.creditHistory = make(map[string][]creditUsageObservation)
-	}
-
-	history := p.creditHistory[key]
-	if len(history) > 0 {
-		last := history[len(history)-1]
-		if last.limit != limit || used < last.used {
-			history = nil
-		}
-	}
-	observation := creditUsageObservation{at: snap.Timestamp, used: used, limit: limit}
-	history = append(history, observation)
-	cutoff := snap.Timestamp.Add(-6 * time.Hour)
-	kept := history[:0]
-	for _, sample := range history {
-		if !sample.at.Before(cutoff) {
-			kept = append(kept, sample)
-		}
-	}
-	if len(kept) > 12 {
-		kept = kept[len(kept)-12:]
-	}
-	p.creditHistory[key] = kept
-
-	if len(kept) < 2 {
+	if len(history) < 2 {
 		return
 	}
-	first := kept[0]
-	last := kept[len(kept)-1]
+	first := history[0]
+	last := history[len(history)-1]
 	duration := last.at.Sub(first.at)
 	if duration <= time.Minute || last.used <= first.used {
 		return
@@ -224,6 +307,41 @@ func (p *Provider) applyCreditForecast(snap *core.UsageSnapshot, accountID strin
 // inferCreditPeriodStart derives the beginning of the current monthly quota
 // period from the next reset returned by Codex. It deliberately returns false
 // when the reset is missing, stale, or not safely in the future.
+// recordCreditObservation appends this poll's cumulative reading and returns
+// the pruned observation window.
+func (p *Provider) recordCreditObservation(key string, observation creditUsageObservation) []creditUsageObservation {
+	if p == nil {
+		return nil
+	}
+	p.creditHistoryMu.Lock()
+	defer p.creditHistoryMu.Unlock()
+	if p.creditHistory == nil {
+		p.creditHistory = make(map[string][]creditUsageObservation)
+	}
+	history := p.creditHistory[key]
+	if len(history) > 0 {
+		last := history[len(history)-1]
+		// A lower cumulative total or a changed quota means the period rolled
+		// over; the samples either side of that are not comparable.
+		if last.limit != observation.limit || observation.used < last.used {
+			history = nil
+		}
+	}
+	history = append(history, observation)
+	cutoff := observation.at.Add(-6 * time.Hour)
+	kept := history[:0]
+	for _, sample := range history {
+		if !sample.at.Before(cutoff) {
+			kept = append(kept, sample)
+		}
+	}
+	if len(kept) > 12 {
+		kept = kept[len(kept)-12:]
+	}
+	p.creditHistory[key] = kept
+	return kept
+}
+
 func inferCreditPeriodStart(resetAt, observedAt time.Time) (time.Time, bool) {
 	resetAt = resetAt.UTC()
 	observedAt = observedAt.UTC()
@@ -246,4 +364,136 @@ func applyCreditForecastMetrics(snap *core.UsageSnapshot, rate, remaining float6
 	}
 	runout := remaining / rate
 	snap.Metrics["codex_credit_runout_hours"] = core.Metric{Used: &runout, Unit: "h", Window: "at current rate"}
+}
+
+type codexDailyCreditProjection struct {
+	averageCredits          float64
+	observedDayCount        int
+	periodDayCount          int
+	projectedCreditsAtReset float64
+	projectedReserveAtReset float64
+}
+
+func buildDailyCreditProjection(snap *core.UsageSnapshot, periodStart, resetAt time.Time) (codexDailyCreditProjection, bool) {
+	if snap == nil || snap.DailySeries == nil || len(snap.DailySeries[codexCreditUsageDailySeriesKey]) == 0 {
+		return codexDailyCreditProjection{}, false
+	}
+
+	location := time.Local
+	periodStartDay := startOfCodexDay(periodStart, location)
+	periodEndDay := startOfCodexDay(resetAt, location)
+	periodDayCount := codexCalendarDayDistance(periodStartDay, periodEndDay)
+	if periodDayCount <= 0 {
+		return codexDailyCreditProjection{}, false
+	}
+
+	currentDay := startOfCodexDay(snap.Timestamp, location)
+	if currentDay.Before(periodStartDay) {
+		currentDay = periodStartDay
+	} else if !currentDay.Before(periodEndDay) {
+		currentDay = periodEndDay.AddDate(0, 0, -1)
+	}
+	observedDayCount := codexCalendarDayDistance(periodStartDay, currentDay) + 1
+	if observedDayCount < 1 {
+		observedDayCount = 1
+	}
+	if observedDayCount > periodDayCount {
+		observedDayCount = periodDayCount
+	}
+
+	byDay := make(map[string]float64, len(snap.DailySeries[codexCreditUsageDailySeriesKey]))
+	for _, point := range snap.DailySeries[codexCreditUsageDailySeriesKey] {
+		day, err := parseCodexDay(point.Date, location)
+		if err != nil || day.Before(periodStartDay) || !day.Before(periodEndDay) {
+			continue
+		}
+		value := point.Value
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			value = 0
+		}
+		key := formatCodexDay(day)
+		byDay[key] += value
+	}
+
+	// Keep today's value anchored to the live cumulative quota even when the
+	// daily endpoint's response is cached or lags behind the live response.
+	historicalCredits := 0.0
+	todayKey := formatCodexDay(currentDay)
+	for day, value := range byDay {
+		if day < todayKey {
+			historicalCredits += value
+		}
+	}
+	used := 0.0
+	if metric, ok := snap.Metrics["codex_credit_limit"]; ok && metric.Used != nil {
+		used = math.Max(0, *metric.Used)
+	}
+	byDay[todayKey] = math.Max(0, used-historicalCredits)
+
+	observedTotal := 0.0
+	for offset := 0; offset < observedDayCount; offset++ {
+		day := periodStartDay.AddDate(0, 0, offset)
+		observedTotal += math.Max(0, byDay[formatCodexDay(day)])
+	}
+	averageCredits := observedTotal / float64(observedDayCount)
+	projectedCreditsAtReset := math.Max(0, averageCredits*float64(periodDayCount))
+	limit := 0.0
+	if metric, ok := snap.Metrics["codex_credit_limit"]; ok && metric.Limit != nil {
+		limit = math.Max(0, *metric.Limit)
+	}
+	projectedReserveAtReset := math.Min(limit, limit-projectedCreditsAtReset)
+
+	return codexDailyCreditProjection{
+		averageCredits:          averageCredits,
+		observedDayCount:        observedDayCount,
+		periodDayCount:          periodDayCount,
+		projectedCreditsAtReset: projectedCreditsAtReset,
+		projectedReserveAtReset: projectedReserveAtReset,
+	}, true
+}
+
+func codexCalendarDayDistance(start, end time.Time) int {
+	startLocal := start.In(time.Local)
+	endLocal := end.In(time.Local)
+	startDay := time.Date(startLocal.Year(), startLocal.Month(), startLocal.Day(), 0, 0, 0, 0, time.UTC)
+	endDay := time.Date(endLocal.Year(), endLocal.Month(), endLocal.Day(), 0, 0, 0, 0, time.UTC)
+	return int(endDay.Sub(startDay) / (24 * time.Hour))
+}
+
+func applyCreditProjectionMetrics(
+	snap *core.UsageSnapshot,
+	projectedCreditsAtReset, projectedReserveAtReset, dailyAverageCredits float64,
+	observedDayCount, periodDayCount int,
+	source string,
+) {
+	if snap == nil {
+		return
+	}
+	snap.EnsureMaps()
+	snap.Metrics["codex_credit_projected_credits_at_reset"] = core.Metric{
+		Used:   core.Float64Ptr(projectedCreditsAtReset),
+		Unit:   "credits",
+		Window: "at reset",
+	}
+	snap.Metrics["codex_credit_projected_reserve_at_reset"] = core.Metric{
+		Used:   core.Float64Ptr(projectedReserveAtReset),
+		Unit:   "credits",
+		Window: "at reset",
+	}
+	if dailyAverageCredits > 0 {
+		snap.Metrics["codex_credit_daily_average"] = core.Metric{
+			Used:   core.Float64Ptr(dailyAverageCredits),
+			Unit:   "credits/day",
+			Window: "current-period average",
+		}
+	}
+	if observedDayCount > 0 {
+		snap.Raw["credit_forecast_observed_days"] = strconv.Itoa(observedDayCount)
+	}
+	if periodDayCount > 0 {
+		snap.Raw["credit_forecast_period_days"] = strconv.Itoa(periodDayCount)
+	}
+	if source != "" {
+		snap.Raw["credit_forecast_projection_source"] = source
+	}
 }

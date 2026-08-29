@@ -154,16 +154,42 @@ func checkDaemon(out io.Writer, opts DoctorOptions) {
 }
 
 func checkActiveProvider(out io.Writer, opts DoctorOptions) {
+	socket := strings.TrimSpace(opts.SocketPath)
+	if socket == "" {
+		socket = daemon.ResolveSocketPath()
+	}
+	if socket != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		sel, err := daemon.NewClient(socket).Active(ctx)
+		cancel()
+		if err == nil {
+			if sel.Status != "ok" {
+				fmt.Fprintf(out, "[INFO] active provider: %s (source=%s)\n", sel.Status, sel.Source)
+				return
+			}
+			name := sel.Display
+			if strings.TrimSpace(name) == "" {
+				name = sel.Selected
+			}
+			pin := ""
+			if sel.Pinned {
+				pin = fmt.Sprintf(", pinned=%s", sel.Selected)
+			}
+			fmt.Fprintf(out, "[ OK ] active provider: %s via %s%s\n", name, sel.Source, pin)
+			return
+		}
+	}
+
 	res := Detect(DetectOptions{Now: opts.Now, NoCache: true})
 	if res.Primary == "" {
-		fmt.Fprintln(out, "[WARN] active provider: none detected (no recent local activity, no configured priority match)")
+		fmt.Fprintln(out, "[WARN] active provider: none detected via local fallback (no recent local activity, no configured priority match)")
 		return
 	}
 	suffix := ""
 	if len(res.Ordered) > 1 {
 		suffix = fmt.Sprintf(" (also seen: %s)", strings.Join(res.Ordered[1:], ", "))
 	}
-	fmt.Fprintf(out, "[ OK ] active provider: %s via %s%s\n", res.Primary, res.Source, suffix)
+	fmt.Fprintf(out, "[ OK ] active provider: %s via local (%s)%s\n", res.Primary, res.Source, suffix)
 }
 
 func checkSnippet(out io.Writer, opts DoctorOptions) {

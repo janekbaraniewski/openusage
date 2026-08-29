@@ -43,6 +43,7 @@ func buildDetailTrendsSectionWithHide(snap core.UsageSnapshot, widget core.Dashb
 		{keys: []string{"analytics_cost", "cost"}, label: "Cost", yFmt: formatCostAxis, color: colorTeal},
 		{keys: []string{"analytics_requests", "requests"}, label: "Requests", yFmt: formatChartValue, color: colorYellow},
 		{keys: []string{"analytics_tokens", "tokens_total"}, label: "Tokens", yFmt: formatChartValue, color: colorSapphire},
+		{keys: []string{"codex_credit_usage"}, label: "Credits", yFmt: formatChartValue, color: colorLavender},
 		{keys: []string{"messages"}, label: "Messages", yFmt: formatChartValue, color: colorGreen},
 		{keys: []string{"sessions"}, label: "Sessions", yFmt: formatChartValue, color: colorPeach},
 	}

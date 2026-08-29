@@ -136,7 +136,7 @@ changelog:
 
 release:
   github:
-    owner: janekbaraniewski
+    owner: achappell
     name: openusage
   draft: false
   prerelease: auto
@@ -146,4 +146,4 @@ release:
   header: |
     ## Changelog
   footer: |
-    **Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/achappell/openusage/compare/{{ .PreviousTag }}...{{ .Tag }}

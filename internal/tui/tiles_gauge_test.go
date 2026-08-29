@@ -289,6 +289,96 @@ func TestTileGaugeProjectionAnnotation_CodexCredits(t *testing.T) {
 	}
 }
 
+func TestTileGaugeProjectionAnnotation_CodexCreditsUsesDailyProjection(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	usedPct := 36.0
+	limit := 7500.0
+	rate := 7.73
+	projected := 5000.0
+	creditPct := core.Metric{Used: &usedPct, Limit: core.Float64Ptr(100), Unit: "%", Window: "current-period"}
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_percent_used":               creditPct,
+			"codex_credit_limit":                      {Used: &limit, Limit: &limit, Unit: "credits", Window: "current-period"},
+			"codex_credit_burn_rate":                  {Used: &rate, Unit: "credits/hour", Window: "current-period average"},
+			"codex_credit_projected_credits_at_reset": {Used: &projected, Unit: "credits", Window: "at reset"},
+		},
+		Resets: map[string]time.Time{
+			"codex_credit_limit": now.Add(16*24*time.Hour + 12*time.Hour),
+		},
+	}
+
+	out := tileGaugeProjectionAnnotation(snap, "codex_credit_percent_used", creditPct, usedPct, now)
+	if !strings.Contains(out, "~67% by reset") {
+		t.Errorf("expected account daily projection to drive reset percentage, got %q", out)
+	}
+}
+
+func TestTileGaugeProjectionAnnotation_CodexPersonalCap(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	usedPct := 80.0
+	cap := 4000.0
+	rate := 10.0
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":     {Limit: &cap, Unit: "credits"},
+			"codex_credit_burn_rate": {Used: &rate, Unit: "credits/hour"},
+		},
+		Resets: map[string]time.Time{"codex_credit_limit": now.Add(48 * time.Hour)},
+		Raw:    map[string]string{"credit_limit_override_active": "true"},
+	}
+
+	out := tileCodexCreditProjectionAnnotation(snap, usedPct, now)
+	if !strings.Contains(out, "cap 4000") || !strings.Contains(out, "resets 2d") {
+		t.Fatalf("expected cap and reset annotation, got %q", out)
+	}
+}
+
+func TestTileGaugeProjectionAnnotation_CodexPersonalCapAfterReadModel(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	cap := 1000.0
+	reported := 7500.0
+	snap := core.UsageSnapshot{
+		Metrics: map[string]core.Metric{
+			"codex_credit_limit":          {Limit: &cap, Unit: "credits"},
+			"codex_credit_reported_limit": {Limit: &reported, Unit: "credits"},
+		},
+		Resets: map[string]time.Time{"codex_credit_limit": now.Add(48 * time.Hour)},
+	}
+
+	out := tileCodexCreditProjectionAnnotation(snap, 100, now)
+	if !strings.Contains(out, "cap 1000") {
+		t.Fatalf("expected reported-limit metric to preserve cap annotation, got %q", out)
+	}
+}
+
+func TestTileGaugeProjectionAnnotation_SuffixedResetKeyAndAliasedWindows(t *testing.T) {
+	// Some providers (copilot, opencode) store the reset timestamp under a
+	// "<key>_reset" suffixed key rather than the bare metric key, and use
+	// "rolling-5h"/"month" as documented Window aliases for "5h"/"30d"
+	// (see core.Metric's Window doc comment). Both conventions must resolve
+	// to a real annotation, not silently render nothing.
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+
+	rolling := makeUsageMetric(50, 100, "rolling-5h")
+	snap := core.UsageSnapshot{
+		Resets: map[string]time.Time{"rolling_usage_reset": now.Add(4 * time.Hour)},
+	}
+	out := tileGaugeProjectionAnnotation(snap, "rolling_usage", rolling, 50, now)
+	if !strings.Contains(out, "resets") {
+		t.Errorf("rolling-5h window with _reset-suffixed key: expected a reset annotation, got %q", out)
+	}
+
+	monthly := makeUsageMetric(50, 100, "month")
+	snap2 := core.UsageSnapshot{
+		Resets: map[string]time.Time{"monthly_usage_pct_reset": now.Add(15 * 24 * time.Hour)},
+	}
+	out2 := tileGaugeProjectionAnnotation(snap2, "monthly_usage_pct", monthly, 50, now)
+	if !strings.Contains(out2, "resets") {
+		t.Errorf("month window with _reset-suffixed key: expected a reset annotation, got %q", out2)
+	}
+}
+
 func TestTileGaugeProjectionAnnotation_OvershootsWindow(t *testing.T) {
 	// User's reported scenario: 5h window started 1h 18m ago, 22% used.
 	// Pace = 0.22/78 = 0.002820/min → pctPerMinute = 0.2820.

@@ -65,7 +65,7 @@ OpenUsage looks for these keys in this order: process environment → shell rc f
 
 ## Style B: local binary + config dir
 
-Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`.
+Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`, `antigravity`.
 
 ### Checklist
 
@@ -74,6 +74,7 @@ Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`.
    which claude
    which codex
    which gemini
+   which agy
    which gh && gh extension list | grep copilot
    ```
    No output → install the tool, or fix `$PATH` for the shell that runs OpenUsage.
@@ -86,6 +87,7 @@ Affected: `claude_code`, `codex`, `cursor`, `copilot`, `gemini_cli`.
    | Cursor | macOS `~/Library/Application Support/Cursor`, Linux `~/.config/Cursor`, Windows `%APPDATA%\Cursor` |
    | Copilot | `~/.copilot/` (standalone) or `~/.config/github-copilot/devices.json` |
    | Gemini CLI | `~/.gemini/` |
+   | Antigravity CLI | `~/.gemini/antigravity-cli/` |
 
 3. **For Cursor specifically**, the provider reads local SQLite files. If the app has never been opened on this machine, the DBs don't exist yet.
 

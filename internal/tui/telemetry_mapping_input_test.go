@@ -22,6 +22,7 @@ func (f *fakeServices) SaveDashboardProviders([]config.DashboardProviderConfig) 
 	return nil
 }
 func (f *fakeServices) SaveDashboardProviderHideCosts(string, *bool) error                { return nil }
+func (f *fakeServices) SaveAccountCreditLimitOverride(string, *float64) error             { return nil }
 func (f *fakeServices) SaveDashboardView(string) error                                    { return nil }
 func (f *fakeServices) SaveDashboardWidgetSections([]config.DashboardWidgetSection) error { return nil }
 func (f *fakeServices) SaveDetailWidgetSections([]config.DetailWidgetSection) error       { return nil }

@@ -1,0 +1,9 @@
+# Docusaurus uses image-size only while building this repository's static docs.
+# The deployed site and OpenUsage binaries do not accept runtime image input.
+[[IgnoredVulns]]
+id = "GHSA-5p2g-fcmc-qvqq"
+reason = "Docusaurus build-time parser only processes repository-controlled documentation images; no runtime image input reaches it."
+
+[[IgnoredVulns]]
+id = "GHSA-w3rx-r6r6-pgpr"
+reason = "Docusaurus build-time parser only processes repository-controlled documentation images; no runtime image input reaches it."

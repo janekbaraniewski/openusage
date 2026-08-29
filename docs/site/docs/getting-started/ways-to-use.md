@@ -1,6 +1,6 @@
 ---
 title: Ways to use OpenUsage
-description: The surfaces OpenUsage exposes — live terminal dashboard, headless CLI reports, the Claude Code statusline, a tmux status segment, an always-on background daemon, multi-machine aggregation, and machine-readable export.
+description: The surfaces OpenUsage exposes — live terminal dashboard, headless CLI reports, the Claude Code statusline, tmux and SketchyBar status bars, an always-on background daemon, multi-machine aggregation, and machine-readable export.
 sidebar_position: 2
 sidebar_label: Ways to use it
 ---
@@ -15,6 +15,7 @@ providers and (optionally) the same local history.
 | [CLI reports](#headless-cli-reports) | `openusage daily` (`--json`) | Scripting, CI, a quick check |
 | [Claude Code statusline](#claude-code-statusline) | `openusage statusline --install` | You live in Claude Code |
 | [tmux status bar](#tmux-status-bar) | `openusage tmux install` | You live in tmux |
+| [SketchyBar status bar](#sketchybar-status-bar) | `openusage sketchybar install --write` | You want provider usage in SketchyBar on macOS |
 | [Background daemon](#always-on-background-daemon) | `openusage telemetry daemon install` | You want history over time |
 | [Multiple machines](#across-multiple-machines) | `openusage hub` / `hub-view` | You work across several machines |
 | [Export](#export--scripting) | `openusage export --json` | You want to pipe data into your own tools |
@@ -66,6 +67,19 @@ openusage tmux install
 ```
 
 See the [tmux integration guide](../guides/tmux-integration.md).
+
+## SketchyBar status bar
+
+Show the active provider and quota in SketchyBar, with a detail popup and a
+provider/account switcher. This is a macOS integration and requires `jq` plus
+the OpenUsage telemetry daemon for event-backed selection.
+
+```bash
+openusage sketchybar install --write
+sketchybar --reload
+```
+
+See the [SketchyBar integration guide](../guides/sketchybar-integration.md).
 
 ## Always-on background daemon
 

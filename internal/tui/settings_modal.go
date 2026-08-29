@@ -39,6 +39,8 @@ func (m *Model) openSettingsModal() {
 	m.settings.apiKeyEditing = false
 	m.settings.apiKeyInput = ""
 	m.settings.apiKeyStatus = ""
+	m.settings.creditLimitEditing = false
+	m.settings.creditLimitInput = ""
 	m.settings.bodyOffset = 0
 	if len(m.providerOrder) > 0 {
 		m.settings.cursor = clamp(m.settings.cursor, 0, len(m.providerOrder)-1)
@@ -62,6 +64,8 @@ func (m *Model) closeSettingsModal() {
 	m.settings.apiKeyEditing = false
 	m.settings.apiKeyInput = ""
 	m.settings.apiKeyStatus = ""
+	m.settings.creditLimitEditing = false
+	m.settings.creditLimitInput = ""
 	m.settings.bodyOffset = 0
 	m.settings.sectionRowCursor = 0
 	m.settings.sectionSubTab = 0

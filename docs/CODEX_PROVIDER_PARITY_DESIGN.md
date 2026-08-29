@@ -69,7 +69,13 @@ New extraction paths emit:
 9. Individual credit quota and forecast:
    - `codex_credit_limit` for used/total credits and its reset time.
    - `codex_credit_percent_used` for the used percentage.
-   - `codex_credit_burn_rate` and `codex_credit_runout_hours` derived from successive CLI quota observations.
+   - `codex_credit_usage` daily account-authoritative credit totals when the authenticated daily endpoint is available.
+   - `codex_credit_daily_average`, `codex_credit_burn_rate`, and `codex_credit_runout_hours` derived from account daily totals, with cumulative elapsed-time fallback.
+   - `codex_credit_projected_credits_at_reset` and `codex_credit_projected_reserve_at_reset` for expected usage and reserve/deficit at the next reset.
+
+10. Provider-neutral quota forecast:
+    - `quota_burn_rate` and `quota_runout_hours` are added during snapshot normalization whenever a provider reports a finite quota, a parseable period (or explicit period start), and a future reset.
+    - `quota_forecast_metric`, `quota_forecast_period_start`, and `quota_forecast_reset_at` identify the source window so integrations do not need Codex-specific keys.
 
 ### 4.2 Cursor-Compatibility Aliases
 
@@ -95,7 +101,7 @@ Codex dashboard widget now mirrors Cursor-style composition:
 7. Code stats slot mapping uses Codex metric keys.
 8. Compact rows align with Cursor-style `Credits/Team/Usage/Activity/Lines`.
 9. Prefix/key hiding rules suppress noisy raw metric families once rendered as sections.
-10. The primary credit gauge includes the reset countdown and projected percent at reset, using the current-period average burn rate.
+10. The primary credit gauge includes the reset countdown and projected percent at reset, using the account daily average when available and the cumulative current-period average as fallback.
 
 ### 4.4 TUI Support for Codex Trends (`internal/tui/tiles.go`)
 
@@ -165,14 +171,18 @@ The demo snapshot should match real Codex section structure and key families whi
 |------|---------|
 | `internal/providers/codex/codex.go` | session/API parsing, aliases, trends, model/client/tool/language/code metrics, credit forecast wiring |
 | `internal/providers/codex/cli_rate_limits.go` | Codex app-server RPC transport and `individualLimit` decoding |
-| `internal/providers/codex/credit_forecast.go` | used/total credit metrics and observed burn/runout projection |
+| `internal/providers/codex/credit_forecast.go` | used/total credit metrics, daily-average pacing, and expected-at-reset reserve projection |
+| `internal/providers/codex/daily_credit_usage.go` | authenticated daily account-credit history, missing-day normalization, live-today correction, and polling cache |
 | `internal/providers/codex/widget.go` | Cursor-like section/compact-row config for Codex, including credit forecast rows |
 | `internal/providers/codex/codex_test.go` | codex extraction + alias + widget parity regression tests |
 | `internal/providers/codex/credit_forecast_test.go` | CLI quota decoding, provider wiring, reset, and forecast regression tests |
+| `internal/providers/codex/daily_credit_usage_test.go` | daily endpoint parsing, zero-fill, live-today correction, cache, and projection regression tests |
 | `internal/tui/tiles.go` | interface-as-client trend support for `usage_client_*` / `usage_source_*` |
 | `internal/tui/tiles_gauge.go` | top-usage reset and projected-percent annotation for Codex credits |
 | `internal/tui/tiles_gauge_test.go` | top-usage Codex credit projection regression coverage |
 | `internal/tui/detail_sections.go` | structured Codex credit forecast detail section |
+| `internal/tui/detail_trends.go` | daily Codex credit trend chart |
+| `internal/tui/tiles_composition_providers.go` | daily Codex credit sparkline |
 | `cmd/demo/main.go` | codex demo fixture parity/anonymization (in progress) |
 | `cmd/demo/main_test.go` | demo codex coverage assertions (to be aligned with final fixture keys) |
 

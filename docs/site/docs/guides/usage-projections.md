@@ -79,6 +79,20 @@ In practice, the annotation shows up on:
 
 If a provider doesn't supply a reset timestamp or uses an unrecognized window, the gauge still works — you just won't see the projection.
 
+### Provider-neutral export metrics
+
+Snapshot normalization exposes the same projection data to scripts and
+integrations when a provider supplies the required inputs:
+
+- `quota_burn_rate` — average current-period consumption per hour.
+- `quota_runout_hours` — hours until the quota would reach its limit at that pace.
+- `quota_forecast_metric`, `quota_forecast_period_start`, and
+  `quota_forecast_reset_at` — source and timing metadata.
+
+The values are estimates, not vendor promises. Integrations should show the
+reset countdown alongside the run-out estimate and say `not before reset` when
+the estimate exceeds the remaining quota period.
+
 ## When the projection is suppressed
 
 The pace half is omitted (only `resets in …` renders, or nothing at all) when:

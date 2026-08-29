@@ -294,9 +294,10 @@ func applyConversationUsageProjection(snap *core.UsageSnapshot, p conversationUs
 
 	if p.inCurrentBlock {
 		snap.Metrics["5h_block_cost"] = core.Metric{
-			Used:   core.Float64Ptr(p.blockCostUSD),
-			Unit:   "USD",
-			Window: fmt.Sprintf("%s – %s", p.currentBlockStart.Format("15:04"), p.currentBlockEnd.Format("15:04")),
+			Used:     core.Float64Ptr(p.blockCostUSD),
+			Unit:     "USD",
+			Window:   fmt.Sprintf("%s – %s", p.currentBlockStart.Format("15:04"), p.currentBlockEnd.Format("15:04")),
+			ResetKey: "billing_block",
 		}
 		blockIn := float64(p.blockInputTokens)
 		blockOut := float64(p.blockOutputTokens)
@@ -314,6 +315,7 @@ func applyConversationUsageProjection(snap *core.UsageSnapshot, p conversationUs
 		remaining := p.currentBlockEnd.Sub(p.now)
 		if remaining > 0 {
 			snap.Resets["billing_block"] = p.currentBlockEnd
+			snap.Resets["billing_block_start"] = p.currentBlockStart
 			snap.Raw["block_time_remaining"] = fmt.Sprintf("%s", remaining.Round(time.Minute))
 			elapsed := p.now.Sub(p.currentBlockStart)
 			progress := math.Min(elapsed.Seconds()/billingBlockDuration.Seconds()*100, 100)

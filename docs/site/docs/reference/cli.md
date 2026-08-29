@@ -17,7 +17,9 @@ openusage daily|weekly|monthly [flags]          # headless usage/cost report by 
 openusage session [flags]                        # usage/cost grouped by Claude Code session
 openusage blocks [flags]                          # usage by 5-hour billing block + burn rate
 openusage statusline [flags]                     # one-line status bar for Claude Code
+openusage active [--json|--explain]               # active provider and quota facts
 openusage tmux [subcommand] [flags]              # tmux status bar integration
+openusage sketchybar [subcommand] [flags]         # SketchyBar integration (macOS)
 openusage telemetry hook <source> [flags]       # forward an event from a tool hook
 openusage telemetry daemon <subcommand> [flags] # daemon lifecycle
 openusage integrations <subcommand> [flags]     # tool integration management
@@ -314,6 +316,25 @@ openusage tmux watch --background --alert-mode both
 | `--interval DURATION` | 5s | Poll interval. |
 
 Pidfile location: `~/.cache/openusage/tmux-watch.pid`.
+
+## `openusage sketchybar`
+
+Installs or prints a managed SketchyBar integration for macOS. It renders an
+active-provider item, a detail popup, and a provider/account switcher. Generated
+scripts live under `~/.local/share/openusage/sketchybar/`; the installer edits
+only its sentinel block in `sketchybarrc` and does not write into the user's
+SketchyBar plugins directory.
+
+```bash
+openusage sketchybar                         # print the managed block
+openusage sketchybar install --write         # write the block and scripts
+openusage sketchybar doctor                  # diagnose the setup
+openusage sketchybar uninstall               # remove the managed block
+openusage sketchybar presets                 # list built-in presets
+```
+
+See the [SketchyBar integration guide](../guides/sketchybar-integration.md) for
+requirements, configuration, and troubleshooting.
 
 ## `openusage telemetry hook`
 

@@ -23,7 +23,8 @@ func normalizeModelKey(model string) string {
 
 	// strip leading provider segment ("openai/gpt-4o" -> "gpt-4o")
 	if idx := strings.Index(m, "/"); idx >= 0 && idx < len(m)-1 {
-		m = m[idx+1:]
+		m = strings.TrimSpace(m[idx+1:])
+		m = strings.TrimLeft(m, "/")
 	}
 	// strip leading vendor namespace ("anthropic.claude-..." -> "claude-...")
 	for _, prefix := range []string{
@@ -42,6 +43,7 @@ func normalizeModelKey(model string) string {
 			break
 		}
 	}
+	m = strings.TrimSpace(m)
 	// collapse "." into "-" (claude-3.5 vs claude-3-5)
 	m = strings.ReplaceAll(m, ".", "-")
 	// strip date suffix and minor revision suffixes
@@ -49,7 +51,7 @@ func normalizeModelKey(model string) string {
 	m = bedrockVersionRE.ReplaceAllString(m, "")
 	m = trailingRevRE.ReplaceAllString(m, "")
 	// collapse repeated dashes / whitespace
-	m = strings.Trim(multiDashRE.ReplaceAllString(m, "-"), "-")
+	m = strings.TrimSpace(strings.Trim(multiDashRE.ReplaceAllString(m, "-"), "-"))
 	return m
 }
 

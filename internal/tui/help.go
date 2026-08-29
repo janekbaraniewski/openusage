@@ -147,6 +147,7 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		struct{ key, desc string }{"t", "Cycle theme"},
 		struct{ key, desc string }{"w", "Cycle time window"},
 		struct{ key, desc string }{"c", "toggle hide-costs for focused account (auto/hide/show)"},
+		struct{ key, desc string }{"l", "Edit Codex credit cap (settings > providers)"},
 	)
 
 	groups := []keyGroup{

@@ -48,6 +48,7 @@ const sidebars: SidebarsConfig = {
             'providers/copilot',
             'providers/codex',
             'providers/gemini-cli',
+            'providers/antigravity',
             'providers/opencode',
             'providers/ollama',
             'providers/amp',
@@ -120,6 +121,7 @@ const sidebars: SidebarsConfig = {
       link: {type: 'generated-index', slug: '/reference'},
       items: [
         'reference/cli',
+        'reference/active-provider',
         'reference/configuration',
         'reference/env-vars',
         'reference/paths',
@@ -139,6 +141,7 @@ const sidebars: SidebarsConfig = {
         'guides/cache-hit-ratio',
         'guides/cli-reports',
         'guides/tmux-integration',
+        'guides/sketchybar-integration',
         'guides/claude-code-statusline',
         'guides/headless-servers',
         'guides/multi-machine',

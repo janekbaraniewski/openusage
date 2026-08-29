@@ -24,7 +24,7 @@ func TestManagerInstallAndListStatuses(t *testing.T) {
 	}
 	m := Manager{dirs: dirs}
 
-	for _, id := range []ID{OpenCodeID, CodexID, ClaudeCodeID} {
+	for _, id := range []ID{OpenCodeID, CodexID, ClaudeCodeID, AntigravityID} {
 		if err := m.Install(id); err != nil {
 			t.Fatalf("Install(%s) error = %v", id, err)
 		}

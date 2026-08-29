@@ -42,6 +42,12 @@ Providers may expose any combination of:
 
 For each, the snapshot can carry `limit`, `remaining`, and `reset` timestamps.
 
+When a provider also supplies a finite `Metric` with `used`, `limit`, a fixed
+window such as `5h` or `7d`, and a matching `Resets` entry, snapshot
+normalization adds the provider-neutral forecast metrics
+`quota_burn_rate` and `quota_runout_hours`. The forecast is a linear
+current-period estimate; the reset timestamp remains the authoritative value.
+
 ### Per-model breakdown
 
 A list of per-model rows with input/output/cache tokens, request counts, and (where available) cost in the provider's currency.

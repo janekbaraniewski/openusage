@@ -78,6 +78,13 @@
       "api_key_env": "ANTHROPIC_API_KEY"
     },
     {
+      "id": "codex-cli",
+      "provider": "codex",
+      "auth": "local",
+      "binary": "codex",
+      "credit_limit_override": 4000
+    },
+    {
       "id": "azure-openai",
       "provider": "azure_openai",
       "api_key_env": "AZURE_OPENAI_API_KEY",
@@ -158,6 +165,12 @@
       "id": "gemini-cli",
       "provider": "gemini_cli",
       "binary": "gemini"
+    },
+    {
+      "id": "antigravity",
+      "provider": "antigravity",
+      "auth": "local",
+      "binary": "agy"
     },
     {
       "id": "copilot",

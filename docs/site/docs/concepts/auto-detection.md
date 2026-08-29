@@ -11,7 +11,7 @@ Detection runs in four phases. Earlier phases win when the same provider/account
 
 ### 1. Tool detectors
 
-Tool-specific local stores: Cursor's `state.vscdb` (extracts the auth token), Z.AI Coding Helper's `~/.chelper/config.yaml`, Codex's `~/.codex/auth.json` (extracts the top-level `OPENAI_API_KEY` written when you sign in via API key, plus email/plan metadata from the ID token), and the binary+config-dir checks for Claude Code, GitHub Copilot, Gemini CLI, Aider, and Ollama.
+Tool-specific local stores: Cursor's `state.vscdb` (extracts the auth token), Z.AI Coding Helper's `~/.chelper/config.yaml`, Codex's `~/.codex/auth.json` (extracts the top-level `OPENAI_API_KEY` written when you sign in via API key, plus email/plan metadata from the ID token), and the binary+config-dir checks for Claude Code, GitHub Copilot, Gemini CLI, Antigravity CLI, Aider, and Ollama.
 
 ### 2. Environment variables (API platforms)
 

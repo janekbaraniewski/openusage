@@ -100,6 +100,7 @@ func TestChangeDetectorReturnsFalse_WhenNoFiles(t *testing.T) {
 			ProviderPaths: map[string]string{
 				"tracking_db": "/nonexistent/path/tracking.db",
 				"state_db":    "/nonexistent/path/state.db",
+				"status_file": "/nonexistent/path/antigravity-status.json",
 			},
 		}
 

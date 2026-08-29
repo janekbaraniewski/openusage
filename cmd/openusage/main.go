@@ -47,14 +47,17 @@ func main() {
 		},
 	})
 	root.AddCommand(newTelemetryCommand())
+	root.AddCommand(newActiveCommand())
 	root.AddCommand(newIntegrationsCommand())
 	root.AddCommand(newDetectCommand())
 	root.AddCommand(newPricingCommand())
 	root.AddCommand(newExportCommand())
 	root.AddCommand(newHubCommand())
 	root.AddCommand(newHubViewCommand())
+	root.AddCommand(newAntigravityCommand())
 	root.AddCommand(newStatuslineCommand())
 	root.AddCommand(newTmuxCommand())
+	root.AddCommand(newSketchybarCommand())
 	for _, c := range newReportCommands() {
 		root.AddCommand(c)
 	}

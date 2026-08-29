@@ -89,9 +89,9 @@ Install method inferred from executable path heuristics:
 
 ### 5.5 Upgrade hint mapping
 
-- Homebrew: `brew upgrade janekbaraniewski/tap/openusage`
-- Go install: `go install github.com/janekbaraniewski/openusage/cmd/openusage@latest`
-- Install script: `curl -fsSL https://github.com/janekbaraniewski/openusage/releases/latest/download/install.sh | bash`
+- Homebrew: `brew upgrade achappell/tap/openusage`
+- Go install: `go install github.com/achappell/openusage/cmd/openusage@latest`
+- Install script: `curl -fsSL https://github.com/achappell/openusage/releases/latest/download/install.sh | bash`
 - Scoop: `scoop update openusage`
 - Chocolatey: `choco upgrade openusage -y`
 - Unknown: same actionable install script command (`curl ... | bash`) across platforms.

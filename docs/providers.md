@@ -1,6 +1,6 @@
 # Providers
 
-OpenUsage ships with 17 provider integrations covering coding agents, API platforms, and local tools. All providers are auto-detected when available — no manual config needed.
+OpenUsage ships with provider integrations covering coding agents, API platforms, and local tools. All providers are auto-detected when available — no manual config needed.
 
 ## Coding agents & IDEs
 
@@ -43,6 +43,12 @@ Tracks session tokens, per-model and per-client breakdown, credits, and rate lim
 Tracks OAuth status, conversation count, per-model tokens, and quota API data.
 
 ![Gemini CLI provider](../assets/gemini.png)
+
+### Antigravity CLI
+
+**Detection:** `agy` binary + `~/.gemini/antigravity-cli` directory
+
+Tracks status-line context usage, session tokens, model quotas, workspace, and agent state without reading credentials or estimating spend.
 
 ### OpenCode
 

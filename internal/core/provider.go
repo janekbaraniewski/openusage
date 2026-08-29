@@ -36,6 +36,11 @@ type AccountConfig struct {
 	// "tracking_db", "state_db", "stats_cache", "account_config").
 	ProviderPaths map[string]string `json:"provider_paths,omitempty"`
 
+	// CreditLimitOverride is an advisory personal credit cap. Providers that
+	// support it may use it for usage percentages and forecasts while retaining
+	// the authoritative provider-reported quota separately.
+	CreditLimitOverride *float64 `json:"credit_limit_override,omitempty"`
+
 	// Paths is a legacy persisted alias for provider-specific paths. New code
 	// should use ProviderPaths through Path/SetPath helpers.
 	Paths map[string]string `json:"paths,omitempty"`

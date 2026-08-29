@@ -1,0 +1,21 @@
+{
+  "name": "catppuccin-macchiato",
+  "description": "Active provider item and horizontal switcher for a Catppuccin Macchiato bar.",
+  "position": "right",
+  "item": "ai",
+  "switcher": "ai_switcher",
+  "update_freq": 60,
+  "icon": "󰚩",
+  "switcher_icon": "⇄",
+  "colors": {
+    "bar": "0xff1e2030",
+    "text": "0xffcad3f5",
+    "surface": "0xff494d64",
+    "crust": "0xff181926",
+    "accent": "0xffc6a0f6",
+    "good": "0xffa6da95",
+    "warn": "0xffeed49f",
+    "bad": "0xffed8796",
+    "unknown": "0xffcad3f5"
+  }
+}

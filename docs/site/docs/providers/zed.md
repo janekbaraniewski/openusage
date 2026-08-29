@@ -53,7 +53,7 @@ Default `threads.db` locations:
 }
 ```
 
-The only path hint the provider honours is `db_path`. Point it at the `threads.db` file directly when running a non-standard Zed install.
+The only path hint the provider honours is `db_path`. Point it at the `threads.db` file directly when running a non-standard Zed install. The override is authoritative: when set, the provider reads that database and no other. If the path does not exist the tile reports "Zed threads.db not found" rather than silently falling back to the default locations — otherwise a pinned account could report another profile's usage as its own. Leave `db_path` unset to search the defaults.
 
 ## Data sources & how each metric is computed
 
@@ -124,6 +124,6 @@ The per-model `ModelUsageRecord` always carries `upstream_provider=zed.dev` as a
 
 ## Troubleshooting
 
-- **Tile shows "Zed threads.db not found"** — confirm `threads.db` exists at the OS-appropriate path above, or set `db_path` manually.
+- **Tile shows "Zed threads.db not found"** — confirm `threads.db` exists at the OS-appropriate path above, or set `db_path` manually. If you already set `db_path`, check that exact file exists: an override that points at a missing file reports not-found rather than falling back to the default locations.
 - **Tile shows zero threads even though you have used the Agent** — your threads may be targeting a non-`zed.dev` provider. Switch the Agent panel to a hosted model and verify the tile populates.
 - **`query_error` diagnostic** — the SQLite open or read failed. Check the diagnostic text; the most common cause is a stale path after a Zed major upgrade that moved the data dir.
