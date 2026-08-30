@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -111,12 +110,7 @@ func renderDetailCompactHeader(sb *strings.Builder, snap core.UsageSnapshot, now
 	}
 	summaryLeft := "  " + strings.Join(summaryParts, dimStyle.Render("  ·  "))
 
-	timeStr := snap.Timestamp.Format("15:04:05")
-	age := now.Sub(snap.Timestamp)
-	if age > 60*time.Second {
-		timeStr = fmt.Sprintf("%s (%s ago)", snap.Timestamp.Format("15:04:05"), formatDuration(age))
-	}
-	summaryRight := dimStyle.Render("⏱ " + timeStr)
+	summaryRight := dimStyle.Render(formatLastRefreshed(snap.Timestamp, now))
 	sLeftW := lipgloss.Width(summaryLeft)
 	sRightW := lipgloss.Width(summaryRight)
 	sGap := w - sLeftW - sRightW - 1

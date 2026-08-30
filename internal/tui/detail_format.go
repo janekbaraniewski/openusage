@@ -123,6 +123,20 @@ func formatUSD(n float64) string {
 	return fmt.Sprintf("$%.2f", n)
 }
 
+func formatLastRefreshed(timestamp time.Time, now time.Time) string {
+	if timestamp.IsZero() {
+		return ""
+	}
+	age := now.Sub(timestamp)
+	if age < 0 {
+		age = 0
+	}
+	if age < 5*time.Second {
+		return "Last refreshed just now"
+	}
+	return "Last refreshed " + formatDuration(age) + " ago"
+}
+
 func formatDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
