@@ -290,19 +290,7 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 	}
 	line1 := namePart + strings.Repeat(" ", gapLen) + rightPart
 
-	summary := di.summary
-	stripW := 0
-	if di.gaugePercent >= 0 {
-		stripW = compactBlockStripWidth + 2 // strip + gap
-	}
-	summaryMaxW := w - 5 - stripW
-	if summaryMaxW < 5 {
-		summaryMaxW = 5
-	}
-	if len(summary) > summaryMaxW {
-		summary = summary[:summaryMaxW-1] + "…"
-	}
-	summaryLine := "   " + m.renderListSummary(summary, di.gaugePercent, snap)
+	summaryLine := m.renderListSummaryRow(snap, di, w)
 
 	sepStyle := surface1Style
 	if inActiveGroup || selected {
@@ -331,6 +319,53 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+const sidebarSummaryMinWidth = 7 // room for e.g. "93.00%"
+
+func (m Model) renderListSummaryRow(snap core.UsageSnapshot, di providerDisplayInfo, w int) string {
+	now := m.viewNow()
+	entries := collectCycleResetEntries(snap)
+
+	stripW := 0
+	if di.gaugePercent >= 0 {
+		stripW = compactBlockStripWidth + 2
+	}
+
+	summary := di.summary
+	summaryMaxW := w - 5 - stripW - 1
+	if summaryMaxW < sidebarSummaryMinWidth {
+		summaryMaxW = sidebarSummaryMinWidth
+	}
+	if len(summary) > summaryMaxW {
+		summary = summary[:summaryMaxW-1] + "…"
+	}
+
+	left := m.renderListSummary(summary, di.gaugePercent, snap)
+	leftPart := "   " + left
+	if len(entries) == 0 {
+		return leftPart
+	}
+
+	d := entries[0].at.Sub(now)
+	dur := formatCycleResetDuration(d)
+	for _, candidate := range []string{
+		formatCycleResetIn(entries[0].at, now),
+		"Resets in " + dur,
+		"in " + dur,
+		dur,
+	} {
+		if candidate == "" {
+			continue
+		}
+		suffix := dimStyle.Render(" · ") + tileCycleResetStyle.Render(candidate)
+		combined := leftPart + suffix
+		if lipgloss.Width(combined) <= w-1 {
+			return combined
+		}
+	}
+
+	return leftPart
 }
 
 func (m Model) renderListSummary(summary string, gaugePercent float64, snap core.UsageSnapshot) string {

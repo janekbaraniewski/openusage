@@ -134,12 +134,16 @@ func (m *Model) buildTileBodyLines(
 		if di.summary != "" {
 			topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(di.summary)))
 		}
-		if di.detail != "" {
+		if schedule := formatCycleResetSchedule(snap, m.viewNow()); schedule != "" {
+			topUsageLines = append(topUsageLines, tileCycleResetStyle.Render(truncate(schedule)))
+		} else if di.detail != "" {
 			topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
 		}
 		if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
 			topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
 		}
+	} else if schedule := formatCycleResetSchedule(snap, m.viewNow()); schedule != "" {
+		topUsageLines = append(topUsageLines, tileCycleResetStyle.Render(truncate(schedule)))
 	}
 	if len(topUsageLines) > 0 {
 		sectionsByID[core.DashboardSectionTopUsageProgress] = section{withSectionPadding(topUsageLines)}

@@ -155,6 +155,7 @@ var (
 	tileNameStyle           lipgloss.Style
 	tileNameSelectedStyle   lipgloss.Style
 	tileSummaryStyle        lipgloss.Style
+	tileCycleResetStyle     lipgloss.Style
 	tileTimestampStyle      lipgloss.Style
 	tileHeroStyle           lipgloss.Style
 	tileDotLeaderStyle      lipgloss.Style
@@ -301,6 +302,7 @@ func applyTheme(t Theme) {
 	tileNameStyle = lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	tileNameSelectedStyle = lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
 	tileSummaryStyle = lipgloss.NewStyle().Foreground(colorSubtext)
+	tileCycleResetStyle = lipgloss.NewStyle().Foreground(colorSky)
 	tileTimestampStyle = lipgloss.NewStyle().Foreground(colorDim)
 	tileHeroStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
 	tileDotLeaderStyle = lipgloss.NewStyle().Foreground(colorSubtext)

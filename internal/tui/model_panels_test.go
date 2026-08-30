@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/janekbaraniewski/openusage/internal/config"
@@ -95,5 +96,93 @@ func TestRenderListSummary_IncludesBlockStrip(t *testing.T) {
 	idxPct := strings.Index(out, "78.00%")
 	if idxStrip < 0 || idxPct < 0 || idxStrip > idxPct {
 		t.Fatalf("strip should precede percent, got %q", out)
+	}
+}
+
+func TestRenderListSummaryRow_ShowsResetAtMaxSidebarWidth(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.referenceTime = now
+
+	snap := cursorPlanSnap(now)
+	di := computeDisplayInfo(snap, dashboardWidget("cursor"), false, config.UsageModeRemaining)
+	out := m.renderListSummaryRow(snap, di, maxLeftWidth)
+
+	if !strings.Contains(out, "Resets in") {
+		t.Fatalf("expected reset duration at max sidebar width, got %q", out)
+	}
+	if !strings.Contains(out, "93.00%") {
+		t.Fatalf("expected full summary preserved, got %q", out)
+	}
+	if strings.Contains(out, "93.0…") {
+		t.Fatalf("summary should not truncate at max width, got %q", out)
+	}
+	if !strings.Contains(out, compactBlockFilled) {
+		t.Fatalf("expected block strip preserved, got %q", out)
+	}
+	idxPct := strings.Index(out, "93.00%")
+	idxReset := strings.Index(out, "Resets in")
+	if idxPct < 0 || idxReset < 0 || idxPct > idxReset {
+		t.Fatalf("expected inline single-row layout, got %q", out)
+	}
+}
+
+func TestRenderListSummaryRow_ShowsResetAtTypicalSidebarWidth(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.referenceTime = now
+
+	snap := cursorPlanSnap(now)
+	di := computeDisplayInfo(snap, dashboardWidget("cursor"), false, config.UsageModeRemaining)
+	out := m.renderListSummaryRow(snap, di, 33)
+
+	if !strings.Contains(out, "Resets in") && !strings.Contains(out, "in ") {
+		t.Fatalf("expected reset duration on typical sidebar width, got %q", out)
+	}
+}
+
+func TestRenderListSummaryRow_HidesResetWhenTooNarrow(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.referenceTime = now
+
+	snap := cursorPlanSnap(now)
+	di := computeDisplayInfo(snap, dashboardWidget("cursor"), false, config.UsageModeRemaining)
+	out := m.renderListSummaryRow(snap, di, 24)
+
+	if strings.Contains(out, "Resets in") || strings.Contains(out, " days") || strings.Contains(out, "d") {
+		// narrow widths may still fit compact duration; ensure no calendar month names
+		for _, month := range []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"} {
+			if strings.Contains(out, month) {
+				t.Fatalf("narrow sidebar should omit reset, got %q", out)
+			}
+		}
+	}
+}
+
+func TestRenderListSummaryRow_DualCycleShowsPrimaryResetInline(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.referenceTime = now
+
+	snap := core.UsageSnapshot{
+		ProviderID: "command_code",
+		Metrics: map[string]core.Metric{
+			"monthly_subscription": {Remaining: core.Float64Ptr(48)},
+			"weekly_usage":         {Remaining: core.Float64Ptr(70)},
+		},
+		Resets: map[string]time.Time{
+			"monthly_subscription": time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC),
+			"weekly_usage":         time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	di := computeDisplayInfo(snap, dashboardWidget("command_code"), false, config.UsageModeRemaining)
+	out := m.renderListSummaryRow(snap, di, maxLeftWidth)
+
+	if !strings.Contains(out, "Resets in") {
+		t.Fatalf("expected primary monthly reset inline, got %q", out)
+	}
+	if strings.Contains(out, "Weekly") {
+		t.Fatalf("sidebar should only show primary reset, got %q", out)
 	}
 }
