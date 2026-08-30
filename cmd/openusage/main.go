@@ -54,7 +54,6 @@ func main() {
 	root.AddCommand(newHubCommand())
 	root.AddCommand(newHubViewCommand())
 	root.AddCommand(newServeCommand())
-	root.AddCommand(newAntigravityCommand())
 	root.AddCommand(newCursorCommand())
 	root.AddCommand(newStatuslineCommand())
 	root.AddCommand(newTmuxCommand())

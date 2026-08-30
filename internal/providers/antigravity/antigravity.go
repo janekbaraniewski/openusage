@@ -1,32 +1,28 @@
-// Package antigravity adapts the Antigravity CLI status-line feed to the
-// OpenUsage provider and telemetry contracts.
+// Package antigravity fetches Antigravity account quota from Google's
+// Cloud Code internal API using each box's local OAuth token.
 package antigravity
 
 import (
 	"context"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
-	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
 const (
-	providerID           = "antigravity"
-	defaultAccountID     = "antigravity"
-	defaultUsageWindow   = "session"
-	quotaNearLimitRatio  = 0.15
-	statusFilePathEnvVar = "OPENUSAGE_ANTIGRAVITY_STATUS_FILE"
+	providerID          = "antigravity"
+	defaultAccountID    = "antigravity"
+	defaultUsageWindow  = "session"
+	quotaNearLimitRatio = 0.15
 )
 
-// Provider exposes Antigravity's documented status-line data as a local
-// provider. It does not authenticate independently or make network calls.
+// Provider exposes Antigravity quota via retrieveUserQuotaSummary.
 type Provider struct {
 	providerbase.Base
 }
@@ -38,18 +34,19 @@ func New() *Provider {
 			ID: providerID,
 			Info: core.ProviderInfo{
 				Name:         "Antigravity CLI",
-				Capabilities: []string{"local_config", "statusline", "token_usage", "quota", "by_model", "by_workspace"},
-				DocURL:       "https://antigravity.google/docs/cli/statusline/",
+				Capabilities: []string{"local_config", "oauth", "quota"},
+				DocURL:       "https://antigravity.google/docs/cli/reference",
 			},
 			Auth: core.ProviderAuthSpec{
 				Type:             core.ProviderAuthTypeLocal,
 				DefaultAccountID: defaultAccountID,
 			},
 			Setup: core.ProviderSetupSpec{
-				DocsURL: "https://antigravity.google/docs/cli/statusline/",
+				DocsURL: "https://antigravity.google/docs/cli/reference",
 				Quickstart: []string{
-					"Install and run the Antigravity CLI so ~/.gemini/antigravity-cli exists.",
-					"Run `openusage integrations install antigravity` to connect the status line.",
+					"Install the Antigravity CLI (`agy`) and sign in.",
+					"For multi-account boxes, use `agy-box <name>` so ~/.agy-containers/<name> exists.",
+					"OpenUsage reads antigravity-oauth-token and polls retrieveUserQuotaSummary.",
 				},
 			},
 			Dashboard: dashboardWidget(),
@@ -58,84 +55,97 @@ func New() *Provider {
 }
 
 // DetailWidget keeps the provider's detail view focused on the generic usage
-// and token sections. Antigravity does not expose code-stat or tool-call data
-// through the status-line contract.
+// sections. Antigravity's API path exposes quota buckets only.
 func (p *Provider) DetailWidget() core.DetailWidget {
 	return core.DefaultDetailWidget()
 }
 
-// DefaultStatusFilePath returns the path written by the installed status-line
-// command. An environment override is useful for alternate installations and
-// keeps tests isolated without changing the persisted account schema.
-func DefaultStatusFilePath() string {
-	if path := strings.TrimSpace(os.Getenv(statusFilePathEnvVar)); path != "" {
-		return path
-	}
-	stateDir, err := telemetry.DefaultStateDir()
-	if err != nil || strings.TrimSpace(stateDir) == "" {
-		return ""
-	}
-	return filepath.Join(stateDir, "antigravity-status.json")
-}
-
-func statusFilePath(acct core.AccountConfig) string {
-	return strings.TrimSpace(acct.Path("status_file", DefaultStatusFilePath()))
-}
-
-// Fetch projects the latest captured status-line document into a snapshot.
+// Fetch loads a usable OAuth token for the account, calls
+// retrieveUserQuotaSummary, and projects quota metrics into a snapshot.
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
-	path := statusFilePath(acct)
-	if path != "" {
-		snap.Raw["status_file"] = path
-	}
-
 	if err := ctx.Err(); err != nil {
 		return snap, err
 	}
-	if path == "" {
+
+	if dir := configDir(acct); dir != "" {
+		snap.Raw["config_dir"] = dir
+	}
+	if box := boxName(acct); box != "" {
+		snap.SetAttribute("box", box)
+	}
+
+	accessToken, tokenPath, tokenRefreshed, err := ensureAccessToken(ctx, acct, p.Client())
+	if tokenPath != "" {
+		snap.Raw["oauth_token_file"] = tokenPath
+	}
+	if err != nil {
 		snap.Status = core.StatusAuth
-		snap.Message = "Antigravity status-line path is unavailable"
+		snap.Message = "Antigravity OAuth token unavailable"
+		snap.SetDiagnostic("auth_error", err.Error())
+		snap.SetDiagnostic("setup", "Sign in with agy / agy-box so antigravity-oauth-token exists")
+		return snap, nil
+	}
+	if tokenRefreshed {
+		snap.Raw["oauth_status"] = "refreshed"
+	} else {
+		snap.Raw["oauth_status"] = "valid"
+	}
+
+	baseURL := strings.TrimSpace(acct.Hint("quota_endpoint", defaultQuotaEndpoint))
+	summary, err := retrieveUserQuotaSummary(ctx, accessToken, baseURL, p.Client())
+	if err != nil {
+		// One retry after forcing a box ping when the access token looks rejected.
+		if isAuthHTTPError(err) {
+			if pingErr := pingBoxForToken(ctx, acct); pingErr == nil {
+				accessToken, tokenPath, _, retryErr := ensureAccessToken(ctx, acct, p.Client())
+				if retryErr == nil {
+					summary, err = retrieveUserQuotaSummary(ctx, accessToken, baseURL, p.Client())
+					if err == nil {
+						snap.Raw["oauth_status"] = "refreshed_after_401"
+						if tokenPath != "" {
+							snap.Raw["oauth_token_file"] = tokenPath
+						}
+					}
+				}
+			}
+		}
+	}
+	if err != nil {
+		if isAuthHTTPError(err) {
+			snap.Status = core.StatusAuth
+			snap.Message = "Antigravity quota API rejected credentials"
+		} else {
+			snap.Status = core.StatusError
+			snap.Message = "Antigravity quota API request failed"
+		}
+		snap.SetDiagnostic("quota_api_error", err.Error())
 		return snap, nil
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			snap.Status = core.StatusAuth
-			snap.Message = "No Antigravity status-line data yet"
-			snap.SetDiagnostic("setup", "Run `openusage integrations install antigravity`, then start agy")
-			return snap, nil
-		}
-		return snap, fmt.Errorf("antigravity: read status file: %w", err)
+	payload := statusLinePayload{
+		Quota:      quotaMapFromSummary(summary),
+		ReceivedAt: time.Now().UTC(),
+		Product:    "antigravity",
 	}
-
-	payload, err := parseStatusLinePayload(data)
-	if err != nil {
+	if len(payload.Quota) == 0 {
 		snap.Status = core.StatusError
-		snap.Message = "Antigravity status-line data is malformed"
-		snap.SetDiagnostic("parse_error", err.Error())
+		snap.Message = "Antigravity quota API returned no buckets"
 		return snap, nil
 	}
 
 	projectSnapshot(&snap, payload)
+	snap.Raw["quota_api"] = fmt.Sprintf("ok (%d buckets)", len(payload.Quota))
+	snap.Raw["quota_source"] = "retrieveUserQuotaSummary"
 	return snap, nil
 }
 
-// HasChanged lets the dashboard avoid reparsing an unchanged status file.
-func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
-	path := statusFilePath(acct)
-	if path == "" {
-		return false, nil
+func isAuthHTTPError(err error) bool {
+	if err == nil {
+		return false
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return info.ModTime().After(since), nil
+	msg := err.Error()
+	return strings.Contains(msg, "HTTP 401") || strings.Contains(msg, "HTTP 403")
 }
 
 func projectSnapshot(snap *core.UsageSnapshot, payload statusLinePayload) {
@@ -146,29 +156,6 @@ func projectSnapshot(snap *core.UsageSnapshot, payload statusLinePayload) {
 	snap.Timestamp = payloadReceivedAt(payload)
 	snap.Status = statusFromQuota(payload)
 
-	modelID := strings.TrimSpace(payload.Model.ID)
-	modelName := strings.TrimSpace(payload.Model.DisplayName)
-	if modelName == "" {
-		modelName = modelID
-	}
-	if modelID != "" {
-		snap.SetAttribute("model_id", modelID)
-	}
-	if modelName != "" {
-		snap.SetAttribute("model", modelName)
-	}
-	if workspace := statusWorkspace(payload); workspace != "" {
-		snap.SetAttribute("workspace", workspace)
-	}
-	if payload.SessionID != "" {
-		snap.SetAttribute("session_id", payload.SessionID)
-	}
-	if payload.ConversationID != "" {
-		snap.SetAttribute("conversation_id", payload.ConversationID)
-	}
-	if payload.Version != "" {
-		snap.SetAttribute("cli_version", payload.Version)
-	}
 	if payload.Product != "" {
 		snap.SetAttribute("product", payload.Product)
 	}
@@ -178,96 +165,81 @@ func projectSnapshot(snap *core.UsageSnapshot, payload statusLinePayload) {
 	if payload.Email != "" {
 		snap.SetAttribute("account_email", payload.Email)
 	}
-	if payload.AgentState != "" {
-		snap.Raw["agent_state"] = payload.AgentState
-	}
 
-	projectContextMetrics(snap, payload.ContextWindow)
 	projectQuotaMetrics(snap, payload)
 
-	if total := cumulativeTotalTokens(payload.ContextWindow); total > 0 {
-		snap.Metrics["total_tokens"] = core.Metric{
-			Used:   core.Float64Ptr(float64(total)),
-			Unit:   "tokens",
-			Window: defaultUsageWindow,
-		}
-		if modelName != "" {
-			record := core.ModelUsageRecord{
-				RawModelID:   modelName,
-				RawSource:    "statusline",
-				Window:       defaultUsageWindow,
-				InputTokens:  core.Float64Ptr(float64(payload.ContextWindow.TotalInputTokens)),
-				OutputTokens: core.Float64Ptr(float64(payload.ContextWindow.TotalOutputTokens)),
-				TotalTokens:  core.Float64Ptr(float64(total)),
-			}
-			record.SetDimension("workspace", statusWorkspace(payload))
-			snap.AppendModelUsage(record)
-		}
-	}
-
-	projectCurrentUsageMetrics(snap, payload.ContextWindow.CurrentUsage)
 	if snap.Message == "" {
-		if modelName != "" {
-			snap.Message = fmt.Sprintf("Antigravity CLI (%s)", modelName)
-		} else {
-			snap.Message = "Antigravity CLI status line"
-		}
+		snap.Message = "Antigravity quota"
 	}
 }
 
-func projectContextMetrics(snap *core.UsageSnapshot, contextWindow statusLineContextWindow) {
-	used, remaining, hasPercent := contextPercentages(contextWindow)
-	if hasPercent {
-		snap.Metrics["context_window"] = core.Metric{
-			Limit:     core.Float64Ptr(100),
-			Used:      core.Float64Ptr(used),
-			Remaining: core.Float64Ptr(remaining),
-			Unit:      "%",
-			Window:    defaultUsageWindow,
+// EnrichSnapshots overlays live retrieveUserQuotaSummary data onto daemon
+// snapshots. The TUI refresh path (`r` / auto-refresh) reads the telemetry
+// read-model, which only updates on the daemon poll cadence; this fetches
+// current quota in the dashboard process so refresh is immediate.
+func (p *Provider) EnrichSnapshots(ctx context.Context, accounts []core.AccountConfig, snaps map[string]core.UsageSnapshot) {
+	if p == nil || len(snaps) == 0 {
+		return
+	}
+	byID := make(map[string]core.AccountConfig, len(accounts))
+	for _, acct := range accounts {
+		if id := strings.TrimSpace(acct.ID); id != "" {
+			byID[id] = acct
 		}
 	}
 
-	if contextWindow.TotalInputTokens > 0 {
-		snap.Metrics["total_input_tokens"] = core.Metric{
-			Used:   core.Float64Ptr(float64(contextWindow.TotalInputTokens)),
-			Unit:   "tokens",
-			Window: defaultUsageWindow,
-		}
+	type result struct {
+		id   string
+		snap core.UsageSnapshot
+		ok   bool
 	}
-	if contextWindow.TotalOutputTokens > 0 {
-		snap.Metrics["total_output_tokens"] = core.Metric{
-			Used:   core.Float64Ptr(float64(contextWindow.TotalOutputTokens)),
-			Unit:   "tokens",
-			Window: defaultUsageWindow,
+	ids := make([]string, 0, len(snaps))
+	for id, snap := range snaps {
+		if snap.ProviderID != providerID && !strings.HasPrefix(id, providerID+"-") && id != providerID {
+			continue
 		}
+		ids = append(ids, id)
 	}
-	if !hasPercent && contextWindow.ContextWindowSize != nil && *contextWindow.ContextWindowSize > 0 {
-		usedTokens := cumulativeTotalTokens(contextWindow)
-		if usedTokens > 0 {
-			snap.Metrics["context_window"] = core.Metric{
-				Limit:  core.Float64Ptr(float64(*contextWindow.ContextWindowSize)),
-				Used:   core.Float64Ptr(float64(usedTokens)),
-				Unit:   "tokens",
-				Window: defaultUsageWindow,
+	if len(ids) == 0 {
+		return
+	}
+
+	results := make(chan result, len(ids))
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		acct, ok := byID[id]
+		if !ok {
+			acct = core.AccountConfig{ID: id, Provider: providerID}
+		}
+		wg.Add(1)
+		go func(id string, acct core.AccountConfig) {
+			defer wg.Done()
+			if err := ctx.Err(); err != nil {
+				results <- result{id: id}
+				return
 			}
+			fresh, err := p.Fetch(ctx, acct)
+			if err != nil || !snapshotUsable(fresh) {
+				results <- result{id: id}
+				return
+			}
+			results <- result{id: id, snap: fresh, ok: true}
+		}(id, acct)
+	}
+	wg.Wait()
+	close(results)
+	for res := range results {
+		if res.ok {
+			snaps[res.id] = res.snap
 		}
 	}
 }
 
-func projectCurrentUsageMetrics(snap *core.UsageSnapshot, usage statusLineCurrentUsage) {
-	setTokenMetric := func(key string, value int64) {
-		if value <= 0 {
-			return
-		}
-		snap.Metrics[key] = core.Metric{Used: core.Float64Ptr(float64(value)), Unit: "tokens", Window: "current"}
+func snapshotUsable(snap core.UsageSnapshot) bool {
+	if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
+		return len(snap.Metrics) > 0
 	}
-	setTokenMetric("current_input_tokens", usage.InputTokens)
-	setTokenMetric("current_output_tokens", usage.OutputTokens)
-	setTokenMetric("current_cache_read_tokens", usage.CacheReadTokens)
-	setTokenMetric("current_cache_write_tokens", usage.CacheWriteTokensValue())
-	if total := usage.TotalTokens(); total > 0 {
-		setTokenMetric("current_tokens", total)
-	}
+	return len(snap.Metrics) > 0 || (snap.Status != "" && snap.Status != core.StatusUnknown)
 }
 
 func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
@@ -379,8 +351,7 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		}
 	}
 
-	// Synthesize 5h window if only weekly was emitted by Antigravity CLI statusline.
-	// When an account is fresh or hasn't made calls in the rolling 5h window, 5h remaining is 100%.
+	// Synthesize 5h window if only weekly was emitted.
 	if _, hasGemini5h := snap.Metrics["quota_gemini_5h"]; !hasGemini5h {
 		if gWk, hasGeminiWk := snap.Metrics["quota_gemini_weekly"]; hasGeminiWk && gWk.Remaining != nil {
 			rem := 100.0
@@ -417,9 +388,6 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		return
 	}
 
-	// Overall usable quota metric:
-	// If both model pools are tracked, overall available capacity reflects the active pool that
-	// is still available, so having Claude/GPT exhausted does not falsely show 100% used for the account.
 	var overallRemaining float64
 	geminiRem, hasGemini := getPoolRemainingFraction(payload, "gemini")
 	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
@@ -430,7 +398,6 @@ func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {
 		} else if activePool == "claude" {
 			overallRemaining = claudeRem
 		} else {
-			// If either pool has remaining capacity, use the max remaining so available pool is shown
 			overallRemaining = math.Max(geminiRem, claudeRem)
 		}
 	} else if hasGemini {
@@ -517,11 +484,9 @@ func statusFromQuota(payload statusLinePayload) core.Status {
 	claudeRem, hasClaude := getPoolRemainingFraction(payload, "claude", "3p", "opus", "sonnet")
 
 	if hasGemini && hasClaude {
-		// Only LIMITED if BOTH Gemini and Claude/Opus model pools are exhausted
 		if geminiRem <= 0 && claudeRem <= 0 {
 			return core.StatusLimited
 		}
-		// If both are near limit (< 15%)
 		if geminiRem < quotaNearLimitRatio && claudeRem < quotaNearLimitRatio {
 			return core.StatusNearLimit
 		}
@@ -557,41 +522,6 @@ func worstQuotaFraction(payload statusLinePayload) (float64, bool) {
 	return worst, found
 }
 
-func contextPercentages(contextWindow statusLineContextWindow) (float64, float64, bool) {
-	if contextWindow.UsedPercentage == nil && contextWindow.RemainingPercentage == nil {
-		return 0, 0, false
-	}
-	used := 0.0
-	remaining := 0.0
-	if contextWindow.UsedPercentage != nil {
-		used = clamp(*contextWindow.UsedPercentage, 0, 100)
-	}
-	if contextWindow.RemainingPercentage != nil {
-		remaining = clamp(*contextWindow.RemainingPercentage, 0, 100)
-	}
-	if contextWindow.UsedPercentage == nil {
-		used = 100 - remaining
-	}
-	if contextWindow.RemainingPercentage == nil {
-		remaining = 100 - used
-	}
-	return used, remaining, true
-}
-
-func cumulativeTotalTokens(contextWindow statusLineContextWindow) int64 {
-	return contextWindow.TotalInputTokens + contextWindow.TotalOutputTokens
-}
-
-func statusWorkspace(payload statusLinePayload) string {
-	if current := strings.TrimSpace(payload.Workspace.CurrentDir); current != "" {
-		return current
-	}
-	if project := strings.TrimSpace(payload.Workspace.ProjectDir); project != "" {
-		return project
-	}
-	return strings.TrimSpace(payload.CWD)
-}
-
 func payloadReceivedAt(payload statusLinePayload) time.Time {
 	if !payload.ReceivedAt.IsZero() {
 		return payload.ReceivedAt.UTC()
@@ -602,6 +532,9 @@ func payloadReceivedAt(payload statusLinePayload) time.Time {
 func quotaResetTime(quota statusLineQuota, receivedAt time.Time) time.Time {
 	if reset := strings.TrimSpace(quota.ResetTime); reset != "" {
 		if parsed, err := time.Parse(time.RFC3339Nano, reset); err == nil {
+			return parsed.UTC()
+		}
+		if parsed, err := time.Parse(time.RFC3339, reset); err == nil {
 			return parsed.UTC()
 		}
 	}
@@ -619,4 +552,22 @@ func clamp(value, min, max float64) float64 {
 		return max
 	}
 	return value
+}
+
+func sanitizeMetricName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore && b.Len() > 0 {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }

@@ -26,7 +26,6 @@ func AllDefinitions() []Definition {
 		claudeCodeDef(),
 		codexDef(),
 		opencodeDef(),
-		antigravityDef(),
 		cursorDef(),
 	}
 }
@@ -127,39 +126,6 @@ func opencodeDef() Definition {
 		MatchToolNameHint: "",
 		TemplateFileMode:  0o644,
 		EscapeBin:         escapeForTSString,
-	}
-}
-
-func antigravityDef() Definition {
-	return Definition{
-		ID:          AntigravityID,
-		Name:        "Antigravity Status Line",
-		Description: "Status-line bridge for Antigravity CLI",
-		Type:        TypeHookScript,
-		// Antigravity can invoke the OpenUsage binary directly. There is no
-		// separate artifact to render or remove.
-		WritesArtifact: func(Dirs) bool { return false },
-		TargetFileFunc: func(dirs Dirs) string {
-			return dirs.OpenusageBin
-		},
-		ConfigFileFunc: func(dirs Dirs) string {
-			if f := strings.TrimSpace(os.Getenv("ANTIGRAVITY_SETTINGS_FILE")); f != "" {
-				return f
-			}
-			configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
-			if configDir == "" {
-				configDir = filepath.Join(dirs.Home, ".gemini", "antigravity-cli")
-			}
-			return filepath.Join(configDir, "settings.json")
-		},
-		ConfigFormat:  ConfigJSON,
-		ConfigPatcher: patchAntigravityConfig,
-		Detector:      detectAntigravityStatus,
-
-		MatchProviderIDs:  []string{"antigravity"},
-		MatchToolNameHint: "Antigravity CLI",
-		TemplateFileMode:  0o755,
-		EscapeBin:         escapeForShellString,
 	}
 }
 
@@ -351,64 +317,6 @@ func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]
 	return append(payload, '\n'), nil
 }
 
-func patchAntigravityConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
-	if !install && len(bytes.TrimSpace(configData)) == 0 {
-		return configData, nil
-	}
-
-	cfg := map[string]any{}
-	if len(bytes.TrimSpace(configData)) > 0 {
-		if err := json.Unmarshal(configData, &cfg); err != nil {
-			return nil, fmt.Errorf("parse antigravity settings: %w", err)
-		}
-	}
-
-	statusLine, _ := cfg["statusLine"].(map[string]any)
-	existingCommand := ""
-	if statusLine != nil {
-		existingCommand = strings.TrimSpace(stringOrEmpty(statusLine["command"]))
-	}
-
-	if install {
-		if existingCommand != "" && !isAntigravityOpenUsageCommand(existingCommand) {
-			return nil, fmt.Errorf("antigravity statusLine.command is already configured with another command")
-		}
-		if statusLine == nil {
-			statusLine = map[string]any{}
-		}
-		statusLine["type"] = "command"
-		statusLine["command"] = antigravityStatuslineCommand(targetFile)
-		statusLine["enabled"] = true
-		statusLine["stack_with_default"] = true
-		cfg["statusLine"] = statusLine
-	} else if isAntigravityOpenUsageCommand(existingCommand) {
-		// Leave the built-in status-line feature enabled, but remove only the
-		// command owned by OpenUsage. Unrelated custom commands are untouched.
-		cfg["statusLine"] = map[string]any{"enabled": true}
-	} else {
-		return configData, nil
-	}
-
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("serialize antigravity settings: %w", err)
-	}
-	return append(payload, '\n'), nil
-}
-
-func antigravityStatuslineCommand(targetFile string) string {
-	targetFile = strings.TrimSpace(targetFile)
-	if targetFile == "" {
-		targetFile = "openusage"
-	}
-	return fmt.Sprintf("\"%s\" antigravity statusline", escapeForShellString(targetFile))
-}
-
-func isAntigravityOpenUsageCommand(command string) bool {
-	command = strings.ToLower(strings.TrimSpace(command))
-	return strings.Contains(command, "antigravity statusline")
-}
-
 func patchCursorConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
 	if !install && len(bytes.TrimSpace(configData)) == 0 {
 		return configData, nil
@@ -568,37 +476,6 @@ func detectOpenCodeStatus(dirs Dirs) Status {
 		}
 	}
 	st.Configured = configured
-	deriveState(&st)
-	return st
-}
-
-func detectAntigravityStatus(dirs Dirs) Status {
-	def := antigravityDef()
-	st := Status{
-		ID:             AntigravityID,
-		Name:           def.Name,
-		DesiredVersion: IntegrationVersion,
-	}
-
-	configFile := def.ConfigFileFunc(dirs)
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		deriveState(&st)
-		return st
-	}
-
-	var cfg map[string]any
-	if json.Unmarshal(data, &cfg) == nil {
-		if statusLine, ok := cfg["statusLine"].(map[string]any); ok {
-			st.Configured = isAntigravityOpenUsageCommand(stringOrEmpty(statusLine["command"]))
-		}
-	}
-	// This integration registers the OpenUsage binary directly, so configured
-	// is the equivalent of an installed artifact.
-	st.Installed = st.Configured
-	if st.Installed {
-		st.InstalledVersion = IntegrationVersion
-	}
 	deriveState(&st)
 	return st
 }

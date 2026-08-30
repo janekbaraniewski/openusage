@@ -14,7 +14,6 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
-	"github.com/janekbaraniewski/openusage/internal/providers/antigravity"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/report"
@@ -351,11 +350,6 @@ func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) er
 		if json.Unmarshal(rawData, &raw) == nil {
 			if _, hasCW := raw["context_window"]; hasCW {
 				line, captureErr := cursor.CaptureStatusLine(rawData, "")
-				fmt.Fprintln(stdout, line)
-				return captureErr
-			}
-			if prod, _ := raw["product"].(string); prod == "antigravity" || raw["conversation_id"] != nil {
-				line, captureErr := antigravity.CaptureStatusLine(rawData, "")
 				fmt.Fprintln(stdout, line)
 				return captureErr
 			}

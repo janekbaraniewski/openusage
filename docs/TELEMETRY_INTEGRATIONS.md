@@ -1,11 +1,13 @@
 # Telemetry Integrations
 
-This repository supports four native coding-agent telemetry streams:
+This repository supports three native coding-agent telemetry streams:
 
 1. OpenCode plugin hooks
 2. Codex `notify` hook
 3. Claude Code command hooks
-4. Antigravity CLI status-line state
+
+Antigravity quota is polled directly by the Antigravity provider (OAuth token +
+`retrieveUserQuotaSummary`) and does not use a status-line integration hook.
 
 All streams emit normalized telemetry events into the same SQLite store:
 
@@ -31,7 +33,6 @@ openusage integrations list --all
 openusage integrations install claude_code
 openusage integrations install codex
 openusage integrations install opencode
-openusage integrations install antigravity
 
 # Upgrade an integration to the latest embedded version
 openusage integrations upgrade claude_code
@@ -65,11 +66,14 @@ The daemon also prints a hint at startup when it detects tools with missing inte
   - `SubagentStop`
   - `PostToolUse`
 
-### Antigravity CLI (Status Line)
+### Antigravity CLI (API poll)
 
-- `~/.gemini/antigravity-cli/settings.json` receives the `openusage antigravity statusline` command.
-- The command atomically writes the latest status-line JSON to `~/.local/state/openusage/antigravity-status.json`.
-- The normal daemon collector reads that latest state and deduplicates revisions in the shared telemetry store.
+- OpenUsage reads `antigravity-oauth-token` under each box config dir
+  (`~/.agy-containers/<box>/.gemini/antigravity-cli/` or `~/.gemini/antigravity-cli/`).
+- The daemon polls `https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary`
+  with `User-Agent: antigravity`.
+- Expired tokens are refreshed via OAuth when a refresh token is present; otherwise
+  OpenUsage runs `agy-box <box> -p ping` (or `agy -p ping`) to renew credentials.
 
 ## Provider Linking (Explicit Control)
 

@@ -5,175 +5,114 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-const telemetrySchemaVersion = "antigravity_statusline_v1"
+const telemetrySchemaVersion = "antigravity_quota_api_v1"
 
 // System implements shared.TelemetrySource.
 func (p *Provider) System() string { return p.ID() }
 
-// DefaultCollectOptions points the daemon at the latest status-line state.
+// DefaultCollectOptions carries the account id for multi-box collects.
 func (p *Provider) DefaultCollectOptions() shared.TelemetryCollectOptions {
 	return shared.TelemetryCollectOptions{
 		Paths: map[string]string{
-			"status_file": DefaultStatusFilePath(),
+			"config_dir": "",
 		},
 	}
 }
 
-// Collect reads the latest status-line state. The existing telemetry store
-// deduplicates the stable revision ID, so polling this file is cheap and safe.
+// Collect fetches live quota via the same path as Fetch and emits a stable
+// revision event the telemetry store can dedupe.
 func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path := opts.Path("status_file", DefaultStatusFilePath())
-	if path == "" {
+	acct := core.AccountConfig{
+		ID:            opts.Path("account_id", defaultAccountID),
+		Provider:      providerID,
+		ProviderPaths: map[string]string{},
+		RuntimeHints:  map[string]string{},
+	}
+	if dir := strings.TrimSpace(opts.Path("config_dir", "")); dir != "" {
+		acct.ProviderPaths["config_dir"] = dir
+	}
+	if box := strings.TrimSpace(opts.Path("box_name", "")); box != "" {
+		acct.RuntimeHints["box_name"] = box
+	}
+	if token := strings.TrimSpace(opts.Path("oauth_token_file", "")); token != "" {
+		acct.ProviderPaths["oauth_token_file"] = token
+	}
+	if endpoint := strings.TrimSpace(opts.Path("quota_endpoint", "")); endpoint != "" {
+		acct.RuntimeHints["quota_endpoint"] = endpoint
+	}
+
+	snap, err := p.Fetch(ctx, acct)
+	if err != nil {
+		return nil, err
+	}
+	if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
 		return nil, nil
 	}
-	data, err := os.ReadFile(shared.ExpandHome(path))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("antigravity: read telemetry state: %w", err)
-	}
-	payload, err := parseStatusLinePayload(data)
-	if err != nil {
-		return nil, err
-	}
-	event := statusLineTelemetryEvent(payload, opts.Path("account_id", defaultAccountID), shared.TelemetryChannelHook, path)
-	return []shared.TelemetryEvent{event}, nil
+	return []shared.TelemetryEvent{quotaTelemetryEvent(snap, opts.Path("account_id", defaultAccountID))}, nil
 }
 
-// ParseHookPayload accepts a raw Antigravity status-line document for callers
-// that explicitly route it through `openusage telemetry hook antigravity`.
+// ParseHookPayload is retained for daemon hook routing but no longer accepts
+// Antigravity status-line documents.
 func (p *Provider) ParseHookPayload(raw []byte, opts shared.TelemetryCollectOptions) ([]shared.TelemetryEvent, error) {
-	payload, err := parseStatusLinePayload(raw)
-	if err != nil {
-		return nil, err
-	}
-	return []shared.TelemetryEvent{
-		statusLineTelemetryEvent(payload, opts.Path("account_id", defaultAccountID), shared.TelemetryChannelHook, ""),
-	}, nil
+	return nil, fmt.Errorf("antigravity: status-line hook payloads are no longer supported; quota is polled via API")
 }
 
-func statusLineTelemetryEvent(
-	payload statusLinePayload,
-	accountID string,
-	channel shared.TelemetryChannel,
-	statusPath string,
-) shared.TelemetryEvent {
-	sessionID := strings.TrimSpace(payload.SessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(payload.ConversationID)
+func quotaTelemetryEvent(snap core.UsageSnapshot, accountID string) shared.TelemetryEvent {
+	occurredAt := snap.Timestamp
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
 	}
-	if sessionID == "" && strings.TrimSpace(payload.TranscriptPath) != "" {
-		sessionID = strings.TrimSuffix(filepath.Base(payload.TranscriptPath), filepath.Ext(payload.TranscriptPath))
-	}
+	revision := quotaRevision(snap)
+	sessionID := strings.TrimSpace(accountID)
 	if sessionID == "" {
 		sessionID = defaultAccountID
 	}
-
-	model := strings.TrimSpace(payload.Model.ID)
-	if model == "" {
-		model = strings.TrimSpace(payload.Model.DisplayName)
-	}
-	revision := statusLineRevision(payload)
-	usage := currentTokenUsage(payload.ContextWindow.CurrentUsage)
-	eventType := shared.TelemetryEventTypeRawEnvelope
-	if usage.HasTokenData() {
-		eventType = shared.TelemetryEventTypeMessageUsage
-	}
-	occurredAt := payloadReceivedAt(payload)
-
-	event := shared.TelemetryEvent{
+	return shared.TelemetryEvent{
 		SchemaVersion: telemetrySchemaVersion,
-		Channel:       channel,
+		Channel:       shared.TelemetryChannelAPI,
 		OccurredAt:    occurredAt,
-		AccountID:     strings.TrimSpace(accountID),
-		WorkspaceID:   shared.SanitizeWorkspace(statusWorkspace(payload)),
+		AccountID:     sessionID,
 		SessionID:     sessionID,
-		TurnID:        sessionID + ":status:" + revision,
+		TurnID:        sessionID + ":quota:" + revision,
 		MessageID:     revision,
 		ProviderID:    providerID,
 		AgentName:     providerID,
-		EventType:     eventType,
-		ModelRaw:      model,
-		TokenUsage:    usage,
+		EventType:     shared.TelemetryEventTypeRawEnvelope,
 		Status:        shared.TelemetryStatusOK,
 		Payload: map[string]any{
-			"source":                       "antigravity_statusline",
-			"status_file":                  statusPath,
-			"agent_state":                  payload.AgentState,
-			"product":                      payload.Product,
-			"cumulative_input_tokens":      payload.ContextWindow.TotalInputTokens,
-			"cumulative_output_tokens":     payload.ContextWindow.TotalOutputTokens,
-			"context_window_size":          int64Value(payload.ContextWindow.ContextWindowSize),
-			"context_used_percentage":      float64Value(payload.ContextWindow.UsedPercentage),
-			"context_remaining_percentage": float64Value(payload.ContextWindow.RemainingPercentage),
+			"source":      "antigravity_quota_api",
+			"quota_api":   snap.Raw["quota_api"],
+			"box":         snap.Attributes["box"],
+			"metric_keys": sortedMetricKeys(snap),
 		},
 	}
-	return event
 }
 
-func currentTokenUsage(usage statusLineCurrentUsage) core.TokenUsage {
-	cacheWrite := usage.CacheWriteTokensValue()
-	result := core.TokenUsage{
-		InputTokens:      positiveInt64Ptr(usage.InputTokens),
-		OutputTokens:     positiveInt64Ptr(usage.OutputTokens),
-		CacheReadTokens:  positiveInt64Ptr(usage.CacheReadTokens),
-		CacheWriteTokens: positiveInt64Ptr(cacheWrite),
+func quotaRevision(snap core.UsageSnapshot) string {
+	parts := []string{string(snap.Status)}
+	for _, key := range sortedMetricKeys(snap) {
+		metric := snap.Metrics[key]
+		rem := ""
+		if metric.Remaining != nil {
+			rem = strconv.FormatFloat(*metric.Remaining, 'f', 4, 64)
+		}
+		parts = append(parts, key+"="+rem)
 	}
-	result.SumTotalTokens()
-	if result.HasTokenData() {
-		result.Requests = core.Int64Ptr(1)
-	}
-	return result
-}
-
-func statusLineRevision(payload statusLinePayload) string {
-	material := strings.Join([]string{
-		strings.TrimSpace(payload.SessionID),
-		strings.TrimSpace(payload.ConversationID),
-		strings.TrimSpace(payload.Model.ID),
-		strings.TrimSpace(payload.Model.DisplayName),
-		strconv.FormatInt(payload.ContextWindow.TotalInputTokens, 10),
-		strconv.FormatInt(payload.ContextWindow.TotalOutputTokens, 10),
-		strconv.FormatInt(payload.ContextWindow.CurrentUsage.InputTokens, 10),
-		strconv.FormatInt(payload.ContextWindow.CurrentUsage.OutputTokens, 10),
-		strconv.FormatInt(payload.ContextWindow.CurrentUsage.CacheReadTokens, 10),
-		strconv.FormatInt(payload.ContextWindow.CurrentUsage.CacheWriteTokensValue(), 10),
-		strings.TrimSpace(payload.AgentState),
-	}, "|")
-	digest := sha256.Sum256([]byte(material))
+	digest := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(digest[:8])
 }
 
-func positiveInt64Ptr(value int64) *int64 {
-	if value <= 0 {
-		return nil
-	}
-	return core.Int64Ptr(value)
-}
-
-func int64Value(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
-func float64Value(value *float64) float64 {
-	if value == nil {
-		return 0
-	}
-	return *value
+func sortedMetricKeys(snap core.UsageSnapshot) []string {
+	return core.SortedStringKeys(snap.Metrics)
 }

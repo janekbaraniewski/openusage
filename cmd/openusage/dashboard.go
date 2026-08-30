@@ -16,6 +16,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/dashboardapp"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
+	"github.com/janekbaraniewski/openusage/internal/providers/antigravity"
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 	"github.com/janekbaraniewski/openusage/internal/version"
@@ -58,11 +59,13 @@ func runDashboard(cfg config.Config) {
 
 	var program *tea.Program
 	cursorProv := cursor.New()
+	antigravityProv := antigravity.New()
 	dispatcher := &snapshotDispatcher{
 		enrich: func(snaps map[string]core.UsageSnapshot) {
-			enrichCtx, enrichCancel := context.WithTimeout(ctx, 4*time.Second)
+			enrichCtx, enrichCancel := context.WithTimeout(ctx, 8*time.Second)
 			defer enrichCancel()
 			cursorProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+			antigravityProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
 		},
 	}
 

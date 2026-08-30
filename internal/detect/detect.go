@@ -415,7 +415,6 @@ func detectAntigravity(result *Result) {
 				}
 				boxName := entry.Name()
 				boxConfigDir := filepath.Join(containersDir, boxName, ".gemini", "antigravity-cli")
-				boxStatusFile := filepath.Join(home, ".local", "state", "openusage", fmt.Sprintf("antigravity-%s-status.json", boxName))
 
 				acct := core.AccountConfig{
 					ID:           fmt.Sprintf("antigravity-%s", boxName),
@@ -425,7 +424,7 @@ func detectAntigravity(result *Result) {
 					RuntimeHints: make(map[string]string),
 				}
 				acct.SetHint("config_dir", boxConfigDir)
-				acct.SetHint("status_file", boxStatusFile)
+				acct.SetHint("box_name", boxName)
 				addAccount(result, acct)
 				hasBoxes = true
 			}

@@ -46,9 +46,9 @@ Tracks OAuth status, conversation count, per-model tokens, and quota API data.
 
 ### Antigravity CLI
 
-**Detection:** `agy` binary + `~/.gemini/antigravity-cli` directory
+**Detection:** `agy` binary + `~/.gemini/antigravity-cli` (or `~/.agy-containers/<box>/...`)
 
-Tracks status-line context usage, session tokens, model quotas, workspace, and agent state without reading credentials or estimating spend.
+Tracks live quota buckets via `retrieveUserQuotaSummary` using each box's local OAuth token (`antigravity-oauth-token`). Expired tokens are refreshed when possible; otherwise OpenUsage pings the box (`agy-box <name> -p ping`) to renew credentials.
 
 ### OpenCode
 
