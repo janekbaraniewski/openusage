@@ -24,6 +24,13 @@ func (s *Service) computeReadModel(
 		TodaySince:    core.LocalMidnight(),
 		TimeWindow:    tw,
 	})
+	if err != nil {
+		return result, err
+	}
+	accounts, modelNorm, loadErr := LoadAccountsAndNorm()
+	if loadErr == nil {
+		result = s.enrichReadModelSnapshots(ctx, accounts, modelNorm, result)
+	}
 	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
 		time.Since(start).Milliseconds(), tw, len(req.Accounts), len(result))
 	return result, err

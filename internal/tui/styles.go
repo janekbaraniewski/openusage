@@ -457,8 +457,9 @@ func StatusBadge(s core.Status) string {
 // SnapshotStatusBadge returns a styled status badge that specifies the exact limit window
 // (e.g. WEEKLY LIMIT, MONTHLY LIMIT, 5H LIMIT) when an account is limited.
 func SnapshotStatusBadge(snap core.UsageSnapshot) string {
-	if snap.Status != core.StatusLimited {
-		return StatusBadge(snap.Status)
+	status := core.EffectiveStatus(snap)
+	if status != core.StatusLimited {
+		return StatusBadge(status)
 	}
 
 	limitType := resolveExhaustedLimitType(snap)

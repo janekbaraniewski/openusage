@@ -433,6 +433,9 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 		if enrichErr := enrichEventByDedupKey(ctx, tx, dedupKey, norm); enrichErr != nil {
 			return IngestResult{}, fmt.Errorf("telemetry: enrich dedup event: %w", enrichErr)
 		}
+		if repairErr := repairEmptyLimitSnapshotPayload(ctx, tx, existing.RawEventID, norm.EventType, payloadBytes, payloadHash); repairErr != nil {
+			return IngestResult{}, fmt.Errorf("telemetry: repair empty limit snapshot payload: %w", repairErr)
+		}
 		if commitErr := tx.Commit(); commitErr != nil {
 			return IngestResult{}, fmt.Errorf("telemetry: commit dedup tx: %w", commitErr)
 		}
@@ -511,6 +514,9 @@ func (s *Store) Ingest(ctx context.Context, req IngestRequest) (IngestResult, er
 			}
 			if enrichErr := enrichEventByDedupKey(ctx, tx, dedupKey, norm); enrichErr != nil {
 				return IngestResult{}, fmt.Errorf("telemetry: enrich dedup event: %w", enrichErr)
+			}
+			if repairErr := repairEmptyLimitSnapshotPayload(ctx, tx, existing.RawEventID, norm.EventType, payloadBytes, payloadHash); repairErr != nil {
+				return IngestResult{}, fmt.Errorf("telemetry: repair empty limit snapshot payload: %w", repairErr)
 			}
 			if commitErr := tx.Commit(); commitErr != nil {
 				return IngestResult{}, fmt.Errorf("telemetry: commit dedup tx: %w", commitErr)
@@ -638,6 +644,51 @@ func loadCanonicalEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey stri
 		&row.SourceChannel,
 	)
 	return row, err
+}
+
+// repairEmptyLimitSnapshotPayload replaces an empty/corrupt limit_snapshot raw
+// payload when a later poll reuses the same dedup key (common when the status
+// file's received_at is unchanged). Without this, grey "UNKNOWN" placeholders
+// stay stuck forever even though Fetch returns real quota data.
+func repairEmptyLimitSnapshotPayload(
+	ctx context.Context,
+	tx *sql.Tx,
+	rawEventID string,
+	eventType EventType,
+	payloadBytes []byte,
+	payloadHash [32]byte,
+) error {
+	if eventType != EventTypeLimitSnapshot || strings.TrimSpace(rawEventID) == "" || len(payloadBytes) == 0 {
+		return nil
+	}
+	var currentPayload string
+	err := tx.QueryRowContext(ctx, `
+		SELECT source_payload FROM usage_raw_events WHERE raw_event_id = ? LIMIT 1
+	`, rawEventID).Scan(&currentPayload)
+	if err != nil {
+		return err
+	}
+	if limitSnapshotPayloadUsable(currentPayload) {
+		return nil
+	}
+	if !limitSnapshotPayloadUsable(string(payloadBytes)) {
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE usage_raw_events
+		SET source_payload = ?, source_payload_hash = ?
+		WHERE raw_event_id = ?
+	`, string(payloadBytes), hex.EncodeToString(payloadHash[:]), rawEventID)
+	return err
+}
+
+func limitSnapshotPayloadUsable(payload string) bool {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || payload == "{}" || payload == "null" {
+		return false
+	}
+	snap, ok := decodeStoredLimitSnapshot("probe", "probe", payload, time.Now().UTC().Format(time.RFC3339Nano))
+	return ok && limitSnapshotUsable(snap)
 }
 
 // enrichEventByDedupKey merges duplicate canonical fields with source priority.

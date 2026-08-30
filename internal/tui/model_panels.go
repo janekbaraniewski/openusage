@@ -262,7 +262,7 @@ func (m Model) renderListItem(snap core.UsageSnapshot, selected bool, w int) str
 func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, inActiveGroup bool, pColor lipgloss.Color, w int) string {
 	di := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID), m.resolveHideCosts(snap), m.usageMode)
 
-	iconStr := lipgloss.NewStyle().Foreground(StatusColor(snap.Status)).Render(StatusIcon(snap.Status))
+	iconStr := lipgloss.NewStyle().Foreground(StatusColor(core.EffectiveStatus(snap))).Render(StatusIcon(core.EffectiveStatus(snap)))
 	nameStyle := lipgloss.NewStyle().Foreground(colorText)
 	if selected {
 		nameStyle = nameStyle.Bold(true).Foreground(pColor)

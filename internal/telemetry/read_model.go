@@ -342,7 +342,20 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 	} else {
 		s.Timestamp = time.Now().UTC()
 	}
+
+	// Older poller bugs stored empty "{}" payloads for some accounts. Treat those
+	// as missing so callers can fall back to a live provider Fetch.
+	if !limitSnapshotUsable(s) {
+		return core.UsageSnapshot{}, false
+	}
 	return s, true
+}
+
+func limitSnapshotUsable(s core.UsageSnapshot) bool {
+	if s.Status != "" && s.Status != core.StatusUnknown {
+		return true
+	}
+	return len(s.Metrics) > 0 || len(s.Resets) > 0
 }
 
 func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) core.UsageSnapshot {
@@ -365,6 +378,9 @@ func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) co
 	merged.Diagnostics = maps.Clone(root.Diagnostics)
 	if merged.Raw == nil {
 		merged.Raw = map[string]string{}
+	}
+	if status := core.EffectiveStatus(merged); status != "" && status != core.StatusUnknown {
+		merged.Status = status
 	}
 	return merged
 }
