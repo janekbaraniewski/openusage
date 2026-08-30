@@ -28,8 +28,8 @@ func TestComputeDisplayInfo_CursorListUsesSimpleRemainingSummary(t *testing.T) {
 	}
 
 	info := computeDisplayInfo(snap, core.DashboardWidget{}, false, config.UsageModeRemaining)
-	if info.summary != "93.00% remaining" {
-		t.Fatalf("list summary = %q, want 93.00%% remaining", info.summary)
+	if info.summary != "93.00%" {
+		t.Fatalf("list summary = %q, want 93.00%%", info.summary)
 	}
 	if info.gaugePercent != 93 {
 		t.Fatalf("gaugePercent = %v, want 93", info.gaugePercent)
@@ -57,8 +57,11 @@ func TestRenderListItem_CursorCompactSummary(t *testing.T) {
 	}
 
 	item := m.renderListItem(snap, true, 50)
-	if !strings.Contains(item, "85.00% remaining") {
+	if !strings.Contains(item, "85.00%") {
 		t.Fatalf("expected simple remaining summary, got:\n%s", item)
+	}
+	if strings.Contains(item, "85.00% remaining") {
+		t.Fatalf("list item should omit 'remaining' suffix, got:\n%s", item)
 	}
 	if strings.Contains(item, "Included 15") || strings.Contains(item, "Auto 12") {
 		t.Fatalf("list item must not show bucket overlay, got:\n%s", item)

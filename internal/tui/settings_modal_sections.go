@@ -313,7 +313,7 @@ func (m Model) renderSettingsWidgetPreviewPanel(contentW, contentH int) string {
 	bodyH := max(4, contentH-1)
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Widget Preview"),
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", innerW)),
+		lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", innerW)),
 		m.renderSettingsWidgetSectionsPreview(innerW, bodyH),
 	}
 	return lipgloss.NewStyle().
@@ -330,7 +330,7 @@ func (m Model) renderSettingsDetailPreviewPanel(contentW, contentH int) string {
 	bodyH := max(4, contentH-1)
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(colorRosewater).Render("Detail Preview"),
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", innerW)),
+		lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", innerW)),
 		m.renderSettingsDetailSectionsPreview(innerW, bodyH),
 	}
 	return lipgloss.NewStyle().

@@ -156,7 +156,7 @@ func renderDetailCard(sb *strings.Builder, sec detailSection, w int) {
 	if sec.hasOwnHeader {
 		// Composition sections already have their own styled heading.
 		// Wrap in a subtle bordered card without a title in the border.
-		topBorder := "  " + lipgloss.NewStyle().Foreground(colorSurface1).Render("╭"+strings.Repeat("─", cardW-2)+"╮")
+		topBorder := "  " + lipgloss.NewStyle().Foreground(colorLine).Render("╭"+strings.Repeat("─", cardW-2)+"╮")
 		sb.WriteString(topBorder + "\n")
 
 		for _, line := range sec.lines {
@@ -166,10 +166,10 @@ func renderDetailCard(sb *strings.Builder, sec detailSection, w int) {
 			if pad < 0 {
 				pad = 0
 			}
-			sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render("│") + " " + line + strings.Repeat(" ", pad) + " " + lipgloss.NewStyle().Foreground(colorSurface1).Render("│") + "\n")
+			sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorLine).Render("│") + " " + line + strings.Repeat(" ", pad) + " " + lipgloss.NewStyle().Foreground(colorLine).Render("│") + "\n")
 		}
 
-		botBorder := "  " + lipgloss.NewStyle().Foreground(colorSurface1).Render("╰"+strings.Repeat("─", cardW-2)+"╯")
+		botBorder := "  " + lipgloss.NewStyle().Foreground(colorLine).Render("╰"+strings.Repeat("─", cardW-2)+"╯")
 		sb.WriteString(botBorder + "\n")
 		return
 	}

@@ -56,7 +56,7 @@ func renderScrollBarLine(width, offset, visible, total int, axis string) string 
 		thumbPos = int(math.Round((float64(offset) / float64(maxOffset)) * float64(trackW-thumbW)))
 	}
 
-	railStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	railStyle := lipgloss.NewStyle().Foreground(colorLine)
 	thumbStyle := lipgloss.NewStyle().Foreground(colorAccent)
 	arrowStyle := lipgloss.NewStyle().Foreground(colorDim)
 

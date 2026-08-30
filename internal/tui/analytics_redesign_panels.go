@@ -322,9 +322,9 @@ func renderAnalyticsPanel(title string, accent lipgloss.Color, width int, body s
 	)
 	sb.WriteString("\n")
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render("│ "))
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorLine).Render("│ "))
 		sb.WriteString(analyticsPadLine(line, innerW))
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorSurface1).Render(" │"))
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorLine).Render(" │"))
 		sb.WriteString("\n")
 	}
 	sb.WriteString(lipgloss.NewStyle().Foreground(accent).Render("╰" + strings.Repeat("─", width-2) + "╯"))

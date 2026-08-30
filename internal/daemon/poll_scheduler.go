@@ -11,7 +11,7 @@ import (
 
 // PollScheduler manages per-provider adaptive backoff to reduce CPU usage when data
 // sources are idle. Each account gets its own backoff state: when consecutive polls
-// detect no changes, the effective interval increases in tiers up to a configurable cap.
+// detect no changes, the effective interval increases until a provider-specific cap.
 type PollScheduler struct {
 	mu           sync.Mutex
 	states       map[string]*pollBackoffState
@@ -32,15 +32,17 @@ var backoffTiers = []struct {
 }{
 	{0, 1},   // 0-2:  1x (normal)
 	{3, 2},   // 3-5:  2x
-	{6, 4},   // 6-10: 4x
+	{6, 6},   // 6-10: 6x
 	{11, 8},  // 11-20: 8x
 	{21, 16}, // 21+:  16x
 }
 
 const (
-	// HTTP-only providers cap at 4x (they can't do cheap local change detection).
-	maxMultiplierHTTP = 4
-	// Local providers (with ChangeDetector) can back off further since stat() is cheap.
+	// HTTP polls never run faster than this, even when refresh_interval_seconds is lower.
+	minIntervalHTTP = 30 * time.Second
+	// HTTP providers double their interval on each unchanged poll until this cap.
+	maxIntervalHTTP = 8 * time.Minute
+	// Local providers (with ChangeDetector) use tiered backoff up to 16x base.
 	maxMultiplierLocal = 16
 )
 
@@ -113,22 +115,40 @@ func (ps *PollScheduler) SnapshotChanged(accountID string, snap core.UsageSnapsh
 }
 
 func (ps *PollScheduler) effectiveIntervalLocked(state *pollBackoffState) time.Duration {
+	if !state.hasLocalDetector {
+		return httpPollInterval(ps.baseInterval, state.consecutiveNoChange)
+	}
+
 	multiplier := 1
 	for _, tier := range backoffTiers {
 		if state.consecutiveNoChange >= tier.minNoChange {
 			multiplier = tier.multiplier
 		}
 	}
-
-	maxMult := maxMultiplierHTTP
-	if state.hasLocalDetector {
-		maxMult = maxMultiplierLocal
+	if multiplier > maxMultiplierLocal {
+		multiplier = maxMultiplierLocal
 	}
-	if multiplier > maxMult {
-		multiplier = maxMult
-	}
-
 	return ps.baseInterval * time.Duration(multiplier)
+}
+
+// httpPollInterval doubles the base interval for each consecutive unchanged poll,
+// floored at minIntervalHTTP and capped at maxIntervalHTTP.
+func httpPollInterval(base time.Duration, consecutiveNoChange int) time.Duration {
+	if base < minIntervalHTTP {
+		base = minIntervalHTTP
+	}
+	interval := base
+	for i := 0; i < consecutiveNoChange; i++ {
+		if interval >= maxIntervalHTTP {
+			return maxIntervalHTTP
+		}
+		next := interval * 2
+		if next > maxIntervalHTTP {
+			return maxIntervalHTTP
+		}
+		interval = next
+	}
+	return interval
 }
 
 func hashSnapshotMetrics(snap core.UsageSnapshot) string {

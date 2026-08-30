@@ -27,7 +27,7 @@ func TestPollScheduler_ShouldPoll_RespectsBaseInterval(t *testing.T) {
 	}
 }
 
-func TestPollScheduler_BackoffTiers(t *testing.T) {
+func TestPollScheduler_HTTPExponentialBackoff(t *testing.T) {
 	ps := newPollScheduler(30 * time.Second)
 
 	ps.ShouldPoll("acct1", false) // init
@@ -37,12 +37,11 @@ func TestPollScheduler_BackoffTiers(t *testing.T) {
 		wantInterval  time.Duration
 	}{
 		{0, 30 * time.Second},
-		{2, 30 * time.Second},
-		{3, 60 * time.Second},
-		{5, 60 * time.Second},
-		{6, 120 * time.Second}, // but capped at 4x for HTTP
-		{11, 120 * time.Second},
-		{21, 120 * time.Second},
+		{1, 60 * time.Second},
+		{2, 2 * time.Minute},
+		{3, 4 * time.Minute},
+		{4, 8 * time.Minute},
+		{10, 8 * time.Minute},
 	}
 
 	for _, tt := range tests {
@@ -67,7 +66,7 @@ func TestPollScheduler_BackoffTiers_LocalProvider(t *testing.T) {
 	}{
 		{0, 30 * time.Second},
 		{3, 60 * time.Second},
-		{6, 120 * time.Second},
+		{6, 180 * time.Second},
 		{11, 240 * time.Second},
 		{21, 480 * time.Second}, // 16x cap for local providers
 	}
@@ -140,6 +139,19 @@ func TestPollScheduler_SnapshotChanged(t *testing.T) {
 	}
 	if !ps.SnapshotChanged("acct1", snap2) {
 		t.Error("different snapshot should be reported as changed")
+	}
+}
+
+func TestPollScheduler_HTTPMinimumInterval(t *testing.T) {
+	ps := newPollScheduler(10 * time.Second)
+	ps.ShouldPoll("acct1", false)
+
+	ps.mu.Lock()
+	ps.states["acct1"].consecutiveNoChange = 0
+	got := ps.effectiveIntervalLocked(ps.states["acct1"])
+	ps.mu.Unlock()
+	if got != 30*time.Second {
+		t.Errorf("HTTP provider at 1x with 10s base: got %s, want 30s floor", got)
 	}
 }
 

@@ -48,9 +48,9 @@ func (m Model) renderSettingsModalOverlay() string {
 	lines := []string{
 		title,
 		tabs,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
+		lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", panelInnerW)),
 		body,
-		lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", panelInnerW)),
+		lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", panelInnerW)),
 		hint,
 	}
 	if status != "" {

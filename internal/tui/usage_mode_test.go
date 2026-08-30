@@ -100,8 +100,8 @@ func TestUsageModeToggle_KeybindingAndPersistence(t *testing.T) {
 	if !strings.Contains(m.View(), "Weekly Limit Remaining") {
 		t.Errorf("expected 'Weekly Limit Remaining' in remaining mode")
 	}
-	if !strings.Contains(m.View(), "80.00% remaining") {
-		t.Errorf("expected '80.00%% remaining' in remaining mode")
+	if !strings.Contains(m.View(), "80.00%") {
+		t.Errorf("expected '80.00%%' in remaining mode")
 	}
 
 	// Press 'u' to toggle to Used mode

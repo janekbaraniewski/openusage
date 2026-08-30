@@ -58,7 +58,7 @@ func RenderBudgetGauge(label string, used, limit float64, barW, labelW int, colo
 	}
 
 	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled))
-	track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", empty))
+	track := lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("░", empty))
 
 	detail := fmt.Sprintf("%s / %s  %.0f%%", formatUSD(used), formatUSD(limit), pct)
 	detailRendered := lipgloss.NewStyle().Foreground(color).Bold(true).Render(detail)

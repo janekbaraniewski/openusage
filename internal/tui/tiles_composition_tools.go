@@ -283,7 +283,7 @@ func buildProviderCodeStatsLines(snap core.UsageSnapshot, widget core.DashboardW
 	if aiPct > 0 {
 		lines = append(lines, "  "+renderNTStackedBar([]ntBarSegment{
 			{Value: aiPct, Color: colorBlue},
-			{Value: max(0, 100-aiPct), Color: colorSurface1},
+			{Value: max(0, 100-aiPct), Color: colorLine},
 		}, 100, barW))
 	}
 	if prompts > 0 {

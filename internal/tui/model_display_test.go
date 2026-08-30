@@ -444,8 +444,11 @@ func TestComputeDisplayInfo_UsageFiveHourBranch(t *testing.T) {
 	if got.gaugePercent != 43.0 {
 		t.Fatalf("gaugePercent = %v, want 43.0", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "43.00% remaining") {
-		t.Fatalf("summary = %q, want '43.00%% remaining'", got.summary)
+	if !strings.Contains(got.summary, "43.00%") {
+		t.Fatalf("summary = %q, want '43.00%%'", got.summary)
+	}
+	if strings.Contains(got.summary, "remaining") {
+		t.Fatalf("summary should omit 'remaining' suffix, got %q", got.summary)
 	}
 	if got.reason != "usage_five_hour" {
 		t.Fatalf("reason = %q, want usage_five_hour", got.reason)
@@ -484,8 +487,8 @@ func TestComputeDisplayInfo_RollingUsageBranchClassifiesAsUsageNotCredits(t *tes
 	if got.gaugePercent != 85.0 {
 		t.Fatalf("gaugePercent = %v, want 85.0 (100 - rolling 15%%)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "85.00% remaining") {
-		t.Fatalf("summary = %q, want 85.00%% remaining", got.summary)
+	if !strings.Contains(got.summary, "85.00%") {
+		t.Fatalf("summary = %q, want 85.00%%", got.summary)
 	}
 	if got.reason != "rolling_usage" {
 		t.Fatalf("reason = %q, want rolling_usage", got.reason)
@@ -511,8 +514,8 @@ func TestComputeDisplayInfo_OpenCodeGoExhaustedWeeklyMonthly(t *testing.T) {
 	if got.gaugePercent != 0.0 {
 		t.Fatalf("gaugePercent = %v, want 0.0 (monthly 100%% exhausted)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "0.00% remaining") {
-		t.Fatalf("summary = %q, want '0.00%% remaining'", got.summary)
+	if !strings.Contains(got.summary, "0.00%") {
+		t.Fatalf("summary = %q, want '0.00%%'", got.summary)
 	}
 }
 

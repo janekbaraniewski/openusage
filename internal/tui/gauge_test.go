@@ -284,6 +284,30 @@ func TestRenderMiniUsageGauge(t *testing.T) {
 	}
 }
 
+func TestRenderGauge_NoConsumedTrack(t *testing.T) {
+	out := RenderGauge(25, 20, 0.30, 0.15)
+	if !strings.Contains(out, "25.00%") {
+		t.Fatalf("expected 25.00%% label, got %q", out)
+	}
+	if strings.ContainsAny(out, "░·") {
+		t.Fatalf("remaining-mode gauge should not render a consumed track, got %q", out)
+	}
+	hasFill := strings.ContainsAny(out, "█▏▎▍▌▋▊▉")
+	if !hasFill {
+		t.Fatalf("expected visible fill at 25%% remaining, got %q", out)
+	}
+}
+
+func TestRenderGauge_HighRemainingOmitsTrack(t *testing.T) {
+	out := RenderGauge(75, 20, 0.30, 0.15)
+	if !strings.Contains(out, "75.00%") {
+		t.Fatalf("expected 75.00%% label, got %q", out)
+	}
+	if strings.ContainsAny(out, "░·") {
+		t.Fatalf("remaining-mode gauge should not render a consumed track, got %q", out)
+	}
+}
+
 func TestUsageGaugeTrackColor(t *testing.T) {
 	cases := []struct {
 		used float64
@@ -291,13 +315,13 @@ func TestUsageGaugeTrackColor(t *testing.T) {
 	}{
 		{0, colorTeal},
 		{-1, colorTeal},
-		{1, colorSurface1},
-		{25, colorSurface1},
-		{49.9, colorSurface1},
-		{50, colorSurface2},
-		{74.9, colorSurface2},
-		{75, colorSurface1},
-		{100, colorSurface1},
+		{1, colorLine},
+		{25, colorLine},
+		{49.9, colorLine},
+		{50, colorLine},
+		{74.9, colorLine},
+		{75, colorLine},
+		{100, colorLine},
 	}
 	for _, tc := range cases {
 		got := usageGaugeTrackColor(tc.used)

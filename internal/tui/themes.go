@@ -99,7 +99,7 @@ func defaultTheme() Theme {
 		Name: "Deep Space", Icon: "✦",
 		Base: "#0C0E16", Mantle: "#080A11",
 		Surface0: "#161928", Surface1: "#1E2235", Surface2: "#2A2F47", Overlay: "#1E2235",
-		Text: "#E4E6F0", Subtext: "#B0B4C8", Dim: "#5C6180",
+		Text: "#E4E6F0", Subtext: "#B0B4C8", Dim: "#727899",
 		Accent: "#7EB8F7", Blue: "#5DA4E8", Sapphire: "#4EC5C1",
 		Green: "#59D4A0", Yellow: "#F0C75E", Red: "#F06A7A",
 		Peach: "#F09860", Teal: "#4EC5C1", Flamingo: "#E878B0",

@@ -54,11 +54,11 @@ func usageGaugeColor(usedPercent, warnThresh, critThresh float64) lipgloss.Color
 	}
 }
 
-// renderGaugeBar draws a sub-cell-accurate gauge bar and returns the bar string.
-// percent must be in [0, 100]. width is the bar width in terminal columns.
-func renderGaugeBar(percent float64, width int, color lipgloss.Color) string {
-	filledStyle := lipgloss.NewStyle().Foreground(color)
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+// renderRemainingGaugeBar draws a remaining-mode gauge: only the remaining capacity
+// is rendered as colored fill; the consumed portion is left blank so the bar length
+// itself communicates what's left.
+func renderRemainingGaugeBar(percent float64, width int, fillColor lipgloss.Color) string {
+	filledStyle := lipgloss.NewStyle().Foreground(fillColor)
 
 	totalUnits := width * 8
 	fillUnits := int(percent / 100 * float64(totalUnits))
@@ -79,8 +79,16 @@ func renderGaugeBar(percent float64, width int, color lipgloss.Color) string {
 	if hasPartial {
 		b.WriteString(filledStyle.Render(blockChars[remainder]))
 	}
-	b.WriteString(trackStyle.Render(strings.Repeat("░", emptyCells)))
+	if emptyCells > 0 {
+		b.WriteString(strings.Repeat(" ", emptyCells))
+	}
 	return b.String()
+}
+
+// renderGaugeBar draws a sub-cell-accurate gauge bar and returns the bar string.
+// percent must be in [0, 100]. width is the bar width in terminal columns.
+func renderGaugeBar(percent float64, width int, color lipgloss.Color) string {
+	return renderRemainingGaugeBar(percent, width, color)
 }
 
 // usageGaugeTrackColor picks the unfilled-track color for used-mode gauges.
@@ -91,12 +99,8 @@ func usageGaugeTrackColor(usedPercent float64) lipgloss.Color {
 	switch {
 	case usedPercent <= 0:
 		return colorTeal
-	case usedPercent >= 75:
-		return colorSurface1
-	case usedPercent >= 50:
-		return colorSurface2
 	default:
-		return colorSurface1
+		return colorLine
 	}
 }
 
@@ -134,8 +138,7 @@ func renderGaugeWithLabel(percent float64, width int, color lipgloss.Color) stri
 		width = 5
 	}
 	if percent < 0 {
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
-		return track + dimStyle.Render(" N/A")
+		return strings.Repeat(" ", width) + dimStyle.Render(" N/A")
 	}
 	if percent > 100 {
 		percent = 100
@@ -150,7 +153,7 @@ func renderUsageGaugeWithLabel(usedPercent float64, width int, fillColor lipglos
 		width = 5
 	}
 	if usedPercent < 0 {
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		track := lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("░", width))
 		return track + dimStyle.Render(" N/A")
 	}
 	if usedPercent > 100 {
@@ -306,7 +309,7 @@ func RenderMiniGauge(remainingPercent float64, width int) string {
 		width = 3
 	}
 	if remainingPercent < 0 {
-		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		return strings.Repeat(" ", width)
 	}
 	if remainingPercent > 100 {
 		remainingPercent = 100
@@ -331,7 +334,7 @@ func RenderMiniUsageGauge(usedPercent float64, width int) string {
 		width = 3
 	}
 	if usedPercent < 0 {
-		return lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		return lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("░", width))
 	}
 	if usedPercent > 100 {
 		usedPercent = 100
@@ -366,7 +369,7 @@ func RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, widt
 	}
 
 	if totalPercent < 0 {
-		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		track := lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("░", width))
 		return track + dimStyle.Render(" N/A")
 	}
 	if totalPercent > 100 {
@@ -444,7 +447,7 @@ func RenderShimmerGauge(width, frame int) string {
 		width = 5
 	}
 
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	trackStyle := lipgloss.NewStyle().Foreground(colorLine)
 	shimmerStyle := lipgloss.NewStyle().Foreground(colorSurface2)
 
 	// The shimmer is a 3-char bright spot that scrolls across the track.

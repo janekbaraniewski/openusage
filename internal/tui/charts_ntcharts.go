@@ -418,7 +418,7 @@ func renderNTHeatmap(spec HeatmapSpec, w int) string {
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
 	sb.WriteString("  " + sectionStyle.Render(spec.Title) + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", w-4)) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", w-4)) + "\n")
 
 	// Render each row.
 	for r := 0; r < numRows; r++ {
@@ -520,7 +520,7 @@ func renderNTChartBlock(title, body string, bodyW int, footer string) string {
 	var sb strings.Builder
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
 	sb.WriteString("  " + sectionStyle.Render(title) + "\n")
-	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("─", max(1, bodyW))) + "\n")
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(colorLine).Render(strings.Repeat("─", max(1, bodyW))) + "\n")
 	for _, line := range strings.Split(body, "\n") {
 		sb.WriteString("  " + line + "\n")
 	}

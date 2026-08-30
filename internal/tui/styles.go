@@ -62,6 +62,7 @@ var (
 	colorSurface0 lipgloss.Color
 	colorSurface1 lipgloss.Color
 	colorSurface2 lipgloss.Color
+	colorLine     lipgloss.Color
 	colorText     lipgloss.Color
 	colorSubtext  lipgloss.Color
 	colorDim      lipgloss.Color
@@ -189,6 +190,10 @@ func applyTheme(t Theme) {
 	colorText = t.Text
 	colorSubtext = t.Subtext
 	colorDim = t.Dim
+	colorLine = t.Dim
+	if strings.TrimSpace(string(colorLine)) == "" {
+		colorLine = t.Subtext
+	}
 	colorAccent = t.Accent
 	colorBlue = t.Blue
 	colorSapphire = t.Sapphire
@@ -247,7 +252,7 @@ func applyTheme(t Theme) {
 
 	detailHeaderCardStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
+		BorderForeground(colorLine).
 		Padding(0, 1)
 
 	statusPillOKStyle = lipgloss.NewStyle().Foreground(colorMantle).Background(colorGreen).Bold(true).Padding(0, 1)
@@ -266,7 +271,7 @@ func applyTheme(t Theme) {
 	tabActiveStyle = lipgloss.NewStyle().Bold(true).Foreground(colorLavender).Background(colorSurface0).Padding(0, 1)
 	tabInactiveStyle = lipgloss.NewStyle().Foreground(colorDim).Padding(0, 1)
 	tabUnderlineStyle = lipgloss.NewStyle().Foreground(colorLavender)
-	sectionSepStyle = lipgloss.NewStyle().Foreground(colorSurface1)
+	sectionSepStyle = lipgloss.NewStyle().Foreground(colorLine)
 
 	screenTabActiveStyle = lipgloss.NewStyle().Bold(true).Foreground(colorMantle).Background(colorAccent).Padding(0, 1)
 	screenTabInactiveStyle = lipgloss.NewStyle().Foreground(colorDim).Padding(0, 1)
@@ -285,7 +290,7 @@ func applyTheme(t Theme) {
 
 	tileBorderStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
+		BorderForeground(colorLine).
 		Padding(0, tilePadH)
 
 	tileSelectedBorderStyle = lipgloss.NewStyle().
@@ -298,7 +303,7 @@ func applyTheme(t Theme) {
 	tileSummaryStyle = lipgloss.NewStyle().Foreground(colorSubtext)
 	tileTimestampStyle = lipgloss.NewStyle().Foreground(colorDim)
 	tileHeroStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	tileDotLeaderStyle = lipgloss.NewStyle().Foreground(colorSurface2)
+	tileDotLeaderStyle = lipgloss.NewStyle().Foreground(colorSubtext)
 
 	accentBoldStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	subtextBoldStyle = lipgloss.NewStyle().Foreground(colorSubtext).Bold(true)
@@ -308,7 +313,7 @@ func applyTheme(t Theme) {
 	greenStyle = lipgloss.NewStyle().Foreground(colorGreen)
 	yellowStyle = lipgloss.NewStyle().Foreground(colorYellow)
 	textBoldStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	surface1Style = lipgloss.NewStyle().Foreground(colorSurface1)
+	surface1Style = lipgloss.NewStyle().Foreground(colorLine)
 	tealBoldStyle = lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
 }
 
@@ -630,6 +635,6 @@ func StatusBorderColor(s core.Status) lipgloss.Color {
 	case core.StatusAuth:
 		return colorPeach
 	default:
-		return colorSurface1
+		return colorLine
 	}
 }

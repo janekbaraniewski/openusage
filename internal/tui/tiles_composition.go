@@ -501,7 +501,7 @@ func renderClientMixBar(top []clientMixEntry, total float64, barW int, colors ma
 		segs = append(segs, ntBarSegment{Value: value, Color: colorForClient(colors, client.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorLine})
 	}
 	return renderNTStackedBar(segs, total, barW)
 }
@@ -522,7 +522,7 @@ func renderModelMixBar(models []modelMixEntry, total float64, barW int, mode str
 		segs = append(segs, ntBarSegment{Value: value, Color: colorForModel(colors, model.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorLine})
 	}
 	return renderNTStackedBar(segs, total, barW)
 }
@@ -542,7 +542,7 @@ func renderToolMixBar(top []toolMixEntry, total float64, barW int, colors map[st
 		segs = append(segs, ntBarSegment{Value: tool.count, Color: colorForTool(colors, tool.name)})
 	}
 	if sumTop < total {
-		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorSurface1})
+		segs = append(segs, ntBarSegment{Value: total - sumTop, Color: colorLine})
 	}
 	return renderNTStackedBar(segs, total, barW)
 }
