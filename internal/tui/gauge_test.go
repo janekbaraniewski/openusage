@@ -284,6 +284,59 @@ func TestRenderMiniUsageGauge(t *testing.T) {
 	}
 }
 
+func TestUsageGaugeTrackColor(t *testing.T) {
+	cases := []struct {
+		used float64
+		want lipgloss.Color
+	}{
+		{0, colorTeal},
+		{-1, colorTeal},
+		{1, colorSurface1},
+		{25, colorSurface1},
+		{49.9, colorSurface1},
+		{50, colorSurface2},
+		{74.9, colorSurface2},
+		{75, colorSurface1},
+		{100, colorSurface1},
+	}
+	for _, tc := range cases {
+		got := usageGaugeTrackColor(tc.used)
+		if got != tc.want {
+			t.Errorf("usageGaugeTrackColor(%v) = %v, want %v", tc.used, got, tc.want)
+		}
+	}
+}
+
+func TestRenderUsageGauge_LowUsedShowsSmallFill(t *testing.T) {
+	out := RenderUsageGauge(1, 20, 0.30, 0.15)
+	if !strings.Contains(out, "1.00%") {
+		t.Fatalf("expected 1.00%% label, got %q", out)
+	}
+	if !strings.Contains(out, "░") {
+		t.Fatalf("expected neutral track characters, got %q", out)
+	}
+	// Partial or full block char indicates visible fill separate from track.
+	hasFill := strings.ContainsAny(out, "█▏▎▍▌▋▊▉")
+	if !hasFill {
+		t.Fatalf("expected visible fill at 1%% used, got %q", out)
+	}
+}
+
+func TestRenderUsageGauge_ZeroUsedShowsHealthyTrack(t *testing.T) {
+	remainingGauge := RenderGauge(100, 20, 0.30, 0.15)
+	usedGauge := RenderUsageGauge(0, 20, 0.30, 0.15)
+
+	if !strings.Contains(usedGauge, "0.00%") {
+		t.Fatalf("expected 0.00%% label, got %q", usedGauge)
+	}
+	if usedGauge == remainingGauge {
+		t.Fatal("expected used-mode 0%% gauge to differ from remaining-mode 100%% gauge")
+	}
+	if !strings.Contains(usedGauge, "░") {
+		t.Fatalf("expected track characters in zero-used gauge, got %q", usedGauge)
+	}
+}
+
 func TestRenderQuotaStatusAndTimerLineWithMode(t *testing.T) {
 	now := time.Now()
 	resetAt := now.Add(2 * time.Hour)

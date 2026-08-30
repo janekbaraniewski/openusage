@@ -83,6 +83,52 @@ func renderGaugeBar(percent float64, width int, color lipgloss.Color) string {
 	return b.String()
 }
 
+// usageGaugeTrackColor picks the unfilled-track color for used-mode gauges.
+// At exactly 0% used the whole bar is a soft teal track (healthy empty capacity).
+// Once any usage is recorded, the track switches to neutral dark so the colored
+// fill reads as a small depletion bar instead of green-on-green.
+func usageGaugeTrackColor(usedPercent float64) lipgloss.Color {
+	switch {
+	case usedPercent <= 0:
+		return colorTeal
+	case usedPercent >= 75:
+		return colorSurface1
+	case usedPercent >= 50:
+		return colorSurface2
+	default:
+		return colorSurface1
+	}
+}
+
+// renderUsageGaugeBar draws a used-mode gauge: fill grows with consumption and
+// the unfilled track uses usageGaugeTrackColor so low usage looks open/healthy.
+func renderUsageGaugeBar(percent float64, width int, fillColor lipgloss.Color) string {
+	filledStyle := lipgloss.NewStyle().Foreground(fillColor)
+	trackStyle := lipgloss.NewStyle().Foreground(usageGaugeTrackColor(percent))
+
+	totalUnits := width * 8
+	fillUnits := int(percent / 100 * float64(totalUnits))
+
+	fullCells := fillUnits / 8
+	remainder := fillUnits % 8
+	hasPartial := remainder > 0
+	emptyCells := width - fullCells
+	if hasPartial {
+		emptyCells--
+	}
+	if emptyCells < 0 {
+		emptyCells = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(filledStyle.Render(strings.Repeat("█", fullCells)))
+	if hasPartial {
+		b.WriteString(filledStyle.Render(blockChars[remainder]))
+	}
+	b.WriteString(trackStyle.Render(strings.Repeat("░", emptyCells)))
+	return b.String()
+}
+
 func renderGaugeWithLabel(percent float64, width int, color lipgloss.Color) string {
 	if width < 5 {
 		width = 5
@@ -99,6 +145,22 @@ func renderGaugeWithLabel(percent float64, width int, color lipgloss.Color) stri
 	return fmt.Sprintf("%s %s", bar, pctStyle.Render(fmt.Sprintf("%6.2f%%", percent)))
 }
 
+func renderUsageGaugeWithLabel(usedPercent float64, width int, fillColor lipgloss.Color) string {
+	if width < 5 {
+		width = 5
+	}
+	if usedPercent < 0 {
+		track := lipgloss.NewStyle().Foreground(colorSurface1).Render(strings.Repeat("░", width))
+		return track + dimStyle.Render(" N/A")
+	}
+	if usedPercent > 100 {
+		usedPercent = 100
+	}
+	bar := renderUsageGaugeBar(usedPercent, width, fillColor)
+	pctStyle := lipgloss.NewStyle().Foreground(fillColor).Bold(true)
+	return fmt.Sprintf("%s %s", bar, pctStyle.Render(fmt.Sprintf("%6.2f%%", usedPercent)))
+}
+
 func RenderGauge(percent float64, width int, warnThresh, critThresh float64) string {
 	color := gaugeColor(percent, warnThresh, critThresh)
 	return renderGaugeWithLabel(percent, width, color)
@@ -106,7 +168,7 @@ func RenderGauge(percent float64, width int, warnThresh, critThresh float64) str
 
 func RenderUsageGauge(usedPercent float64, width int, warnThresh, critThresh float64) string {
 	color := usageGaugeColor(usedPercent, warnThresh, critThresh)
-	return renderGaugeWithLabel(usedPercent, width, color)
+	return renderUsageGaugeWithLabel(usedPercent, width, color)
 }
 
 // RenderUsageGaugeWithProjection renders a usage gauge with an optional dim
@@ -286,7 +348,7 @@ func RenderMiniUsageGauge(usedPercent float64, width int) string {
 	default:
 		color = colorOK // low used -> green
 	}
-	return renderGaugeBar(usedPercent, width, color)
+	return renderUsageGaugeBar(usedPercent, width, color)
 }
 
 // GaugeSegment represents one colored segment of a stacked gauge bar.
@@ -328,7 +390,7 @@ func RenderStackedUsageGauge(segments []GaugeSegment, totalPercent float64, widt
 		}
 	}
 
-	trackStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	trackStyle := lipgloss.NewStyle().Foreground(usageGaugeTrackColor(totalPercent))
 
 	// Find the last non-empty segment index so we can avoid partial block
 	// characters between segments (they leave visible gaps because the
