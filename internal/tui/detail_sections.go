@@ -235,6 +235,13 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 		barW = 20
 	}
 
+	if planTitle := antigravityPlanTitle(snap); planTitle != "" {
+		bullet := lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Render("◈ ")
+		title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(planTitle)
+		lines = append(lines, bullet+title)
+		lines = append(lines, "")
+	}
+
 	renderQuotaBlock := func(groupTitle string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
 		if len(lines) > 0 {
 			lines = append(lines, "")
@@ -349,8 +356,15 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 	return lines
 }
 
+func antigravityPlanTitle(snap core.UsageSnapshot) string {
+	if tier := strings.TrimSpace(snap.Attributes["plan_tier"]); tier != "" {
+		return strings.ToUpper(tier)
+	}
+	return "ANTIGRAVITY SUBSCRIPTION"
+}
+
 func buildCursorDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
-	lines := buildCursorPlanUsageLines(snap, innerW, isUsedMode)
+	lines := buildCursorPlanUsageLines(snap, innerW, isUsedMode, now, warnThresh, critThresh)
 	if len(lines) == 0 {
 		return nil
 	}

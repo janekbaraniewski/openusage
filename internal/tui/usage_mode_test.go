@@ -181,8 +181,8 @@ func TestUsageMode_DetailAndGenericProviderGauges(t *testing.T) {
 
 	// Detail in remaining mode
 	detailRemaining := RenderDetailContent(snap, now, 80, 0.2, 0.05, 0, core.TimeWindow30d, false, config.UsageModeRemaining)
-	if !strings.Contains(detailRemaining, "65% remaining") {
-		t.Errorf("expected detail remaining to contain '65%% remaining', got:\n%s", detailRemaining)
+	if !strings.Contains(detailRemaining, "65.00% remaining") {
+		t.Errorf("expected detail remaining to contain '65.00%% remaining', got:\n%s", detailRemaining)
 	}
 	if !strings.Contains(detailRemaining, "Included") {
 		t.Errorf("expected detail remaining to contain 'Included', got:\n%s", detailRemaining)
@@ -190,8 +190,8 @@ func TestUsageMode_DetailAndGenericProviderGauges(t *testing.T) {
 
 	// Detail in used mode
 	detailUsed := RenderDetailContent(snap, now, 80, 0.2, 0.05, 0, core.TimeWindow30d, false, config.UsageModeUsed)
-	if !strings.Contains(detailUsed, "35% used") {
-		t.Errorf("expected detail used to contain '35%% used', got:\n%s", detailUsed)
+	if !strings.Contains(detailUsed, "35.00% used") {
+		t.Errorf("expected detail used to contain '35.00%% used', got:\n%s", detailUsed)
 	}
 	if !strings.Contains(detailUsed, "Included") {
 		t.Errorf("expected detail used to contain 'Included', got:\n%s", detailUsed)

@@ -39,8 +39,13 @@ func dashboardWidget() core.DashboardWidget {
 				MaxSegments: 3,
 			},
 			core.DashboardCompactRow{
-				Label:       "Session",
-				Keys:        []string{"context_window", "total_tokens", "total_input_tokens", "total_output_tokens"},
+				Label: "Session",
+				Keys: []string{
+					"context_window",
+					"total_tokens", "total_input_tokens", "total_output_tokens",
+					"current_tokens", "current_input_tokens", "current_output_tokens",
+					"current_cache_read_tokens", "current_cache_write_tokens",
+				},
 				MaxSegments: 3,
 			},
 		),

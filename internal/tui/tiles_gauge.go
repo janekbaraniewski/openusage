@@ -388,6 +388,13 @@ func (m Model) buildAntigravityTileGaugeLines(snap core.UsageSnapshot, innerW in
 	now := m.viewNow()
 	isUsed := m.isUsageModeUsed()
 
+	if planTitle := antigravityPlanTitle(snap); planTitle != "" {
+		bullet := lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Render("◈ ")
+		title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(planTitle)
+		lines = append(lines, bullet+title)
+		lines = append(lines, "")
+	}
+
 	renderBlock := func(groupTitle string, modelsDesc string, weeklyKeys []string, fiveHourKeys []string) {
 		if len(lines) > 0 {
 			lines = append(lines, "")
@@ -719,21 +726,11 @@ func cursorPlanResetAt(snap core.UsageSnapshot) time.Time {
 	return time.Time{}
 }
 
-func cursorMetricUsedPct(met core.Metric) (float64, bool) {
-	if met.Used != nil {
-		return lo.Clamp(*met.Used, 0, 100), true
-	}
-	if met.Remaining != nil {
-		return lo.Clamp(100-*met.Remaining, 0, 100), true
-	}
-	return 0, false
-}
-
 func (m Model) buildCursorTileGaugeLines(snap core.UsageSnapshot, innerW int) []string {
-	return buildCursorPlanUsageLines(snap, innerW, m.isUsageModeUsed())
+	return buildCursorPlanUsageLines(snap, innerW, m.isUsageModeUsed(), m.viewNow(), m.warnThreshold, m.critThreshold)
 }
 
-func buildCursorPlanUsageLines(snap core.UsageSnapshot, innerW int, isUsed bool) []string {
+func buildCursorPlanUsageLines(snap core.UsageSnapshot, innerW int, isUsed bool, now time.Time, warnThresh, critThresh float64) []string {
 	hasPlan := cursorMetricPresent(snap, "plan_percent_used") ||
 		cursorMetricPresent(snap, "cursor_plan_usage") ||
 		cursorMetricPresent(snap, "plan_auto_percent_used") ||
@@ -744,47 +741,53 @@ func buildCursorPlanUsageLines(snap core.UsageSnapshot, innerW int, isUsed bool)
 		return nil
 	}
 
-	const (
-		labelW   = 11
-		currentW = 14
-	)
-	barW := innerW - (2 + labelW + 1 + currentW + 1)
-	if barW < 6 {
-		barW = 6
+	barW := innerW - 14
+	if barW < 20 {
+		barW = 20
 	}
-	if barW > 28 {
-		barW = 28
+	if barW > 50 {
+		barW = 50
 	}
 
 	var lines []string
 
-	headerTitle := "USAGE"
+	title := "CURSOR PLAN"
 	if plan := strings.TrimSpace(snap.Attributes["plan_tier"]); plan != "" {
-		headerTitle = "USAGE · " + plan
+		title = "CURSOR " + strings.ToUpper(plan) + " PLAN"
 	}
-	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("◈ ")
-	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(headerTitle)
-	header := bullet + title
-	if resetAt := cursorPlanResetAt(snap); !resetAt.IsZero() {
-		resetLabel := lipgloss.NewStyle().Foreground(colorSubtext).Render("Resets " + resetAt.UTC().Format("Jan 2 15:04"))
-		gap := innerW - lipgloss.Width(header) - lipgloss.Width(resetLabel)
-		if gap < 1 {
-			gap = 1
-		}
-		header = header + strings.Repeat(" ", gap) + resetLabel
-	}
-	lines = append(lines, header)
+	bullet := lipgloss.NewStyle().Bold(true).Foreground(colorLavender).Render("◈ ")
+	lines = append(lines, bullet+lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(title))
 	lines = append(lines, "")
 
-	pad := func(s string, w int) string {
-		n := w - lipgloss.Width(s)
-		if n <= 0 {
-			return s
+	resetForKeys := func(keys ...string) time.Time {
+		for _, k := range keys {
+			if t, ok := snap.Resets[k]; ok && !t.IsZero() {
+				return t
+			}
+			if t, ok := snap.Resets[k+"_reset"]; ok && !t.IsZero() {
+				return t
+			}
 		}
-		return s + strings.Repeat(" ", n)
+		return cursorPlanResetAt(snap)
 	}
 
-	appendBucket := func(label string, keys []string, color lipgloss.Color) {
+	remainingFromMetric := func(met core.Metric) float64 {
+		remaining := 0.0
+		if met.Remaining != nil {
+			remaining = *met.Remaining
+		} else if met.Used != nil {
+			remaining = 100 - *met.Used
+		}
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+		return remaining
+	}
+
+	renderBucket := func(label string, keys []string) {
 		var met core.Metric
 		found := false
 		for _, k := range keys {
@@ -797,49 +800,42 @@ func buildCursorPlanUsageLines(snap core.UsageSnapshot, innerW int, isUsed bool)
 		if !found {
 			return
 		}
-		used, ok := cursorMetricUsedPct(met)
-		if !ok {
-			return
+
+		remaining := remainingFromMetric(met)
+		resetAt := resetForKeys(keys...)
+
+		var gaugeBar string
+		if isUsed {
+			gaugeBar = RenderUsageGauge(100-remaining, barW, warnThresh, critThresh)
+		} else {
+			gaugeBar = RenderGauge(remaining, barW, warnThresh, critThresh)
 		}
-		fill := used
-		current := fmt.Sprintf("%.0f%% used", used)
-		if !isUsed {
-			fill = 100 - used
-			current = fmt.Sprintf("%.0f%% remaining", fill)
-		}
-		labelCell := pad(lipgloss.NewStyle().Foreground(colorText).Render(label), labelW)
-		currentCell := pad(lipgloss.NewStyle().Foreground(colorSubtext).Render(current), currentW)
-		bar := renderGaugeBar(fill, barW, color)
-		lines = append(lines, "  "+labelCell+" "+currentCell+" "+bar)
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
+		lines = append(lines, "    "+gaugeBar)
+		lines = append(lines, "    "+RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, now, isUsed))
+		lines = append(lines, "")
 	}
 
-	appendBucket("Included", []string{"plan_percent_used", "cursor_plan_usage"}, colorTeal)
-	appendBucket("Auto", []string{"plan_auto_percent_used"}, colorBlue)
-	appendBucket("API", []string{"plan_api_percent_used"}, colorMauve)
+	suffix := "Remaining"
+	if isUsed {
+		suffix = "Used"
+	}
+	renderBucket("Included "+suffix, []string{"plan_percent_used", "cursor_plan_usage"})
+	renderBucket("Auto "+suffix, []string{"plan_auto_percent_used"})
+	renderBucket("API "+suffix, []string{"plan_api_percent_used"})
 
 	if ondemandDisabled || ondemandEnabled {
-		labelCell := pad(lipgloss.NewStyle().Foreground(colorText).Render("On-Demand"), labelW)
-		status := "Enabled"
 		if ondemandDisabled {
-			status = "Disabled"
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render("On-Demand"))
+			lines = append(lines, "    "+lipgloss.NewStyle().Foreground(colorSubtext).Render("Disabled"))
+			lines = append(lines, "")
+		} else if met, ok := snap.Metrics["plan_ondemand_percent_used"]; ok && (met.Used != nil || met.Remaining != nil) {
+			renderBucket("On-Demand "+suffix, []string{"plan_ondemand_percent_used"})
+		} else {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render("On-Demand"))
+			lines = append(lines, "    "+lipgloss.NewStyle().Foreground(colorSubtext).Render("Enabled"))
+			lines = append(lines, "")
 		}
-		currentCell := pad(lipgloss.NewStyle().Foreground(colorSubtext).Render(status), currentW)
-		bar := renderGaugeBar(0, barW, colorSurface1)
-		if !ondemandDisabled {
-			if met, ok := snap.Metrics["plan_ondemand_percent_used"]; ok {
-				if used, found := cursorMetricUsedPct(met); found {
-					fill := used
-					current := fmt.Sprintf("%.0f%% used", used)
-					if !isUsed {
-						fill = 100 - used
-						current = fmt.Sprintf("%.0f%% remaining", fill)
-					}
-					currentCell = pad(lipgloss.NewStyle().Foreground(colorSubtext).Render(current), currentW)
-					bar = renderGaugeBar(fill, barW, colorPeach)
-				}
-			}
-		}
-		lines = append(lines, "  "+labelCell+" "+currentCell+" "+bar)
 	}
 
 	return lines

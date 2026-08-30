@@ -55,7 +55,18 @@ func TestBuildCursorTileGaugeLines_ShowsAutoAndAPILikeOverlay(t *testing.T) {
 	lines := m.buildCursorTileGaugeLines(cursorPlanSnap(now), 56)
 	out := strings.Join(lines, "\n")
 
-	for _, want := range []string{"Included", "Auto", "API", "On-Demand", "Pro", "Sep 27", "7% used", "6% used", "29% used", "Disabled"} {
+	for _, want := range []string{
+		"CURSOR PRO",
+		"Included Used",
+		"Auto Used",
+		"API Used",
+		"On-Demand",
+		"Disabled",
+		"7.00% used",
+		"6.00% used",
+		"29.00% used",
+		"Resets in",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -65,9 +76,6 @@ func TestBuildCursorTileGaugeLines_ShowsAutoAndAPILikeOverlay(t *testing.T) {
 	}
 	if strings.Contains(out, "Context Window") {
 		t.Errorf("context window must not crowd out Auto/API on the tile, got:\n%s", out)
-	}
-	if !strings.Contains(out, "Resets") {
-		t.Errorf("tile must show billing cycle reset time, got:\n%s", out)
 	}
 
 	joined := strings.Join(lines, " ")
@@ -92,7 +100,7 @@ func TestBuildCursorTileGaugeLines_OmitsMissingBuckets(t *testing.T) {
 	if !strings.Contains(out, "Included") || !strings.Contains(out, "API") {
 		t.Fatalf("expected remaining buckets, got:\n%s", out)
 	}
-	if strings.Contains(out, "Auto") {
+	if strings.Contains(out, "Auto Used") {
 		t.Fatalf("missing Auto metric must not invent a row, got:\n%s", out)
 	}
 	if strings.Contains(out, "On-Demand") {
@@ -117,5 +125,18 @@ func TestBuildCursorTileGaugeLines_ContextOnlyDoesNotFakePlan(t *testing.T) {
 	lines := m.buildCursorTileGaugeLines(snap, 56)
 	if len(lines) != 0 {
 		t.Fatalf("context-only snapshot must not draw a plan overlay, got %v", lines)
+	}
+}
+
+func TestBuildCursorTileGaugeLines_RemainingModeUsesGaugeBlocks(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	m := tileGaugeTestModel(now)
+	m.usageMode = config.UsageModeRemaining
+
+	out := strings.Join(m.buildCursorTileGaugeLines(cursorPlanSnap(now), 60), "\n")
+	for _, want := range []string{"Included Remaining", "Auto Remaining", "API Remaining", "93.00% remaining", "94.00% remaining", "71.00% remaining"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

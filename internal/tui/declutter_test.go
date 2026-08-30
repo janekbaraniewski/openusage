@@ -112,6 +112,40 @@ func TestTileDeclutter_NoVerboseModelsTierDescription(t *testing.T) {
 	}
 }
 
+func TestAntigravityDetail_NoMetricsStillShowsUsageCard(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	snap := core.UsageSnapshot{
+		ProviderID: "antigravity",
+		AccountID:  "antigravity-test",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+	}
+	detail := RenderDetailContent(snap, now, 80, 0.2, 0.05, 0, core.TimeWindow30d, false, config.UsageModeRemaining)
+	for _, want := range []string{"⚡ Usage", "ANTIGRAVITY SUBSCRIPTION", "GEMINI MODELS", "CLAUDE AND GPT", "Five Hour Limit"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("missing %q in empty-metrics antigravity detail:\n%s", want, detail)
+		}
+	}
+}
+
+func TestAntigravityDetail_ShowsPlanTierTitle(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	snap := core.UsageSnapshot{
+		ProviderID: "antigravity",
+		AccountID:  "antigravity-test",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Attributes: map[string]string{"plan_tier": "Google AI Pro"},
+		Metrics: map[string]core.Metric{
+			"quota_gemini_weekly": {Remaining: func(f float64) *float64 { return &f }(90)},
+		},
+	}
+	detail := RenderDetailContent(snap, now, 80, 0.2, 0.05, 0, core.TimeWindow30d, false, config.UsageModeRemaining)
+	if !strings.Contains(detail, "GOOGLE AI PRO") {
+		t.Errorf("expected plan tier title in detail, got:\n%s", detail)
+	}
+}
+
 func TestDetailDeclutter_NoVerboseModelsTierDescription(t *testing.T) {
 	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 

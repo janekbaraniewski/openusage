@@ -50,7 +50,9 @@ func RenderDetailContent(snap core.UsageSnapshot, now time.Time, w int, warnThre
 	// ── Compact top bar ──
 	renderDetailCompactHeader(&sb, snap, now, w, hideCosts, mode)
 
-	if len(snap.Metrics) == 0 && len(snap.ModelUsage) == 0 {
+	// Build and render all sections as bordered cards.
+	sections := buildDetailSections(snap, widget, w, warnThresh, critThresh, timeWindow, hideCosts, now, mode)
+	if len(sections) == 0 {
 		if snap.Message != "" {
 			sb.WriteString("\n")
 			sb.WriteString(dimStyle.Render("  " + snap.Message))
@@ -59,8 +61,6 @@ func RenderDetailContent(snap core.UsageSnapshot, now time.Time, w int, warnThre
 		return sb.String()
 	}
 
-	// Build and render all sections as bordered cards.
-	sections := buildDetailSections(snap, widget, w, warnThresh, critThresh, timeWindow, hideCosts, now, mode)
 	for _, sec := range sections {
 		renderDetailCard(&sb, sec, w)
 	}
