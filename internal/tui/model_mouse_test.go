@@ -19,7 +19,7 @@ func testSnapshots(ids ...string) map[string]core.UsageSnapshot {
 	return snaps
 }
 
-func TestMouseWheelScrollsTilesInSingleColumn(t *testing.T) {
+func TestMouseWheelScrollsDetailInSplitView(t *testing.T) {
 	m := Model{
 		width:     90,
 		height:    40,
@@ -31,13 +31,13 @@ func TestMouseWheelScrollsTilesInSingleColumn(t *testing.T) {
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelDown,
 	})
-	got := updated.(Model).tileOffset
+	got := updated.(Model).detailOffset
 	if got <= 0 {
-		t.Fatalf("tileOffset = %d, want > 0", got)
+		t.Fatalf("detailOffset = %d, want > 0", got)
 	}
 }
 
-func TestMouseWheelScrollsSelectedWidgetInMultiColumn(t *testing.T) {
+func TestMouseWheelScrollsDetailPaneInWideSplitView(t *testing.T) {
 	m := Model{
 		width:     220,
 		height:    40,
@@ -49,47 +49,28 @@ func TestMouseWheelScrollsSelectedWidgetInMultiColumn(t *testing.T) {
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelDown,
 	})
-	got := updated.(Model).tileOffset
+	got := updated.(Model).detailOffset
 	if got <= 0 {
-		t.Fatalf("tileOffset = %d, want > 0", got)
+		t.Fatalf("detailOffset = %d, want > 0", got)
 	}
 }
 
-func TestMouseWheelUpClampsTileOffsetAtZero(t *testing.T) {
+func TestMouseWheelUpClampsDetailOffsetAtZero(t *testing.T) {
 	m := Model{
-		width:      90,
-		height:     40,
-		sortedIDs:  []string{"a", "b", "c"},
-		snapshots:  testSnapshots("a", "b", "c"),
-		tileOffset: 1,
+		width:       90,
+		height:      40,
+		sortedIDs:   []string{"a", "b", "c"},
+		snapshots:   testSnapshots("a", "b", "c"),
+		detailOffset: 1,
 	}
 
 	updated, _ := m.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress,
 		Button: tea.MouseButtonWheelUp,
 	})
-	got := updated.(Model).tileOffset
+	got := updated.(Model).detailOffset
 	if got != 0 {
-		t.Fatalf("tileOffset = %d, want 0", got)
-	}
-}
-
-func TestMouseWheelScrollsWidgetInSplitView(t *testing.T) {
-	m := Model{
-		width:         220,
-		height:        40,
-		dashboardView: dashboardViewSplit,
-		sortedIDs:     []string{"a", "b", "c"},
-		snapshots:     testSnapshots("a", "b", "c"),
-	}
-
-	updated, _ := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonWheelDown,
-	})
-	got := updated.(Model).tileOffset
-	if got <= 0 {
-		t.Fatalf("tileOffset = %d, want > 0", got)
+		t.Fatalf("detailOffset = %d, want 0", got)
 	}
 }
 

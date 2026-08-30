@@ -426,15 +426,15 @@ func (m Model) handleMouseScroll(scroll, mouseX int) Model {
 		if mouseX > 0 && mouseX <= leftW && len(ids) > 0 {
 			if scroll < 0 && m.cursor > 0 {
 				m.cursor--
-				m.tileOffset = 0
+				m.detailOffset = 0
 			} else if scroll > 0 && m.cursor < len(ids)-1 {
 				m.cursor++
-				m.tileOffset = 0
+				m.detailOffset = 0
 			}
 		} else {
-			m.tileOffset += scroll
-			if m.tileOffset < 0 {
-				m.tileOffset = 0
+			m.detailOffset += scroll
+			if m.detailOffset < 0 {
+				m.detailOffset = 0
 			}
 		}
 	}
@@ -918,16 +918,16 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "pgdown", "ctrl+d":
-		m.tileOffset += m.widgetScrollStep()
+		m.detailOffset += m.detailPageStep()
 	case "pgup", "ctrl+u":
-		m.tileOffset -= m.widgetScrollStep()
-		if m.tileOffset < 0 {
-			m.tileOffset = 0
+		m.detailOffset -= m.detailPageStep()
+		if m.detailOffset < 0 {
+			m.detailOffset = 0
 		}
-	case "home":
-		m.tileOffset = 0
-	case "end":
-		m.tileOffset = 9999
+	case "home", "g":
+		m.detailOffset = 0
+	case "end", "G":
+		m.detailOffset = 9999
 	case "ctrl+o":
 		if id := m.selectedTileID(ids); id != "" {
 			m.expandedModelMixTiles[id] = !m.expandedModelMixTiles[id]

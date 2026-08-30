@@ -5,18 +5,26 @@ import (
 	"testing"
 )
 
-func TestRenderSplitPanes_ShowsNavigatorAndFocusPane(t *testing.T) {
+func TestRenderSplitPanes_FocusPaneMatchesDetailView(t *testing.T) {
 	m := Model{
 		width:         120,
 		height:        28,
 		dashboardView: dashboardViewSplit,
-		sortedIDs:     []string{"openrouter", "gemini-cli", "codex-cli"},
-		snapshots:     testSnapshots("openrouter", "gemini-cli", "codex-cli"),
+		sortedIDs:     []string{"openrouter"},
+		snapshots:     testSnapshots("openrouter"),
 	}
 
-	out := m.renderSplitPanes(120, 20)
-	if !strings.Contains(out, "openrouter") || !strings.Contains(out, "gemini-cli") {
-		t.Fatalf("expected navigator and focus pane items to be visible, got:\n%s", out)
+	split := m.renderSplitPanes(120, 20)
+	detail := m.renderDetailPanel(81, 20)
+
+	if !strings.Contains(split, "openrouter") {
+		t.Fatalf("expected navigator and focus pane items to be visible, got:\n%s", split)
+	}
+	if detail == "" {
+		t.Fatal("expected detail panel content")
+	}
+	if !strings.Contains(split, strings.TrimSpace(strings.Split(detail, "\n")[0])) {
+		t.Fatalf("expected focus pane to render detail view content, got split:\n%s\n\ndetail:\n%s", split, detail)
 	}
 }
 

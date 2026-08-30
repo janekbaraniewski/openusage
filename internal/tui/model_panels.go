@@ -198,7 +198,7 @@ func (m Model) renderSplitPanes(w, h int) string {
 	}
 
 	left := m.renderList(leftW, h)
-	right := m.renderWidgetPanelByIndex(m.cursor, rightW, h, m.tileOffset, true)
+	right := m.renderDetailPanel(rightW, h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, renderVerticalSep(h), right)
 }
 
@@ -360,20 +360,18 @@ func (m Model) renderDetailPanel(w, h int) string {
 	}
 
 	result := strings.Join(visible, "\n")
-	if m.mode == modeDetail {
-		rendered := strings.Split(result, "\n")
-		if offset > 0 && len(rendered) > 0 {
-			rendered[0] = lipgloss.NewStyle().Foreground(colorAccent).Render("  ▲ scroll up")
-		}
-		if len(rendered) > 1 {
-			if bar := renderVerticalScrollBarLine(w-2, offset, h, totalLines); bar != "" {
-				rendered[len(rendered)-1] = bar
-			} else if end < totalLines {
-				rendered[len(rendered)-1] = lipgloss.NewStyle().Foreground(colorAccent).Render("  ▼ more below")
-			}
-		}
-		result = strings.Join(rendered, "\n")
+	rendered := strings.Split(result, "\n")
+	if offset > 0 && len(rendered) > 0 {
+		rendered[0] = lipgloss.NewStyle().Foreground(colorAccent).Render("  ▲ scroll up")
 	}
+	if len(rendered) > 1 {
+		if bar := renderVerticalScrollBarLine(w-2, offset, h, totalLines); bar != "" {
+			rendered[len(rendered)-1] = bar
+		} else if end < totalLines {
+			rendered[len(rendered)-1] = lipgloss.NewStyle().Foreground(colorAccent).Render("  ▼ more below")
+		}
+	}
+	result = strings.Join(rendered, "\n")
 
 	return lipgloss.NewStyle().Width(w).Padding(0, 1).Render(result)
 }
