@@ -45,7 +45,7 @@ func New() *Provider {
 				DocsURL: "https://antigravity.google/docs/cli/reference",
 				Quickstart: []string{
 					"Install the Antigravity CLI (`agy`) and sign in.",
-					"For multi-account boxes, use `agy-box <name>` so ~/.agy-containers/<name> exists.",
+					"For multi-account boxes, use `agy-box add <name>` so ~/.agy-containers/<name> exists.",
 					"OpenUsage reads antigravity-oauth-token and polls retrieveUserQuotaSummary.",
 				},
 			},

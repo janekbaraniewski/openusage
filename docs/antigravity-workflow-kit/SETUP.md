@@ -16,6 +16,10 @@ cp -R "$REPO/docs/antigravity-workflow-kit/template/.agents" .
 
 Edit `AGENTS.md` — set your real test/lint commands (defaults assume Go/`make test`).
 
+**Rules UI:** In Antigravity Customizations → Rules, set `always-on-minimal-scope` to **Always On** if it is not already applied via agent `rules:` bindings.
+
+**Tools:** Do not invent tool names in agent frontmatter — see `template/.agents/TOOLS.md` (wrong names can hang agents).
+
 ## Antigravity discovery
 
 Antigravity loads automatically from:

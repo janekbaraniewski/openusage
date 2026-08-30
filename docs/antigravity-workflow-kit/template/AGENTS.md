@@ -1,42 +1,44 @@
-# OpenUsage — Agent Instructions
+# Agent instructions
 
-Go terminal dashboard for AI coding tool usage. CGO required (`CGO_ENABLED=1`).
+<!-- Customize the Verification section for your stack. Defaults assume Go / OpenUsage. -->
+
+Short project rules for coding agents. Prefer skills under `.agents/skills/` for procedures.
 
 ## Verification (must pass before claiming done)
 
 ```bash
-make test    # go test -race ./...
-make vet     # go vet ./...
+make test
+make vet
 ```
 
-For provider-only changes: `go test ./internal/providers/<name>/... -count=1`
+Provider-only (OpenUsage): `go test ./internal/providers/<name>/... -count=1`
+
+Replace the commands above when copying this template to a non-Go repo.
 
 ## Scope
 
-- **Minimal diff only.** Edit files required for the task. See `.agents/rules/always-on-minimal-scope.md`.
-- **No drive-by refactors**, formatting sweeps, or unrelated renames.
-- Spawn **verifier** subagent before reporting complete.
-
-## Architecture pointers
-
-- Providers: `internal/providers/<name>/` implement `core.UsageProvider`
-- Register in `internal/providers/registry.go`
-- Config: `~/.config/openusage/settings.json`
-- Skills for features: `docs/skills/`
+- Minimal diff only — see `.agents/rules/always-on-minimal-scope.md`
+- No drive-by refactors or unrelated renames
+- **Verifier** agent must PASS before done (implementer never self-approves)
 
 ## Workflows
 
 | Intent | Use |
 |--------|-----|
-| Small fix | `implementer` agent + `/goal` with test command |
-| Feature | `/feature-cycle` workflow |
-| Design first | `/grill-me` or `/plan` |
+| Small fix | `implementer` + clear file plan + done-when command |
+| Feature / multi-file | `/feature-cycle` |
+| Spec first | `to-spec` skill or `/grill-me` then `/plan` |
 | Large refactor | `/teamwork-preview` |
 
-## Bundled Matt Pocock skills (vendored, MIT)
+## Bundled skills
 
-Included in `.agents/skills/`: `tdd`, `code-review`, `implement`, `to-spec`, `writing-for-agents`. See `matt-pocock-LICENSE.md`.
+Matt Pocock (MIT, adapted): `tdd`, `code-review`, `implement`, `to-spec`, `writing-for-agents` — see `.agents/skills/matt-pocock-LICENSE.md`.
 
-Optional: [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) plugin for `/spec`, `/review` lifecycle.
+Kit-native: `minimal-scope`, `verify-before-done`, `run-ci`.
 
-Full playbook: `docs/antigravity-workflow-kit/GUIDE.md`
+## OpenUsage map (delete if unused)
+
+- Providers: `internal/providers/<name>/` → `core.UsageProvider`
+- Register: `internal/providers/registry.go`
+- Feature skills: `docs/skills/`
+- Full playbook: `docs/antigravity-workflow-kit/GUIDE.md`
