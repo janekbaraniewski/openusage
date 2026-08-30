@@ -387,13 +387,7 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 	}
 	hdrLine1 := hdrLeft + strings.Repeat(" ", gap) + rightPart
 
-	headerMeta := buildTileHeaderMetaLines(snap, widget, innerW, m.animFrame)
-
-	header := []string{hdrLine1}
-	if len(headerMeta) > 0 {
-		header = append(header, headerMeta...)
-	}
-	header = append(header, accentSep)
+	header := []string{hdrLine1, accentSep}
 
 	age := time.Since(snap.Timestamp)
 	var timeStr string
@@ -442,15 +436,6 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 		return renderWithBody(m.buildTileLoadingBody(innerW, bodyBudget, snap))
 	}
 	fullBody := m.cachedTileBodyLines(snap, widget, di, innerW, modelMixExpanded)
-	if len(headerMeta) == 0 {
-		resetLines := buildTileResetLines(snap, widget, innerW, m.animFrame)
-		if len(resetLines) > 0 {
-			if len(fullBody) > 0 {
-				fullBody = append(fullBody, "")
-			}
-			fullBody = append(fullBody, resetLines...)
-		}
-	}
 
 	if bodyBudget < 0 {
 		return renderWithBody(fullBody)

@@ -204,4 +204,43 @@ func TestOpenCode_MonthlyUsageResetTimer(t *testing.T) {
 	}
 }
 
-// test reload
+func TestTileDeclutter_NoTileHeaderResetPills(t *testing.T) {
+	accounts := []core.AccountConfig{
+		{ID: "opencode-mohammed", Provider: "opencode"},
+	}
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, accounts, core.TimeWindow30d)
+
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	snapOc := core.UsageSnapshot{
+		ProviderID: "opencode",
+		AccountID:  "opencode-mohammed",
+		Timestamp:  now,
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rolling_usage": {
+				Used:      core.Float64Ptr(20),
+				Remaining: core.Float64Ptr(80),
+				Unit:      "percent",
+				Window:    "rolling-5h",
+			},
+			"weekly_usage": {
+				Used:      core.Float64Ptr(40),
+				Remaining: core.Float64Ptr(60),
+				Unit:      "percent",
+				Window:    "7d",
+			},
+		},
+		Resets: map[string]time.Time{
+			"rolling_usage_reset": now.Add(3 * time.Hour),
+			"weekly_usage_reset":  now.Add(23 * time.Hour),
+		},
+	}
+
+	tile := m.renderTile(snapOc, false, false, 80, 15, 0)
+	if strings.Contains(tile, "◷") {
+		t.Errorf("expected tile not to contain header reset pill clock icons, got:\n%s", tile)
+	}
+	if strings.Contains(tile, "Weekly 23h") {
+		t.Errorf("expected tile not to contain weekly reset pill, got:\n%s", tile)
+	}
+}
