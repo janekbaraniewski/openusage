@@ -143,7 +143,8 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		)
 	}
 	actionKeys = append(actionKeys,
-		struct{ key, desc string }{"r", "Refresh"},
+		struct{ key, desc string }{"r", "Refresh focused provider"},
+		struct{ key, desc string }{"R", "Refresh all providers"},
 		struct{ key, desc string }{"t", "Cycle theme"},
 		struct{ key, desc string }{"w", "Cycle time window"},
 		struct{ key, desc string }{"u / Shift+U", "Toggle usage mode (remaining / used)"},

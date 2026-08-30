@@ -77,6 +77,13 @@ type SnapshotsMsg struct {
 	RequestID  uint64
 }
 
+// RefreshRequest scopes a manual refresh. An empty AccountID refreshes every
+// configured account; a non-empty AccountID refreshes one focused tile.
+type RefreshRequest struct {
+	TimeWindow core.TimeWindow
+	AccountID  string
+}
+
 type DaemonStatus string
 
 const (
@@ -230,8 +237,9 @@ type Model struct {
 	analyticsScrollY     int             // vertical scroll offset for analytics content
 
 	animFrame  int // monotonically increasing frame counter
-	refreshing bool
-	hasData    bool
+	refreshing  bool
+	refreshAll  bool // true when the active refresh covers every account (R)
+	hasData     bool
 
 	tickRunning     bool      // true while the tick chain is active
 	lastInteraction time.Time // last user keypress/mouse event
@@ -264,10 +272,11 @@ type Model struct {
 
 	timeWindow            core.TimeWindow
 	lastSnapshotRequestID uint64
+	pendingRefreshRequestID uint64
 
 	services           Services
 	onAddAccount       func(core.AccountConfig)
-	onRefresh          func(core.TimeWindow)
+	onRefresh          func(RefreshRequest) uint64
 	onInstallDaemon    func() error
 	onTimeWindowChange func(core.TimeWindow)
 }
@@ -323,7 +332,7 @@ func (m *Model) SetOnAddAccount(fn func(core.AccountConfig)) {
 	m.onAddAccount = fn
 }
 
-func (m *Model) SetOnRefresh(fn func(core.TimeWindow)) {
+func (m *Model) SetOnRefresh(fn func(RefreshRequest) uint64) {
 	m.onRefresh = fn
 }
 

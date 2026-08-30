@@ -349,6 +349,9 @@ func (m Model) renderDetailPanel(w, h int) string {
 	snap := m.snapshots[ids[m.cursor]]
 	activeTab := clamp(m.detailTab, 0, len(DetailTabs(snap))-1)
 	content := m.cachedDetailContent(ids[m.cursor], snap, w-2, activeTab)
+	if m.refreshing {
+		content = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("  "+m.renderFetchingStatus()) + "\n" + content
+	}
 
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)

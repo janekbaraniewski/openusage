@@ -276,12 +276,42 @@ func (m Model) cycleTimeWindow() (tea.Model, tea.Cmd) {
 	return m, m.persistTimeWindowCmd(string(next))
 }
 
-func (m Model) requestRefresh() Model {
+func (m Model) requestRefresh(req RefreshRequest) Model {
+	if req.TimeWindow == "" {
+		req.TimeWindow = m.timeWindow
+	}
 	m.refreshing = true
+	m.invalidateRenderCaches()
+	m.pendingRefreshRequestID = 0
 	if m.onRefresh != nil {
-		m.onRefresh(m.timeWindow)
+		m.pendingRefreshRequestID = m.onRefresh(req)
 	}
 	return m
+}
+
+func (m Model) requestRefreshAll() Model {
+	m.refreshAll = true
+	return m.requestRefresh(RefreshRequest{TimeWindow: m.timeWindow})
+}
+
+func (m Model) triggerRefreshFocused() (Model, tea.Cmd) {
+	m.refreshAll = false
+	req := RefreshRequest{TimeWindow: m.timeWindow}
+	if m.screen == screenDashboard {
+		req.AccountID = m.selectedTileID(m.filteredIDs())
+	}
+	if req.AccountID == "" {
+		return m.triggerRefreshAll()
+	}
+	m = m.requestRefresh(req)
+	m.tickRunning = true
+	return m, scheduleTickCmd(tickFast)
+}
+
+func (m Model) triggerRefreshAll() (Model, tea.Cmd) {
+	m = m.requestRefreshAll()
+	m.tickRunning = true
+	return m, scheduleTickCmd(tickFast)
 }
 
 // enterDetailMode switches to detail view while preserving the selected time window.
@@ -303,9 +333,11 @@ func (m Model) beginTimeWindowRefresh(window core.TimeWindow) Model {
 	if m.onTimeWindowChange != nil {
 		m.onTimeWindowChange(window)
 	}
+	m.refreshAll = true
 	m.refreshing = true
+	m.pendingRefreshRequestID = 0
 	if m.onRefresh != nil {
-		m.onRefresh(window)
+		m.pendingRefreshRequestID = m.onRefresh(RefreshRequest{TimeWindow: window})
 	}
 	return m
 }

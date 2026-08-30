@@ -46,7 +46,7 @@ func (m Model) handleSettingsModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.settings.status = "integration status refreshed"
 			return m, nil
 		}
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 		return m, nil
 	}
 	if len(msg.String()) == 1 {

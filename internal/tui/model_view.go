@@ -54,8 +54,7 @@ func (m Model) renderHeader(w int) string {
 
 	spinnerStr := ""
 	if m.refreshing {
-		frame := m.animFrame % len(SpinnerFrames)
-		spinnerStr = " " + lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
+		spinnerStr = " " + m.renderFetchingStatus()
 	}
 
 	ids := m.filteredIDs()
@@ -191,8 +190,26 @@ func (m Model) renderFooter(w int) string {
 	return sep + "\n" + statusLine
 }
 
+func (m Model) renderFetchingStatus() string {
+	frame := m.animFrame % len(SpinnerFrames)
+	spinner := lipgloss.NewStyle().Foreground(colorAccent).Render(SpinnerFrames[frame])
+	label := "Fetching..."
+	if m.refreshAll {
+		label = "Fetching all..."
+	}
+	return spinner + " " + lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(label)
+}
+
+func refreshFooterHint() string {
+	return "r refresh · R refresh all"
+}
+
 func (m Model) renderFooterStatusLine(w int) string {
 	searchStyle := sapphireStyle
+
+	if m.refreshing {
+		return " " + m.renderFetchingStatus()
+	}
 
 	switch {
 	case m.settings.show:
@@ -208,10 +225,10 @@ func (m Model) renderFooterStatusLine(w int) string {
 		if m.analyticsFilter.text != "" {
 			return " " + dimStyle.Render("filter: ") + searchStyle.Render(m.analyticsFilter.text)
 		}
-		return " " + dimStyle.Render("j/k scroll · PgUp/PgDn page · Home/End jump · s sort · / filter · r refresh")
+		return " " + dimStyle.Render("j/k scroll · PgUp/PgDn page · Home/End jump · s sort · / filter · " + refreshFooterHint())
 	default:
 		if m.mode == modeDetail && m.screen == screenDashboard {
-			return " " + dimStyle.Render("Tab/Shift+Tab sections · ←/→ sections · j/k scroll · PgUp/PgDn page · r refresh · Esc back")
+			return " " + dimStyle.Render("Tab/Shift+Tab sections · ←/→ sections · j/k scroll · PgUp/PgDn page · " + refreshFooterHint() + " · Esc back")
 		}
 		if m.filter.active {
 			cursor := PulseChar("█", "▌", m.animFrame)
@@ -233,7 +250,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		return " " + yellowStyle.Render(msg)
 	}
 
-	return " " + dimStyle.Render("auto-refresh ⟳ 10s · p menu · u mode · r refresh · ? help")
+	return " " + dimStyle.Render("auto-refresh ⟳ 10s · p menu · u mode · " + refreshFooterHint() + " · ? help")
 }
 
 func (m Model) hasAppUpdateNotice() bool {

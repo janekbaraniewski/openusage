@@ -311,3 +311,32 @@ func TestFetch_ConsoleDoubleFailure_DoesNotFabricateZeroBalance(t *testing.T) {
 		t.Errorf("expected opencode_console_auth_error diagnostic, got diagnostics=%+v", snap.Diagnostics)
 	}
 }
+
+func TestEnrichSnapshots_OverlaysLiveFetch(t *testing.T) {
+	server := startFakeZen(t, http.StatusOK, zenModelsBody())
+	defer server.Close()
+
+	snaps := map[string]core.UsageSnapshot{
+		"opencode": {
+			ProviderID: "opencode",
+			AccountID:  "opencode",
+			Status:     core.StatusOK,
+			Metrics: map[string]core.Metric{
+				"tokens_total": {Used: core.Float64Ptr(100), Unit: "tokens"},
+			},
+			ModelUsage: []core.ModelUsageRecord{{RawModelID: "gpt-4", TotalTokens: core.Float64Ptr(100)}},
+		},
+	}
+	New().EnrichSnapshots(context.Background(), []core.AccountConfig{newAcct(t, server.URL)}, snaps)
+
+	got := snaps["opencode"]
+	if len(got.ModelUsage) != 1 {
+		t.Fatalf("ModelUsage len = %d, want telemetry preserved", len(got.ModelUsage))
+	}
+	if got.Attributes["available_models_count"] != "3" {
+		t.Fatalf("available_models_count = %q, want live fetch overlay", got.Attributes["available_models_count"])
+	}
+	if got.Metrics["tokens_total"].Used == nil || *got.Metrics["tokens_total"].Used != 100 {
+		t.Fatalf("telemetry metric lost: %+v", got.Metrics["tokens_total"])
+	}
+}

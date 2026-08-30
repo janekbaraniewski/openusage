@@ -305,6 +305,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
+const opencodeProviderID = "opencode"
+
+// EnrichSnapshots runs a live Fetch on refresh and overlays quota/console data
+// onto the daemon read-model snapshot so telemetry-derived metrics are preserved.
+func (p *Provider) EnrichSnapshots(ctx context.Context, accounts []core.AccountConfig, snaps map[string]core.UsageSnapshot) {
+	if p == nil {
+		return
+	}
+	shared.EnrichSnapshotsWithFetch(ctx, opencodeProviderID, p.Fetch, accounts, snaps, shared.OverlayLiveFetch)
+}
+
 var errNoCookieConfigured = errors.New("opencode: no browser session configured")
 
 // loadStoredSession reads a browser session directly from the credentials file

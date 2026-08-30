@@ -589,7 +589,7 @@ func TestEnrichSnapshots_UsesAuthFileHint(t *testing.T) {
 	}
 }
 
-func TestEnrichSnapshots_OverlaysDaemonContextOnly(t *testing.T) {
+func TestEnrichSnapshots_FullFetchUpdatesPlanMetrics(t *testing.T) {
 	ts := startNestedPlanUsageServer(t)
 	defer ts.Close()
 
@@ -627,7 +627,7 @@ func TestEnrichSnapshots_OverlaysDaemonContextOnly(t *testing.T) {
 	if metricUsed(t, got, "plan_api_percent_used") != 29 {
 		t.Fatalf("API = %v, want 29", metricUsed(t, got, "plan_api_percent_used"))
 	}
-	if metricRemaining(t, got, "context_window") != 75.5 {
-		t.Fatalf("context remaining = %v, want 75.5 preserved from daemon snapshot", metricRemaining(t, got, "context_window"))
+	if time.Since(got.Timestamp) > 5*time.Second {
+		t.Fatalf("timestamp = %v, want within 5s of enrich refresh", got.Timestamp)
 	}
 }

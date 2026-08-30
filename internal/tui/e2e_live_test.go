@@ -91,8 +91,9 @@ func TestE2E_LiveProvidersRender(t *testing.T) {
 
 	// 4. Test Auto-Refresh trigger
 	refreshCalled := false
-	model.SetOnRefresh(func(window core.TimeWindow) {
+	model.SetOnRefresh(func(_ RefreshRequest) uint64 {
 		refreshCalled = true
+		return 0
 	})
 	refreshedModel, cmd := model.handleAutoRefresh()
 	if !refreshedModel.(Model).refreshing && !refreshCalled {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers/antigravity"
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
+	"github.com/janekbaraniewski/openusage/internal/providers/opencode"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
@@ -60,12 +62,26 @@ func runDashboard(cfg config.Config) {
 	var program *tea.Program
 	cursorProv := cursor.New()
 	antigravityProv := antigravity.New()
+	opencodeProv := opencode.New()
 	dispatcher := &snapshotDispatcher{
 		enrich: func(snaps map[string]core.UsageSnapshot) {
 			enrichCtx, enrichCancel := context.WithTimeout(ctx, 8*time.Second)
 			defer enrichCancel()
-			cursorProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
-			antigravityProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+			var wg sync.WaitGroup
+			wg.Add(3)
+			go func() {
+				defer wg.Done()
+				cursorProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+			}()
+			go func() {
+				defer wg.Done()
+				antigravityProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+			}()
+			go func() {
+				defer wg.Done()
+				opencodeProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+			}()
+			wg.Wait()
 		},
 	}
 
@@ -124,8 +140,8 @@ func runDashboard(cfg config.Config) {
 		}
 	})
 
-	model.SetOnRefresh(func(window core.TimeWindow) {
-		dispatcher.refresh(ctx, viewRuntime, window)
+	model.SetOnRefresh(func(req tui.RefreshRequest) uint64 {
+		return dispatcher.refresh(ctx, viewRuntime, req)
 	})
 
 	model.SetOnTimeWindowChange(func(tw core.TimeWindow) {

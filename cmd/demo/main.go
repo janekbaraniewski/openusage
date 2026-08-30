@@ -62,7 +62,7 @@ func main() {
 	var snapshotRequestID atomic.Uint64
 
 	var p *tea.Program
-	refreshAll := func() {
+	doRefresh := func(requestID uint64) {
 		window := currentWindow.Load().(core.TimeWindow)
 		snaps := make(map[string]core.UsageSnapshot, len(accounts))
 		for _, acct := range accounts {
@@ -87,17 +87,22 @@ func main() {
 		p.Send(tui.SnapshotsMsg{
 			Snapshots:  snaps,
 			TimeWindow: window,
-			RequestID:  snapshotRequestID.Add(1),
+			RequestID:  requestID,
 		})
+	}
+	refreshAll := func() {
+		doRefresh(snapshotRequestID.Add(1))
 	}
 
 	// Pressing `w` cycles the window: record it and re-scope the data (async so
 	// the TUI update loop never blocks on Fetch), which clears the refresh
 	// spinner and updates the windowed metrics.
 	model.SetOnTimeWindowChange(func(w core.TimeWindow) { currentWindow.Store(w) })
-	model.SetOnRefresh(func(w core.TimeWindow) {
-		currentWindow.Store(w)
-		go refreshAll()
+	model.SetOnRefresh(func(req tui.RefreshRequest) uint64 {
+		currentWindow.Store(req.TimeWindow)
+		id := snapshotRequestID.Add(1)
+		go doRefresh(id)
+		return id
 	})
 
 	p = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))

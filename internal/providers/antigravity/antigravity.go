@@ -8,11 +8,11 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 const (
@@ -173,73 +173,13 @@ func projectSnapshot(snap *core.UsageSnapshot, payload statusLinePayload) {
 	}
 }
 
-// EnrichSnapshots overlays live retrieveUserQuotaSummary data onto daemon
-// snapshots. The TUI refresh path (`r` / auto-refresh) reads the telemetry
-// read-model, which only updates on the daemon poll cadence; this fetches
-// current quota in the dashboard process so refresh is immediate.
+// EnrichSnapshots runs a live Fetch on refresh so quota is immediate instead of
+// waiting for the telemetry daemon poll cadence.
 func (p *Provider) EnrichSnapshots(ctx context.Context, accounts []core.AccountConfig, snaps map[string]core.UsageSnapshot) {
-	if p == nil || len(snaps) == 0 {
+	if p == nil {
 		return
 	}
-	byID := make(map[string]core.AccountConfig, len(accounts))
-	for _, acct := range accounts {
-		if id := strings.TrimSpace(acct.ID); id != "" {
-			byID[id] = acct
-		}
-	}
-
-	type result struct {
-		id   string
-		snap core.UsageSnapshot
-		ok   bool
-	}
-	ids := make([]string, 0, len(snaps))
-	for id, snap := range snaps {
-		if snap.ProviderID != providerID && !strings.HasPrefix(id, providerID+"-") && id != providerID {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return
-	}
-
-	results := make(chan result, len(ids))
-	var wg sync.WaitGroup
-	for _, id := range ids {
-		acct, ok := byID[id]
-		if !ok {
-			acct = core.AccountConfig{ID: id, Provider: providerID}
-		}
-		wg.Add(1)
-		go func(id string, acct core.AccountConfig) {
-			defer wg.Done()
-			if err := ctx.Err(); err != nil {
-				results <- result{id: id}
-				return
-			}
-			fresh, err := p.Fetch(ctx, acct)
-			if err != nil || !snapshotUsable(fresh) {
-				results <- result{id: id}
-				return
-			}
-			results <- result{id: id, snap: fresh, ok: true}
-		}(id, acct)
-	}
-	wg.Wait()
-	close(results)
-	for res := range results {
-		if res.ok {
-			snaps[res.id] = res.snap
-		}
-	}
-}
-
-func snapshotUsable(snap core.UsageSnapshot) bool {
-	if snap.Status == core.StatusAuth || snap.Status == core.StatusError {
-		return len(snap.Metrics) > 0
-	}
-	return len(snap.Metrics) > 0 || (snap.Status != "" && snap.Status != core.StatusUnknown)
+	shared.EnrichSnapshotsWithFetch(ctx, providerID, p.Fetch, accounts, snaps, nil)
 }
 
 func projectQuotaMetrics(snap *core.UsageSnapshot, payload statusLinePayload) {

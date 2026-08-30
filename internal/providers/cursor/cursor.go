@@ -12,6 +12,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -297,30 +298,18 @@ func planBucketHitMonthlyLimit(live livePlanUsage) bool {
 	return hit(live.Auto) || hit(live.API)
 }
 
-// EnrichSnapshots overlays live Included/Auto/API plan buckets onto daemon
-// snapshots. make run reads the telemetry daemon, which often still only has
-// status-line context metrics; this fills plan usage in the TUI process.
+// EnrichSnapshots runs a live Fetch on refresh so status-line and plan usage are
+// current instead of waiting for the telemetry daemon poll cadence.
 func (p *Provider) EnrichSnapshots(ctx context.Context, accounts []core.AccountConfig, snaps map[string]core.UsageSnapshot) {
-	if p == nil || len(snaps) == 0 {
+	if p == nil {
 		return
 	}
-	byID := make(map[string]core.AccountConfig, len(accounts))
-	for _, acct := range accounts {
-		if id := strings.TrimSpace(acct.ID); id != "" {
-			byID[id] = acct
-		}
-	}
-	for id, snap := range snaps {
-		if snap.ProviderID != "cursor" {
-			continue
-		}
-		acct, ok := byID[id]
-		if !ok {
-			acct = core.AccountConfig{ID: id, Provider: "cursor"}
-		}
-		p.applyLivePlanUsage(ctx, acct, &snap)
-		snaps[id] = snap
-	}
+	shared.EnrichSnapshotsWithFetch(ctx, providerID, p.Fetch, accounts, snaps, stampLiveRefreshTime)
+}
+
+func stampLiveRefreshTime(_ core.UsageSnapshot, fresh core.UsageSnapshot) core.UsageSnapshot {
+	fresh.Timestamp = time.Now().UTC()
+	return fresh
 }
 
 // HasChanged reports whether the Cursor status-line state file has been modified since the given time.

@@ -389,12 +389,16 @@ func (m Model) renderTile(snap core.UsageSnapshot, selected, modelMixExpanded bo
 
 	header := []string{hdrLine1, accentSep}
 
-	age := time.Since(snap.Timestamp)
 	var timeStr string
-	if age > 60*time.Second {
-		timeStr = formatDuration(age) + " ago"
-	} else if !snap.Timestamp.IsZero() {
-		timeStr = snap.Timestamp.Format("15:04:05")
+	if m.refreshing {
+		timeStr = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("Fetching...")
+	} else {
+		age := time.Since(snap.Timestamp)
+		if age > 60*time.Second {
+			timeStr = formatDuration(age) + " ago"
+		} else if !snap.Timestamp.IsZero() {
+			timeStr = snap.Timestamp.Format("15:04:05")
+		}
 	}
 	footerLine := tileTimestampStyle.Render(timeStr)
 	footer := []string{dimSep, footerLine}

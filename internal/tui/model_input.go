@@ -84,7 +84,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.providerLinkPicker = providerLinkPickerState{}
 		m.settings.status = fmt.Sprintf("mapped %s → %s", msg.source, msg.target)
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 		return m, nil
 
 	case providerLinkDeletedMsg:
@@ -95,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.providerLinkPicker = providerLinkPickerState{}
 		m.settings.status = fmt.Sprintf("cleared mapping for %s", msg.source)
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 		return m, nil
 
 	case availableBrowsersLoadedMsg:
@@ -164,7 +164,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.apiKeyStatus = fmt.Sprintf("connected via %s", msg.Info.SourceBrowser)
 		m.settings.status = fmt.Sprintf("browser session connected for %s", msg.AccountID)
 		// Trigger a fresh poll so the tile picks up the new auth path.
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 		return m, nil
 
 	case browserSessionDisconnectedMsg:
@@ -175,7 +175,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.apiKeyStatus = "disconnected"
 		m.settings.status = fmt.Sprintf("browser session removed for %s", msg.AccountID)
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 		return m, nil
 
 	case providerConsoleOpenedMsg:
@@ -233,7 +233,7 @@ func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
 	if !m.refreshing {
-		m = m.requestRefresh()
+		m = m.requestRefreshAll()
 	}
 	return m, autoRefreshCmd()
 }
@@ -261,11 +261,24 @@ func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
 	if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID {
 		return m, nil
 	}
+	if m.refreshing && m.pendingRefreshRequestID > 0 && msg.RequestID != m.pendingRefreshRequestID {
+		if len(msg.Snapshots) > 0 && snapshotsReady(msg.Snapshots) {
+			m.snapshots = msg.Snapshots
+			m.lastDataUpdate = time.Now()
+			m.invalidateRenderCaches()
+			if msg.RequestID > m.lastSnapshotRequestID {
+				m.lastSnapshotRequestID = msg.RequestID
+			}
+		}
+		return m, m.restartTickIfNeeded()
+	}
 	if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {
 		return m, nil
 	}
 	m.snapshots = msg.Snapshots
 	m.refreshing = false
+	m.refreshAll = false
+	m.pendingRefreshRequestID = 0
 	m.lastDataUpdate = time.Now()
 	m.invalidateRenderCaches()
 	if msg.RequestID > m.lastSnapshotRequestID {
@@ -808,7 +821,9 @@ func (m Model) handleAnalyticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.analyticsScrollY = 0
 		}
 	case "r":
-		m = m.requestRefresh()
+		return m.triggerRefreshFocused()
+	case "R":
+		return m.triggerRefreshAll()
 	case "j", "down":
 		m.analyticsScrollY++
 	case "k", "up":
@@ -946,7 +961,9 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "r":
-		m = m.requestRefresh()
+		return m.triggerRefreshFocused()
+	case "R":
+		return m.triggerRefreshAll()
 	}
 	return m, nil
 }
@@ -987,7 +1004,9 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailOffset = 0
 		}
 	case "r":
-		m = m.requestRefresh()
+		return m.triggerRefreshFocused()
+	case "R":
+		return m.triggerRefreshAll()
 	}
 	return m, nil
 }
@@ -1147,7 +1166,9 @@ func (m Model) handleTilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tileOffset = 0
 		}
 	case "r":
-		m = m.requestRefresh()
+		return m.triggerRefreshFocused()
+	case "R":
+		return m.triggerRefreshAll()
 	}
 	return m, nil
 }
