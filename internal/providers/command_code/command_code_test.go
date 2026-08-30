@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -124,6 +125,111 @@ func TestCommandCode_Fetch_Success(t *testing.T) {
 
 	if _, ok := snap.Resets["monthly_subscription"]; !ok {
 		t.Errorf("expected monthly_subscription reset time")
+	}
+}
+
+func TestCommandCode_Fetch_LimitedFlagWithoutExhaustion(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/alpha/billing/credits", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"credits": {
+				"monthlyCredits": 34.15,
+				"purchasedCredits": 0,
+				"freeCredits": 0
+			},
+			"windowLimits": {
+				"limited": true,
+				"exceeded": null,
+				"fiveHour": {
+					"used": 0,
+					"cap": 14,
+					"exceeded": false,
+					"resetAt": 0
+				},
+				"weekly": {
+					"used": 0,
+					"cap": 35,
+					"exceeded": false,
+					"resetAt": 0
+				}
+			}
+		}`))
+	})
+	mux.HandleFunc("/alpha/billing/subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success": true, "data": {"planId": "individual-goat", "status": "active"}}`))
+	})
+	mux.HandleFunc("/alpha/whoami", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success": true, "user": {"name": "Test User"}}`))
+	})
+	mux.HandleFunc("/alpha/usage/summary", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"totalCost": 35.84, "totalTokens": 1, "totalCount": 1}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:      "command_code",
+		Provider: "command_code",
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Errorf("status = %v, want OK when limited=true but windows not exhausted", snap.Status)
+	}
+}
+
+func TestCommandCode_Fetch_WeeklyWindowExceeded(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/alpha/billing/credits", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"credits": {"monthlyCredits": 10, "purchasedCredits": 0, "freeCredits": 0},
+			"windowLimits": {
+				"limited": true,
+				"exceeded": "weekly",
+				"fiveHour": {"used": 0, "cap": 14, "exceeded": false, "resetAt": 0},
+				"weekly": {"used": 35, "cap": 35, "exceeded": true, "resetAt": 1788053390413}
+			}
+		}`))
+	})
+	mux.HandleFunc("/alpha/billing/subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success": true, "data": {"planId": "individual-goat", "status": "active"}}`))
+	})
+	mux.HandleFunc("/alpha/whoami", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success": true, "user": {"name": "Test User"}}`))
+	})
+	mux.HandleFunc("/alpha/usage/summary", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"totalCost": 0, "totalTokens": 0, "totalCount": 0}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:       "command_code",
+		Provider: "command_code",
+		APIKey:   "test-key",
+		BaseURL:  srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+	if snap.Status != core.StatusLimited {
+		t.Errorf("status = %v, want LIMITED when weekly window exhausted", snap.Status)
+	}
+	if !strings.Contains(snap.Message, "Weekly Limit Reached") {
+		t.Errorf("message = %q, want weekly limit reached", snap.Message)
 	}
 }
 

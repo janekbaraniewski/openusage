@@ -426,8 +426,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.SetAttribute("monthly_remaining", fmt.Sprintf("$%.2f", monthlyRemaining))
 	}
 
-	// Status calculation
-	if creds.WindowLimits.Limited || creds.WindowLimits.Exceeded != "" || (weeklyCap > 0 && weeklyUsedDollars >= weeklyCap) || (fiveHourCap > 0 && fiveHourUsedDollars >= fiveHourCap) {
+	// Status calculation: only mark limited when a concrete window is exhausted.
+	// windowLimits.limited alone is not reliable (API may set it while windows still have headroom).
+	weeklyExceeded := creds.WindowLimits.Exceeded == "weekly" ||
+		creds.WindowLimits.Weekly.Exceeded ||
+		(weeklyCap > 0 && weeklyUsedDollars >= weeklyCap)
+	fiveHourExceeded := creds.WindowLimits.Exceeded == "fiveHour" ||
+		creds.WindowLimits.FiveHour.Exceeded ||
+		(fiveHourCap > 0 && fiveHourUsedDollars >= fiveHourCap)
+	if weeklyExceeded || fiveHourExceeded {
 		snap.Status = core.StatusLimited
 	} else {
 		snap.Status = core.StatusOK
@@ -441,12 +448,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		planLabel = fmt.Sprintf("Command Code (%s)", strings.ReplaceAll(planID, "-", " "))
 	}
 	if snap.Status == core.StatusLimited {
-		if creds.WindowLimits.Exceeded == "weekly" || (weeklyCap > 0 && weeklyUsedDollars >= weeklyCap) {
+		if weeklyExceeded {
 			snap.Message = fmt.Sprintf("%s · Weekly Limit Reached", planLabel)
-		} else if creds.WindowLimits.Exceeded == "fiveHour" || (fiveHourCap > 0 && fiveHourUsedDollars >= fiveHourCap) {
+		} else if fiveHourExceeded {
 			snap.Message = fmt.Sprintf("%s · 5h Limit Reached", planLabel)
-		} else {
-			snap.Message = fmt.Sprintf("%s · Rate Limited", planLabel)
 		}
 	} else {
 		if wu, ok := snap.Metrics["weekly_usage"]; ok && wu.Remaining != nil {
