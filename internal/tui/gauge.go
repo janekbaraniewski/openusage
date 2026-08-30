@@ -304,6 +304,47 @@ func formatDurationShort(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
+const compactBlockStripWidth = 5
+
+const (
+	compactBlockFilled = "▰"
+	compactBlockEmpty  = "▱"
+)
+
+// RenderCompactBlockStrip draws a fixed-width sidebar capacity indicator using
+// five high/low block glyphs (e.g. ▰▰▰▰▱).
+func RenderCompactBlockStrip(percent float64, segments int, fillColor lipgloss.Color) string {
+	if segments <= 0 {
+		segments = compactBlockStripWidth
+	}
+	emptyStyle := lipgloss.NewStyle().Foreground(colorLine)
+	if percent < 0 {
+		return emptyStyle.Render(strings.Repeat(compactBlockEmpty, segments))
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	filled := int(math.Round(percent / 100 * float64(segments)))
+	if filled > segments {
+		filled = segments
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
+	var b strings.Builder
+	for i := 0; i < segments; i++ {
+		if i < filled {
+			b.WriteString(fillStyle.Render(compactBlockFilled))
+		} else {
+			b.WriteString(emptyStyle.Render(compactBlockEmpty))
+		}
+	}
+	return b.String()
+}
+
 func RenderMiniGauge(remainingPercent float64, width int) string {
 	if width < 3 {
 		width = 3

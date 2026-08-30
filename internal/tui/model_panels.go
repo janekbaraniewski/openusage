@@ -291,25 +291,18 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 	line1 := namePart + strings.Repeat(" ", gapLen) + rightPart
 
 	summary := di.summary
-	miniGauge := ""
-	if di.gaugePercent >= 0 && w > 25 {
-		gaugeW := 8
-		if w < 35 {
-			gaugeW = 5
-		}
-		if m.isUsageModeUsed() {
-			miniGauge = " " + RenderMiniUsageGauge(di.gaugePercent, gaugeW)
-		} else {
-			miniGauge = " " + RenderMiniGauge(di.gaugePercent, gaugeW)
-		}
+	stripW := 0
+	if di.gaugePercent >= 0 {
+		stripW = compactBlockStripWidth + 2 // strip + gap
 	}
-	summaryMaxW := w - 5 - lipgloss.Width(miniGauge)
+	summaryMaxW := w - 5 - stripW
 	if summaryMaxW < 5 {
 		summaryMaxW = 5
 	}
 	if len(summary) > summaryMaxW {
 		summary = summary[:summaryMaxW-1] + "…"
 	}
+	summaryLine := "   " + m.renderListSummary(summary, di.gaugePercent, snap)
 
 	sepStyle := surface1Style
 	if inActiveGroup || selected {
@@ -317,7 +310,7 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 	}
 
 	result := line1 + "\n" +
-		"   " + textBoldStyle.Render(summary) + miniGauge + "\n" +
+		summaryLine + "\n" +
 		"  " + sepStyle.Render(strings.Repeat("─", w-4))
 
 	var indicator string
@@ -338,6 +331,43 @@ func (m Model) renderListItemWithGroup(snap core.UsageSnapshot, selected bool, i
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderListSummary(summary string, gaugePercent float64, snap core.UsageSnapshot) string {
+	color := listSummaryColor(
+		gaugePercent,
+		m.isUsageModeUsed(),
+		m.warnThreshold,
+		m.critThreshold,
+		core.EffectiveStatus(snap),
+	)
+	style := lipgloss.NewStyle().Bold(true).Foreground(color)
+	if gaugePercent < 0 {
+		return style.Render(summary)
+	}
+	strip := RenderCompactBlockStrip(gaugePercent, compactBlockStripWidth, color)
+	return strip + "  " + style.Render(summary)
+}
+
+// listSummaryColor picks a traffic-light color for sidebar summary text.
+// When no gauge metric is available, status drives the tint instead.
+func listSummaryColor(gaugePercent float64, isUsedMode bool, warnThresh, critThresh float64, status core.Status) lipgloss.Color {
+	if gaugePercent >= 0 {
+		if isUsedMode {
+			return usageGaugeColor(gaugePercent, warnThresh, critThresh)
+		}
+		return gaugeColor(gaugePercent, warnThresh, critThresh)
+	}
+	switch status {
+	case core.StatusLimited:
+		return colorPeach
+	case core.StatusError:
+		return colorCrit
+	case core.StatusAuth:
+		return colorYellow
+	default:
+		return colorText
+	}
 }
 
 func (m Model) renderDetailPanel(w, h int) string {
