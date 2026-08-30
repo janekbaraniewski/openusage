@@ -7,7 +7,7 @@
 # self-hosted multi-machine deployment. The TUI dashboard is not designed
 # to run inside a container.
 #
-# See docs/site/docs/guides/multi-machine.md for the end-to-end flow.
+# See README.md for the end-to-end flow.
 # Base images pin minor versions so security patches auto-flow; apk
 # packages stay unpinned because the alpine index moves frequently and
 # strict pins would break CI without bringing a real security win.

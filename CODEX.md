@@ -40,7 +40,7 @@ go run ./cmd/openusage telemetry hook codex < /tmp/payload.json
 - Dashboard runtime wiring: `cmd/openusage/dashboard.go`
 - Telemetry subcommands: `cmd/openusage/telemetry.go`
 - Core interface: `core.UsageProvider` in `internal/core/provider.go`
-- Provider registry: `internal/providers/registry.go` (16 providers)
+- Provider registry: `internal/providers/registry.go` (37 providers)
 - Auto-detection: `internal/detect/`
 - Telemetry/daemon pipeline: `internal/daemon/` + `internal/telemetry/`
 - TUI rendering: `internal/tui/`

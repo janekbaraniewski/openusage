@@ -76,13 +76,14 @@ type UsageProvider interface {
 - `DashboardWidget` / `DetailWidget` define how provider metrics render in the TUI.
 - Providers are registered in `internal/providers/registry.go` via `AllProviders()`.
 
-### Provider patterns (16 providers)
+### Provider patterns (37 providers)
 
-- **HTTP header probing** (`openai`, `anthropic`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`): Lightweight API request, parse rate-limit headers using shared helpers from `internal/parsers/`.
-- **Rich API / local hybrid** (`openrouter`, `cursor`): Multiple API endpoints; `cursor` also reads local SQLite DBs as fallback.
-- **Local file readers** (`claude_code`, `codex`, `gemini_cli`, `ollama`): Read local stats/session files. `claude_code` is the most complex with billing block computation and burn rate tracking.
-- **CLI subprocess** (`copilot`): Shells out to `gh` CLI commands.
-- **Plugin/integration** (`opencode`): Reads local session data from the OpenCode tool.
+- **HTTP header probing & REST APIs** (`openai`, `anthropic`, `azure_openai`, `alibaba_cloud`, `groq`, `mistral`, `deepseek`, `moonshot`, `xai`, `zai`, `gemini_api`): Lightweight API requests and rate-limit / balance parsing using shared helpers.
+- **Browser-session & cookie auth** (`perplexity`, `opencode`): Direct cookie extraction from browser storage for web console metrics and billing data.
+- **Rich API / local hybrid** (`openrouter`, `cursor`): Multiple API endpoints; `cursor` also reads local SQLite DBs (`state.vscdb`) as fallback.
+- **Local file readers & agents** (`claude_code`, `codex`, `gemini_cli`, `antigravity`, `ollama`, `amp`, `goose`, `hermes`, `mux`, `droid`, `crush`, `roocode`, `kilocode`, `kiro`, `zed`, `codebuff`, `kimi_cli`, `openclaw`, `pi`, `qwen_cli`, `command_code`): Read local stats/session files, logs, or SQLite databases. `claude_code` computes 5-hour billing blocks and burn rates.
+- **CLI subprocess** (`copilot`): Shells out to `gh` CLI commands or standalone `copilot` binary.
+- **Plugin/integration** (`opencode`): Reads local session data and container profiles.
 
 ### TUI structure (`internal/tui/`)
 
@@ -106,7 +107,7 @@ Background data collection system with server/client architecture:
 
 ### Auto-detection (`internal/detect/`)
 
-Scans for installed tools (Cursor, Claude Code, Codex, Copilot, Gemini CLI, Aider, Ollama) and environment variables for API keys. Auto-detected accounts merge with manually configured ones; configured accounts take precedence.
+Scans for installed tools (Cursor, Claude Code, Codex, Copilot, Gemini CLI, Antigravity, OpenCode, Aider, Ollama, Amp, Goose, etc.) and environment variables for API keys. Auto-detected accounts merge with manually configured ones; configured accounts take precedence.
 
 ## Skills
 
@@ -150,19 +151,9 @@ Use these directly when you need a specific phase, or let `/develop-feature` cha
 
 Each skill has a design doc in `docs/skills/<name>/` and a slash command in `.claude/commands/<name>.md`.
 
-### Docs sweep is mandatory on every PR
+### Documentation is unified in README.md
 
-Every PR that ships code is also a docs PR. Before opening or
-re-pushing the PR you MUST audit user-facing docs under
-`docs/site/docs/` and update or create pages affected by the change.
-This is enforced as `Phase 0.5` of `/finalize-feature` and `Phase 5.5`
-of `/develop-feature`. A PR that ships code without the matching docs
-update gets bounced. If no docs change is genuinely needed, the PR
-description must include a one-line justification.
-
-The docs site lives at `docs/site/`. Build it with
-`DOCS_PREVIEW=1 npm run build` from that directory; it must complete
-with `[SUCCESS]` and no broken-link warnings.
+All user-facing documentation is unified into `README.md` as the single source of truth. Every PR that modifies user-facing features, commands, flags, or providers must update `README.md` to keep documentation accurate, self-contained, and complete.
 
 ## Key design notes
 

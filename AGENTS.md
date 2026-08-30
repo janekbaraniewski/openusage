@@ -61,7 +61,7 @@ internal/
   detect/               local tool + env key auto-detection
   integrations/         Codex/OpenCode/Claude hook/plugin install + version checks
   parsers/              shared HTTP header parsing helpers
-  providers/            provider implementations + registry (16 providers)
+  providers/            provider implementations + registry (37 providers)
   telemetry/            SQLite store, ingest pipeline, dedup, read model
   tui/                  Bubble Tea views/components/settings UX
   version/              build metadata injected by ldflags
@@ -79,9 +79,12 @@ All providers implement `core.UsageProvider` from `internal/core/provider.go`:
 - `Fetch(ctx, acct) (core.UsageSnapshot, error)`
 
 Providers are registered in `internal/providers/registry.go` via `AllProviders()`.
-Current provider set: `openai`, `anthropic`, `alibaba_cloud`, `openrouter`, `groq`,
-`mistral`, `deepseek`, `xai`, `opencode`, `gemini_api`, `gemini_cli`,
-`ollama`, `copilot`, `cursor`, `claude_code`, `codex`.
+Current provider set (37 providers): `openai`, `anthropic`, `azure_openai`,
+`alibaba_cloud`, `openrouter`, `perplexity`, `groq`, `mistral`, `moonshot`,
+`deepseek`, `xai`, `zai`, `opencode`, `gemini_api`, `gemini_cli`, `antigravity`,
+`ollama`, `copilot`, `cursor`, `claude_code`, `codex`, `amp`, `goose`,
+`hermes`, `mux`, `droid`, `crush`, `roocode`, `kilocode`, `kiro`, `zed`,
+`codebuff`, `kimi_cli`, `openclaw`, `pi`, `qwen_cli`, `command_code`.
 
 ## Code Style
 
