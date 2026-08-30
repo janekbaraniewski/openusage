@@ -272,6 +272,78 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		return info
 	}
 
+	if snap.ProviderID == "cursor" {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "cursor_usage"
+
+		hasQuota := false
+		quotaRem := 100.0
+		for _, qk := range []string{"quota", "quota_pro", "quota_fast", "cursor_plan_usage"} {
+			if m, ok := snap.Metrics[qk]; ok {
+				if m.Remaining != nil {
+					quotaRem = *m.Remaining
+					hasQuota = true
+					break
+				} else if m.Used != nil {
+					quotaRem = 100 - *m.Used
+					hasQuota = true
+					break
+				}
+			}
+		}
+
+		ctxUsed := 0.0
+		hasCtx := false
+		if m, ok := snap.Metrics["context_window"]; ok && (m.Used != nil || m.Remaining != nil) {
+			hasCtx = true
+			if m.Used != nil {
+				ctxUsed = *m.Used
+			} else if m.Remaining != nil {
+				ctxUsed = 100 - *m.Remaining
+			}
+		}
+
+		totalTok := 0.0
+		if m, ok := snap.Metrics["total_tokens"]; ok && m.Used != nil {
+			totalTok = *m.Used
+		}
+
+		if hasQuota {
+			if isUsedMode {
+				info.gaugePercent = 100 - quotaRem
+				info.summary = fmt.Sprintf("%.2f%% used", 100-quotaRem)
+			} else {
+				info.gaugePercent = quotaRem
+				info.summary = fmt.Sprintf("%.2f%% remaining", quotaRem)
+			}
+			if hasCtx && totalTok > 0 {
+				info.detail = fmt.Sprintf("ctx %.0f%% · %s tok", ctxUsed, shortCompact(totalTok))
+			} else if hasCtx {
+				info.detail = fmt.Sprintf("ctx %.0f%%", ctxUsed)
+			} else if totalTok > 0 {
+				info.detail = fmt.Sprintf("%s tok", shortCompact(totalTok))
+			}
+		} else if hasCtx {
+			if isUsedMode {
+				info.gaugePercent = ctxUsed
+				info.summary = fmt.Sprintf("%.2f%% ctx used", ctxUsed)
+			} else {
+				info.gaugePercent = 100 - ctxUsed
+				info.summary = fmt.Sprintf("%.2f%% ctx remaining", 100-ctxUsed)
+			}
+			if totalTok > 0 {
+				info.detail = fmt.Sprintf("%s tok", shortCompact(totalTok))
+			}
+		} else if totalTok > 0 {
+			info.summary = fmt.Sprintf("%s tokens", shortCompact(totalTok))
+		} else {
+			info.summary = "Ready"
+			info.gaugePercent = 100
+		}
+		return info
+	}
+
 	quotaKey := ""
 	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
 		if _, ok := snap.Metrics[key]; ok {
@@ -293,15 +365,9 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			used := 100 - remaining
 			info.gaugePercent = used
 			info.summary = fmt.Sprintf("%.2f%% used", used)
-			if m.Used != nil {
-				info.detail = fmt.Sprintf("%.2f%% used", *m.Used)
-			}
 		} else {
 			info.gaugePercent = remaining
 			info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
-			if m.Remaining != nil {
-				info.detail = fmt.Sprintf("%.2f%% remaining", *m.Remaining)
-			}
 		}
 		return info
 	}
