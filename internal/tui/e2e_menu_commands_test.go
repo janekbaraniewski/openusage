@@ -82,7 +82,7 @@ func TestE2E_MenuAndKeyNavigationWithoutBugs(t *testing.T) {
 	if !strings.Contains(view, "◈ GEMINI MODELS") && !strings.Contains(view, "antigravity") {
 		t.Errorf("expected diamond bullet GEMINI MODELS in view")
 	}
-	if !strings.Contains(view, "auto-refresh ⟳ 10s") {
+	if !strings.Contains(view, "auto-refresh ⟳ 30s") {
 		t.Errorf("expected auto-refresh hint in footer")
 	}
 

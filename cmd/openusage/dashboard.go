@@ -48,6 +48,7 @@ func runDashboard(cfg config.Config) {
 		cachedAccounts,
 		timeWindow,
 	)
+	model.SetRefreshInterval(daemon.HTTPBasePollInterval(interval))
 	model.SetServices(dashboardapp.NewService(ctx))
 
 	socketPath := daemon.ResolveSocketPath()

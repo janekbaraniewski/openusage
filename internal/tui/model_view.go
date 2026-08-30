@@ -250,7 +250,7 @@ func (m Model) renderFooterStatusLine(w int) string {
 		return " " + yellowStyle.Render(msg)
 	}
 
-	return " " + dimStyle.Render("auto-refresh ⟳ 10s · p menu · u mode · " + refreshFooterHint() + " · ? help")
+	return " " + dimStyle.Render("auto-refresh ⟳ "+formatDurationShort(m.refreshInterval)+" · p menu · u mode · "+refreshFooterHint()+" · ? help")
 }
 
 func (m Model) hasAppUpdateNotice() bool {

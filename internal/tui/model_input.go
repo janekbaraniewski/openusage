@@ -232,10 +232,11 @@ func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
-	if !m.refreshing {
-		m = m.requestRefreshAll()
+	// Background refresh: pull latest data without blocking the UI on "Fetching...".
+	if !m.refreshing && m.onRefresh != nil {
+		_ = m.onRefresh(RefreshRequest{TimeWindow: m.timeWindow})
 	}
-	return m, autoRefreshCmd()
+	return m, autoRefreshCmd(m.refreshInterval)
 }
 
 func (m Model) handleDaemonInstallResultMsg(msg daemonInstallResultMsg) (tea.Model, tea.Cmd) {
@@ -258,10 +259,13 @@ func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
 	if msgWindow != m.timeWindow {
 		return m, nil
 	}
-	if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID {
+
+	pendingRefresh := m.refreshing && m.pendingRefreshRequestID > 0 && msg.RequestID == m.pendingRefreshRequestID
+
+	if msg.RequestID > 0 && msg.RequestID < m.lastSnapshotRequestID && !pendingRefresh {
 		return m, nil
 	}
-	if m.refreshing && m.pendingRefreshRequestID > 0 && msg.RequestID != m.pendingRefreshRequestID {
+	if m.refreshing && m.pendingRefreshRequestID > 0 && !pendingRefresh {
 		if len(msg.Snapshots) > 0 && snapshotsReady(msg.Snapshots) {
 			m.snapshots = msg.Snapshots
 			m.lastDataUpdate = time.Now()
@@ -270,6 +274,34 @@ func (m Model) handleSnapshotsMsg(msg SnapshotsMsg) (tea.Model, tea.Cmd) {
 				m.lastSnapshotRequestID = msg.RequestID
 			}
 		}
+		return m, m.restartTickIfNeeded()
+	}
+	if pendingRefresh {
+		if snapshotsReady(msg.Snapshots) {
+			m.snapshots = msg.Snapshots
+			m.lastDataUpdate = time.Now()
+			m.invalidateRenderCaches()
+		}
+		m.refreshing = false
+		m.refreshAll = false
+		m.pendingRefreshRequestID = 0
+		if msg.RequestID > m.lastSnapshotRequestID {
+			m.lastSnapshotRequestID = msg.RequestID
+		}
+		if len(m.snapshots) > 0 || snapshotsReady(m.snapshots) {
+			m.hasData = true
+			m.daemon.status = DaemonRunning
+		}
+		for id, snap := range m.snapshots {
+			info := computeDisplayInfo(snap, dashboardWidget(snap.ProviderID), m.resolveHideCosts(snap))
+			if info.reason != "" {
+				snap.EnsureMaps()
+				snap.Diagnostics["display_branch"] = info.reason
+				m.snapshots[id] = snap
+			}
+		}
+		m.ensureSnapshotProvidersKnown()
+		m.rebuildSortedIDs()
 		return m, m.restartTickIfNeeded()
 	}
 	if m.refreshing && m.hasData && !snapshotsReady(msg.Snapshots) {

@@ -131,6 +131,12 @@ func (ps *PollScheduler) effectiveIntervalLocked(state *pollBackoffState) time.D
 	return ps.baseInterval * time.Duration(multiplier)
 }
 
+// HTTPBasePollInterval returns the minimum poll interval for HTTP providers
+// given the configured dashboard refresh interval.
+func HTTPBasePollInterval(refreshInterval time.Duration) time.Duration {
+	return httpPollInterval(refreshInterval, 0)
+}
+
 // httpPollInterval doubles the base interval for each consecutive unchanged poll,
 // floored at minIntervalHTTP and capped at maxIntervalHTTP.
 func httpPollInterval(base time.Duration, consecutiveNoChange int) time.Duration {

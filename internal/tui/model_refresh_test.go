@@ -167,6 +167,43 @@ func TestRefreshingSurvivesBroadcastSnapshot(t *testing.T) {
 	}
 }
 
+func TestPendingRefreshCompletesAfterNewerBroadcast(t *testing.T) {
+	m := NewModel(0.2, 0.05, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m.hasData = true
+	m.refreshing = true
+	m.refreshAll = true
+	m.pendingRefreshRequestID = 5
+	m.lastSnapshotRequestID = 6
+	m.snapshots = map[string]core.UsageSnapshot{
+		"a": {
+			ProviderID: "openai",
+			AccountID:  "a",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{"requests": {Used: core.Float64Ptr(1)}},
+		},
+	}
+
+	completed, _ := m.handleSnapshotsMsg(SnapshotsMsg{
+		RequestID:  5,
+		TimeWindow: core.TimeWindow30d,
+		Snapshots: map[string]core.UsageSnapshot{
+			"a": {
+				ProviderID: "openai",
+				AccountID:  "a",
+				Status:     core.StatusOK,
+				Metrics:    map[string]core.Metric{"requests": {Used: core.Float64Ptr(9)}},
+			},
+		},
+	})
+	c := completed.(Model)
+	if c.refreshing {
+		t.Fatal("refreshing still true after pending refresh completed with older request ID")
+	}
+	if metric := c.snapshots["a"].Metrics["requests"]; metric.Used == nil || *metric.Used != 9 {
+		t.Fatalf("pending refresh snapshot not applied: %+v", metric)
+	}
+}
+
 func TestEnterDetailModePreservesTimeWindow(t *testing.T) {
 	m := Model{
 		timeWindow:      core.TimeWindow7d,

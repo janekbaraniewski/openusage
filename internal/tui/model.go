@@ -26,9 +26,9 @@ const (
 	idleAfterInteraction = 5 * time.Second  // fast→normal→slow after no user input
 	idleAfterData        = 15 * time.Second // slow→paused after no data change
 
-	// autoRefreshInterval controls how often usage data is automatically
-	// re-fetched so the dashboard stays live without user interaction.
-	autoRefreshInterval = 10 * time.Second
+	// defaultRefreshInterval matches the HTTP provider poll floor when config
+	// refresh_interval_seconds is unset.
+	defaultRefreshInterval = 30 * time.Second
 )
 
 func tickCmd() tea.Cmd {
@@ -41,8 +41,11 @@ func scheduleTickCmd(interval time.Duration) tea.Cmd {
 	})
 }
 
-func autoRefreshCmd() tea.Cmd {
-	return tea.Tick(autoRefreshInterval, func(t time.Time) tea.Msg {
+func autoRefreshCmd(interval time.Duration) tea.Cmd {
+	if interval <= 0 {
+		interval = defaultRefreshInterval
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return autoRefreshMsg(t)
 	})
 }
@@ -270,9 +273,10 @@ type Model struct {
 	// missing key or nil pointer means "fall through to global / auto".
 	hideCostsByAccount map[string]*bool
 
-	timeWindow            core.TimeWindow
-	lastSnapshotRequestID uint64
+	timeWindow              core.TimeWindow
+	lastSnapshotRequestID   uint64
 	pendingRefreshRequestID uint64
+	refreshInterval         time.Duration
 
 	services           Services
 	onAddAccount       func(core.AccountConfig)
@@ -301,8 +305,9 @@ func NewModel(
 		analyticsCache:        analyticsRenderCacheEntry{},
 		detailCache:           detailRenderCacheEntry{},
 		daemon:                daemonState{status: DaemonConnecting},
-		timeWindow:            timeWindow,
-		tickRunning:           true, // Init() starts the first tick chain
+		timeWindow:      timeWindow,
+		refreshInterval: defaultRefreshInterval,
+		tickRunning:     true, // Init() starts the first tick chain
 	}
 
 	model.applyDashboardConfig(dashboardCfg, accounts)
@@ -334,6 +339,13 @@ func (m *Model) SetOnAddAccount(fn func(core.AccountConfig)) {
 
 func (m *Model) SetOnRefresh(fn func(RefreshRequest) uint64) {
 	m.onRefresh = fn
+}
+
+func (m *Model) SetRefreshInterval(interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultRefreshInterval
+	}
+	m.refreshInterval = interval
 }
 
 func (m *Model) SetOnTimeWindowChange(fn func(core.TimeWindow)) {
@@ -433,7 +445,7 @@ type integrationInstallResultMsg struct {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), autoRefreshCmd())
+	return tea.Batch(tickCmd(), autoRefreshCmd(m.refreshInterval))
 }
 
 // nextTickInterval determines the appropriate tick interval based on activity.

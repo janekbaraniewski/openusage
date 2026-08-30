@@ -96,8 +96,11 @@ func TestE2E_LiveProvidersRender(t *testing.T) {
 		return 0
 	})
 	refreshedModel, cmd := model.handleAutoRefresh()
-	if !refreshedModel.(Model).refreshing && !refreshCalled {
+	if !refreshCalled {
 		t.Error("expected handleAutoRefresh to trigger refresh")
+	}
+	if refreshedModel.(Model).refreshing {
+		t.Error("auto-refresh should not enter fetching state")
 	}
 	if cmd == nil {
 		t.Error("expected autoRefreshCmd to be returned for next tick")
