@@ -13,6 +13,7 @@ import (
 type snapshotDispatcher struct {
 	program *tea.Program
 	nextID  atomic.Uint64
+	enrich  func(map[string]core.UsageSnapshot)
 }
 
 func (d *snapshotDispatcher) bind(program *tea.Program) {
@@ -34,6 +35,9 @@ func (d *snapshotDispatcher) refresh(ctx context.Context, rt *daemon.ViewRuntime
 func (d *snapshotDispatcher) send(frame daemon.SnapshotFrame, requestID uint64) {
 	if d == nil || d.program == nil || len(frame.Snapshots) == 0 {
 		return
+	}
+	if d.enrich != nil {
+		d.enrich(frame.Snapshots)
 	}
 	d.program.Send(tui.SnapshotsMsg{
 		Snapshots:  frame.Snapshots,

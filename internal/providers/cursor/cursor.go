@@ -23,11 +23,11 @@ const (
 	statusFilePathEnvVar = "OPENUSAGE_CURSOR_STATUS_FILE"
 )
 
-// Provider exposes Cursor CLI's status-line data as a local provider.
-// It reads live session metrics without needing SQLite DBs or network API calls.
+// Provider exposes Cursor usage from the local status line plus DashboardService plan buckets.
 type Provider struct {
 	providerbase.Base
-	clock core.Clock
+	clock  core.Clock
+	client *Client
 }
 
 // New returns the Cursor provider.
@@ -55,6 +55,12 @@ func New() *Provider {
 		}),
 		clock: core.SystemClock{},
 	}
+}
+
+// WithClient injects a DashboardService client (tests / custom base URL).
+func (p *Provider) WithClient(c *Client) *Provider {
+	p.client = c
+	return p
 }
 
 // DetailWidget keeps the provider's detail view focused on the generic usage and token sections.
@@ -90,6 +96,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, err
 	}
 	if path == "" {
+		p.applyLivePlanUsage(ctx, acct, &snap)
+		if _, ok := snap.Metrics["plan_percent_used"]; ok {
+			return snap, nil
+		}
 		snap.Status = core.StatusAuth
 		snap.Message = "Cursor status-line path is unavailable"
 		return snap, nil
@@ -109,6 +119,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 					if version > 0 {
 						snap.Raw["csv_schema_version"] = fmt.Sprintf("v%d", version)
 					}
+					p.applyLivePlanUsage(ctx, acct, &snap)
 					return snap, nil
 				}
 			}
@@ -168,32 +179,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 						if mName != "" {
 							snap.SetAttribute("model", mName)
 						}
-						snap.Metrics["cursor_plan_usage"] = core.Metric{
-							Limit:     core.Float64Ptr(100),
-							Used:      core.Float64Ptr(0),
-							Remaining: core.Float64Ptr(100),
-							Unit:      "%",
-							Window:    "monthly",
-						}
-						snap.Metrics["plan_percent_used"] = core.Metric{
-							Limit:     core.Float64Ptr(100),
-							Used:      core.Float64Ptr(0),
-							Remaining: core.Float64Ptr(100),
-							Unit:      "%",
-							Window:    "monthly",
-						}
-						snap.Metrics["context_window_percent"] = core.Metric{
-							Limit:     core.Float64Ptr(100),
-							Used:      core.Float64Ptr(0),
-							Remaining: core.Float64Ptr(100),
-							Unit:      "%",
-							Window:    "session",
-						}
-						snap.Metrics["tokens_used"] = core.Metric{
-							Used:   core.Float64Ptr(0),
-							Unit:   "tokens",
-							Window: "session",
-						}
+						p.applyLivePlanUsage(ctx, acct, &snap)
 						return snap, nil
 					}
 				}
@@ -202,6 +188,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			snap.Status = core.StatusAuth
 			snap.Message = "No Cursor status-line data yet"
 			snap.SetDiagnostic("setup", "Run `openusage integrations install cursor`, then start cursor")
+			p.applyLivePlanUsage(ctx, acct, &snap)
+			if _, ok := snap.Metrics["plan_percent_used"]; ok {
+				snap.Status = core.StatusOK
+				snap.Message = ""
+			}
 			return snap, nil
 		}
 		return snap, fmt.Errorf("cursor: read status file: %w", err)
@@ -216,7 +207,120 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 
 	projectSnapshot(&snap, payload)
+	p.applyLivePlanUsage(ctx, acct, &snap)
 	return snap, nil
+}
+
+func (p *Provider) applyLivePlanUsage(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) {
+	if p == nil || snap == nil {
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	token, auth := resolveCursorAccessToken(acct)
+	if token == "" {
+		return
+	}
+	client := p.client
+	if client == nil {
+		client = NewClient(acct.BaseURL, nil)
+	}
+	live, err := client.fetchLivePlanUsage(ctx, token)
+	if err != nil {
+		snap.SetDiagnostic("plan_api_error", err.Error())
+		return
+	}
+	applyLivePlanToSnapshot(snap, live, auth)
+}
+
+func applyLivePlanToSnapshot(snap *core.UsageSnapshot, live livePlanUsage, auth LocalAuthInfo) {
+	if snap == nil {
+		return
+	}
+	snap.EnsureMaps()
+	setPct := func(key string, used *float64) {
+		if used == nil {
+			return
+		}
+		pct := clamp(*used, 0, 100)
+		metric := core.Metric{
+			Limit:     core.Float64Ptr(100),
+			Used:      core.Float64Ptr(pct),
+			Remaining: core.Float64Ptr(100 - pct),
+			Unit:      "%",
+			Window:    "monthly",
+		}
+		snap.Metrics[key] = metric
+		if !live.ResetAt.IsZero() {
+			snap.Resets[key] = live.ResetAt
+			snap.Resets[key+"_reset"] = live.ResetAt
+		}
+	}
+	setPct("plan_percent_used", live.Included)
+	setPct("plan_auto_percent_used", live.Auto)
+	setPct("plan_api_percent_used", live.API)
+	if m, ok := snap.Metrics["plan_percent_used"]; ok {
+		snap.Metrics["cursor_plan_usage"] = m
+		if !live.ResetAt.IsZero() {
+			snap.Resets["cursor_plan_usage"] = live.ResetAt
+			snap.Resets["quota"] = live.ResetAt
+			snap.Resets["billing_cycle_end"] = live.ResetAt
+		}
+	}
+	if planBucketHitMonthlyLimit(live) && snap.Status != core.StatusError {
+		snap.Status = core.StatusLimited
+		snap.Message = "Monthly usage has been hit"
+	}
+	if live.PlanName != "" {
+		snap.SetAttribute("plan_tier", live.PlanName)
+	} else if auth.MembershipType != "" {
+		snap.SetAttribute("plan_tier", auth.MembershipType)
+	}
+	if live.Ondemand != "" {
+		snap.SetAttribute("ondemand", live.Ondemand)
+	}
+	if auth.Email != "" && snap.Attributes["account_email"] == "" {
+		snap.SetAttribute("account_email", auth.Email)
+		snap.Raw["account_email"] = auth.Email
+	}
+	snap.Raw["plan_source"] = "dashboard_api"
+	if snap.Status == "" || snap.Status == core.StatusAuth {
+		snap.Status = core.StatusOK
+	}
+}
+
+func planBucketHitMonthlyLimit(live livePlanUsage) bool {
+	hit := func(v *float64) bool {
+		return v != nil && *v >= 100
+	}
+	return hit(live.Auto) || hit(live.API)
+}
+
+// EnrichSnapshots overlays live Included/Auto/API plan buckets onto daemon
+// snapshots. make run reads the telemetry daemon, which often still only has
+// status-line context metrics; this fills plan usage in the TUI process.
+func (p *Provider) EnrichSnapshots(ctx context.Context, accounts []core.AccountConfig, snaps map[string]core.UsageSnapshot) {
+	if p == nil || len(snaps) == 0 {
+		return
+	}
+	byID := make(map[string]core.AccountConfig, len(accounts))
+	for _, acct := range accounts {
+		if id := strings.TrimSpace(acct.ID); id != "" {
+			byID[id] = acct
+		}
+	}
+	for id, snap := range snaps {
+		if snap.ProviderID != "cursor" {
+			continue
+		}
+		acct, ok := byID[id]
+		if !ok {
+			acct = core.AccountConfig{ID: id, Provider: "cursor"}
+		}
+		p.applyLivePlanUsage(ctx, acct, &snap)
+		snaps[id] = snap
+	}
 }
 
 // HasChanged reports whether the Cursor status-line state file has been modified since the given time.

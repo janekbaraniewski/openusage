@@ -16,6 +16,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/dashboardapp"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
+	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/tui"
 	"github.com/janekbaraniewski/openusage/internal/version"
 )
@@ -56,7 +57,14 @@ func runDashboard(cfg config.Config) {
 	viewRuntime.SetTimeWindow(timeWindow)
 
 	var program *tea.Program
-	dispatcher := &snapshotDispatcher{}
+	cursorProv := cursor.New()
+	dispatcher := &snapshotDispatcher{
+		enrich: func(snaps map[string]core.UsageSnapshot) {
+			enrichCtx, enrichCancel := context.WithTimeout(ctx, 4*time.Second)
+			defer enrichCancel()
+			cursorProv.EnrichSnapshots(enrichCtx, cachedAccounts, snaps)
+		},
+	}
 
 	model.SetOnAddAccount(func(acct core.AccountConfig) {
 		if strings.TrimSpace(acct.ID) == "" || strings.TrimSpace(acct.Provider) == "" {

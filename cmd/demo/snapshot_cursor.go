@@ -24,9 +24,9 @@ func buildCursorDemoSnapshot(now time.Time) core.UsageSnapshot {
 		"plan_limit_usd":       {Used: ptr(3600), Unit: "USD"},
 		"plan_included_amount": {Used: ptr(20.00), Unit: "USD"},
 
-		"plan_percent_used":      {Used: ptr(100), Unit: "%"},
-		"plan_auto_percent_used": {Used: ptr(0), Unit: "%"},
-		"plan_api_percent_used":  {Used: ptr(100), Unit: "%"},
+		"plan_percent_used":      {Used: ptr(7), Remaining: ptr(93), Limit: ptr(100), Unit: "%", Window: "monthly"},
+		"plan_auto_percent_used": {Used: ptr(6), Remaining: ptr(94), Limit: ptr(100), Unit: "%", Window: "monthly"},
+		"plan_api_percent_used":  {Used: ptr(29), Remaining: ptr(71), Limit: ptr(100), Unit: "%", Window: "monthly"},
 		"composer_context_pct":   {Used: ptr(43), Unit: "%"},
 
 		"team_size":   {Used: ptr(18), Unit: "members"},
@@ -199,6 +199,11 @@ func buildCursorDemoSnapshot(now time.Time) core.UsageSnapshot {
 		Metrics:    metrics,
 		Resets: map[string]time.Time{
 			"billing_cycle_end": billingEnd,
+			"plan_percent_used": time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC),
+		},
+		Attributes: map[string]string{
+			"plan_tier": "Pro",
+			"ondemand":  "disabled",
 		},
 		Raw: map[string]string{
 			"account_email":       "demo.user@acme-corp.dev",

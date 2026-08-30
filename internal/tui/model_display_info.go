@@ -162,17 +162,30 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 			remaining = *pu.Remaining
 		}
 		if isUsedMode {
-			info.summary = fmt.Sprintf("%.2f%% used", *pu.Used)
+			info.summary = fmt.Sprintf("%.0f%% used", *pu.Used)
 			info.gaugePercent = *pu.Used
-			if pu.Remaining != nil {
-				info.detail = fmt.Sprintf("%.2f%% used", 100-*pu.Remaining)
-			}
 		} else {
-			info.summary = fmt.Sprintf("%.2f%% remaining", remaining)
+			info.summary = fmt.Sprintf("%.0f%% remaining", remaining)
 			info.gaugePercent = remaining
-			if pu.Remaining != nil {
-				info.detail = fmt.Sprintf("%.2f%% remaining", *pu.Remaining)
+		}
+		if snap.ProviderID == "cursor" {
+			if summary := cursorPlanBucketSummary(snap); summary != "" {
+				info.summary = summary
+				info.reason = "cursor_plan"
 			}
+		}
+		var parts []string
+		if auto, ok := snap.Metrics["plan_auto_percent_used"]; ok && auto.Used != nil {
+			parts = append(parts, fmt.Sprintf("Auto %.0f%%", *auto.Used))
+		}
+		if api, ok := snap.Metrics["plan_api_percent_used"]; ok && api.Used != nil {
+			parts = append(parts, fmt.Sprintf("API %.0f%%", *api.Used))
+		}
+		if snap.Attributes["ondemand"] == "disabled" {
+			parts = append(parts, "On-Demand off")
+		}
+		if len(parts) > 0 && snap.ProviderID != "cursor" {
+			info.detail = strings.Join(parts, " · ")
 		}
 		return info
 	}
@@ -276,6 +289,21 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
 		info.reason = "cursor_usage"
+
+		if summary := cursorPlanBucketSummary(snap); summary != "" {
+			info.summary = summary
+			info.reason = "cursor_plan"
+			if pu, ok := snap.Metrics["plan_percent_used"]; ok && pu.Used != nil {
+				if isUsedMode {
+					info.gaugePercent = *pu.Used
+				} else if pu.Remaining != nil {
+					info.gaugePercent = *pu.Remaining
+				} else {
+					info.gaugePercent = 100 - *pu.Used
+				}
+			}
+			return info
+		}
 
 		hasQuota := false
 		quotaRem := 100.0
@@ -904,4 +932,37 @@ func windowCreditSpendPart(snap core.UsageSnapshot) (part string, ok bool) {
 		}
 	}
 	return part, true
+}
+
+func cursorPlanBucketSummary(snap core.UsageSnapshot) string {
+	var parts []string
+	add := func(label, key string) {
+		m, ok := snap.Metrics[key]
+		if !ok {
+			return
+		}
+		used := 0.0
+		switch {
+		case m.Used != nil:
+			used = *m.Used
+		case m.Remaining != nil:
+			used = 100 - *m.Remaining
+		default:
+			return
+		}
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", label, used))
+	}
+	add("Included", "plan_percent_used")
+	if _, ok := snap.Metrics["plan_percent_used"]; !ok {
+		add("Included", "cursor_plan_usage")
+	}
+	add("Auto", "plan_auto_percent_used")
+	add("API", "plan_api_percent_used")
+	if snap.Attributes["ondemand"] == "disabled" {
+		parts = append(parts, "On-Demand off")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ")
 }

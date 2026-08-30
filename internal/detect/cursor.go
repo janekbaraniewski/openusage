@@ -46,6 +46,7 @@ func detectCursor(result *Result) {
 			}
 			acct.SetHint("config_dir", boxConfigDir)
 			acct.SetHint("status_file", boxStatusFile)
+			acct.SetHint("auth_file", filepath.Join(containersDir, boxName, ".config", "cursor", "auth.json"))
 			addAccount(result, acct)
 			hasBoxes = true
 		}
@@ -80,6 +81,7 @@ func detectCursor(result *Result) {
 		}
 		acct.SetHint("config_dir", configDir)
 		acct.SetHint("status_file", defaultStatusFile)
+		acct.SetHint("auth_file", filepath.Join(home, ".config", "cursor", "auth.json"))
 		addAccount(result, acct)
 	}
 }

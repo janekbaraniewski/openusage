@@ -2,8 +2,12 @@ package cursor
 
 // LocalSourcePaths returns the on-disk locations the provider reads on each Fetch.
 func (p *Provider) LocalSourcePaths() []string {
+	var paths []string
 	if path := DefaultStatusFilePath(); path != "" {
-		return []string{path}
+		paths = append(paths, path)
 	}
-	return nil
+	if path := DefaultStateDBPath(); path != "" {
+		paths = append(paths, path)
+	}
+	return paths
 }

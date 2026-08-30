@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -365,31 +367,267 @@ func TestPhysicsAndNurulzMultiAccountIsolation(t *testing.T) {
 		t.Fatalf("Fetch(nurulz) error = %v", err)
 	}
 
-	// Verify physics is ready and 100% remaining (never used)
 	if snapPhysics.Status != core.StatusOK {
 		t.Fatalf("expected physics status OK, got %v (%s)", snapPhysics.Status, snapPhysics.Message)
 	}
-	if rem := *snapPhysics.Metrics["cursor_plan_usage"].Remaining; rem != 100.0 {
-		t.Errorf("expected physics plan remaining 100%%, got %.2f%%", rem)
+	if snapPhysics.Attributes["email"] != "physicsxd2izi@gmail.com" {
+		t.Fatalf("physics email = %q", snapPhysics.Attributes["email"])
 	}
-	if used := *snapPhysics.Metrics["cursor_plan_usage"].Used; used != 0.0 {
-		t.Errorf("expected physics plan used 0%%, got %.2f%%", used)
+	if _, ok := snapPhysics.Metrics["cursor_plan_usage"]; ok {
+		t.Fatal("cli-config-only physics account must not invent 100% plan usage")
 	}
 
-	// Verify nurulz is ready with actual usage (45% used / 55% remaining)
 	if snapNurulz.Status != core.StatusOK {
 		t.Fatalf("expected nurulz status OK, got %v (%s)", snapNurulz.Status, snapNurulz.Message)
 	}
-	if rem := *snapNurulz.Metrics["cursor_plan_usage"].Remaining; math.Abs(rem-55.0) > 0.001 {
-		t.Errorf("expected nurulz plan remaining 55%%, got %.2f%%", rem)
+	if got := metricRemaining(t, snapNurulz, "context_window"); got != 55.0 {
+		t.Errorf("expected nurulz context remaining 55%%, got %.2f%%", got)
 	}
-	if used := *snapNurulz.Metrics["cursor_plan_usage"].Used; math.Abs(used-45.0) > 0.001 {
-		t.Errorf("expected nurulz plan used 45%%, got %.2f%%", used)
+	if snapNurulz.Attributes["account_email"] == snapPhysics.Attributes["email"] {
+		t.Fatal("multi-account isolation failure: physics and nurulz share the same email")
+	}
+}
+
+func TestFetchLivePlanFillsAutoAndAPI(t *testing.T) {
+	ts := startNestedPlanUsageServer(t)
+	defer ts.Close()
+	path := filepath.Join(t.TempDir(), "cursor-status.json")
+	if err := os.WriteFile(path, []byte(`{
+		"model": {"display_name": "Auto"},
+		"context_window": {"used_percentage": 10.0, "remaining_percentage": 90.0}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	// Strict assertion: physics and nurulz must NOT have the same values!
-	if *snapPhysics.Metrics["cursor_plan_usage"].Used == *snapNurulz.Metrics["cursor_plan_usage"].Used {
-		t.Fatalf("Multi-account isolation failure: physics and nurulz have identical used value %.2f%%",
-			*snapPhysics.Metrics["cursor_plan_usage"].Used)
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:       "cursor",
+		Provider: "cursor",
+		Token:    "test-jwt",
+		BaseURL:  ts.URL,
+		ProviderPaths: map[string]string{
+			"status_file": path,
+			"state_db":    filepath.Join(t.TempDir(), "missing.vscdb"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if got := metricUsed(t, snap, "plan_percent_used"); got != 7 {
+		t.Fatalf("Included = %v, want 7", got)
+	}
+	if got := metricUsed(t, snap, "plan_auto_percent_used"); got != 6 {
+		t.Fatalf("Auto = %v, want 6", got)
+	}
+	if got := metricUsed(t, snap, "plan_api_percent_used"); got != 29 {
+		t.Fatalf("API = %v, want 29", got)
+	}
+	if snap.Attributes["plan_tier"] != "Pro" {
+		t.Fatalf("plan_tier = %q, want Pro", snap.Attributes["plan_tier"])
+	}
+	if snap.Attributes["ondemand"] != "disabled" {
+		t.Fatalf("ondemand = %q, want disabled", snap.Attributes["ondemand"])
+	}
+}
+
+func TestFetchLivePlan_UsesBoxAuthJSONNotHostStateDB(t *testing.T) {
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/aiserver.v1.DashboardService/GetCurrentPeriodUsage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"billingCycleEnd": "1790685824000",
+			"planUsage": {
+				"autoPercentUsed": 0.56,
+				"apiPercentUsed": 0,
+				"totalPercentUsed": 0.5090909090909091
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	boxRoot := filepath.Join(home, ".agent-containers", "physics")
+	configDir := filepath.Join(boxRoot, ".cursor")
+	authDir := filepath.Join(boxRoot, ".config", "cursor")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "cli-config.json"), []byte(`{"authInfo":{"email":"physicsxd2izi@gmail.com"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(authDir, "auth.json"), []byte(`{"accessToken":"physics-box-jwt","refreshToken":"refresh"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:       "cursor-physics",
+		Provider: "cursor",
+		BaseURL:  ts.URL,
+		ProviderPaths: map[string]string{
+			"config_dir":  configDir,
+			"status_file": filepath.Join(home, "cursor-physics-status.json"),
+			"state_db":    filepath.Join(home, "missing.vscdb"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if gotAuth != "Bearer physics-box-jwt" {
+		t.Fatalf("Authorization = %q, want Bearer physics-box-jwt from auth.json", gotAuth)
+	}
+	if got := metricUsed(t, snap, "plan_percent_used"); math.Abs(got-0.5090909090909091) > 0.0001 {
+		t.Fatalf("included = %v, want 0.509...", got)
+	}
+	if got := metricUsed(t, snap, "plan_auto_percent_used"); math.Abs(got-0.56) > 0.0001 {
+		t.Fatalf("auto = %v, want 0.56", got)
+	}
+	if got := metricUsed(t, snap, "plan_api_percent_used"); got != 0 {
+		t.Fatalf("api = %v, want 0", got)
+	}
+	reset, ok := snap.Resets["plan_percent_used"]
+	if !ok || reset.IsZero() {
+		t.Fatal("expected billing cycle reset on plan_percent_used")
+	}
+	wantReset := time.UnixMilli(1790685824000).UTC()
+	if !reset.Equal(wantReset) {
+		t.Fatalf("reset = %v, want %v", reset, wantReset)
+	}
+}
+
+func TestFetchLivePlan_MonthlyHitWhenAutoOrAPIIs100(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/aiserver.v1.DashboardService/GetCurrentPeriodUsage" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"billingCycleEnd": "1790685824000",
+			"planUsage": {
+				"autoPercentUsed": 100,
+				"apiPercentUsed": 12,
+				"totalPercentUsed": 80
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	path := filepath.Join(t.TempDir(), "cursor-status.json")
+	if err := os.WriteFile(path, []byte(`{"model":{"display_name":"Auto"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:      "cursor",
+		Token:   "test-jwt",
+		BaseURL: ts.URL,
+		ProviderPaths: map[string]string{
+			"status_file": path,
+			"state_db":    filepath.Join(t.TempDir(), "missing.vscdb"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if snap.Status != core.StatusLimited {
+		t.Fatalf("status = %q, want LIMITED when auto is 100%%", snap.Status)
+	}
+	if !strings.Contains(strings.ToLower(snap.Message), "monthly") {
+		t.Fatalf("message = %q, want monthly usage hit", snap.Message)
+	}
+}
+
+func TestEnrichSnapshots_UsesAuthFileHint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer hinted-jwt" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/aiserver.v1.DashboardService/GetCurrentPeriodUsage" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"planUsage":{"totalPercentUsed":13.2,"autoPercentUsed":10.7,"apiPercentUsed":66.4}}`))
+	}))
+	defer ts.Close()
+
+	authFile := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authFile, []byte(`{"accessToken":"hinted-jwt"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snaps := map[string]core.UsageSnapshot{
+		"cursor-nurulz": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-nurulz",
+			Status:     core.StatusOK,
+			Metrics:    map[string]core.Metric{},
+		},
+	}
+	New().WithClient(NewClient(ts.URL, ts.Client())).EnrichSnapshots(context.Background(), []core.AccountConfig{{
+		ID:       "cursor-nurulz",
+		Provider: "cursor",
+		ProviderPaths: map[string]string{
+			"auth_file": authFile,
+			"state_db":  filepath.Join(t.TempDir(), "missing.vscdb"),
+		},
+	}}, snaps)
+
+	got := snaps["cursor-nurulz"]
+	if metricUsed(t, got, "plan_percent_used") != 13.2 {
+		t.Fatalf("included = %v, want 13.2 from auth.json token", metricUsed(t, got, "plan_percent_used"))
+	}
+	if metricUsed(t, got, "plan_api_percent_used") != 66.4 {
+		t.Fatalf("api = %v, want 66.4", metricUsed(t, got, "plan_api_percent_used"))
+	}
+}
+
+func TestEnrichSnapshots_OverlaysDaemonContextOnly(t *testing.T) {
+	ts := startNestedPlanUsageServer(t)
+	defer ts.Close()
+
+	snaps := map[string]core.UsageSnapshot{
+		"cursor-nurulz": {
+			ProviderID: "cursor",
+			AccountID:  "cursor-nurulz",
+			Status:     core.StatusOK,
+			Metrics: map[string]core.Metric{
+				"context_window": {
+					Used:      core.Float64Ptr(24.5),
+					Remaining: core.Float64Ptr(75.5),
+					Limit:     core.Float64Ptr(100),
+					Unit:      "%",
+				},
+			},
+		},
+	}
+	New().WithClient(NewClient(ts.URL, ts.Client())).EnrichSnapshots(context.Background(), []core.AccountConfig{{
+		ID:       "cursor-nurulz",
+		Provider: "cursor",
+		Token:    "test-jwt",
+		ProviderPaths: map[string]string{
+			"state_db": filepath.Join(t.TempDir(), "missing.vscdb"),
+		},
+	}}, snaps)
+
+	got := snaps["cursor-nurulz"]
+	if metricUsed(t, got, "plan_percent_used") != 7 {
+		t.Fatalf("Included = %v, want 7", metricUsed(t, got, "plan_percent_used"))
+	}
+	if metricUsed(t, got, "plan_auto_percent_used") != 6 {
+		t.Fatalf("Auto = %v, want 6", metricUsed(t, got, "plan_auto_percent_used"))
+	}
+	if metricUsed(t, got, "plan_api_percent_used") != 29 {
+		t.Fatalf("API = %v, want 29", metricUsed(t, got, "plan_api_percent_used"))
+	}
+	if metricRemaining(t, got, "context_window") != 75.5 {
+		t.Fatalf("context remaining = %v, want 75.5 preserved from daemon snapshot", metricRemaining(t, got, "context_window"))
 	}
 }

@@ -350,97 +350,15 @@ func buildAntigravityDetailUsageSection(snap core.UsageSnapshot, innerW int, war
 }
 
 func buildCursorDetailUsageSection(snap core.UsageSnapshot, innerW int, warnThresh, critThresh float64, now time.Time, isUsedMode bool) []string {
-	var lines []string
-
-	barW := innerW - 14
-	if barW < 20 {
-		barW = 20
+	lines := buildCursorPlanUsageLines(snap, innerW, isUsedMode)
+	if len(lines) == 0 {
+		return nil
 	}
-
-	renderItem := func(label string, candidateKeys []string, defaultRemaining float64) {
-		var met core.Metric
-		found := false
-		matchedKey := ""
-		for _, k := range candidateKeys {
-			if m, ok := snap.Metrics[k]; ok && (m.Remaining != nil || m.Used != nil) {
-				met = m
-				found = true
-				matchedKey = k
-				break
-			}
-		}
-
-		remaining := defaultRemaining
-		if found {
-			if met.Remaining != nil {
-				remaining = *met.Remaining
-			} else if met.Used != nil {
-				remaining = 100 - *met.Used
-			}
-		}
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining > 100 {
-			remaining = 100
-		}
-
-		var resetAt time.Time
-		if matchedKey != "" {
-			if r, hasReset := snap.Resets[matchedKey]; hasReset {
-				resetAt = r
-			} else if r, hasReset := snap.Resets[matchedKey+"_reset"]; hasReset {
-				resetAt = r
-			}
-		}
-
-		var gaugeBar string
-		if isUsedMode {
-			gaugeBar = RenderUsageGauge(100-remaining, barW, warnThresh, critThresh)
-		} else {
-			gaugeBar = RenderGauge(remaining, barW, warnThresh, critThresh)
-		}
-		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(colorSubtext).Render(label))
-		lines = append(lines, "    "+gaugeBar)
-		lines = append(lines, "    "+RenderQuotaStatusAndTimerLineWithMode(remaining, resetAt, now, isUsedMode))
-		lines = append(lines, "")
-	}
-
-	hasQuota := false
-	for _, k := range []string{"plan_percent_used", "cursor_plan_usage", "quota", "quota_pro", "quota_fast"} {
-		if m, ok := snap.Metrics[k]; ok && (m.Remaining != nil || m.Used != nil) {
-			hasQuota = true
-			break
-		}
-	}
-	if hasQuota {
-		if isUsedMode {
-			renderItem("Plan Used", []string{"plan_percent_used", "cursor_plan_usage", "quota", "quota_pro", "quota_fast"}, 100.0)
-		} else {
-			renderItem("Plan Remaining", []string{"plan_percent_used", "cursor_plan_usage", "quota", "quota_pro", "quota_fast"}, 100.0)
-		}
-	}
-
-	hasContext := false
-	for _, k := range []string{"context_window", "context_window_percent"} {
-		if m, ok := snap.Metrics[k]; ok && (m.Remaining != nil || m.Used != nil) {
-			hasContext = true
-			break
-		}
-	}
-	if hasContext {
-		if isUsedMode {
-			renderItem("Context Window Used", []string{"context_window", "context_window_percent"}, 100.0)
-		} else {
-			renderItem("Context Window Remaining", []string{"context_window", "context_window_percent"}, 100.0)
-		}
-	}
-
 	compactLines, _ := buildTileCompactMetricSummaryLinesWithHide(snap, dashboardWidget(snap.ProviderID), innerW, false)
 	if len(compactLines) > 0 {
+		lines = append(lines, "")
 		lines = append(lines, compactLines...)
 	}
-
 	return lines
 }
 
