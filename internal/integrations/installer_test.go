@@ -324,15 +324,16 @@ func TestUninstallOpenCodeRemovesLegacyRegistration(t *testing.T) {
 		t.Fatalf("Install() error = %v", err)
 	}
 
+	// Marshal rather than interpolate: on Windows TemplateFile contains
+	// backslashes, which are escape sequences inside a JSON string literal.
 	configPath := filepath.Join(root, ".config", "opencode", "opencode.json")
-	legacy := `{
-  "plugin": [
-    "file://` + result.TemplateFile + `",
-    "some-other-plugin"
-  ]
-}
-`
-	if err := os.WriteFile(configPath, []byte(legacy), 0o644); err != nil {
+	legacy, err := json.Marshal(map[string]any{
+		"plugin": []string{"file://" + result.TemplateFile, "some-other-plugin"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, legacy, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
