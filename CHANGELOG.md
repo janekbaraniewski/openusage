@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.25.0 (2026-08-31)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump github.com/mattn/go-sqlite3 from 1.14.49 to 1.14.50 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/328
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/330
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/332
+* deps(docs): bump posthog-js from 1.417.0 to 1.418.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/329
+* deps(docs): bump posthog-js from 1.418.7 to 1.422.1 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/342
+* deps(website): bump the website-minor-and-patch group in /website with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/343
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/344
+### Other Changes
+* docs: add CONTRIBUTING and CODE_OF_CONDUCT, file the #277 design note by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/340
+* fix(claude_code): try both known Keychain account names for Safe Storage password by @achappell in https://github.com/janekbaraniewski/openusage/pull/299
+* fix: don't clobber or leak a sibling account's session/usage data by @achappell in https://github.com/janekbaraniewski/openusage/pull/300
+* fix(codex): resolve session model from base_instructions provenance by @achappell in https://github.com/janekbaraniewski/openusage/pull/315
+* feat(antigravity): add Antigravity provider by @achappell in https://github.com/janekbaraniewski/openusage/pull/317
+* fix(telemetry): stop retention blanking the limit_snapshot the dashboard reads by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/341
+* perf(telemetry): skip the dedup enrich UPDATE when the merge changes nothing by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/339
+* fix(integrations): treat OpenCode plugin auto-discovery as configured by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/338
+* perf(daemon): preserve telemetry source collection state by @tttboy123 in https://github.com/janekbaraniewski/openusage/pull/269
+* feat(tui): make Analytics a standard screen, retiring the experimental flag by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/345
+
+## New Contributors
+* @tttboy123 made their first contribution in https://github.com/janekbaraniewski/openusage/pull/269
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.24.4...v0.25.0
+
 ## 0.24.4 (2026-08-17)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
