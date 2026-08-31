@@ -27,6 +27,19 @@ type storedLimitSnapshot struct {
 	Diagnostics map[string]string            `json:"diagnostics"`
 }
 
+// isEmpty reports whether the envelope carried no snapshot data at all, which
+// is what a retention-blanked '{}' payload decodes to. Provider and account id
+// are ignored: the caller already knows both, and a payload carrying only
+// those is still telling us nothing about quota state.
+func (s storedLimitSnapshot) isEmpty() bool {
+	return strings.TrimSpace(s.Status) == "" &&
+		strings.TrimSpace(s.Message) == "" &&
+		len(s.Metrics) == 0 &&
+		len(s.Resets) == 0 &&
+		len(s.Attributes) == 0 &&
+		len(s.Diagnostics) == 0
+}
+
 type storedLimitMetric struct {
 	Limit     *float64 `json:"limit"`
 	Remaining *float64 `json:"remaining"`
@@ -306,6 +319,13 @@ func queryLatestLimitSnapshotPayload(
 func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string) (core.UsageSnapshot, bool) {
 	var envelope storedLimitEnvelope
 	if unmarshalErr := json.Unmarshal([]byte(payload), &envelope); unmarshalErr != nil {
+		return core.UsageSnapshot{}, false
+	}
+	// A payload blanked by retention ('{}') unmarshals cleanly into a zero
+	// envelope, so a successful decode is not proof of usable data. Merging
+	// that empty snapshot overwrote the live one with a confident UNKNOWN and
+	// no metrics (#293). Treat it as absent so hydration is skipped instead.
+	if envelope.Snapshot.isEmpty() {
 		return core.UsageSnapshot{}, false
 	}
 

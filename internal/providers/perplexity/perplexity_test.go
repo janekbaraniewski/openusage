@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/janekbaraniewski/openusage/internal/browsercookies"
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -33,14 +32,14 @@ func isolateConfigDir(t *testing.T) {
 	}
 }
 
-// stubNoBrowserSession makes the browser-session lookup report "none configured"
-// without touching the developer's real browsers or Keychain.
+// stubNoBrowserSession makes the stored-session lookup report "none configured"
+// without touching the developer's real credentials file.
 func stubNoBrowserSession(t *testing.T) {
 	t.Helper()
 
-	orig := loadBrowserSession
-	t.Cleanup(func() { loadBrowserSession = orig })
-	loadBrowserSession = func(context.Context, core.AccountConfig, browsercookies.Reader) (config.BrowserSession, bool, error) {
+	orig := loadStoredSession
+	t.Cleanup(func() { loadStoredSession = orig })
+	loadStoredSession = func(string) (config.BrowserSession, bool, error) {
 		return config.BrowserSession{}, false, nil
 	}
 }

@@ -125,7 +125,15 @@ The daemon runs, in order each cycle:
    you lose the per-turn timeline beyond the hot window, not the totals or
    breakdowns.
 3. **Payload pruning** — `PruneRawEventPayloads` clears the heavy payload blob
-   from old raw rows.
+   from old raw rows, one hour after ingest. Everything the dashboard needs from
+   a usage event has already been extracted into `usage_events` columns by then,
+   so the blob is only replay/debug detail.
+
+   One exception: the newest `limit_snapshot` per provider/account keeps its
+   payload permanently. That payload *is* the provider's quota state — it is
+   what the daemon reads back to rebuild a tile's metrics, and no column in
+   `usage_events` can substitute for it. Superseded snapshots are still cleared,
+   and they are the bulk of the volume.
 
 ```json
 {

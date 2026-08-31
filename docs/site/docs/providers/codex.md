@@ -73,6 +73,27 @@ The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatg
   - Per-model rows with input/output/cached token totals.
   - Per-client rows with the same totals plus session count.
 
+#### How the model is resolved
+
+The model credited to each turn is resolved in this order, first match wins:
+
+1. `model` / `model_id` on the `token_count` event itself (per-turn override).
+2. `model` / `model_id` on the `turn_context` line, if present.
+3. `model` / `model_id` in the `session_meta` header.
+4. `base_instructions.provenance.model` in the `session_meta` header.
+
+Step 4 matters on Codex CLI 0.147.0 and later, which stopped writing an
+explicit model to the session header and no longer emits `turn_context` lines
+at all. Without it every turn falls through to the `unknown` bucket, which
+also zeroes that bucket's cost.
+
+:::note Turns that report only a token total
+Some Codex clients emit `token_count` events with `total_tokens` populated but
+`input_tokens` and `output_tokens` both zero. Those turns still contribute to
+`model_<name>_total_tokens`, but no cost is derived for them — input and output
+price differently, so a total alone cannot be converted to spend.
+:::
+
 ### Rate-limit windows (`rate_limit_primary`, `rate_limit_secondary`)
 
 - Source: `rate_limit.primary` and `rate_limit.secondary` from the live usage endpoint. Each carries `used_percent`, `window_minutes`, `resets_at` (Unix seconds).

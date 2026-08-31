@@ -1,6 +1,6 @@
 ---
 title: OpenUsage docs
-description: Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 19 providers.
+description: Local-first terminal dashboard for AI tool spend, quotas, and rate limits across 36 providers.
 slug: /
 sidebar_position: 1
 sidebar_label: Welcome
@@ -9,7 +9,7 @@ hide_table_of_contents: true
 
 # OpenUsage
 
-Local-first terminal dashboard for AI tool spend, quotas, and rate limits across **19 providers** — Claude Code, Codex CLI, Cursor, Copilot, OpenRouter, OpenAI, Anthropic, and more.
+Local-first terminal dashboard for AI tool spend, quotas, and rate limits across **36 providers** — Claude Code, Codex CLI, Cursor, Copilot, Antigravity CLI, OpenRouter, OpenAI, Anthropic, and more.
 
 ```bash
 brew install janekbaraniewski/tap/openusage
@@ -31,7 +31,7 @@ Run `brew trust janekbaraniewski/tap` once so OpenUsage stays linked across `bre
 - **Local-first** — no cloud, no telemetry sent anywhere; your data never leaves the machine
 - **Zero config** — run `openusage` and the dashboard fills itself in
 - **Always-on collection** — the daemon keeps gathering data even when the dashboard is closed
-- **Tool integrations** — opt-in hooks for Claude Code, Codex CLI, and OpenCode add per-session detail
+- **Tool integrations** — opt-in hooks/status-line bridges for Claude Code, Codex CLI, OpenCode, and Antigravity add richer detail
 
 ## Where to start
 
@@ -57,7 +57,7 @@ Run `brew trust janekbaraniewski/tap` once so OpenUsage stays linked across `bre
   <div className="card">
     <a href="./providers/">
       <h3>Provider catalog</h3>
-      <p>Setup notes for all 19 providers with detection details.</p>
+      <p>Setup notes for all 36 providers with detection details.</p>
     </a>
   </div>
   <div className="card">

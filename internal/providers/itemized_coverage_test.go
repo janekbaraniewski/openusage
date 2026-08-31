@@ -14,7 +14,7 @@ import (
 // parsing). It fails if a provider silently loses that capability.
 func TestItemizedCoverage(t *testing.T) {
 	wantTelemetry := map[string]bool{
-		"claude_code": true, "codex": true, "gemini_cli": true,
+		"claude_code": true, "codex": true, "gemini_cli": true, "antigravity": true,
 		"copilot": true, "cursor": true, "ollama": true, "opencode": true,
 	}
 	wantItemized := map[string]bool{

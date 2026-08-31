@@ -160,6 +160,12 @@
       "binary": "gemini"
     },
     {
+      "id": "antigravity",
+      "provider": "antigravity",
+      "auth": "local",
+      "binary": "agy"
+    },
+    {
       "id": "copilot",
       "provider": "copilot",
       "binary": "gh"
