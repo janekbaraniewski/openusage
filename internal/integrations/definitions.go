@@ -26,6 +26,7 @@ func AllDefinitions() []Definition {
 		claudeCodeDef(),
 		codexDef(),
 		opencodeDef(),
+		antigravityDef(),
 	}
 }
 
@@ -114,17 +115,48 @@ func opencodeDef() Definition {
 		TargetFileFunc: func(dirs Dirs) string {
 			return filepath.Join(dirs.ConfigRoot, "opencode", "plugins", "openusage-telemetry.ts")
 		},
-		ConfigFileFunc: func(dirs Dirs) string {
-			return filepath.Join(dirs.ConfigRoot, "opencode", "opencode.json")
-		},
-		ConfigFormat:  ConfigJSON,
-		ConfigPatcher: patchOpenCodeConfig,
-		Detector:      detectOpenCodeStatus,
+		ConfigFileFunc: openCodeConfigFile,
+		ConfigFormat:   ConfigJSON,
+		ConfigPatcher:  patchOpenCodeConfig,
+		Detector:       detectOpenCodeStatus,
 
 		MatchProviderIDs:  []string{"opencode"},
 		MatchToolNameHint: "",
 		TemplateFileMode:  0o644,
 		EscapeBin:         escapeForTSString,
+	}
+}
+
+func antigravityDef() Definition {
+	return Definition{
+		ID:          AntigravityID,
+		Name:        "Antigravity Status Line",
+		Description: "Status-line bridge for Antigravity CLI",
+		Type:        TypeHookScript,
+		// Antigravity can invoke the OpenUsage binary directly. There is no
+		// separate artifact to render or remove.
+		WritesArtifact: func(Dirs) bool { return false },
+		TargetFileFunc: func(dirs Dirs) string {
+			return dirs.OpenusageBin
+		},
+		ConfigFileFunc: func(dirs Dirs) string {
+			if f := strings.TrimSpace(os.Getenv("ANTIGRAVITY_SETTINGS_FILE")); f != "" {
+				return f
+			}
+			configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
+			if configDir == "" {
+				configDir = filepath.Join(dirs.Home, ".gemini", "antigravity-cli")
+			}
+			return filepath.Join(configDir, "settings.json")
+		},
+		ConfigFormat:  ConfigJSON,
+		ConfigPatcher: patchAntigravityConfig,
+		Detector:      detectAntigravityStatus,
+
+		MatchProviderIDs:  []string{"antigravity"},
+		MatchToolNameHint: "Antigravity CLI",
+		TemplateFileMode:  0o755,
+		EscapeBin:         escapeForShellString,
 	}
 }
 
@@ -246,43 +278,217 @@ func patchCodexConfig(configData []byte, targetFile string, install bool) ([]byt
 	return []byte(out), nil
 }
 
-func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
-	cfg := map[string]any{
-		"$schema": "https://opencode.ai/config.json",
+// openCodeConfigFile resolves the config file to inspect or edit. OpenCode
+// accepts both opencode.json and opencode.jsonc; when the user keeps an
+// authoritative .jsonc we must read and edit that one rather than create a
+// competing strict-JSON file alongside it.
+func openCodeConfigFile(dirs Dirs) string {
+	root := filepath.Join(dirs.ConfigRoot, "opencode")
+	jsonc := filepath.Join(root, "opencode.jsonc")
+	if _, err := os.Stat(jsonc); err == nil {
+		return jsonc
 	}
-	if len(bytes.TrimSpace(configData)) > 0 {
-		if err := json.Unmarshal(configData, &cfg); err != nil {
-			return nil, fmt.Errorf("parse opencode config: %w", err)
-		}
+	return filepath.Join(root, "opencode.json")
+}
+
+// patchOpenCodeConfig unregisters the plugin on uninstall and leaves the config
+// untouched on install.
+//
+// The plugin is written into OpenCode's global plugin directory, and OpenCode
+// loads every local file there automatically
+// (https://opencode.ai/docs/plugins/#from-local-files). An explicit `plugin`
+// entry is therefore redundant on install, and writing one costs real things:
+// it would create an opencode.json for users who have none, and re-serializing
+// a .jsonc through encoding/json would silently strip the comments that make it
+// a .jsonc in the first place.
+//
+// Uninstall still has to run, because earlier openusage versions did write an
+// explicit registration and a stale entry would point at a deleted file.
+// Returning nil means "no config change required" — see Definition.ConfigPatcher.
+func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
+	if install {
+		return nil, nil
+	}
+	if len(bytes.TrimSpace(configData)) == 0 {
+		return nil, nil
+	}
+
+	cfg := map[string]any{}
+	if err := decodeJSONC(configData, &cfg); err != nil {
+		return nil, fmt.Errorf("parse opencode config: %w", err)
+	}
+
+	raw, ok := cfg["plugin"].([]any)
+	if !ok {
+		return nil, nil
 	}
 
 	plugins := []string{}
-	if raw, ok := cfg["plugin"].([]any); ok {
-		for _, item := range raw {
-			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
-				plugins = append(plugins, text)
-			}
+	for _, item := range raw {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			plugins = append(plugins, text)
 		}
 	}
 
 	pluginURL := "file://" + targetFile
-
-	if install {
-		if !slices.Contains(plugins, pluginURL) {
-			plugins = append(plugins, pluginURL)
-		}
-	} else {
-		plugins = slices.DeleteFunc(plugins, func(s string) bool {
-			return s == pluginURL || strings.Contains(s, "openusage-telemetry.ts")
-		})
+	remaining := slices.DeleteFunc(slices.Clone(plugins), func(s string) bool {
+		return s == pluginURL || strings.Contains(s, "openusage-telemetry.ts")
+	})
+	if len(remaining) == len(plugins) {
+		// Nothing of ours in there — leave the file alone rather than
+		// reformat a config we have no edit to make to.
+		return nil, nil
 	}
-	cfg["plugin"] = plugins
+	// Re-serializing through encoding/json would drop every comment in a
+	// .jsonc, so when the file carries any, excise just our array entries
+	// textually and leave the rest of the bytes alone. A plain .json has
+	// nothing to preserve, so it takes the simpler marshal path.
+	if configCarriesComments(configData) {
+		trimmed, ok := removeOpenCodePluginLines(configData, pluginURL)
+		if ok {
+			return trimmed, nil
+		}
+		// Entries were not on their own lines, so a line-wise edit can't be
+		// done safely. Marshalling is still correct JSON and still removes
+		// the stale entry; comments are lost, which beats leaving a
+		// registration pointing at a file we just deleted.
+	}
+
+	cfg["plugin"] = remaining
 
 	payload, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("serialize opencode config: %w", err)
 	}
 	return append(payload, '\n'), nil
+}
+
+// configCarriesComments reports whether stripping JSONC syntax would actually
+// change the file, i.e. whether there is anything worth preserving.
+func configCarriesComments(configData []byte) bool {
+	return !bytes.Equal(bytes.TrimSpace(configData), bytes.TrimSpace(stripJSONC(configData)))
+}
+
+// removeOpenCodePluginLines deletes the lines of the `plugin` array that hold
+// our registration, preserving the rest of the file verbatim. Reports false
+// when any of our entries is not alone on its line, in which case a line-wise
+// edit could corrupt the file and the caller must fall back.
+func removeOpenCodePluginLines(configData []byte, pluginURL string) ([]byte, bool) {
+	isOurs := func(line string) bool {
+		return strings.Contains(line, "openusage-telemetry.ts") || strings.Contains(line, pluginURL)
+	}
+
+	lines := strings.Split(string(configData), "\n")
+	kept := make([]string, 0, len(lines))
+	removed := 0
+
+	for _, line := range lines {
+		if !isOurs(line) {
+			kept = append(kept, line)
+			continue
+		}
+		// The entry must be the only value on the line: a bare quoted string
+		// with an optional trailing comma, and nothing else.
+		bare := strings.TrimSpace(line)
+		bare = strings.TrimSuffix(bare, ",")
+		if !strings.HasPrefix(bare, `"`) || !strings.HasSuffix(bare, `"`) || strings.Count(bare, `"`) != 2 {
+			return nil, false
+		}
+		removed++
+	}
+	if removed == 0 {
+		return nil, false
+	}
+
+	out := strings.Join(kept, "\n")
+
+	// Removing the last element can leave the preceding one with a trailing
+	// comma. JSONC tolerates that, but normalize it so the file stays valid
+	// strict JSON too.
+	out = dropDanglingCommaBeforeClose(out)
+	return []byte(out), true
+}
+
+// dropDanglingCommaBeforeClose removes a comma that now sits immediately before
+// a closing bracket or brace, ignoring whitespace and comment-only lines.
+func dropDanglingCommaBeforeClose(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasSuffix(trimmed, ",") {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			next := strings.TrimSpace(lines[j])
+			if next == "" || strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/*") {
+				continue
+			}
+			if strings.HasPrefix(next, "]") || strings.HasPrefix(next, "}") {
+				idx := strings.LastIndex(line, ",")
+				lines[i] = line[:idx] + line[idx+1:]
+			}
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func patchAntigravityConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
+	if !install && len(bytes.TrimSpace(configData)) == 0 {
+		return configData, nil
+	}
+
+	cfg := map[string]any{}
+	if len(bytes.TrimSpace(configData)) > 0 {
+		if err := json.Unmarshal(configData, &cfg); err != nil {
+			return nil, fmt.Errorf("parse antigravity settings: %w", err)
+		}
+	}
+
+	statusLine, _ := cfg["statusLine"].(map[string]any)
+	existingCommand := ""
+	if statusLine != nil {
+		existingCommand = strings.TrimSpace(stringOrEmpty(statusLine["command"]))
+	}
+
+	if install {
+		if existingCommand != "" && !isAntigravityOpenUsageCommand(existingCommand) {
+			return nil, fmt.Errorf("antigravity statusLine.command is already configured with another command")
+		}
+		if statusLine == nil {
+			statusLine = map[string]any{}
+		}
+		statusLine["type"] = "command"
+		statusLine["command"] = antigravityStatuslineCommand(targetFile)
+		statusLine["enabled"] = true
+		statusLine["stack_with_default"] = true
+		cfg["statusLine"] = statusLine
+	} else if isAntigravityOpenUsageCommand(existingCommand) {
+		// Leave the built-in status-line feature enabled, but remove only the
+		// command owned by OpenUsage. Unrelated custom commands are untouched.
+		cfg["statusLine"] = map[string]any{"enabled": true}
+	} else {
+		return configData, nil
+	}
+
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("serialize antigravity settings: %w", err)
+	}
+	return append(payload, '\n'), nil
+}
+
+func antigravityStatuslineCommand(targetFile string) string {
+	targetFile = strings.TrimSpace(targetFile)
+	if targetFile == "" {
+		targetFile = "openusage"
+	}
+	return fmt.Sprintf("\"%s\" antigravity statusline", escapeForShellString(targetFile))
+}
+
+func isAntigravityOpenUsageCommand(command string) bool {
+	command = strings.ToLower(strings.TrimSpace(command))
+	return strings.Contains(command, "antigravity statusline")
 }
 
 // --- Detectors ---
@@ -370,26 +576,65 @@ func detectOpenCodeStatus(dirs Dirs) Status {
 	st.Installed = pluginErr == nil
 	st.InstalledVersion = parseIntegrationVersion(pluginData)
 
-	configured := false
-	configFile := def.ConfigFileFunc(dirs)
-	if configData, err := os.ReadFile(configFile); err == nil {
-		var cfg map[string]any
-		if json.Unmarshal(configData, &cfg) == nil {
-			if list, ok := cfg["plugin"].([]any); ok {
-				for _, item := range list {
-					text, ok := item.(string)
-					if !ok {
-						continue
-					}
-					if text == "file://"+pluginFile || strings.Contains(text, "openusage-telemetry.ts") {
-						configured = true
-						break
+	// A versioned plugin sitting in OpenCode's global plugin directory is
+	// already active: OpenCode loads every local file there automatically
+	// (https://opencode.ai/docs/plugins/#from-local-files). Requiring an
+	// explicit `plugin` entry on top of that reported a working install as
+	// PARTIAL. An explicit registration still counts, so configs written by
+	// older openusage versions keep reporting READY.
+	configured := st.Installed && st.InstalledVersion != ""
+	if !configured {
+		configFile := def.ConfigFileFunc(dirs)
+		if configData, err := os.ReadFile(configFile); err == nil {
+			var cfg map[string]any
+			if decodeJSONC(configData, &cfg) == nil {
+				if list, ok := cfg["plugin"].([]any); ok {
+					for _, item := range list {
+						text, ok := item.(string)
+						if !ok {
+							continue
+						}
+						if text == "file://"+pluginFile || strings.Contains(text, "openusage-telemetry.ts") {
+							configured = true
+							break
+						}
 					}
 				}
 			}
 		}
 	}
 	st.Configured = configured
+	deriveState(&st)
+	return st
+}
+
+func detectAntigravityStatus(dirs Dirs) Status {
+	def := antigravityDef()
+	st := Status{
+		ID:             AntigravityID,
+		Name:           def.Name,
+		DesiredVersion: IntegrationVersion,
+	}
+
+	configFile := def.ConfigFileFunc(dirs)
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		deriveState(&st)
+		return st
+	}
+
+	var cfg map[string]any
+	if json.Unmarshal(data, &cfg) == nil {
+		if statusLine, ok := cfg["statusLine"].(map[string]any); ok {
+			st.Configured = isAntigravityOpenUsageCommand(stringOrEmpty(statusLine["command"]))
+		}
+	}
+	// This integration registers the OpenUsage binary directly, so configured
+	// is the equivalent of an installed artifact.
+	st.Installed = st.Configured
+	if st.Installed {
+		st.InstalledVersion = IntegrationVersion
+	}
 	deriveState(&st)
 	return st
 }

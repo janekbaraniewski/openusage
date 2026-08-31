@@ -89,7 +89,7 @@ openusage integrations install codex
 openusage integrations install opencode
 ```
 
-Each tool's config file is patched (Claude `~/.claude/settings.json`, Codex `~/.codex/config.toml`, OpenCode `~/.config/opencode/opencode.json`). The hook scripts shell out to `openusage telemetry hook <source>` and post events to the daemon.
+Claude and Codex have their config files patched (`~/.claude/settings.json`, `~/.codex/config.toml`). OpenCode needs no config change — it auto-discovers plugins in `~/.config/opencode/plugins/`. The hook scripts shell out to `openusage telemetry hook <source>` and post events to the daemon.
 
 If the daemon is briefly unavailable, hooks spool to `~/.local/state/openusage/telemetry-spool/` and are drained when it comes back.
 

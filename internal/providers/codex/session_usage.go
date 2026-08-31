@@ -70,7 +70,10 @@ func (p *Provider) readSessionUsageBreakdowns(sessionsDir string, snap *core.Usa
 			switch {
 			case record.SessionMeta != nil:
 				sessionClient = classifyClient(record.SessionMeta.Source, record.SessionMeta.Originator)
-				if m := core.FirstNonEmpty(record.SessionMeta.Model, record.SessionMeta.ModelID); m != "" {
+				// ProvenanceModel is the fallback for CLI versions that no
+				// longer write an explicit model to the header; the explicit
+				// fields still win when present.
+				if m := core.FirstNonEmpty(record.SessionMeta.Model, record.SessionMeta.ModelID, record.SessionMeta.ProvenanceModel()); m != "" {
 					sessionDefaultModel = m
 					currentModel = m
 				}

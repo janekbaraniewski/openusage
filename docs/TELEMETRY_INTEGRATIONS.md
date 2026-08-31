@@ -1,10 +1,11 @@
 # Telemetry Integrations
 
-This repository supports three native coding-agent telemetry streams:
+This repository supports four native coding-agent telemetry streams:
 
 1. OpenCode plugin hooks
 2. Codex `notify` hook
 3. Claude Code command hooks
+4. Antigravity CLI status-line state
 
 All streams emit normalized telemetry events into the same SQLite store:
 
@@ -30,6 +31,7 @@ openusage integrations list --all
 openusage integrations install claude_code
 openusage integrations install codex
 openusage integrations install opencode
+openusage integrations install antigravity
 
 # Upgrade an integration to the latest embedded version
 openusage integrations upgrade claude_code
@@ -48,7 +50,7 @@ The daemon also prints a hint at startup when it detects tools with missing inte
 ### OpenCode (Plugin)
 
 - `~/.config/opencode/plugins/openusage-telemetry.ts`
-- plugin entry in `~/.config/opencode/opencode.json`
+- no config entry: OpenCode auto-discovers plugins in `~/.config/opencode/plugins/`
 
 ### Codex (Notify Hook)
 
@@ -62,6 +64,12 @@ The daemon also prints a hint at startup when it detects tools with missing inte
   - `Stop`
   - `SubagentStop`
   - `PostToolUse`
+
+### Antigravity CLI (Status Line)
+
+- `~/.gemini/antigravity-cli/settings.json` receives the `openusage antigravity statusline` command.
+- The command atomically writes the latest status-line JSON to `~/.local/state/openusage/antigravity-status.json`.
+- The normal daemon collector reads that latest state and deduplicates revisions in the shared telemetry store.
 
 ## Provider Linking (Explicit Control)
 
@@ -150,6 +158,12 @@ Claude Code:
 
 ```bash
 sqlite3 ~/.local/state/openusage/telemetry.db "select r.source_system, r.source_channel, e.event_type, count(*) from usage_events e join usage_raw_events r on r.raw_event_id=e.raw_event_id where r.source_system='claude_code' group by 1,2,3 order by 1,2,3;"
+```
+
+Antigravity:
+
+```bash
+sqlite3 ~/.local/state/openusage/telemetry.db "select r.source_system, r.source_channel, e.event_type, count(*) from usage_events e join usage_raw_events r on r.raw_event_id=e.raw_event_id where r.source_system='antigravity' group by 1,2,3 order by 1,2,3;"
 ```
 
 Inspect latest canonical metrics:

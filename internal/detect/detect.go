@@ -49,6 +49,7 @@ func AutoDetect() Result {
 	detectAider(&result)
 	detectGHCopilot(&result)
 	detectGeminiCLI(&result)
+	detectAntigravity(&result)
 	detectAmp(&result)
 	detectGoose(&result)
 	detectHermes(&result)
@@ -380,6 +381,51 @@ func detectGeminiCLI(result *Result) {
 		log.Printf("[detect] Gemini CLI project from GOOGLE_CLOUD_PROJECT_ID: %s", v)
 	}
 
+	addAccount(result, acct)
+}
+
+func detectAntigravity(result *Result) {
+	bin := findBinary("agy")
+	if bin == "" {
+		return
+	}
+
+	home := homeDir()
+	if home == "" {
+		return
+	}
+	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
+	if configDir == "" {
+		configDir = filepath.Join(home, ".gemini", "antigravity-cli")
+	}
+	if !dirExists(configDir) {
+		log.Printf("[detect] Antigravity CLI config dir %s not found, skipping", configDir)
+		return
+	}
+
+	settingsFile := filepath.Join(configDir, "settings.json")
+	brainDir := filepath.Join(configDir, "brain")
+	if !fileExists(settingsFile) && !dirExists(brainDir) {
+		log.Printf("[detect] Antigravity CLI config dir exists but no settings.json or brain directory found, skipping")
+		return
+	}
+
+	log.Printf("[detect] Found Antigravity CLI at %s", bin)
+	result.Tools = append(result.Tools, DetectedTool{
+		Name:       "Antigravity CLI",
+		BinaryPath: bin,
+		ConfigDir:  configDir,
+		Type:       "cli",
+	})
+
+	acct := core.AccountConfig{
+		ID:           "antigravity",
+		Provider:     "antigravity",
+		Auth:         "local",
+		Binary:       bin,
+		RuntimeHints: make(map[string]string),
+	}
+	acct.SetHint("config_dir", configDir)
 	addAccount(result, acct)
 }
 

@@ -393,8 +393,11 @@ func applyTelemetrySessionMeta(state *telemetryParserState, meta *sessionMetaPay
 	if sid := core.FirstNonEmpty(meta.SessionID, meta.ID); sid != "" {
 		state.sessionID = sid
 	}
-	if strings.TrimSpace(meta.Model) != "" {
-		state.model = strings.TrimSpace(meta.Model)
+	// ProvenanceModel is the last-resort source: Codex CLI 0.147.0 dropped the
+	// explicit model from the session header, so without it every turn falls
+	// into the "unknown" bucket. The explicit fields still win.
+	if m := core.FirstNonEmpty(meta.Model, meta.ModelID, meta.ProvenanceModel()); strings.TrimSpace(m) != "" {
+		state.model = strings.TrimSpace(m)
 	}
 	if strings.TrimSpace(meta.ModelProvider) != "" {
 		state.upstreamProviderID = strings.TrimSpace(meta.ModelProvider)
@@ -411,8 +414,8 @@ func applyTelemetryTurnContext(state *telemetryParserState, turn *turnContextPay
 	if state == nil || turn == nil {
 		return
 	}
-	if strings.TrimSpace(turn.Model) != "" {
-		state.model = strings.TrimSpace(turn.Model)
+	if m := core.FirstNonEmpty(turn.Model, turn.ModelID); strings.TrimSpace(m) != "" {
+		state.model = strings.TrimSpace(m)
 	}
 	if strings.TrimSpace(turn.TurnID) != "" {
 		state.currentTurnID = strings.TrimSpace(turn.TurnID)
@@ -437,7 +440,6 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 			if payload.Type != "token_count" || payload.Info == nil {
 				return nil
 			}
-
 			total := payload.Info.TotalTokenUsage
 			delta := total
 			if state.hasPrevious {
@@ -471,6 +473,14 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 				messageID = turnID
 			}
 
+			// A token_count event may name its own model, which overrides the
+			// session/turn default for this turn only -- so it is derived here
+			// rather than stored on the parser state.
+			eventModel := state.model
+			if m := core.FirstNonEmpty(payload.Model, payload.ModelID); strings.TrimSpace(m) != "" {
+				eventModel = strings.TrimSpace(m)
+			}
+
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: "codex_session_v1",
 				Channel:       shared.TelemetryChannelJSONL,
@@ -483,7 +493,7 @@ func parseTelemetrySessionFileFrom(path string, byteOffset int64, lineNumber int
 				ProviderID:    codexTelemetryProviderID,
 				AgentName:     "codex",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:      state.model,
+				ModelRaw:      eventModel,
 				TokenUsage: core.TokenUsage{
 					InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
 					OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),

@@ -41,9 +41,6 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 			return InstallResult{}, fmt.Errorf("integrations: create target dir: %w", err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: create config dir: %w", err)
-	}
 
 	// Render template with version and binary placeholders.
 	content := strings.ReplaceAll(def.Template, "__OPENUSAGE_INTEGRATION_VERSION__", IntegrationVersion)
@@ -55,9 +52,6 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 			return InstallResult{}, fmt.Errorf("integrations: backup target: %w", err)
 		}
 	}
-	if err := backupIfExists(configFile); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: backup config: %w", err)
-	}
 
 	// Write rendered template.
 	if writesArtifact {
@@ -66,7 +60,8 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 		}
 	}
 
-	// Read config, patch it, write it back.
+	// Read config, patch it, write it back. A nil patch means the tool needs
+	// no registration entry, so the config file is left untouched.
 	configData, err := os.ReadFile(configFile)
 	if err != nil && !os.IsNotExist(err) {
 		return InstallResult{}, fmt.Errorf("integrations: read config: %w", err)
@@ -75,8 +70,16 @@ func Install(def Definition, dirs Dirs) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("integrations: patch config: %w", err)
 	}
-	if err := os.WriteFile(configFile, patched, 0o600); err != nil {
-		return InstallResult{}, fmt.Errorf("integrations: write config: %w", err)
+	if patched != nil {
+		if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: create config dir: %w", err)
+		}
+		if err := backupIfExists(configFile); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: backup config: %w", err)
+		}
+		if err := os.WriteFile(configFile, patched, 0o600); err != nil {
+			return InstallResult{}, fmt.Errorf("integrations: write config: %w", err)
+		}
 	}
 
 	action := "installed"
@@ -110,8 +113,10 @@ func Uninstall(def Definition, dirs Dirs) error {
 		if err != nil {
 			return fmt.Errorf("integrations: unpatch config: %w", err)
 		}
-		if err := os.WriteFile(configFile, patched, 0o600); err != nil {
-			return fmt.Errorf("integrations: write config: %w", err)
+		if patched != nil {
+			if err := os.WriteFile(configFile, patched, 0o600); err != nil {
+				return fmt.Errorf("integrations: write config: %w", err)
+			}
 		}
 	}
 

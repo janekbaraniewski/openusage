@@ -372,6 +372,27 @@ func TestParseTelemetrySessionFile_CollectsTokenDeltas(t *testing.T) {
 	}
 }
 
+func TestParseTelemetrySessionFile_UsesProvenanceModelFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-provenance.jsonl")
+	content := `{"timestamp":"2026-08-15T10:00:00Z","type":"session_meta","payload":{"id":"sess-prov","source":"cli","originator":"codex_cli_rs","model_provider":"openai","base_instructions":{"provenance":{"type":"model","model":"gpt-5.6-luna"}}}}
+{"timestamp":"2026-08-15T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":80}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	events, err := ParseTelemetrySessionFile(path)
+	if err != nil {
+		t.Fatalf("parse telemetry file: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].ModelRaw != "gpt-5.6-luna" {
+		t.Fatalf("model_raw = %q, want gpt-5.6-luna", events[0].ModelRaw)
+	}
+}
+
 func TestParseTelemetrySessionFile_UsesTurnIDAsMessageIDFallback(t *testing.T) {
 	sessionsDir := filepath.Join(t.TempDir(), "sessions", "2026", "03", "05")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
