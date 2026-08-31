@@ -22,7 +22,7 @@ The codebase is small enough that a few simple conventions go a long way. Follow
   ```go
   import tea "github.com/charmbracelet/bubbletea"
   ```
-- Provider package names match the provider ID (`openai`, `claude_code`, `gemini_cli`).
+- Provider package names match the provider ID (`openai`, `claude_code`, `gemini_cli`, `antigravity`).
 - Test files end in `_test.go` and live next to the code under test.
 
 ### Errors

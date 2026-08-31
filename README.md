@@ -159,7 +159,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 ## Features
 
 - **Cross-provider tracking** — compare coding agents, API platforms, and local runtimes in one local dashboard
-- **35 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
+- **36 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, Antigravity CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, tokens, burn rate, and per-model usage at a glance
 - **tmux integration** — show the active tool's usage in your tmux status bar, with provider icons, presets, and active-tool detection
@@ -167,13 +167,13 @@ If the question is whether this is the right fit versus a simpler local limits t
 - **Headless reports** — `daily`, `weekly`, `monthly`, `session`, and `blocks` reports in table or JSON
 - **Background tracking** — a daemon collects data continuously, even when the dashboard is closed, into a local SQLite database you own
 - **Deep cost insights** — model, tool, project, MCP, and session breakdowns; combine providers like OpenCode + OpenRouter
-- **Tool integrations** — optional hooks for Claude Code, Codex CLI, and OpenCode provide richer, real-time usage data
+- **Tool integrations** — optional hooks/status-line bridges for Claude Code, Codex CLI, OpenCode, and Antigravity provide richer, real-time usage data
 - **Export & metrics** — export snapshots to JSON or CSV, look up model pricing, or serve Prometheus metrics from the built-in hub
 - **Customizable** — 17 built-in themes, adjustable time windows, configurable thresholds, provider reordering, plus external theme files
 
 ## Supported providers
 
-35 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
+36 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
 
 ### Claude Code
 
@@ -202,6 +202,7 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **GitHub Copilot** | `gh` CLI + Copilot extension | Chat & completions quota, org billing, session tracking |
 | **Codex CLI** | `codex` binary + `~/.codex` | Session tokens, per-model breakdown, credits, rate limits |
 | **Gemini CLI** | `gemini` binary + `~/.gemini` | OAuth status, conversation count, per-model tokens |
+| **Antigravity CLI** | `agy` binary + `~/.gemini/antigravity-cli` | Status-line context, session tokens, model quotas |
 | **OpenCode** | `OPENCODE_API_KEY` / `ZEN_API_KEY` | Credits, activity, generation stats |
 | **Ollama** | `OLLAMA_HOST` / binary | Local models, per-model usage |
 

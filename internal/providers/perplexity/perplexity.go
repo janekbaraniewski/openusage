@@ -22,15 +22,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/providerbase"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
-// loadBrowserSession is a seam so tests can supply a session instead of reading
-// the developer's real browser cookie store, which on macOS blocks in a Keychain
-// prompt no test binary can answer.
-var loadBrowserSession = shared.LoadOrRefreshBrowserSession
+// loadStoredSession is a seam so tests can supply a session instead of reading
+// the developer's real credentials file. It deliberately does not refresh from
+// the browser cookie store: doing so on every poll overwrites the stored
+// session and clobbers a sibling account that shares this provider's cookie
+// domain but was connected from a different browser.
+var loadStoredSession = config.LoadSession
 
 const (
 	consoleBaseURL = "https://console.perplexity.ai"
@@ -82,7 +85,14 @@ func New() *Provider {
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
-	session, ok, err := loadBrowserSession(ctx, acct, nil)
+	// Load directly from stored credentials rather than
+	// shared.LoadOrRefreshBrowserSession, which re-reads the live browser
+	// cookie and overwrites the stored session on every poll — clobbering a
+	// sibling account's session when two accounts share this provider's
+	// fixed cookie domain but use different source browsers. See the
+	// equivalent opencode fix (loadStoredSession in
+	// internal/providers/opencode/provider.go) for the bug this avoids.
+	session, ok, err := loadStoredSession(acct.ID)
 	if err != nil || !ok || session.Value == "" {
 		snap.Status = core.StatusAuth
 		snap.Message = "browser session not configured — Settings → 5 KEYS → perplexity → Enter"

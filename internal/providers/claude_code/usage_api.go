@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -121,16 +122,42 @@ func getClaudeSessionCookies() (map[string]string, error) {
 	return cookies, nil
 }
 
-func getChromiumEncryptionKey() ([]byte, error) {
-	cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", "Claude")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("keychain lookup failed (is Claude desktop installed?): %w", err)
-	}
-	password := strings.TrimSpace(string(out))
+// claudeSafeStorageAccounts are the Keychain "account" values Claude
+// Desktop has stored its Chromium Safe Storage password under across
+// releases. Older builds used "Claude"; current builds use "Claude Key".
+// Try each in order so we work across versions.
+var claudeSafeStorageAccounts = []string{"Claude Key", "Claude"}
 
-	key := pbkdf2.Key([]byte(password), []byte("saltysalt"), 1003, 16, sha1.New)
-	return key, nil
+func getChromiumEncryptionKey() ([]byte, error) {
+	var lastErr error
+	for _, account := range claudeSafeStorageAccounts {
+		cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", account)
+		out, err := cmd.Output()
+		if err != nil {
+			if !keychainItemNotFound(err) {
+				return nil, fmt.Errorf("keychain lookup for account %q failed: %w", account, err)
+			}
+			lastErr = err
+			continue
+		}
+		password := strings.TrimSpace(string(out))
+		key := pbkdf2.Key([]byte(password), []byte("saltysalt"), 1003, 16, sha1.New)
+		return key, nil
+	}
+	if lastErr == nil {
+		return nil, fmt.Errorf("keychain lookup failed: no Safe Storage account names configured")
+	}
+	return nil, fmt.Errorf("keychain lookup failed (is Claude desktop installed and signed in?): %w", lastErr)
+}
+
+func keychainItemNotFound(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+
+	message := strings.ToLower(string(exitErr.Stderr))
+	return strings.Contains(message, "could not be found") || strings.Contains(message, "item not found")
 }
 
 func decryptChromiumCookie(encrypted []byte, key []byte) (string, error) {

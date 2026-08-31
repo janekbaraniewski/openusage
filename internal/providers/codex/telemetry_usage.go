@@ -115,8 +115,8 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			if sid != "" {
 				sessionID = sid
 			}
-			if strings.TrimSpace(record.SessionMeta.Model) != "" {
-				model = strings.TrimSpace(record.SessionMeta.Model)
+			if m := core.FirstNonEmpty(record.SessionMeta.Model, record.SessionMeta.ModelID, record.SessionMeta.ProvenanceModel()); strings.TrimSpace(m) != "" {
+				model = strings.TrimSpace(m)
 			}
 			if strings.TrimSpace(record.SessionMeta.ModelProvider) != "" {
 				upstreamProviderID = strings.TrimSpace(record.SessionMeta.ModelProvider)
@@ -128,8 +128,8 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			clientOriginator = strings.TrimSpace(record.SessionMeta.Originator)
 			clientName = classifyClient(clientSource, clientOriginator)
 		case record.TurnContext != nil:
-			if strings.TrimSpace(record.TurnContext.Model) != "" {
-				model = strings.TrimSpace(record.TurnContext.Model)
+			if m := core.FirstNonEmpty(record.TurnContext.Model, record.TurnContext.ModelID); strings.TrimSpace(m) != "" {
+				model = strings.TrimSpace(m)
 			}
 			if strings.TrimSpace(record.TurnContext.TurnID) != "" {
 				currentTurnID = strings.TrimSpace(record.TurnContext.TurnID)
@@ -138,6 +138,10 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 			payload := record.EventPayload
 			if payload.Type != "token_count" || payload.Info == nil {
 				return nil
+			}
+			eventModel := model
+			if m := core.FirstNonEmpty(payload.Model, payload.ModelID); strings.TrimSpace(m) != "" {
+				eventModel = strings.TrimSpace(m)
 			}
 
 			total := payload.Info.TotalTokenUsage
@@ -185,7 +189,7 @@ func ParseTelemetrySessionFile(path string) ([]shared.TelemetryEvent, error) {
 				ProviderID:    codexTelemetryProviderID,
 				AgentName:     "codex",
 				EventType:     shared.TelemetryEventTypeMessageUsage,
-				ModelRaw:      model,
+				ModelRaw:      eventModel,
 				TokenUsage: core.TokenUsage{
 					InputTokens:     core.Int64Ptr(int64(delta.InputTokens)),
 					OutputTokens:    core.Int64Ptr(int64(delta.OutputTokens)),

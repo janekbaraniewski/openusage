@@ -30,7 +30,7 @@ func TestAllTelemetrySources_DerivedFromProviderRegistry(t *testing.T) {
 		found[source.System()] = true
 	}
 
-	for _, want := range []string{"codex", "claude_code", "opencode"} {
+	for _, want := range []string{"codex", "claude_code", "opencode", "antigravity"} {
 		if !found[want] {
 			t.Fatalf("missing telemetry source %q", want)
 		}

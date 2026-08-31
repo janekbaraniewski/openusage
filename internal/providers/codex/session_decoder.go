@@ -51,6 +51,35 @@ type sessionMetaPayload struct {
 	ModelID       string `json:"model_id,omitempty"`
 	CWD           string `json:"cwd,omitempty"`
 	ModelProvider string `json:"model_provider,omitempty"`
+	// BaseInstructions is the last-resort source for the session model.
+	// Codex CLI 0.147.0 dropped both `model` and `model_id` from the session
+	// header and stopped emitting turn_context lines, leaving
+	// base_instructions.provenance.model as the only record of which model
+	// the session ran on.
+	BaseInstructions *baseInstructions `json:"base_instructions,omitempty"`
+}
+
+// ProvenanceModel returns the model recorded in base_instructions provenance,
+// or "" when the header predates that field or the instructions did not come
+// from a model.
+func (m *sessionMetaPayload) ProvenanceModel() string {
+	if m == nil || m.BaseInstructions == nil || m.BaseInstructions.Provenance == nil {
+		return ""
+	}
+	provenance := m.BaseInstructions.Provenance
+	if provenance.Type != "model" {
+		return ""
+	}
+	return provenance.Model
+}
+
+type baseInstructions struct {
+	Provenance *instructionsProvenance `json:"provenance,omitempty"`
+}
+
+type instructionsProvenance struct {
+	Type  string `json:"type,omitempty"`
+	Model string `json:"model,omitempty"`
 }
 
 type turnContextPayload struct {
