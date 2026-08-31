@@ -672,6 +672,38 @@ func enrichEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string, nor
 	requests := chooseInt64(current.Requests, norm.Requests, override)
 	status := chooseStatus(current.Status, norm.Status, override)
 
+	// A re-ingested event usually merges to exactly what is already stored:
+	// local-file sources re-import their recent history every collection
+	// cycle, and a hook event often arrives again from the session file. The
+	// UPDATE below rewrites twenty columns, dirtying the row's page and every
+	// index covering them, and all of it lands in the WAL. Issuing it for a
+	// merge that changes nothing turned steady-state ingest into sustained
+	// write amplification (#318), so compare first and skip the no-op.
+	if !canonicalEventDiffers(current, canonicalEventFields{
+		providerID:       providerID,
+		accountID:        accountID,
+		workspaceID:      workspaceID,
+		sessionID:        sessionID,
+		turnID:           turnID,
+		messageID:        messageID,
+		toolCallID:       toolCallID,
+		modelRaw:         modelRaw,
+		modelCanonical:   modelCanonical,
+		modelLineage:     modelLineage,
+		toolName:         toolName,
+		inputTokens:      inputTokens,
+		outputTokens:     outputTokens,
+		reasoningTokens:  reasoningTokens,
+		cacheReadTokens:  cacheReadTokens,
+		cacheWriteTokens: cacheWriteTokens,
+		totalTokens:      totalTokens,
+		costUSD:          costUSD,
+		requests:         requests,
+		status:           status,
+	}) {
+		return nil
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		UPDATE usage_events
 		SET
@@ -720,6 +752,113 @@ func enrichEventByDedupKey(ctx context.Context, tx *sql.Tx, dedupKey string, nor
 		current.EventID,
 	)
 	return err
+}
+
+// canonicalEventFields is the merged result enrichEventByDedupKey is about to
+// write, in the same nullable-or-zero form the UPDATE binds.
+type canonicalEventFields struct {
+	providerID       string
+	accountID        string
+	workspaceID      string
+	sessionID        string
+	turnID           string
+	messageID        string
+	toolCallID       string
+	modelRaw         string
+	modelCanonical   string
+	modelLineage     string
+	toolName         string
+	inputTokens      *int64
+	outputTokens     *int64
+	reasoningTokens  *int64
+	cacheReadTokens  *int64
+	cacheWriteTokens *int64
+	totalTokens      *int64
+	costUSD          *float64
+	requests         *int64
+	status           EventStatus
+}
+
+// canonicalEventDiffers reports whether writing merged would change the stored
+// row. Each comparison mirrors the binder the UPDATE uses for that column, so
+// a value the binder would store as NULL compares equal to a NULL column:
+// nullable() nulls a blank string, and nullableInt64/nullableFloat64 null a nil
+// pointer. Getting that mapping wrong would either skip a real update or never
+// skip at all, so the binders are the reference, not the Go zero value.
+func canonicalEventDiffers(current storedCanonicalEvent, merged canonicalEventFields) bool {
+	strFields := []struct {
+		stored sql.NullString
+		next   string
+	}{
+		{current.ProviderID, merged.providerID},
+		{current.AccountID, merged.accountID},
+		{current.WorkspaceID, merged.workspaceID},
+		{current.SessionID, merged.sessionID},
+		{current.TurnID, merged.turnID},
+		{current.MessageID, merged.messageID},
+		{current.ToolCallID, merged.toolCallID},
+		{current.ModelRaw, merged.modelRaw},
+		{current.ModelCanonical, merged.modelCanonical},
+		{current.ModelLineageID, merged.modelLineage},
+		{current.ToolName, merged.toolName},
+	}
+	for _, f := range strFields {
+		if nullStringDiffers(f.stored, f.next) {
+			return true
+		}
+	}
+
+	intFields := []struct {
+		stored sql.NullInt64
+		next   *int64
+	}{
+		{current.InputTokens, merged.inputTokens},
+		{current.OutputTokens, merged.outputTokens},
+		{current.Reasoning, merged.reasoningTokens},
+		{current.CacheRead, merged.cacheReadTokens},
+		{current.CacheWrite, merged.cacheWriteTokens},
+		{current.TotalTokens, merged.totalTokens},
+		{current.Requests, merged.requests},
+	}
+	for _, f := range intFields {
+		if nullInt64Differs(f.stored, f.next) {
+			return true
+		}
+	}
+
+	if nullFloat64Differs(current.CostUSD, merged.costUSD) {
+		return true
+	}
+
+	// status is bound as a plain string, never NULL.
+	return current.Status != string(merged.status)
+}
+
+// nullStringDiffers compares a stored column against what nullable(next) would
+// write: NULL for a blank string, otherwise next verbatim.
+func nullStringDiffers(stored sql.NullString, next string) bool {
+	if strings.TrimSpace(next) == "" {
+		return stored.Valid
+	}
+	return !stored.Valid || stored.String != next
+}
+
+// nullInt64Differs compares a stored column against what nullableInt64(next)
+// would write: NULL for a nil pointer, otherwise *next.
+func nullInt64Differs(stored sql.NullInt64, next *int64) bool {
+	if next == nil {
+		return stored.Valid
+	}
+	return !stored.Valid || stored.Int64 != *next
+}
+
+// nullFloat64Differs compares a stored column against what
+// nullableFloat64(next) would write: NULL for a nil pointer, otherwise *next.
+func nullFloat64Differs(stored sql.NullFloat64, next *float64) bool {
+	if next == nil {
+		return stored.Valid
+	}
+	return !stored.Valid || stored.Float64 != *next
 }
 
 func sourceChannelPriority(channel SourceChannel) int {
