@@ -12,6 +12,7 @@ OpenUsage follows the [XDG Base Directory Specification](https://specifications.
 | Path | Purpose | Override |
 |---|---|---|
 | `~/.config/openusage/settings.json` | Main config file. | — |
+| `~/.config/openusage/settings.json.corrupt` | Copy of a `settings.json` OpenUsage had to salvage, kept for inspection. Overwritten on each repair. See [common issues](../troubleshooting/common-issues.md). | — |
 | `~/.config/openusage/custom-pricing.json` | User pricing overrides. | `OPENUSAGE_CUSTOM_PRICING`, `XDG_CONFIG_HOME` |
 | `~/.config/openusage/themes/` | External themes directory (scanned for `*.json`). | `OPENUSAGE_THEME_DIR` (extra dirs only) |
 | `~/.config/openusage/hooks/` | Hook scripts installed by `openusage integrations`. | — |

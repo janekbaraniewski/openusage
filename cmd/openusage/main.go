@@ -19,18 +19,22 @@ func main() {
 		log.SetOutput(io.Discard)
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Config path: %s\n", config.ConfigPath())
-		os.Exit(1)
-	}
-
 	root := cobra.Command{
 		Use:     "openusage",
 		Short:   "OpenUsage is a terminal dashboard for monitoring AI coding tool usage and spend.",
 		Version: version.Version,
 		Run: func(_ *cobra.Command, _ []string) {
+			// Loaded here rather than in main so an unreadable config only fails
+			// the dashboard. Subcommands load their own config, and the ones that
+			// do not need it (version, help, daemon install/uninstall) keep
+			// working — including the ones you reach for to dig yourself out.
+			cfg, err := config.Load()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Config path: %s\n", config.ConfigPath())
+				fmt.Fprintf(os.Stderr, "Move that file aside to start from defaults.\n")
+				os.Exit(1)
+			}
 			runDashboard(cfg)
 		},
 	}
