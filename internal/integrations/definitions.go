@@ -114,12 +114,10 @@ func opencodeDef() Definition {
 		TargetFileFunc: func(dirs Dirs) string {
 			return filepath.Join(dirs.ConfigRoot, "opencode", "plugins", "openusage-telemetry.ts")
 		},
-		ConfigFileFunc: func(dirs Dirs) string {
-			return filepath.Join(dirs.ConfigRoot, "opencode", "opencode.json")
-		},
-		ConfigFormat:  ConfigJSON,
-		ConfigPatcher: patchOpenCodeConfig,
-		Detector:      detectOpenCodeStatus,
+		ConfigFileFunc: openCodeConfigFile,
+		ConfigFormat:   ConfigJSON,
+		ConfigPatcher:  patchOpenCodeConfig,
+		Detector:       detectOpenCodeStatus,
 
 		MatchProviderIDs:  []string{"opencode"},
 		MatchToolNameHint: "",
@@ -246,37 +244,68 @@ func patchCodexConfig(configData []byte, targetFile string, install bool) ([]byt
 	return []byte(out), nil
 }
 
-func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
-	cfg := map[string]any{
-		"$schema": "https://opencode.ai/config.json",
+// openCodeConfigFile resolves the config file to inspect or edit. OpenCode
+// accepts both opencode.json and opencode.jsonc; when the user keeps an
+// authoritative .jsonc we must read and edit that one rather than create a
+// competing strict-JSON file alongside it.
+func openCodeConfigFile(dirs Dirs) string {
+	root := filepath.Join(dirs.ConfigRoot, "opencode")
+	jsonc := filepath.Join(root, "opencode.jsonc")
+	if _, err := os.Stat(jsonc); err == nil {
+		return jsonc
 	}
-	if len(bytes.TrimSpace(configData)) > 0 {
-		if err := json.Unmarshal(configData, &cfg); err != nil {
-			return nil, fmt.Errorf("parse opencode config: %w", err)
-		}
+	return filepath.Join(root, "opencode.json")
+}
+
+// patchOpenCodeConfig unregisters the plugin on uninstall and leaves the config
+// untouched on install.
+//
+// The plugin is written into OpenCode's global plugin directory, and OpenCode
+// loads every local file there automatically
+// (https://opencode.ai/docs/plugins/#from-local-files). An explicit `plugin`
+// entry is therefore redundant on install, and writing one costs real things:
+// it would create an opencode.json for users who have none, and re-serializing
+// a .jsonc through encoding/json would silently strip the comments that make it
+// a .jsonc in the first place.
+//
+// Uninstall still has to run, because earlier openusage versions did write an
+// explicit registration and a stale entry would point at a deleted file.
+// Returning nil means "no config change required" — see Definition.ConfigPatcher.
+func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]byte, error) {
+	if install {
+		return nil, nil
+	}
+	if len(bytes.TrimSpace(configData)) == 0 {
+		return nil, nil
+	}
+
+	cfg := map[string]any{}
+	if err := decodeJSONC(configData, &cfg); err != nil {
+		return nil, fmt.Errorf("parse opencode config: %w", err)
+	}
+
+	raw, ok := cfg["plugin"].([]any)
+	if !ok {
+		return nil, nil
 	}
 
 	plugins := []string{}
-	if raw, ok := cfg["plugin"].([]any); ok {
-		for _, item := range raw {
-			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
-				plugins = append(plugins, text)
-			}
+	for _, item := range raw {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			plugins = append(plugins, text)
 		}
 	}
 
 	pluginURL := "file://" + targetFile
-
-	if install {
-		if !slices.Contains(plugins, pluginURL) {
-			plugins = append(plugins, pluginURL)
-		}
-	} else {
-		plugins = slices.DeleteFunc(plugins, func(s string) bool {
-			return s == pluginURL || strings.Contains(s, "openusage-telemetry.ts")
-		})
+	remaining := slices.DeleteFunc(slices.Clone(plugins), func(s string) bool {
+		return s == pluginURL || strings.Contains(s, "openusage-telemetry.ts")
+	})
+	if len(remaining) == len(plugins) {
+		// Nothing of ours in there — leave the file alone rather than
+		// reformat a config we have no edit to make to.
+		return nil, nil
 	}
-	cfg["plugin"] = plugins
+	cfg["plugin"] = remaining
 
 	payload, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -370,20 +399,28 @@ func detectOpenCodeStatus(dirs Dirs) Status {
 	st.Installed = pluginErr == nil
 	st.InstalledVersion = parseIntegrationVersion(pluginData)
 
-	configured := false
-	configFile := def.ConfigFileFunc(dirs)
-	if configData, err := os.ReadFile(configFile); err == nil {
-		var cfg map[string]any
-		if json.Unmarshal(configData, &cfg) == nil {
-			if list, ok := cfg["plugin"].([]any); ok {
-				for _, item := range list {
-					text, ok := item.(string)
-					if !ok {
-						continue
-					}
-					if text == "file://"+pluginFile || strings.Contains(text, "openusage-telemetry.ts") {
-						configured = true
-						break
+	// A versioned plugin sitting in OpenCode's global plugin directory is
+	// already active: OpenCode loads every local file there automatically
+	// (https://opencode.ai/docs/plugins/#from-local-files). Requiring an
+	// explicit `plugin` entry on top of that reported a working install as
+	// PARTIAL. An explicit registration still counts, so configs written by
+	// older openusage versions keep reporting READY.
+	configured := st.Installed && st.InstalledVersion != ""
+	if !configured {
+		configFile := def.ConfigFileFunc(dirs)
+		if configData, err := os.ReadFile(configFile); err == nil {
+			var cfg map[string]any
+			if decodeJSONC(configData, &cfg) == nil {
+				if list, ok := cfg["plugin"].([]any); ok {
+					for _, item := range list {
+						text, ok := item.(string)
+						if !ok {
+							continue
+						}
+						if text == "file://"+pluginFile || strings.Contains(text, "openusage-telemetry.ts") {
+							configured = true
+							break
+						}
 					}
 				}
 			}

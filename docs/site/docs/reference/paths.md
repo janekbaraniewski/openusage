@@ -40,7 +40,7 @@ These belong to the third-party tools OpenUsage hooks into.
 |---|---|---|---|
 | `~/.claude/settings.json` | Claude Code | Hook registration. | `CLAUDE_SETTINGS_FILE` |
 | `~/.codex/config.toml` | Codex | `notify` registration. | `CODEX_CONFIG_DIR` |
-| `~/.config/opencode/opencode.json` | OpenCode | Plugin registration. | — |
+| `~/.config/opencode/opencode.json` or `opencode.jsonc` | OpenCode | Read only. Plugin registration is not required — OpenCode auto-discovers the plugin directory. Legacy entries written by openusage < 0.24.5 are still honored and removed on uninstall. | — |
 | `~/.config/opencode/plugins/openusage-telemetry.ts` | OpenCode | Plugin source installed by `integrations install opencode`. | — |
 | `~/.local/share/opencode/auth.json` | OpenCode | API keys adopted by auto-detection (OpenCode's data dir). | `XDG_DATA_HOME` |
 

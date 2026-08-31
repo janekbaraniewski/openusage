@@ -150,30 +150,70 @@ func TestInstallOpenCode(t *testing.T) {
 		t.Fatal("template missing version marker")
 	}
 
-	// Verify config has plugin entry.
-	configData, err := os.ReadFile(result.ConfigFile)
+	// The plugin lands in OpenCode's global plugin directory, which OpenCode
+	// loads automatically, so install must not write a config file — doing so
+	// would create an opencode.json for users who deliberately have none.
+	if _, err := os.Stat(result.ConfigFile); !os.IsNotExist(err) {
+		t.Fatalf("install created a config file at %s (err = %v), want none", result.ConfigFile, err)
+	}
+
+	// And it must still report READY rather than PARTIAL.
+	st := def.Detector(dirs)
+	if !st.Configured {
+		t.Errorf("Configured = false after install; auto-discovery should count as configured")
+	}
+	if st.State != "ready" {
+		t.Errorf("State = %q, want %q", st.State, "ready")
+	}
+}
+
+// An authoritative opencode.jsonc must be read as JSONC and left alone rather
+// than shadowed by a competing strict-JSON opencode.json. Regression test for
+// the PARTIAL false negative in #313.
+func TestInstallOpenCodeLeavesJSONCConfigUntouched(t *testing.T) {
+	root := t.TempDir()
+	dirs := testDirs(root)
+	def, ok := DefinitionByID(OpenCodeID)
+	if !ok {
+		t.Fatal("OpenCodeID definition not found")
+	}
+
+	configDir := filepath.Join(root, ".config", "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsoncPath := filepath.Join(configDir, "opencode.jsonc")
+	original := `{
+  // the model I actually use
+  "model": "anthropic/claude-sonnet-4-5",
+}
+`
+	if err := os.WriteFile(jsoncPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Install(def, dirs)
 	if err != nil {
-		t.Fatalf("read config file: %v", err)
+		t.Fatalf("Install() error = %v", err)
 	}
-	var cfg map[string]any
-	if err := json.Unmarshal(configData, &cfg); err != nil {
-		t.Fatalf("parse config: %v", err)
+
+	if result.ConfigFile != jsoncPath {
+		t.Errorf("ConfigFile = %q, want the existing jsonc at %q", result.ConfigFile, jsoncPath)
 	}
-	list, ok := cfg["plugin"].([]any)
-	if !ok || len(list) == 0 {
-		t.Fatal("config missing plugin list")
+	got, err := os.ReadFile(jsoncPath)
+	if err != nil {
+		t.Fatalf("read jsonc: %v", err)
 	}
-	wantURL := "file://" + result.TemplateFile
-	found := false
-	for _, item := range list {
-		text, _ := item.(string)
-		if text == wantURL {
-			found = true
-			break
-		}
+	if string(got) != original {
+		t.Errorf("opencode.jsonc was rewritten:\n--- got ---\n%s\n--- want ---\n%s", got, original)
 	}
-	if !found {
-		t.Fatalf("plugin list missing %q: %#v", wantURL, list)
+	if _, err := os.Stat(filepath.Join(configDir, "opencode.json")); !os.IsNotExist(err) {
+		t.Error("install created a competing opencode.json next to the authoritative .jsonc")
+	}
+
+	st := def.Detector(dirs)
+	if st.State != "ready" {
+		t.Errorf("State = %q, want %q with a JSONC config", st.State, "ready")
 	}
 }
 
@@ -265,7 +305,42 @@ func TestUninstallOpenCode(t *testing.T) {
 		t.Fatal("template file still exists after uninstall")
 	}
 
-	configData, err := os.ReadFile(result.ConfigFile)
+	// Install wrote no config, so uninstall has none to clean up.
+	if _, err := os.Stat(result.ConfigFile); !os.IsNotExist(err) {
+		t.Fatalf("config file exists at %s (err = %v), want none", result.ConfigFile, err)
+	}
+}
+
+// Configs written by older openusage versions carry an explicit file:// plugin
+// entry pointing at the artifact uninstall deletes. That entry must still be
+// removed, and unrelated plugins left in place.
+func TestUninstallOpenCodeRemovesLegacyRegistration(t *testing.T) {
+	root := t.TempDir()
+	dirs := testDirs(root)
+	def, _ := DefinitionByID(OpenCodeID)
+
+	result, err := Install(def, dirs)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	configPath := filepath.Join(root, ".config", "opencode", "opencode.json")
+	legacy := `{
+  "plugin": [
+    "file://` + result.TemplateFile + `",
+    "some-other-plugin"
+  ]
+}
+`
+	if err := os.WriteFile(configPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Uninstall(def, dirs); err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
@@ -274,8 +349,8 @@ func TestUninstallOpenCode(t *testing.T) {
 		t.Fatalf("parse config: %v", err)
 	}
 	list, _ := cfg["plugin"].([]any)
-	if len(list) > 0 {
-		t.Fatalf("config still has plugins after uninstall: %#v", list)
+	if len(list) != 1 || list[0] != "some-other-plugin" {
+		t.Fatalf("plugin list = %#v, want only [\"some-other-plugin\"]", list)
 	}
 }
 
@@ -315,6 +390,15 @@ func TestInstallIdempotent(t *testing.T) {
 				t.Fatalf("second result.Action = %q, want %q", result2.Action, wantAction)
 			}
 
+			// OpenCode relies on plugin-directory auto-discovery and writes
+			// no config, so there is nothing that could duplicate.
+			if id == OpenCodeID {
+				if _, err := os.Stat(result1.ConfigFile); !os.IsNotExist(err) {
+					t.Fatalf("install created a config file at %s (err = %v), want none", result1.ConfigFile, err)
+				}
+				return
+			}
+
 			// Config should not have duplicate entries.
 			configData, err := os.ReadFile(result1.ConfigFile)
 			if err != nil {
@@ -345,15 +429,6 @@ func TestInstallIdempotent(t *testing.T) {
 				}
 				if notifyCount != 1 {
 					t.Fatalf("expected 1 notify key line, found %d in:\n%s", notifyCount, string(configData))
-				}
-			case OpenCodeID:
-				var cfg map[string]any
-				if err := json.Unmarshal(configData, &cfg); err != nil {
-					t.Fatalf("parse config: %v", err)
-				}
-				list, _ := cfg["plugin"].([]any)
-				if len(list) != 1 {
-					t.Fatalf("expected 1 plugin entry, got %d", len(list))
 				}
 			}
 		})

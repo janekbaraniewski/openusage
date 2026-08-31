@@ -58,7 +58,12 @@ type Definition struct {
 	// (e.g., CODEX_CONFIG_DIR, CLAUDE_SETTINGS_FILE).
 	ConfigFileFunc func(dirs Dirs) string
 	ConfigFormat   ConfigFormat
-	ConfigPatcher  ConfigPatchFunc
+	// ConfigPatcher returns the new config file contents. Returning nil
+	// bytes with a nil error means "no config change required": the config
+	// file is then left exactly as it is, and is not created if absent.
+	// Used by tools that discover the integration without an explicit
+	// registration entry.
+	ConfigPatcher ConfigPatchFunc
 
 	Detector DetectFunc
 
