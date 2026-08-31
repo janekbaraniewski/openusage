@@ -6,7 +6,7 @@ sidebar_label: Providers
 
 # Providers
 
-OpenUsage supports 35 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
+OpenUsage supports 36 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
 
 ## Coding agents
 
@@ -32,6 +32,10 @@ These providers read local files, OAuth credentials, or shell out to a CLI. No A
   <a href="./gemini-cli/">
     <strong>Gemini CLI</strong>
     <span>OAuth status, session tokens, MCP config, user quota</span>
+  </a>
+  <a href="./antigravity/">
+    <strong>Antigravity CLI</strong>
+    <span>Status-line context, session tokens, model quotas</span>
   </a>
   <a href="./opencode/">
     <strong>OpenCode</strong>

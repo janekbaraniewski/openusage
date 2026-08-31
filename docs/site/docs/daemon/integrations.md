@@ -7,13 +7,14 @@ description: Install hook integrations for Claude Code, Codex, and OpenCode so e
 
 Integrations install hook scripts and plugins that emit telemetry to the [daemon](./overview.md) as your AI tools run. With integrations active, every turn, message, and tool call is recorded the moment it happens — no polling lag, no gaps when the dashboard isn't open.
 
-OpenUsage ships three official integrations.
+OpenUsage ships four official integrations.
 
 | ID | Tool | Hook artifact | Tool config | Format |
 |---|---|---|---|---|
 | `claude_code` | Claude Code | `~/.config/openusage/hooks/claude-hook.sh` | `~/.claude/settings.json` | JSON |
 | `codex` | Codex | `~/.config/openusage/hooks/codex-notify.sh` | `~/.codex/config.toml` | TOML |
 | `opencode` | OpenCode | `~/.config/opencode/plugins/openusage-telemetry.ts` | `~/.config/opencode/opencode.json` | JSON |
+| `antigravity` | Antigravity CLI | none (invokes the OpenUsage binary) | `~/.gemini/antigravity-cli/settings.json` | JSON |
 
 ## Listing integrations
 
@@ -157,6 +158,27 @@ openusage integrations install opencode
 ```
 
 The patcher writes the singular `plugin` key as a flat array of `file://` URLs; existing entries are preserved.
+
+---
+
+## antigravity
+
+**What it adds.** A `statusLine` command in Antigravity's settings. Antigravity pipes its documented state JSON to `openusage antigravity statusline`; the command atomically stores the latest payload, and the daemon's normal collector ingests revision-stable telemetry.
+
+**Files written.**
+
+```
+~/.gemini/antigravity-cli/settings.json       (patched, mode 0600)
+~/.local/state/openusage/antigravity-status.json (mode 0600)
+```
+
+**Install.**
+
+```bash
+openusage integrations install antigravity
+```
+
+The installer preserves the built-in Antigravity status line with `stack_with_default: true` and refuses to overwrite an unrelated custom status-line command.
 
 The plugin uses `OPENUSAGE_BIN` and `OPENUSAGE_TELEMETRY_SOCKET` if set; otherwise it falls back to the embedded defaults captured at install time.
 

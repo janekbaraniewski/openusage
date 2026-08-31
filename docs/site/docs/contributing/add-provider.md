@@ -92,7 +92,7 @@ See [development](development.md) for examples.
 |---|---|---|
 | Header-only probe | `openai`, `anthropic`, `groq` | Vendor exposes rate-limit headers but no usage API |
 | Rich JSON API | `openrouter`, `xai`, `mistral`, `moonshot`, `zai` | Vendor returns credits, balances, per-model breakdowns |
-| Local files only | `claude_code`, `codex`, `gemini_cli` | All data lives in the agent's config dir |
+| Local files only | `claude_code`, `codex`, `gemini_cli`, `antigravity` | All data lives in the agent's config dir or status-line state |
 | Local files + API | `cursor`, `ollama` | SQLite or log files plus optional cloud endpoints |
 | CLI subprocess | `copilot` | Easiest data path is shelling out to a vendor CLI |
 

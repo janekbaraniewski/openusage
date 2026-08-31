@@ -266,12 +266,19 @@ func (s *Store) PruneBalanceObservations(ctx context.Context, retentionDays int)
 		retentionDays = minRetentionDays
 	}
 
+	// observed_at is RFC3339Nano, so the horizons are rendered in Go rather
+	// than with datetime('now', ...) — see Store.retentionCutoff for why the
+	// two forms do not compare correctly within the same day.
+	horizon := s.retentionCutoff(time.Duration(retentionDays) * 24 * time.Hour)
+	sevenDays := s.retentionCutoff(7 * 24 * time.Hour)
+	fortyEightHours := s.retentionCutoff(48 * time.Hour)
+
 	var total int64
 	// 1. Hard delete beyond the retention horizon.
 	if res, err := s.db.ExecContext(ctx, `
 		DELETE FROM balance_observations
-		WHERE observed_at < datetime('now', ?)
-	`, fmt.Sprintf("-%d day", retentionDays)); err == nil {
+		WHERE observed_at < ?
+	`, horizon); err == nil {
 		n, _ := res.RowsAffected()
 		total += n
 	} else {
@@ -281,13 +288,13 @@ func (s *Store) PruneBalanceObservations(ctx context.Context, retentionDays int)
 	// 2. Thin 7d..horizon to one row per metric per day (keep the earliest).
 	if res, err := s.db.ExecContext(ctx, `
 		DELETE FROM balance_observations
-		WHERE observed_at < datetime('now', '-7 day')
+		WHERE observed_at < ?
 		  AND rowid NOT IN (
 			SELECT MIN(rowid) FROM balance_observations
-			WHERE observed_at < datetime('now', '-7 day')
+			WHERE observed_at < ?
 			GROUP BY provider_id, account_id, metric_key, date(observed_at)
 		  )
-	`); err == nil {
+	`, sevenDays, sevenDays); err == nil {
 		n, _ := res.RowsAffected()
 		total += n
 	} else {
@@ -297,15 +304,15 @@ func (s *Store) PruneBalanceObservations(ctx context.Context, retentionDays int)
 	// 3. Thin 48h..7d to one row per metric per hour (keep the earliest).
 	if res, err := s.db.ExecContext(ctx, `
 		DELETE FROM balance_observations
-		WHERE observed_at < datetime('now', '-48 hours')
-		  AND observed_at >= datetime('now', '-7 day')
+		WHERE observed_at < ?
+		  AND observed_at >= ?
 		  AND rowid NOT IN (
 			SELECT MIN(rowid) FROM balance_observations
-			WHERE observed_at < datetime('now', '-48 hours')
-			  AND observed_at >= datetime('now', '-7 day')
+			WHERE observed_at < ?
+			  AND observed_at >= ?
 			GROUP BY provider_id, account_id, metric_key, strftime('%Y-%m-%dT%H', observed_at)
 		  )
-	`); err == nil {
+	`, fortyEightHours, sevenDays, fortyEightHours, sevenDays); err == nil {
 		n, _ := res.RowsAffected()
 		total += n
 	} else {

@@ -3,7 +3,7 @@ title: Providers
 description: What a provider is in OpenUsage, the three categories, and how each one shapes its own dashboard and detail widgets.
 ---
 
-A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 19 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
+A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 36 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
 
 ## The provider contract
 
@@ -41,7 +41,7 @@ Detection signal: an env var holding the key.
 
 Providers backed by a local CLI or IDE. They usually read on-disk session files, optionally combined with a vendor API.
 
-Examples: `claude_code`, `cursor`, `codex`, `copilot`, `gemini_cli`, `opencode`.
+Examples: `claude_code`, `cursor`, `codex`, `copilot`, `gemini_cli`, `antigravity`, `opencode`.
 
 Detection signal: a binary on `$PATH` plus a config directory.
 
@@ -86,12 +86,12 @@ For more detail on the snapshot model see [snapshots](snapshots.md).
 3. The daemon's pipeline calls `Fetch()` on a ticker as part of the collector loop.
 4. The latest snapshot is rendered through the provider's widget definitions.
 
-## The 19 providers at a glance
+## The 36 providers at a glance
 
 | Category | Providers |
 |---|---|
 | API platforms | openai, anthropic, openrouter, groq, mistral, deepseek, xai, gemini_api, alibaba_cloud, moonshot, zai, perplexity |
-| Coding agents | claude_code, cursor, codex, copilot, gemini_cli, opencode |
+| Coding agents | claude_code, cursor, codex, copilot, gemini_cli, antigravity, opencode |
 | Local runtimes | ollama |
 
 For the full per-provider reference (auth, endpoints, fields tracked, caveats), see the [provider catalog](/providers).
