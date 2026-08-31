@@ -76,11 +76,16 @@ type UsageProvider interface {
 - `DashboardWidget` / `DetailWidget` define how provider metrics render in the TUI.
 - Providers are registered in `internal/providers/registry.go` via `AllProviders()`.
 
-### Provider patterns (16 providers)
+### Provider patterns
 
-- **HTTP header probing** (`openai`, `anthropic`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`): Lightweight API request, parse rate-limit headers using shared helpers from `internal/parsers/`.
+`AllProviders()` in `internal/providers/registry.go` is the authoritative list —
+check it rather than trusting a count written here. Providers fall into a handful
+of shapes:
+
+- **HTTP header probing** (`openai`, `anthropic`, `azure_openai`, `groq`, `mistral`, `deepseek`, `xai`, `gemini_api`, `alibaba_cloud`, `moonshot`, `zai`): Lightweight API request, parse rate-limit headers using shared helpers from `internal/parsers/`.
 - **Rich API / local hybrid** (`openrouter`, `cursor`): Multiple API endpoints; `cursor` also reads local SQLite DBs as fallback.
-- **Local file readers** (`claude_code`, `codex`, `gemini_cli`, `ollama`): Read local stats/session files. `claude_code` is the most complex with billing block computation and burn rate tracking.
+- **Browser-session auth** (`perplexity`, `opencode`): Console RPCs authenticated by a stored browser cookie. Read the session via `config.LoadSession` — never refresh from the live browser store on a poll, which clobbers a sibling account that shares the cookie domain.
+- **Local file readers** (`claude_code`, `codex`, `gemini_cli`, `qwen_cli`, `kimi_cli`, `ollama`, and most agent CLIs): Read local stats/session files. `claude_code` is the most complex with billing block computation and burn rate tracking.
 - **CLI subprocess** (`copilot`): Shells out to `gh` CLI commands.
 - **Plugin/integration** (`opencode`): Reads local session data from the OpenCode tool.
 
