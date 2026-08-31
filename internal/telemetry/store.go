@@ -890,7 +890,7 @@ func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int, rolledThr
 		// detail. Not an error; the next pass (after a rollup) will prune.
 		return 0, false, nil
 	}
-	cutoff := fmt.Sprintf("-%d day", retentionDays)
+	cutoff := s.retentionCutoff(time.Duration(retentionDays) * 24 * time.Hour)
 	for {
 		if ctx.Err() != nil {
 			return deleted, false, nil
@@ -903,7 +903,7 @@ func (s *Store) PruneOldEvents(ctx context.Context, retentionDays int, rolledThr
 			DELETE FROM usage_events
 			WHERE event_id IN (
 				SELECT event_id FROM usage_events
-				WHERE occurred_at < datetime('now', ?)
+				WHERE occurred_at < ?
 				  AND date(occurred_at) <= ?
 				ORDER BY occurred_at ASC
 				LIMIT ?
@@ -949,22 +949,69 @@ func (s *Store) PruneOrphanRawEvents(ctx context.Context, limit int) (int64, err
 	return n, nil
 }
 
+// retentionCutoff renders a horizon as an RFC3339Nano string comparable against
+// the timestamp columns.
+//
+// The columns store time.RFC3339Nano ("2026-08-31T08:57:12.211861Z"), so they
+// must not be compared against datetime('now', ...), which renders a space
+// separator ("2026-08-31 07:57:34"). Those forms only sort consistently when
+// the dates differ: on the same day the 'T' (0x54) outranks the ' ' (0x20), so
+// every row ingested earlier today compares as newer than the horizon and
+// escapes pruning. The horizon effectively became "previous calendar days"
+// instead of "older than N hours".
+//
+// Rendering the bound in Go keeps both sides in one format and, unlike wrapping
+// the column in datetime(), leaves the index on that column usable.
+func (s *Store) retentionCutoff(d time.Duration) string {
+	return s.now().UTC().Add(-d).Format(time.RFC3339Nano)
+}
+
 // PruneRawEventPayloads clears source_payload from old raw events to reclaim
-// disk space. All useful data has already been extracted into usage_events.
-// Keeps payloads for events newer than retentionHours.
+// disk space. For usage events all useful data has already been extracted into
+// usage_events columns, so the payload is redundant detail. Keeps payloads for
+// events newer than retentionHours.
+//
+// limit_snapshot is the exception: its payload IS the read model's source of
+// truth. hydrateRootsFromLimitSnapshots reads the newest one back per
+// provider/account to rebuild a provider's metrics, and nothing in
+// usage_events can substitute for it. Blanking it left the dashboard
+// hydrating from an empty envelope, which reads as a confident UNKNOWN with no
+// metrics and survives a daemon restart because the damage is in the database
+// (#293).
+//
+// Only the newest limit_snapshot per (provider_id, account_id) is protected.
+// The historical ones are never read back and are the bulk of the volume, so
+// they still get reclaimed.
 func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, limit int) (int64, error) {
 	if s == nil || s.db == nil || retentionHours < 0 || limit <= 0 {
 		return 0, nil
 	}
-	cutoff := fmt.Sprintf("-%d hours", retentionHours)
+	cutoff := s.retentionCutoff(time.Duration(retentionHours) * time.Hour)
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE usage_raw_events
 		SET source_payload = '{}'
 		WHERE raw_event_id IN (
 			SELECT raw_event_id
 			FROM usage_raw_events
-			WHERE ingested_at < datetime('now', ?)
+			WHERE ingested_at < ?
 			  AND source_payload != '{}'
+			  AND raw_event_id NOT IN (
+				SELECT e.raw_event_id
+				FROM usage_events e
+				JOIN (
+					SELECT
+						COALESCE(provider_id, '') AS provider_id,
+						COALESCE(account_id, '') AS account_id,
+						MAX(occurred_at) AS occurred_at
+					FROM usage_events
+					WHERE event_type = 'limit_snapshot'
+					GROUP BY 1, 2
+				) latest
+				  ON COALESCE(e.provider_id, '') = latest.provider_id
+				 AND COALESCE(e.account_id, '') = latest.account_id
+				 AND e.occurred_at = latest.occurred_at
+				WHERE e.event_type = 'limit_snapshot'
+			  )
 			ORDER BY ingested_at ASC
 			LIMIT ?
 		)
