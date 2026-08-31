@@ -50,7 +50,7 @@ The daemon also prints a hint at startup when it detects tools with missing inte
 ### OpenCode (Plugin)
 
 - `~/.config/opencode/plugins/openusage-telemetry.ts`
-- plugin entry in `~/.config/opencode/opencode.json`
+- no config entry: OpenCode auto-discovers plugins in `~/.config/opencode/plugins/`
 
 ### Codex (Notify Hook)
 

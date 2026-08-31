@@ -32,6 +32,221 @@ func TestStoreInit_CreatesTables(t *testing.T) {
 			t.Fatalf("table %s missing: %v", table, err)
 		}
 	}
+
+	var indexName string
+	err = db.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_usage_raw_events_payload_pending'`).Scan(&indexName)
+	if err != nil {
+		t.Fatalf("pending payload index missing: %v", err)
+	}
+}
+
+func TestStoreInit_TracksUsageEventChanges(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	input, total, requests := int64(10), int64(10), int64(1)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC),
+		ProviderID:    "codex",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "session-change-log",
+		TurnID:        "turn-change-log",
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    &requests,
+		},
+	}); err != nil {
+		t.Fatalf("ingest change-log event: %v", err)
+	}
+
+	assertLatestOperation := func(want string) {
+		t.Helper()
+		var operation string
+		if err := db.QueryRow(`SELECT operation FROM usage_event_changes ORDER BY seq DESC LIMIT 1`).Scan(&operation); err != nil {
+			t.Fatalf("query usage event change: %v", err)
+		}
+		if operation != want {
+			t.Fatalf("expected %s change, got %q", want, operation)
+		}
+	}
+	assertLatestOperation("insert")
+
+	if _, err := db.Exec(`UPDATE usage_events SET input_tokens = 20 WHERE session_id = 'session-change-log'`); err != nil {
+		t.Fatalf("update usage event: %v", err)
+	}
+	assertLatestOperation("update")
+
+	if _, err := db.Exec(`DELETE FROM usage_events WHERE session_id = 'session-change-log'`); err != nil {
+		t.Fatalf("delete usage event: %v", err)
+	}
+	assertLatestOperation("delete")
+}
+
+func TestStorePruneUsageEventChanges_KeepsRecentTail(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := db.Exec(`INSERT INTO usage_event_changes(event_id, operation, changed_at) VALUES (?, 'insert', datetime('now', '-8 day'))`, i); err != nil {
+			t.Fatalf("insert old change: %v", err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO usage_event_changes(event_id, operation) VALUES ('recent', 'insert')`); err != nil {
+		t.Fatalf("insert recent change: %v", err)
+	}
+	removed, err := store.PruneUsageEventChanges(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("prune changes: %v", err)
+	}
+	if removed != 4 {
+		t.Fatalf("expected four old rows removed while retaining a two-row tail, got %d", removed)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes`).Scan(&count); err != nil {
+		t.Fatalf("count changes: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two retained changes, got %d", count)
+	}
+}
+
+func TestStoreInit_ChangeLogCoalescesSameOperation(t *testing.T) {
+	// The change log must NOT grow unboundedly when a single event is updated
+	// many times. Each (event_id, operation) pair should be stored at most
+	// once, even when the same event accumulates dozens of UPDATE triggers.
+	// Without this guard, the candidate/winner churn pattern can balloon the
+	// change log by 100x+ the event count, which is the #318 / #318-class
+	// problem the change-log coalesce fixes.
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// One insert + 50 updates on the same event should produce exactly 2
+	// change log rows: (event, insert) and (event, update). The insert's
+	// seq must be lower than the update's, and the count must stay at 2
+	// even as additional updates pile on.
+	input, total, requests := int64(10), int64(10), int64(1)
+	if _, err := store.Ingest(context.Background(), IngestRequest{
+		SourceSystem:  SourceSystem("codex"),
+		SourceChannel: SourceChannelJSONL,
+		OccurredAt:    time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC),
+		ProviderID:    "codex",
+		AgentName:     "codex",
+		EventType:     EventTypeMessageUsage,
+		SessionID:     "session-coalesce",
+		TurnID:        "turn-coalesce",
+		TokenUsage: core.TokenUsage{
+			InputTokens: &input,
+			TotalTokens: &total,
+			Requests:    &requests,
+		},
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		if _, err := db.Exec(`UPDATE usage_events SET input_tokens = ? WHERE session_id = ?`, int64(20+i), "session-coalesce"); err != nil {
+			t.Fatalf("update %d: %v", i, err)
+		}
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes WHERE event_id = (SELECT event_id FROM usage_events WHERE session_id = ?)`, "session-coalesce").Scan(&count); err != nil {
+		t.Fatalf("count changes: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 coalesced change rows (insert+update), got %d", count)
+	}
+
+	// Verify the insert seq < update seq so the consumer can still advance
+	// its cursor monotonically.
+	var insertSeq, updateSeq int64
+	if err := db.QueryRow(`SELECT seq FROM usage_event_changes WHERE event_id = (SELECT event_id FROM usage_events WHERE session_id = ?) AND operation = 'insert'`, "session-coalesce").Scan(&insertSeq); err != nil {
+		t.Fatalf("get insert seq: %v", err)
+	}
+	if err := db.QueryRow(`SELECT seq FROM usage_event_changes WHERE event_id = (SELECT event_id FROM usage_events WHERE session_id = ?) AND operation = 'update'`, "session-coalesce").Scan(&updateSeq); err != nil {
+		t.Fatalf("get update seq: %v", err)
+	}
+	if updateSeq <= insertSeq {
+		t.Fatalf("update seq (%d) must be greater than insert seq (%d) for monotonic consumer cursor", updateSeq, insertSeq)
+	}
+}
+
+func TestStorePruneUsageEventChangesToSize(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Seed 1000 distinct (event_id, op) rows; the coalesced UNIQUE constraint
+	// guarantees this is the maximum size achievable without distinct keys.
+	for i := 0; i < 1000; i++ {
+		op := "insert"
+		if i%3 == 0 {
+			op = "update"
+		} else if i%5 == 0 {
+			op = "delete"
+		}
+		if _, err := db.Exec(`INSERT INTO usage_event_changes(event_id, operation) VALUES (?, ?)`, "evt-"+string(rune('A'+i%26))+"-"+string(rune('a'+i/26)), op); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+
+	var before int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes`).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+
+	// Drain to 100 rows, keep 20 as the hot tail.
+	removed, done, err := store.PruneUsageEventChangesToSize(context.Background(), 100, 20)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if !done {
+		t.Fatalf("expected done=true, got false")
+	}
+	if removed == 0 {
+		t.Fatalf("expected non-zero removal from %d rows down to 100", before)
+	}
+
+	var after int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes`).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after > 100 {
+		t.Fatalf("expected <= 100 rows after prune, got %d", after)
+	}
+	if after < 20 {
+		t.Fatalf("expected at least 20 rows (retain tail), got %d", after)
+	}
 }
 
 func TestStoreIngest_IdempotentByDedupKey(t *testing.T) {

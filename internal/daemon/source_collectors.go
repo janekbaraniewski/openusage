@@ -19,22 +19,19 @@ type sourceCollectorSpec struct {
 }
 
 func buildCollectors(accounts []core.AccountConfig) ([]telemetry.Collector, []string) {
-	specs, warnings := buildSourceCollectorSpecs(accounts)
+	return buildCollectorsFromSources(accounts, telemetrySourcesBySystem())
+}
+
+func buildCollectorsFromSources(
+	accounts []core.AccountConfig,
+	sources map[string]shared.TelemetrySource,
+) ([]telemetry.Collector, []string) {
+	specs, warnings := buildSourceCollectorSpecsFromSources(accounts, sources)
 	collectors := make([]telemetry.Collector, 0, len(specs))
 	for _, spec := range specs {
 		collectors = append(collectors, telemetry.NewSourceCollector(spec.source, spec.options, spec.accountID))
 	}
 	return collectors, warnings
-}
-
-func telemetrySourceCount() int {
-	count := 0
-	for _, provider := range providers.AllProviders() {
-		if _, ok := provider.(shared.TelemetrySource); ok {
-			count++
-		}
-	}
-	return count
 }
 
 func ResolveTelemetrySourceOptions(
@@ -106,13 +103,19 @@ func resolveTelemetrySourceOptionsFromAccounts(
 }
 
 func buildSourceCollectorSpecs(accounts []core.AccountConfig) ([]sourceCollectorSpec, []string) {
-	providersBySource := telemetrySourcesBySystem()
-	sourceNames := core.SortedStringKeys(providersBySource)
+	return buildSourceCollectorSpecsFromSources(accounts, telemetrySourcesBySystem())
+}
+
+func buildSourceCollectorSpecsFromSources(
+	accounts []core.AccountConfig,
+	sources map[string]shared.TelemetrySource,
+) ([]sourceCollectorSpec, []string) {
+	sourceNames := core.SortedStringKeys(sources)
 
 	specs := make([]sourceCollectorSpec, 0, len(sourceNames))
 	var warnings []string
 	for _, sourceName := range sourceNames {
-		source := providersBySource[sourceName]
+		source := sources[sourceName]
 		candidates := telemetryAccountsForSource(source, accounts)
 		if len(candidates) == 0 {
 			specs = append(specs, sourceCollectorSpec{

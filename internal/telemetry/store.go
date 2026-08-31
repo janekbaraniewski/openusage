@@ -210,6 +210,7 @@ func (s *Store) Init(ctx context.Context) error {
 			agent_session_id TEXT
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_ingested_at ON usage_raw_events(ingested_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_payload_pending ON usage_raw_events(ingested_at) WHERE source_payload != '{}';`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_source ON usage_raw_events(source_system, source_channel);`,
 		`CREATE TABLE IF NOT EXISTS usage_events (
 			event_id TEXT PRIMARY KEY,
@@ -246,6 +247,44 @@ func (s *Store) Init(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_window ON usage_events(provider_id, account_id, occurred_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_provider_account_type_occurred ON usage_events(provider_id, account_id, event_type, occurred_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_events_type_provider ON usage_events(event_type, provider_id);`,
+		// Append-only invalidation log for the incremental usage read model. The
+		// payload stays deliberately small: readers already retain the previous
+		// winner and can reload the changed event by ID. Recording deletes is
+		// essential because retention can remove the current logical winner.
+		//
+		// Coalesce key: (event_id, operation). The same (event_id, op) pair is
+		// only stored once, and triggers use INSERT OR IGNORE. This collapses
+		// the historical "many UPDATEs per event" pattern (the candidate/winner
+		// churn) to one row per (event_id, op) instead of N. The seq column
+		// remains monotonic because SQLite still consumes a sequence value for
+		// ignored inserts, so the read-side "what changed since cursor N"
+		// protocol is preserved.
+		`CREATE TABLE IF NOT EXISTS usage_event_changes (
+			seq INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id TEXT NOT NULL,
+			operation TEXT NOT NULL CHECK(operation IN ('insert', 'update', 'delete')),
+			changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_event_changes_event_op ON usage_event_changes(event_id, operation);`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_event_changes_event ON usage_event_changes(event_id, seq);`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_insert
+			AFTER INSERT ON usage_events BEGIN
+				INSERT OR IGNORE INTO usage_event_changes(event_id, operation) VALUES (NEW.event_id, 'insert');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_update
+			AFTER UPDATE ON usage_events BEGIN
+				INSERT OR IGNORE INTO usage_event_changes(event_id, operation) VALUES (NEW.event_id, 'update');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_events_change_delete
+			AFTER DELETE ON usage_events BEGIN
+				INSERT OR IGNORE INTO usage_event_changes(event_id, operation) VALUES (OLD.event_id, 'delete');
+			END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_usage_raw_payload_change
+			AFTER UPDATE OF source_payload ON usage_raw_events
+			WHEN OLD.source_payload IS NOT NEW.source_payload BEGIN
+				INSERT OR IGNORE INTO usage_event_changes(event_id, operation)
+				SELECT event_id, 'update' FROM usage_events WHERE raw_event_id = NEW.raw_event_id;
+			END;`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_raw_events_source_system ON usage_raw_events(source_system);`,
 		`CREATE TABLE IF NOT EXISTS usage_reconciliation_windows (
 			recon_id TEXT PRIMARY KEY,
@@ -1163,6 +1202,110 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 		return 0, fmt.Errorf("telemetry: prune raw event payloads rows affected: %w", err)
 	}
 	return n, nil
+}
+
+// PruneUsageEventChanges bounds the durable incremental-read-model log. A
+// three-day age gate avoids churning an active reader, while retainTail keeps
+// a useful suffix even on quiet installations. Readers detect sequence gaps
+// and safely cold-rebuild instead of applying an incomplete suffix.
+//
+// After coalescing the change log on (event_id, operation), one event can
+// contribute at most three rows (insert/update/delete), so the log size is
+// bounded by O(distinct events), not O(event operations). The 500k default
+// tail (replaced from 50k) is sized to hold a full backlog for a typical
+// 3-day retention window even on busy installations.
+func (s *Store) PruneUsageEventChanges(ctx context.Context, retainTail int) (int64, error) {
+	if s == nil || s.db == nil || retainTail < 1 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM usage_event_changes
+		WHERE seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM usage_event_changes)
+		  AND datetime(changed_at) < datetime('now', '-3 day')
+	`, retainTail)
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune usage event changes: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("telemetry: prune usage event changes rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// usageEventChangesCount returns the current row count of the change log.
+// Cheap (O(1)) on the (event_id, operation) UNIQUE index.
+func (s *Store) usageEventChangesCount(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_event_changes`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("telemetry: count usage event changes: %w", err)
+	}
+	return n, nil
+}
+
+// PruneUsageEventChangesToSize drains the change log to at most targetRows,
+// keeping the most recent retainTail rows regardless of age. The age gate is
+// retained for the tail only; older rows that exceed the size budget are
+// removed unconditionally so a backlog (e.g. from a long-down daemon) drains
+// in seconds rather than over many 6h ticks.
+//
+// Returns (rowsDeleted, done). done is false when the caller should reschedule
+// soon: either the context expired mid-prune or the row count is still above
+// targetRows and the budget for this call ran out.
+func (s *Store) PruneUsageEventChangesToSize(ctx context.Context, targetRows, retainTail int64) (int64, bool, error) {
+	if s == nil || s.db == nil || targetRows < 0 || retainTail < 0 {
+		return 0, true, nil
+	}
+	const chunkSize int64 = 5000
+	var totalDeleted int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return totalDeleted, false, err
+		}
+		var current int64
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_event_changes`).Scan(&current); err != nil {
+			return totalDeleted, false, fmt.Errorf("telemetry: count usage event changes: %w", err)
+		}
+		if current <= targetRows {
+			return totalDeleted, true, nil
+		}
+		// Trim only what we can afford in this call. retainTail still
+		// protects the hot suffix; everything older than that is removed
+		// to make room for the next chunk.
+		budget := current - targetRows
+		if budget > chunkSize {
+			budget = chunkSize
+		}
+		cutoffRetain := current - retainTail
+		if cutoffRetain < 0 {
+			cutoffRetain = 0
+		}
+		res, err := s.db.ExecContext(ctx, `
+			DELETE FROM usage_event_changes
+			WHERE seq IN (
+				SELECT seq FROM usage_event_changes
+				WHERE seq <= ?
+				ORDER BY seq
+				LIMIT ?
+			)
+		`, cutoffRetain, budget)
+		if err != nil {
+			return totalDeleted, false, fmt.Errorf("telemetry: drain usage event changes: %w", err)
+		}
+		deleted, err := res.RowsAffected()
+		if err != nil {
+			return totalDeleted, false, fmt.Errorf("telemetry: drain usage event changes rows affected: %w", err)
+		}
+		totalDeleted += deleted
+		if deleted == 0 {
+			// No further progress possible (everything older than the
+			// tail is already gone). Caller can stop.
+			return totalDeleted, true, nil
+		}
+	}
 }
 
 // newUUID generates a random UUID v4 string.

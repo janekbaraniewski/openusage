@@ -20,6 +20,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
@@ -27,18 +28,21 @@ type Service struct {
 	cfg Config
 	ctx context.Context
 
-	store        *telemetry.Store
-	pipeline     *telemetry.Pipeline
-	quotaIngest  *telemetry.QuotaSnapshotIngestor
-	providerByID map[string]core.UsageProvider
-	exp          *exporter.Exporter
+	store            *telemetry.Store
+	pipeline         *telemetry.Pipeline
+	quotaIngest      *telemetry.QuotaSnapshotIngestor
+	providerByID     map[string]core.UsageProvider
+	telemetrySources map[string]shared.TelemetrySource
+	exp              *exporter.Exporter
 
 	spoolMu     sync.Mutex // guards spool filesystem operations (read/write/cleanup)
 	logThrottle *core.LogThrottle
 
 	rmCache       *readModelCache
-	dataIngested  atomic.Bool  // set when new data is ingested; read model loop skips refresh when clean
-	lastIngestAt  atomic.Int64 // UnixNano of the most recent ingest; lets readers refresh only when data changed
+	dataIngested  atomic.Bool   // set when new data is ingested; read model loop skips refresh when clean
+	lastIngestAt  atomic.Int64  // UnixNano of the most recent ingest; lets readers refresh only when data changed
+	dataVersion   atomic.Uint64 // increments after each successful ingest so HTTP caches refresh only when stale
+	collectNow    chan struct{} // coalesced source-change requests consumed by the single collect loop
 	pollScheduler *PollScheduler
 
 	pollStateMu sync.Mutex
@@ -50,6 +54,15 @@ type Service struct {
 	clock core.Clock
 }
 
+func (s *Service) markDataIngested() {
+	if s == nil {
+		return
+	}
+	s.dataVersion.Add(1)
+	s.dataIngested.Store(true)
+	s.lastIngestAt.Store(time.Now().UnixNano())
+}
+
 // now is the canonical "what time is it?" hook for the daemon. Code that
 // stamps snap.Timestamp, persists state, or computes deadlines should call
 // this rather than time.Now(). Pure observability paths (request duration
@@ -59,15 +72,6 @@ func (s *Service) now() time.Time {
 		return s.clock.Now()
 	}
 	return time.Now()
-}
-
-// markDataIngested records that new data landed. It arms the flag the
-// background read-model refresh loop consumes and stamps the ingest time so
-// on-demand readers can tell whether their cached view is stale relative to
-// real data (rather than merely old in wall-clock terms).
-func (s *Service) markDataIngested() {
-	s.dataIngested.Store(true)
-	s.lastIngestAt.Store(time.Now().UnixNano())
 }
 
 // ingestedSince reports whether any data was ingested after t. A zero
@@ -148,19 +152,22 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		}
 	}
 
+	telemetrySources := telemetrySourcesBySystem()
 	svc := &Service{
-		cfg:           cfg,
-		ctx:           ctx,
-		store:         store,
-		pipeline:      telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
-		quotaIngest:   telemetry.NewQuotaSnapshotIngestor(store),
-		providerByID:  providersByID(),
-		exp:           exp,
-		logThrottle:   core.NewLogThrottle(200, 10*time.Minute),
-		rmCache:       newReadModelCache(),
-		pollScheduler: newPollScheduler(cfg.PollInterval),
-		pollState:     make(map[string]*providerPollState),
-		clock:         core.SystemClock{},
+		cfg:              cfg,
+		ctx:              ctx,
+		store:            store,
+		pipeline:         telemetry.NewPipeline(store, telemetry.NewSpool(cfg.SpoolDir)),
+		quotaIngest:      telemetry.NewQuotaSnapshotIngestor(store),
+		providerByID:     providersByID(),
+		telemetrySources: telemetrySources,
+		exp:              exp,
+		logThrottle:      core.NewLogThrottle(200, 10*time.Minute),
+		rmCache:          newReadModelCache(),
+		collectNow:       make(chan struct{}, 1),
+		pollScheduler:    newPollScheduler(cfg.PollInterval),
+		pollState:        make(map[string]*providerPollState),
+		clock:            core.SystemClock{},
 	}
 
 	svc.infof(
@@ -171,7 +178,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.SpoolDir,
 		svc.cfg.CollectInterval,
 		svc.cfg.PollInterval,
-		telemetrySourceCount(),
+		len(telemetrySources),
 		len(svc.providerByID),
 	)
 
@@ -195,6 +202,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	go svc.runSpoolMaintenanceLoop(ctx)
 	go svc.runHookSpoolLoop(ctx)
 	go svc.runRetentionLoop(ctx)
+	go svc.runTelemetryPayloadMaintenanceLoop(ctx)
 
 	if svc.exp != nil {
 		go svc.exp.Start(ctx)
