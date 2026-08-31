@@ -67,18 +67,6 @@ tmux attach -t usage
 
 The TUI keeps rendering whether anyone is attached or not.
 
-## Disabling Analytics on small servers
-
-The Analytics screen is opt-in (`cfg.Experimental.Analytics`). On a server you may want to leave it off to keep the rendering loop tight:
-
-```json
-{
-  "experimental": { "analytics": false }
-}
-```
-
-The Tab cycle then just bounces between dashboard views.
-
 ## Integrations on a server
 
 If the server itself runs Claude Code, Codex, or OpenCode jobs, install the hooks the same way as on a workstation:

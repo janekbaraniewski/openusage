@@ -48,7 +48,6 @@ func main() {
 	model := tui.NewModel(
 		0.20,
 		0.05,
-		false,
 		// Hide sections a provider has no data for (e.g. an API router has no
 		// tool/language/MCP telemetry) so the demo never shows empty
 		// "No X data for this time range" placeholders.

@@ -89,7 +89,6 @@ func runHubView(cfg config.Config, hubURL, token string) {
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
 		cfg.UI.CritThreshold,
-		cfg.Experimental.Analytics,
 		cfg.Dashboard,
 		nil,
 		timeWindow,

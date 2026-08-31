@@ -135,13 +135,11 @@ func (m Model) renderHelpOverlay(screenW, screenH int) string {
 		{"Space / Enter", "Apply setting in modal"},
 		{"Shift+J/K", "Reorder providers (order tab)"},
 	}
-	if m.experimentalAnalytics {
-		actionKeys = append(actionKeys,
-			struct{ key, desc string }{"s", "Cycle sort (analytics)"},
-			struct{ key, desc string }{"1-4", "Jump to analytics tab"},
-			struct{ key, desc string }{"Enter/Space", "Expand model (Models tab)"},
-		)
-	}
+	actionKeys = append(actionKeys,
+		struct{ key, desc string }{"s", "Cycle sort (analytics)"},
+		struct{ key, desc string }{"1-4", "Jump to analytics tab"},
+		struct{ key, desc string }{"Enter/Space", "Expand model (Models tab)"},
+	)
 	actionKeys = append(actionKeys,
 		struct{ key, desc string }{"r", "Refresh"},
 		struct{ key, desc string }{"t", "Cycle theme"},

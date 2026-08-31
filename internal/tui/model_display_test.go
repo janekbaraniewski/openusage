@@ -273,7 +273,7 @@ func TestComputeDisplayInfo_IndividualSpendClampedToZero(t *testing.T) {
 }
 
 func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	if m.hasData {
 		t.Fatal("expected hasData=false on fresh model")
 	}
@@ -303,7 +303,7 @@ func TestUpdate_SnapshotsMsgMarksModelReadyOnFirstFrame(t *testing.T) {
 }
 
 func TestUpdate_SnapshotsMsgIgnoresStaleTimeWindowResponse(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow1d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow1d)
 	currentUsed := 1.0
 	m.snapshots = map[string]core.UsageSnapshot{
 		"openrouter": {
@@ -340,7 +340,7 @@ func TestUpdate_SnapshotsMsgIgnoresStaleTimeWindowResponse(t *testing.T) {
 }
 
 func TestUpdate_SnapshotsMsgIgnoresOlderCurrentWindowResponse(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow7d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow7d)
 	m.hasData = true
 
 	newUsed := 7.0
@@ -384,7 +384,7 @@ func TestUpdate_SnapshotsMsgIgnoresOlderCurrentWindowResponse(t *testing.T) {
 }
 
 func TestUpdate_AppUpdateMsgStoresNotice(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow30d)
 
 	updated, _ := m.Update(AppUpdateMsg{
 		CurrentVersion: "v0.4.0",
@@ -407,7 +407,7 @@ func TestUpdate_AppUpdateMsgStoresNotice(t *testing.T) {
 }
 
 func TestRenderFooterStatusLine_ShowsAppUpdateWhenIdle(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	m.daemon.appUpdateCurrent = "v0.4.0"
 	m.daemon.appUpdateLatest = "v0.5.0"
 	m.daemon.appUpdateHint = "go install github.com/janekbaraniewski/openusage/cmd/openusage@latest"

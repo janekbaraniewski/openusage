@@ -592,10 +592,11 @@ func (m Model) handleAnalyticsFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// availableScreens lists the screens Tab cycles through. Analytics is always
+// present: it is rendered only while it is the active screen (see the screen
+// switch in renderDashboard), so an unused Analytics screen costs nothing and
+// there is nothing for a toggle to save.
 func (m Model) availableScreens() []screenTab {
-	if !m.experimentalAnalytics {
-		return []screenTab{screenDashboard}
-	}
 	return []screenTab{screenDashboard, screenAnalytics}
 }
 

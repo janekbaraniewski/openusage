@@ -19,10 +19,6 @@ type UIConfig struct {
 	CritThreshold          float64 `json:"crit_threshold"`
 }
 
-type ExperimentalConfig struct {
-	Analytics bool `json:"analytics"`
-}
-
 type TelemetryConfig struct {
 	// ProviderLinks maps source telemetry provider IDs to configured provider IDs.
 	// Example: {"anthropic":"claude_code"}.
@@ -204,7 +200,6 @@ type Config struct {
 	UI                   UIConfig                      `json:"ui"`
 	Theme                string                        `json:"theme"`
 	Data                 DataConfig                    `json:"data"`
-	Experimental         ExperimentalConfig            `json:"experimental"`
 	Telemetry            TelemetryConfig               `json:"telemetry"`
 	Dashboard            DashboardConfig               `json:"dashboard"`
 	ModelNormalization   core.ModelNormalizationConfig `json:"model_normalization"`
@@ -247,7 +242,6 @@ func DefaultConfig() Config {
 			CritThreshold:          0.05,
 		},
 		Data:               DataConfig{TimeWindow: "30d", RetentionDays: defaultRetentionDays},
-		Experimental:       ExperimentalConfig{Analytics: false},
 		Telemetry:          TelemetryConfig{ProviderLinks: map[string]string{}},
 		Dashboard:          DashboardConfig{View: DashboardViewGrid},
 		ModelNormalization: core.DefaultModelNormalizationConfig(),

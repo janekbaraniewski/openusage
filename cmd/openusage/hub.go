@@ -185,7 +185,6 @@ func runHub(cfg config.Config, allowPublic bool) {
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
 		cfg.UI.CritThreshold,
-		cfg.Experimental.Analytics,
 		cfg.Dashboard,
 		nil,
 		timeWindow,

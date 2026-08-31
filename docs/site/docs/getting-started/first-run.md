@@ -69,14 +69,6 @@ Use <kbd>j</kbd>/<kbd>k</kbd> to scroll, <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> to 
 
 Press <kbd>Tab</kbd> (or <kbd>Shift+Tab</kbd>) to switch to the **Analytics** screen.
 
-:::note Opt-in
-Analytics is gated behind `experimental.analytics` in your settings. If <kbd>Tab</kbd> doesn't seem to do anything, enable it:
-
-```json
-{ "experimental": { "analytics": true } }
-```
-:::
-
 Analytics aggregates across providers:
 
 - **Metric strip** — window spend, token volume, spend/active day, spend trend

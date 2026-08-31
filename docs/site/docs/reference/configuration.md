@@ -22,7 +22,6 @@ The TUI reads the file on startup and writes it back when you change settings in
 | [`data`](#data) | object | Time window default and retention. |
 | [`telemetry`](#telemetry) | object | Daemon-related settings. |
 | [`dashboard`](#dashboard) | object | Provider list, view, and widget sections. |
-| [`experimental`](#experimental) | object | Opt-in screens. |
 | [`model_normalization`](#model_normalization) | object | Group raw model ids by canonical lineage. |
 | [`integrations`](#integrations) | object | Install state for tool hooks. |
 | [`export`](#export) | object | Daemon push to a remote hub (multi-machine aggregation). |
@@ -186,20 +185,6 @@ Same shape as `widget_sections`, but applied to the detail (full-page) view rath
 |---|---|---|
 | `id` | string | Section ID (provider-defined). |
 | `enabled` | bool | Render or hide on the detail view. |
-
-## `experimental`
-
-```json
-{
-  "experimental": {
-    "analytics": true
-  }
-}
-```
-
-| Field | Type | Default | Purpose |
-|---|---|---|---|
-| `analytics` | bool | `false` | Enables the Analytics screen (<kbd>Tab</kbd> from dashboard). |
 
 ## `model_normalization`
 
@@ -391,9 +376,6 @@ Read-only mirror of accounts the detector found at startup. Format is identical 
       "google": "gemini_api",
       "github-copilot": "copilot"
     }
-  },
-  "experimental": {
-    "analytics": false
   },
   "model_normalization": {
     "enabled": true,

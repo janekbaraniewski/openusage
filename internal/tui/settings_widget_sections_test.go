@@ -95,7 +95,7 @@ func TestHandleSettingsModalKey_WidgetSectionsReorderAffectsRenderedWidget(t *te
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{
 			{ID: "openai", Provider: "openai"},
@@ -129,7 +129,7 @@ func TestRenderSettingsWidgetSectionsBody_RendersListOnly(t *testing.T) {
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -155,7 +155,7 @@ func TestRenderSettingsModalOverlay_WidgetSectionsIncludesSeparatePreviewPanel(t
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -183,7 +183,7 @@ func TestHandleSettingsModalKey_WidgetSectionsPreviewScroll(t *testing.T) {
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -244,7 +244,7 @@ func TestRenderSettingsWidgetSectionsPreview_ReflectsSectionVisibility(t *testin
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -275,7 +275,7 @@ func TestSettingsWidgetPreviewBodyHeight_SideBySideShrinksToContent(t *testing.T
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -309,7 +309,7 @@ func TestRenderSettingsDetailSectionsPreview_ShowsTrendCharts(t *testing.T) {
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow30d,

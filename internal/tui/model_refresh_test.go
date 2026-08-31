@@ -83,12 +83,11 @@ func TestBeginTimeWindowRefreshRequestsSelectedWindow(t *testing.T) {
 
 func TestHandleKey_DetailTabNavigatesSectionsInsteadOfSwitchingScreen(t *testing.T) {
 	m := Model{
-		screen:                screenDashboard,
-		mode:                  modeDetail,
-		experimentalAnalytics: true,
-		width:                 120,
-		height:                40,
-		sortedIDs:             []string{"codex-cli"},
+		screen:    screenDashboard,
+		mode:      modeDetail,
+		width:     120,
+		height:    40,
+		sortedIDs: []string{"codex-cli"},
 		snapshots: map[string]core.UsageSnapshot{
 			"codex-cli": {
 				ProviderID: "codex",

@@ -39,7 +39,6 @@ func runDashboard(cfg config.Config) {
 	model := tui.NewModel(
 		cfg.UI.WarnThreshold,
 		cfg.UI.CritThreshold,
-		cfg.Experimental.Analytics,
 		cfg.Dashboard,
 		cachedAccounts,
 		timeWindow,

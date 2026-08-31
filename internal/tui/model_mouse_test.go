@@ -147,7 +147,7 @@ func TestMouseWheelScrollsSettingsWidgetPreview(t *testing.T) {
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -169,7 +169,7 @@ func TestMouseWheelUpClampsSettingsWidgetPreviewOffsetAtZero(t *testing.T) {
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,
@@ -192,7 +192,7 @@ func TestMouseWheelDoesNotScrollSettingsPreviewOutsideWidgetSectionsTab(t *testi
 	m := NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{},
 		[]core.AccountConfig{{ID: "claude-preview", Provider: "claude_code"}},
 		core.TimeWindow7d,

@@ -9,7 +9,7 @@ import (
 )
 
 func TestDaemonInstallResultSuccess(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	m.daemon.status = DaemonNotInstalled
 	m.daemon.installing = true
 
@@ -31,7 +31,7 @@ func TestDaemonInstallResultSuccess(t *testing.T) {
 }
 
 func TestDaemonInstallResultFailure(t *testing.T) {
-	m := NewModel(0.2, 0.1, false, config.DashboardConfig{}, nil, core.TimeWindow30d)
+	m := NewModel(0.2, 0.1, config.DashboardConfig{}, nil, core.TimeWindow30d)
 	m.daemon.status = DaemonNotInstalled
 	m.daemon.installing = true
 

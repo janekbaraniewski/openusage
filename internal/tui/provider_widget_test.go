@@ -76,7 +76,7 @@ func TestNewModel_AppliesWidgetSectionOverridesFromConfig(t *testing.T) {
 	_ = NewModel(
 		0.2,
 		0.05,
-		false,
+
 		config.DashboardConfig{
 			WidgetSections: []config.DashboardWidgetSection{
 				{
