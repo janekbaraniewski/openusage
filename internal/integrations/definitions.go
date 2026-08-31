@@ -305,6 +305,21 @@ func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]
 		// reformat a config we have no edit to make to.
 		return nil, nil
 	}
+	// Re-serializing through encoding/json would drop every comment in a
+	// .jsonc, so when the file carries any, excise just our array entries
+	// textually and leave the rest of the bytes alone. A plain .json has
+	// nothing to preserve, so it takes the simpler marshal path.
+	if configCarriesComments(configData) {
+		trimmed, ok := removeOpenCodePluginLines(configData, pluginURL)
+		if ok {
+			return trimmed, nil
+		}
+		// Entries were not on their own lines, so a line-wise edit can't be
+		// done safely. Marshalling is still correct JSON and still removes
+		// the stale entry; comments are lost, which beats leaving a
+		// registration pointing at a file we just deleted.
+	}
+
 	cfg["plugin"] = remaining
 
 	payload, err := json.MarshalIndent(cfg, "", "  ")
@@ -312,6 +327,76 @@ func patchOpenCodeConfig(configData []byte, targetFile string, install bool) ([]
 		return nil, fmt.Errorf("serialize opencode config: %w", err)
 	}
 	return append(payload, '\n'), nil
+}
+
+// configCarriesComments reports whether stripping JSONC syntax would actually
+// change the file, i.e. whether there is anything worth preserving.
+func configCarriesComments(configData []byte) bool {
+	return !bytes.Equal(bytes.TrimSpace(configData), bytes.TrimSpace(stripJSONC(configData)))
+}
+
+// removeOpenCodePluginLines deletes the lines of the `plugin` array that hold
+// our registration, preserving the rest of the file verbatim. Reports false
+// when any of our entries is not alone on its line, in which case a line-wise
+// edit could corrupt the file and the caller must fall back.
+func removeOpenCodePluginLines(configData []byte, pluginURL string) ([]byte, bool) {
+	isOurs := func(line string) bool {
+		return strings.Contains(line, "openusage-telemetry.ts") || strings.Contains(line, pluginURL)
+	}
+
+	lines := strings.Split(string(configData), "\n")
+	kept := make([]string, 0, len(lines))
+	removed := 0
+
+	for _, line := range lines {
+		if !isOurs(line) {
+			kept = append(kept, line)
+			continue
+		}
+		// The entry must be the only value on the line: a bare quoted string
+		// with an optional trailing comma, and nothing else.
+		bare := strings.TrimSpace(line)
+		bare = strings.TrimSuffix(bare, ",")
+		if !strings.HasPrefix(bare, `"`) || !strings.HasSuffix(bare, `"`) || strings.Count(bare, `"`) != 2 {
+			return nil, false
+		}
+		removed++
+	}
+	if removed == 0 {
+		return nil, false
+	}
+
+	out := strings.Join(kept, "\n")
+
+	// Removing the last element can leave the preceding one with a trailing
+	// comma. JSONC tolerates that, but normalize it so the file stays valid
+	// strict JSON too.
+	out = dropDanglingCommaBeforeClose(out)
+	return []byte(out), true
+}
+
+// dropDanglingCommaBeforeClose removes a comma that now sits immediately before
+// a closing bracket or brace, ignoring whitespace and comment-only lines.
+func dropDanglingCommaBeforeClose(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasSuffix(trimmed, ",") {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			next := strings.TrimSpace(lines[j])
+			if next == "" || strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/*") {
+				continue
+			}
+			if strings.HasPrefix(next, "]") || strings.HasPrefix(next, "}") {
+				idx := strings.LastIndex(line, ",")
+				lines[i] = line[:idx] + line[idx+1:]
+			}
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // --- Detectors ---

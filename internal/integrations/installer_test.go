@@ -607,3 +607,71 @@ func TestUpgrade(t *testing.T) {
 		})
 	}
 }
+
+// Uninstalling from a JSONC config must excise only our registration and leave
+// every comment intact. Re-serializing through encoding/json would strip them,
+// which is the same harm as creating a competing strict-JSON file.
+func TestUninstallOpenCodePreservesJSONCComments(t *testing.T) {
+	root := t.TempDir()
+	dirs := testDirs(root)
+	def, _ := DefinitionByID(OpenCodeID)
+
+	result, err := Install(def, dirs)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	configDir := filepath.Join(root, ".config", "opencode")
+	jsoncPath := filepath.Join(configDir, "opencode.jsonc")
+	original := `{
+  // the model I actually use
+  "model": "anthropic/claude-sonnet-4-5",
+  "plugin": [
+    "keep-me",
+    // ours, added by an older openusage
+    ` + string(mustJSONString(t, "file://"+result.TemplateFile)) + `
+  ]
+}
+`
+	if err := os.WriteFile(jsoncPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Uninstall(def, dirs); err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+
+	got, err := os.ReadFile(jsoncPath)
+	if err != nil {
+		t.Fatalf("read jsonc: %v", err)
+	}
+	text := string(got)
+
+	if strings.Contains(text, "openusage-telemetry.ts") {
+		t.Errorf("our registration survived uninstall:\n%s", text)
+	}
+	if !strings.Contains(text, "// the model I actually use") {
+		t.Errorf("uninstall stripped a comment:\n%s", text)
+	}
+	if !strings.Contains(text, `"keep-me"`) {
+		t.Errorf("uninstall dropped an unrelated plugin:\n%s", text)
+	}
+	// The result must still parse, and the dangling comma left by removing the
+	// last array element must be gone so it is valid strict JSON too.
+	var cfg map[string]any
+	if err := json.Unmarshal(stripJSONC(got), &cfg); err != nil {
+		t.Fatalf("result does not parse after comment stripping: %v\n%s", err, text)
+	}
+	if list, _ := cfg["plugin"].([]any); len(list) != 1 || list[0] != "keep-me" {
+		t.Errorf("plugin list = %#v, want [keep-me]", cfg["plugin"])
+	}
+}
+
+func mustJSONString(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
