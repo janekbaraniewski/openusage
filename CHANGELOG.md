@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.25.1 (2026-09-03)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump fast-uri from 3.1.5 to 3.1.7 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/348
+* deps(docs): bump browserslist from 4.28.6 to 4.28.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/350
+* deps(docs): bump fflate from 0.4.8 to 0.4.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/352
+* deps(website): bump fflate from 0.4.8 to 0.4.9 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/351
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.25.0...v0.25.1
+
 ## 0.25.0 (2026-08-31)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
