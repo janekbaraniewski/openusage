@@ -157,6 +157,11 @@
       "binary": "gemini"
     },
     {
+      "id": "muse-code",
+      "provider": "muse_code",
+      "binary": "muse"
+    },
+    {
       "id": "antigravity",
       "provider": "antigravity",
       "auth": "local",
