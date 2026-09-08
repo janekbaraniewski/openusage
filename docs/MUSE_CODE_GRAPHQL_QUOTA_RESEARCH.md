@@ -41,13 +41,29 @@ envelope. Percentages are derived, not served: no raw percent field exists.
 
 - Byte-exact replay returns HTTP 200 with freshly computed numbers
   (`as_of` advances, `*_used` climbs with real usage): nothing cached.
-- All-or-nothing envelope: dropping even two ad-telemetry params turns the
-  call into a 60s hang (HTTP 408). There is no minimal subset; the client
-  must replay the full ~28-param set plus full headers.
-- Open: shelf life of page-load tokens (`fb_dtsg`, `__s`, `__dyn`,
-  `__spin_*`). Experiment running: replay the same capture daily until it
-  breaks; that number decides whether quota meters are a feature or a
-  party trick. `doc_id` was stable across captures days apart.
+- Envelope is trimmable (earlier group-bisect 408s were a coarse-group
+  artifact): removing `lsd`, `__dyn`, `__csr`, or `__hblp` individually
+  still returns quota. `fb_dtsg` is essential. Either sess cookie alone
+  suffices; removing both fails. Single-param elimination for the rest
+  is still open.
+- Open: shelf life of page-load tokens (`fb_dtsg`, `__s`, `__spin_*`).
+  Experiment running: replay the same capture daily until it breaks;
+  that number decides whether quota meters are a feature or a
+  party trick. `doc_id` was stable across captures days apart,
+  including across a fresh login.
+
+## Alternative: CDP sidecar (proposed, feasibility established)
+
+Instead of recreating the envelope, drive a real browser: dedicated
+persistent Chrome profile (one interactive login), attach over CDP,
+reload the usage page, read the `LLMDCUsageQuery` response with
+`Network.getResponseBody`, extract only
+`data.team.subscription_quota_usage`. Verified working against a live
+session. Tradeoffs: no envelope maintenance and immune to `doc_id`
+rotation, but inherits a Chrome process (memory, lifecycle, headless
+reliability vs Meta session policy) that neither codebase currently
+wants as a dependency. Best viewed as a local experimental collector,
+not a shippable provider dependency.
 
 ## Client sketch (when shelf life justifies it)
 
