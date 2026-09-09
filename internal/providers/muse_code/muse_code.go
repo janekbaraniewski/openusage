@@ -348,9 +348,17 @@ func populateSnapshot(ctx context.Context, snap *core.UsageSnapshot, entries []m
 	setUsedMetric(snap, "total_output_tokens", float64(totalOutput), "tokens", allTimeWindow)
 	setUsedMetric(snap, "total_cache_read", float64(totalCacheRead), "tokens", allTimeWindow)
 	setUsedMetric(snap, "total_cache_write", float64(totalCacheWrite), "tokens", allTimeWindow)
+	// window_* for the selected time window (30d/all-time) — use the same total
+	// definition as total_tokens so the headline 26.6M/19.1M vs 307.7M mismatch
+	// is fixed (MUSE-PARITY-DIAGNOSIS.md:25). Previously window_tokens was
+	// billable-only (input+output) while total included cache reads.
+	setUsedMetric(snap, "window_tokens", float64(totalTokens), "tokens", allTimeWindow)
+	setUsedMetric(snap, "window_input_tokens", float64(totalInput), "tokens", allTimeWindow)
+	setUsedMetric(snap, "window_output_tokens", float64(totalOutput), "tokens", allTimeWindow)
 	if totalCost > 0 {
 		v := totalCost
 		snap.Metrics["total_cost_usd"] = core.Metric{Used: &v, Unit: "USD", Window: allTimeWindow}
+		snap.Metrics["window_cost"] = core.Metric{Used: &v, Unit: "USD", Window: allTimeWindow}
 	}
 	if todayCost > 0 {
 		v := todayCost
