@@ -269,19 +269,25 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 	// window_tokens: total tokens in the window, consistent with
 	// total_tokens (input + output + cache reads + cache writes + reasoning).
-	// Previously this was billable-only (excluded cache reads), which made the
-	// 26.6M headline (input+output) disagree with the 388.9M total that
-	// included cache reads. Now both use the same total definition, with
-	// the breakdown available in the Model Burn detail.
-	windowTotalTokens := windowInput + windowCacheRead + windowCacheWrite
-	for _, m := range agg.Models {
-		// Use TotalTokens if available, otherwise Billable + CacheRead
-		_ = m
-	}
-	// Recompute as total of all token buckets for the window.
-	windowTotalTokens = 0
+	// Previously this was billable-only (excluded cache reads, and here also
+	// reasoning), which made the 26.6M/19.1M headline (input+output) disagree
+	// with the 388.9M/307.7M total that included cache reads. Now both use the
+	// same total definition, with the breakdown available in the Model Burn
+	// detail. Also fix the Go/Swift dedup parity: window now uses the deduped
+	// total (307.7M) so both apps agree.
+	windowTotalTokens := 0.0
 	for _, model := range agg.Models {
 		windowTotalTokens += model.InputTokens + model.OutputTokens + model.CacheReadTokens + model.CacheWriteTokens + model.Reasoning
+	}
+	// For providers like muse_code that don't go through telemetry's Model
+	// aggregation (local provider), agg.Models may be empty but the snapshot
+	// already has total_* metrics. In that case, window_tokens should still
+	// be total_tokens for the window, not billable-only. Fall back to
+	// total_tokens if windowTotalTokens is still 0 but total exists.
+	if windowTotalTokens == 0 {
+		if m, ok := snap.Metrics["total_tokens"]; ok && m.Used != nil {
+			windowTotalTokens = *m.Used
+		}
 	}
 	if windowTotalTokens > 0 {
 		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowTotalTokens), Unit: "tokens", Window: windowLabel}
