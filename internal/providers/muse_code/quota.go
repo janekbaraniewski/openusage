@@ -1,29 +1,11 @@
-// Experimental Muse Code subscription-quota fetch. Primary path: the same
-// POST <api.meta.ai>/v1/responses SSE stream the TUI's /usage view renders —
-// a minimal streamed probe returns a response.subscription_usage event with
-// weekly + window percentages, authenticated by the CLI's own keychain
-// api_key (service "ai.meta.dev.credentials", account "meta").
-// Fallback path: the private Comet GraphQL route (LLMDCUsageQuery). Meta
-// publishes no quota API; this replays the dashboard's own byte-exact
-// envelope using the user's own browser session. See
-// docs/MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md for the full research note.
-// Undocumented routes — expect maintainer pushback and do not treat these
-// meters as stable.
-//
-// Auth shape (passive, no standing browser process):
-//   - The session cookie is re-read from the user's everyday browser on
-//     every poll through shared.LoadOrRefreshBrowserSession (llm_sess, with
-//     ecto_1_sess fallback). Chrome works; Firefox/Safari read without an
-//     OS keychain prompt. The TUI browser picker decides which.
-//   - Page-load tokens (fb_dtsg and friends) cannot be harvested without a
-//     page visit, so they ride in a user-managed JSON file named by the
-//     account's "quota_tokens_file" path (volatile params from one dashboard
-//     page load, e.g. fb_dtsg, lsd, __s, __spin_*, doc_id). chmod 600.
-//   - team_id comes from the account's "team_id" path (per-account setting
-//     in the dashboard request).
-//
-// When tokens die the enrichment degrades to an auth diagnostic telling the
-// user to visit dev.meta.ai in Chrome; local spend meters are unaffected.
+// Muse Code live quota: the same POST api.meta.ai/v1/responses SSE probe
+// the TUI's `/usage` view renders — a minimal `store:false, stream:true,
+// input:"hi"` probe returns `response.subscription_usage` with weekly + window
+// percentages, authenticated by the CLI's own keychain `api_key`
+// (service `ai.meta.dev.credentials`, account `meta`). No browser session
+// or page-load tokens. See `openusage/OPENUSAGE-GO-MUSECODE.md` for the
+// current design; the archived `MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md` is the
+// historical GraphQL investigation and is not shipped.
 package muse_code
 
 import (
@@ -33,61 +15,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
-
-const (
-	quotaEndpoint     = "https://dev.meta.ai/api/graphql/"
-	quotaCookieDomain = "dev.meta.ai"
-	quotaFriendlyName = "LLMDCUsageQuery"
-	quotaCallerClass  = "RelayModern"
-	quotaCRN          = "comet.llamaapi.LLMDCUsageRoute"
-	quotaConsoleURL   = "https://dev.meta.ai"
-)
-
-// quotaCookieNames are the session cookies the dashboard accepts, in
-// preference order. Either one alone suffices (bisect probe 2026-09-07).
-var quotaCookieNames = []string{"llm_sess", "ecto_1_sess"}
-
-// quotaEndpointOverride swaps the POST target in tests.
-var quotaEndpointOverride = ""
 
 // quotaHTTPClient builds the POST client. A var (not a plain func) so tests
 // can substitute a stub RoundTripper and exercise the full request path
 // without binding a socket.
 var quotaHTTPClient = func() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
-}
-
-// loadQuotaSession is a seam so tests can stub the browser read.
-var loadQuotaSession = func(ctx context.Context, acct core.AccountConfig) (config.BrowserSession, bool, error) {
-	if acct.BrowserCookie != nil && strings.TrimSpace(acct.BrowserCookie.CookieName) != "" {
-		return shared.LoadOrRefreshBrowserSession(ctx, acct, nil)
-	}
-	for _, name := range quotaCookieNames {
-		probe := acct
-		probe.BrowserCookie = &core.BrowserCookieRef{Domain: quotaCookieDomain, CookieName: name}
-		sess, ok, err := shared.LoadOrRefreshBrowserSession(ctx, probe, nil)
-		if err != nil {
-			return sess, false, err
-		}
-		if ok && strings.TrimSpace(sess.Value) != "" {
-			return sess, true, nil
-		}
-	}
-	return config.BrowserSession{}, false, nil
 }
 
 // responsesBaseURL is the Meta provider API root behind the TUI's /usage
@@ -459,231 +403,22 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 	return true
 }
 
-type quotaUsage struct {
-	Tier                string `json:"tier"`
-	AsOf                int64  `json:"as_of"`
-	WindowUsed          string `json:"window_weighted_used"`
-	WindowLimit         string `json:"window_weighted_limit"`
-	WindowResetsAt      int64  `json:"window_resets_at"`
-	WeeklyUsed          string `json:"weekly_weighted_used"`
-	WeeklyLimit         string `json:"weekly_weighted_limit"`
-	WeeklyResetsAt      int64  `json:"weekly_resets_at"`
-	AvailableModelCount int    `json:"-"`
-}
-
-type quotaResponse struct {
-	Data struct {
-		Team struct {
-			Usage           quotaUsage `json:"subscription_quota_usage"`
-			AvailableModels []struct {
-				ModelID string `json:"model_id"`
-			} `json:"available_models"`
-		} `json:"team"`
-	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors,omitempty"`
-}
-
-// enrichQuota adds subscription-quota meters to an already-populated snapshot.
-// It is non-fatal by design: every failure path records a diagnostic and
-// leaves the local spend meters untouched.
+// enrichQuota adds live quota (Responses SSE) to the snapshot.
+// It is non-fatal: on any failure it records a diagnostic and leaves the
+// local spend meters untouched. No browser session is required.
 func enrichQuota(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) {
-	// Prefer the Responses SSE probe (keychain or META_API_KEY, no browser
-	// session needed); fall through to the dashboard-cookie path only when
-	// no API key exists.
+	// Single clean probe: POST api.meta.ai/v1/responses with the keychain
+	// or file API key. No GraphQL fallback — that path required opening
+	// dev.meta.ai periodically and is intentionally removed. The history
+	// remains in git (MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md) for reference.
 	if trySubscriptionUsage(ctx, snap) {
 		return
 	}
-	// Team and tokens come from the account's provider paths, with MUSE_* env
-	// fallbacks mirroring MUSE_AUTH_PATH — the account is auto-detected, so
-	// env vars are the surgery-free way to configure quota.
-	tokensPath := core.FirstNonEmpty(acct.Path("quota_tokens_file", ""), os.Getenv("MUSE_QUOTA_TOKENS_FILE"))
-	if strings.TrimSpace(tokensPath) == "" {
-		snap.SetDiagnostic("muse_quota", "not configured — set quota_tokens_file (page-load params JSON) and team_id on the account to enable quota meters")
-		return
-	}
-	volatile, err := readQuotaTokens(tokensPath)
-	if err != nil {
-		snap.SetDiagnostic("muse_quota_error", fmt.Sprintf("cannot read quota tokens file: %v", shared.Truncate(err.Error(), 160)))
-		return
-	}
-	teamID := core.FirstNonEmpty(acct.Path("team_id", ""), os.Getenv("MUSE_QUOTA_TEAM_ID"))
-	if strings.TrimSpace(teamID) == "" {
-		snap.SetDiagnostic("muse_quota", "not configured — set team_id on the account (per-account setting from the dashboard request)")
-		return
-	}
-	sess, ok, err := loadQuotaSession(ctx, acct)
-	if err != nil || !ok || strings.TrimSpace(sess.Value) == "" {
-		quotaAuthHint(snap, "no browser session")
-		return
-	}
-
-	form, err := quotaForm(volatile, teamID)
-	if err != nil {
-		snap.SetDiagnostic("muse_quota_error", fmt.Sprintf("cannot build quota request: %v", shared.Truncate(err.Error(), 160)))
-		return
-	}
-	body, status, err := postQuotaForm(ctx, form, sess)
-	if err != nil {
-		snap.SetDiagnostic("muse_quota_error", fmt.Sprintf("quota request failed: %v", shared.Truncate(err.Error(), 160)))
-		return
-	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		quotaAuthHint(snap, fmt.Sprintf("HTTP %d", status))
-		return
-	}
-	var qr quotaResponse
-	if err := json.Unmarshal(body, &qr); err != nil {
-		snap.SetDiagnostic("muse_quota_error", fmt.Sprintf("cannot parse quota response (HTTP %d)", status))
-		return
-	}
-	if len(qr.Errors) > 0 || qr.Data.Team.Usage.Tier == "" {
-		// GraphQL errors or an empty payload mean the page tokens died even
-		// though the cookie is fine — same remedy as an expired session.
-		quotaAuthHint(snap, "empty quota payload")
-		return
-	}
-	applyQuotaMeters(snap, &qr)
-}
-
-func quotaAuthHint(snap *core.UsageSnapshot, reason string) {
-	snap.SetDiagnostic("muse_quota_auth", fmt.Sprintf("quota %s — visit %s in Chrome, then re-poll", reason, quotaConsoleURL))
-}
-
-// readQuotaTokens loads the volatile page-load params (fb_dtsg, lsd, __s,
-// __spin_*, doc_id, …) from the user's JSON file. Values are secrets; only
-// the file path lives in settings, never the params themselves.
-func readQuotaTokens(path string) (map[string]string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]string
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("quota tokens file must be a JSON string map: %w", err)
-	}
-	if strings.TrimSpace(m["fb_dtsg"]) == "" {
-		return nil, fmt.Errorf("quota tokens file is missing fb_dtsg (re-save it from a fresh dashboard page load)")
-	}
-	if strings.TrimSpace(m["doc_id"]) == "" {
-		return nil, fmt.Errorf("quota tokens file is missing doc_id (re-save it from a fresh dashboard page load)")
-	}
-	return m, nil
-}
-
-// quotaForm merges the fixed envelope skeleton with the stored volatile
-// params and the per-account variables block.
-func quotaForm(volatile map[string]string, teamID string) (url.Values, error) {
-	now := time.Now().UTC()
-	variables := map[string]any{
-		"api_key_id": nil,
-		"model_id":   nil,
-		"team_id":    teamID,
-		"start_date": now.AddDate(0, 0, -30).Format("2006-01-02"),
-		"end_date":   now.Format("2006-01-02"),
-		"timezone":   "UTC",
-		"LLMDCUsageRelayPreloader_ShouldIncludeSubscriptionQuotarelayprovider": true,
-		"LLMDCUsageRelayPreloader_ShouldIncludeCostMetricsrelayprovider":       true,
-		"LLMDCUsageRelayPreloader_ShouldIncludeImageMetricsrelayprovider":      true,
-	}
-	varRaw, err := json.Marshal(variables)
-	if err != nil {
-		return nil, err
-	}
-	form := url.Values{}
-	for k, v := range volatile {
-		if strings.TrimSpace(v) != "" {
-			form.Set(k, v)
-		}
-	}
-	form.Set("fb_api_req_friendly_name", quotaFriendlyName)
-	form.Set("fb_api_caller_class", quotaCallerClass)
-	form.Set("__crn", quotaCRN)
-	form.Set("variables", string(varRaw))
-	return form, nil
-}
-
-func postQuotaForm(ctx context.Context, form url.Values, sess config.BrowserSession) ([]byte, int, error) {
-	endpoint := quotaEndpoint
-	if quotaEndpointOverride != "" {
-		endpoint = quotaEndpointOverride
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Origin", quotaConsoleURL)
-	req.Header.Set("Referer", quotaConsoleURL+"/")
-	req.Header.Set("X-FB-Friendly-Name", quotaFriendlyName)
-	if lsd := form.Get("lsd"); lsd != "" {
-		req.Header.Set("X-FB-LSD", lsd)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-	req.AddCookie(&http.Cookie{Name: sess.CookieName, Value: sess.Value, Domain: quotaCookieDomain, Path: "/"})
-
-	resp, err := quotaHTTPClient().Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	return body, resp.StatusCode, nil
-}
-
-func quotaFloat(s string) (float64, bool) {
-	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
-		return 0, false
-	}
-	return f, true
-}
-
-func applyQuotaMeters(snap *core.UsageSnapshot, qr *quotaResponse) {
-	u := &qr.Data.Team.Usage
-	snap.EnsureMaps()
-	if used, ok := quotaFloat(u.WindowUsed); ok {
-		if limit, ok := quotaFloat(u.WindowLimit); ok && limit > 0 {
-			usedCp, limitCp := used, limit
-			snap.Metrics["muse.session"] = core.Metric{Used: &usedCp, Limit: &limitCp, Unit: "quota", Window: "session"}
-			if u.WindowResetsAt > 0 {
-				snap.Resets["muse.session"] = time.Unix(u.WindowResetsAt, 0).UTC()
-			}
-		}
-	}
-	if used, ok := quotaFloat(u.WeeklyUsed); ok {
-		if limit, ok := quotaFloat(u.WeeklyLimit); ok && limit > 0 {
-			usedCp, limitCp := used, limit
-			snap.Metrics["muse.weekly"] = core.Metric{Used: &usedCp, Limit: &limitCp, Unit: "quota", Window: "weekly"}
-			if u.WeeklyResetsAt > 0 {
-				snap.Resets["muse.weekly"] = time.Unix(u.WeeklyResetsAt, 0).UTC()
-			}
-		}
-	}
-	if u.Tier != "" {
-		snap.SetAttribute("muse_quota_tier", u.Tier)
-		if snap.Raw == nil {
-			snap.Raw = make(map[string]string)
-		}
-		snap.Raw["plan_name"] = quotaPlanName(u.Tier)
-	}
-	if u.AsOf > 0 {
-		snap.SetAttribute("muse_quota_as_of", time.Unix(u.AsOf, 0).UTC().Format(time.RFC3339))
-	}
-	if n := len(qr.Data.Team.AvailableModels); n > 0 {
-		snap.SetAttribute("muse_quota_models", fmt.Sprintf("%d", n))
-	}
-	if summary := quotaSummary(snap); summary != "quota n/a" {
-		if snap.Message != "" {
-			snap.Message += " · "
-		}
-		snap.Message += summary
-	}
+	// No API key: quota is unavailable, but local spend is still valid.
+	// Keep the diagnostic minimal and honest — don't imply a browser
+	// visit would fix it when the clean path is just `muse login` or
+	// `META_API_KEY` / `~/.config/openusage/muse.json`.
+	snap.SetDiagnostic("muse_quota", "quota unavailable — run `muse login` or set META_API_KEY / ~/.config/openusage/muse.json to enable quota")
 }
 
 func quotaSummary(snap *core.UsageSnapshot) string {

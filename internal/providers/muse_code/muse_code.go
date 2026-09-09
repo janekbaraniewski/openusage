@@ -42,18 +42,14 @@ func New() *Provider {
 				DocURL:       "https://developer.meta.com/ai/models/muse-spark/",
 			},
 			Auth: core.ProviderAuthSpec{
-				Type:                core.ProviderAuthTypeLocal,
-				DefaultAccountID:    DefaultAccountID,
-				SupplementalTypes:   []core.ProviderAuthType{core.ProviderAuthTypeBrowserSession},
-				BrowserCookieDomain: quotaCookieDomain,
-				BrowserCookieName:   "llm_sess",
-				BrowserConsoleURL:   quotaConsoleURL,
+				Type:             core.ProviderAuthTypeLocal,
+				DefaultAccountID: DefaultAccountID,
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
 					"Install Muse Code, run `muse login`, and complete at least one session.",
 					"openusage auto-detects the sessions dir and auth file; no configuration required.",
-					"Quota meters (experimental): automatic via macOS keychain, or export META_API_KEY. Legacy dashboard-cookie path needs MUSE_QUOTA_TEAM_ID and MUSE_QUOTA_TOKENS_FILE plus a fresh dev.meta.ai session.",
+					"Quota meters (experimental): automatic via macOS keychain file ~/.config/openusage/muse.json or META_API_KEY; no browser required.",
 					"Plan label: the quota probe returns an opaque tier ID, so set provider_paths.plan_name (Everyday Usage, High Usage, or Power Usage) to name the plan on the tile.",
 				},
 			},
