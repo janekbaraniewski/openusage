@@ -227,12 +227,13 @@ type subscriptionUsage struct {
 	} `json:"window"`
 }
 
-// parseQuotaExhausted returns a 100% usage snapshot for the 429
-// "Subscription quota exhausted" signal. The Responses probe returns
+// parseQuotaExhaustedResetsAt extracts the reset instant from a 429
+// "Subscription quota exhausted" error. The Responses probe returns
 // `{"error":{"code":"rate_limit_exceeded","message":"Subscription quota
 // exhausted…","resets_at":1789344000}}` instead of an SSE stream when the
-// account is at its limit — treat it as quota, not a transient probe error.
-func parseQuotaExhausted(body string) *subscriptionUsage {
+// account is at its limit. We surface the blocked state with the reset
+// rather than fabricating 100% for both windows (P1-1).
+func parseQuotaExhaustedResetsAt(body string) int64 {
 	var payload struct {
 		Error struct {
 			Code     string `json:"code"`
@@ -241,24 +242,29 @@ func parseQuotaExhausted(body string) *subscriptionUsage {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
-		return nil
+		return 0
 	}
 	if payload.Error.Code != "rate_limit_exceeded" {
-		return nil
+		return 0
 	}
 	if !strings.Contains(strings.ToLower(payload.Error.Message), "quota") {
-		return nil
+		return 0
 	}
-	if payload.Error.ResetsAt == 0 {
-		return nil
+	return payload.Error.ResetsAt
+}
+
+// parseQuotaExhausted is deprecated; use parseQuotaExhaustedResetsAt.
+func parseQuotaExhausted(body string) *subscriptionUsage {
+	if resetsAt := parseQuotaExhaustedResetsAt(body); resetsAt != 0 {
+		sub := &subscriptionUsage{}
+		sub.Weekly.UsedPercent = 100
+		sub.Weekly.ResetsAt = resetsAt
+		sub.Window.UsedPercent = 100
+		sub.Window.ResetsAt = resetsAt
+		sub.Window.WindowDurationMins = 300
+		return sub
 	}
-	sub := &subscriptionUsage{}
-	sub.Weekly.UsedPercent = 100
-	sub.Weekly.ResetsAt = payload.Error.ResetsAt
-	sub.Window.UsedPercent = 100
-	sub.Window.ResetsAt = payload.Error.ResetsAt
-	sub.Window.WindowDurationMins = 300
-	return sub
+	return nil
 }
 
 // postSubscriptionUsage sends the minimal streamed probe and returns the
@@ -292,13 +298,13 @@ func postSubscriptionUsage(ctx context.Context, apiKey string) (*subscriptionUsa
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		trimmed := strings.TrimSpace(string(body))
-		// 429 with quota-exhausted is not a probe failure — the
-		// subscription is at 100% with a reset instant. Surface it as
-		// quota instead of a transient error so the TUI shows
-		// Session 100% / Weekly 100% rather than empty resources.
+		// 429 with quota-exhausted is the blocked-subscription signal, not
+		// a transient probe rate limit. Don't fabricate 100% for both windows
+		// (P1-1); surface the blocked state with the reset so the provider
+		// can render it without claiming measured percentages.
 		if resp.StatusCode == http.StatusTooManyRequests {
-			if sub := parseQuotaExhausted(trimmed); sub != nil {
-				return sub, resp.StatusCode, nil
+			if resetsAt := parseQuotaExhaustedResetsAt(trimmed); resetsAt != 0 {
+				return nil, resp.StatusCode, fmt.Errorf("quota exhausted, resets at %d", resetsAt)
 			}
 		}
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, shared.Truncate(trimmed, 160))
@@ -413,6 +419,23 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 	}
 	sub, status, err := postSubscriptionUsage(ctx, key)
 	if err != nil {
+		// Quota exhausted is a known blocked state, not a transient probe
+		// failure. Don't fabricate 100% for both windows (P1-1); surface the
+		// blocked state with the reset so the TUI can render it without
+		// claiming measured percentages.
+		if status == http.StatusTooManyRequests && strings.Contains(strings.ToLower(err.Error()), "quota exhausted") {
+			var resetsAt int64
+			if _, scanErr := fmt.Sscanf(err.Error(), "quota exhausted, resets at %d", &resetsAt); scanErr == nil && resetsAt > 0 {
+				snap.SetDiagnostic("muse_quota_blocked", fmt.Sprintf("quota exhausted, resets at %s", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339)))
+				// Also set the resets so the UI can show a countdown even
+				// though the percentages are unknown. We don't set 100% for
+				// both windows; the blocked diagnostic is the honest signal.
+				snap.SetAttribute("muse_quota_blocked_resets_at", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339))
+				return true
+			}
+			snap.SetDiagnostic("muse_quota_blocked", "quota exhausted")
+			return true
+		}
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			snap.SetDiagnostic("muse_quota_auth", "quota API key rejected — re-authenticate via `muse login`, then re-poll")
 		} else {
