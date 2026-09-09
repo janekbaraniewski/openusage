@@ -426,11 +426,23 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 		if status == http.StatusTooManyRequests && strings.Contains(strings.ToLower(err.Error()), "quota exhausted") {
 			var resetsAt int64
 			if _, scanErr := fmt.Sscanf(err.Error(), "quota exhausted, resets at %d", &resetsAt); scanErr == nil && resetsAt > 0 {
+				// Surface the weekly window as 100% with the reset from the
+				// error (typically ~6 days out, e.g. Sep 14). We don't fabricate
+				// both windows at 100%; the weekly is the honest one for the
+				// observed reset, and the diagnostic makes the blocked state
+				// explicit (P1-1).
+				snap.EnsureMaps()
+				hundred := 100.0
+				snap.Metrics["muse.weekly"] = core.Metric{Used: &hundred, Limit: &hundred, Unit: "quota", Window: "weekly"}
+				snap.Resets["muse.weekly"] = time.Unix(resetsAt, 0).UTC()
 				snap.SetDiagnostic("muse_quota_blocked", fmt.Sprintf("quota exhausted, resets at %s", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339)))
-				// Also set the resets so the UI can show a countdown even
-				// though the percentages are unknown. We don't set 100% for
-				// both windows; the blocked diagnostic is the honest signal.
 				snap.SetAttribute("muse_quota_blocked_resets_at", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339))
+				if summary := quotaSummary(snap); summary != "quota n/a" {
+					if snap.Message != "" {
+						snap.Message += " · "
+					}
+					snap.Message += summary
+				}
 				return true
 			}
 			snap.SetDiagnostic("muse_quota_blocked", "quota exhausted")
