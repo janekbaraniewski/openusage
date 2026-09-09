@@ -192,7 +192,28 @@ func readAllSessions(ctx context.Context, dirs []string) ([]museModelEntry, erro
 			return all, walkErr
 		}
 	}
-	return all, nil
+	// Deduplicate by stable event identity across files. The same
+	// model_completed record can appear in multiple session files
+	// (copied logs, feedback-session) and would otherwise be double-
+	// counted. This matches Swift's dedup (which is heuristic) but uses
+	// the stable record ID + stream + sequence when available.
+	seenEntries := make(map[string]struct{}, len(all))
+	deduped := make([]museModelEntry, 0, len(all))
+	for _, e := range all {
+		key := e.RecordID
+		if key != "" {
+			key = e.RecordID + "|" + e.StreamID + "|" + fmt.Sprintf("%d", e.Sequence)
+		} else {
+			// Fallback heuristic for records without stable ID (should be rare)
+			key = fmt.Sprintf("%d-%s-%d-%d-%d-%d", e.Timestamp.UnixMicro(), e.Model, e.Input, e.CacheRead, e.Output, e.Reasoning)
+		}
+		if _, dup := seenEntries[key]; dup {
+			continue
+		}
+		seenEntries[key] = struct{}{}
+		deduped = append(deduped, e)
+	}
+	return deduped, nil
 }
 
 func canonicalPath(path string) string {

@@ -10,7 +10,9 @@ import (
 )
 
 // museModelEntry is one assistant step's token usage, normalized from a
-// model_completed event.
+// model_completed event. ID/Stream/Sequence are kept for cross-file
+// deduplication: the same record can appear in multiple session files
+// (copied logs, feedback-session) and must be counted once.
 type museModelEntry struct {
 	Timestamp   time.Time
 	SessionID   string
@@ -21,6 +23,9 @@ type museModelEntry struct {
 	CacheRead   int64
 	CacheWrite  int64
 	TotalTokens int64
+	RecordID    string
+	StreamID    string
+	Sequence    int64
 }
 
 type museUsageBuckets struct {
@@ -44,9 +49,15 @@ type musePayload struct {
 }
 
 type museRecord struct {
+	ID          string      `json:"id"`
 	PayloadType string      `json:"payload_type"`
 	Payload     musePayload `json:"payload"`
 	RecordedAt  int64       `json:"recorded_at"`
+	Sequence    int64       `json:"sequence"`
+	Stream      struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	} `json:"stream"`
 }
 
 type museRetainedFrame struct {
@@ -143,5 +154,8 @@ func museRecordEntry(data []byte) (museModelEntry, bool) {
 		CacheRead:   cacheRead,
 		CacheWrite:  usage.CacheWriteTokens,
 		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.ReasoningTokens,
+		RecordID:    rec.ID,
+		StreamID:    rec.Stream.ID,
+		Sequence:    rec.Sequence,
 	}, true
 }
