@@ -202,7 +202,11 @@ func (m Model) renderSettingsAPIKeysBody(w, h int) string {
 		}
 
 		if !isAPIKeyProvider(providerID) {
-			lines = append(lines, fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, "-"))
+			// Local-auth providers (e.g. Muse Code) need no API key, but
+			// may still accept an optional env credential — show it
+			// instead of a bare "-".
+			envLabel := truncateToWidth(core.FirstNonEmpty(localAuthEnvHintForProvider(providerID), "-"), envW)
+			lines = append(lines, fmt.Sprintf("%s%-3d %-7s %-*s %-*s", prefix, i+1, "N/A", accountW, truncateToWidth(id, accountW), envW, envLabel))
 			continue
 		}
 

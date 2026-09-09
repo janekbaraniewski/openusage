@@ -3,10 +3,9 @@
 // aggregates per-model token totals, priced through the shared pricing
 // engine. No network calls are made.
 //
-// Muse Code publishes no quota or spend API (every plausible api.meta.ai
-// usage/billing path returns 404): there are no quota meters by design, only
-// spend and activity. If Meta ever documents a quota endpoint, its meters
-// belong in Fetch next to the spend aggregation below.
+// Quota meters live in quota.go: the Responses SSE probe (same event the
+// TUI's /usage view renders) is primary, the dashboard GraphQL replay is
+// fallback. Both are undocumented and degrade to diagnostics, never errors.
 package muse_code
 
 import (
@@ -43,13 +42,19 @@ func New() *Provider {
 				DocURL:       "https://developer.meta.com/ai/models/muse-spark/",
 			},
 			Auth: core.ProviderAuthSpec{
-				Type:             core.ProviderAuthTypeLocal,
-				DefaultAccountID: DefaultAccountID,
+				Type:                core.ProviderAuthTypeLocal,
+				DefaultAccountID:    DefaultAccountID,
+				SupplementalTypes:   []core.ProviderAuthType{core.ProviderAuthTypeBrowserSession},
+				BrowserCookieDomain: quotaCookieDomain,
+				BrowserCookieName:   "llm_sess",
+				BrowserConsoleURL:   quotaConsoleURL,
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
 					"Install Muse Code, run `muse login`, and complete at least one session.",
 					"openusage auto-detects the sessions dir and auth file; no configuration required.",
+					"Quota meters (experimental): automatic via macOS keychain, or export META_API_KEY. Legacy dashboard-cookie path needs MUSE_QUOTA_TEAM_ID and MUSE_QUOTA_TOKENS_FILE plus a fresh dev.meta.ai session.",
+					"Plan label: the quota probe returns an opaque tier ID, so set provider_paths.plan_name (Everyday Usage, High Usage, or Power Usage) to name the plan on the tile.",
 				},
 			},
 			Dashboard: dashboardWidget(),
@@ -80,10 +85,29 @@ func HasCredential(acct core.AccountConfig) bool {
 	return fileExists(authFilePath(acct))
 }
 
+// HasChanged reports whether Muse Code data may have moved since the given
+// time. Quota comes from the remote probe and drifts without any local
+// session write (other devices, background usage), so credentialed accounts
+// always re-poll — same rationale as codex. Otherwise scan nested .jsonl
+// files: appends to a session transcript never bump the sessions root
+// mtime, so a top-level stat alone misses active sessions and the daemon
+// would re-serve a stale snapshot indefinitely.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
 	dirs := resolveSessionsDirs(acct)
 	if len(dirs) == 0 {
 		return false, nil
+	}
+	if HasCredential(acct) {
+		return true, nil
+	}
+	files, err := shared.CollectFilesWithStat(dirs, map[string]bool{".jsonl": true})
+	if err != nil {
+		return true, nil
+	}
+	for _, info := range files {
+		if info != nil && info.ModTime().After(since) {
+			return true, nil
+		}
 	}
 	return shared.AnyPathModifiedAfter(dirs, since), nil
 }
@@ -123,6 +147,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	populateSnapshot(ctx, &snap, entries, p.now())
 	snap.Status = core.StatusOK
 	snap.Message = buildStatusMessage(snap)
+	// Optional quota enrichment: passive browser-session replay of the
+	// dashboard's private quota route. Non-fatal — failures only add
+	// diagnostics, the local spend meters above always stand.
+	enrichQuota(ctx, acct, &snap)
+	applyPlanNameOverride(acct, &snap)
 	return snap, nil
 }
 

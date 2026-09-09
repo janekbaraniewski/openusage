@@ -65,11 +65,29 @@ reliability vs Meta session policy) that neither codebase currently
 wants as a dependency. Best viewed as a local experimental collector,
 not a shippable provider dependency.
 
-## Client sketch (when shelf life justifies it)
+## Client (implemented, experimental — 2026-09-08)
 
-New fetch path in `internal/providers/muse_code`: cookie refresh via the
-existing `shared.LoadOrRefreshBrowserSession` infra (`dev.meta.ai` cookie
-ref), `team_id` from account config, exact-envelope POST, meters
-`muse.session` / `muse.weekly` (`.percent` with Limit/ResetsAt) above the
-local spend. Degrade to auth-required when page tokens die; the browser
-revisit repairs it. Expect maintainer pushback: undocumented route.
+`internal/providers/muse_code/quota.go` enriches the local-spend snapshot,
+non-fatally, following the opencode console-enrichment pattern:
+
+- Cookie refresh via the existing `shared.LoadOrRefreshBrowserSession`
+  infra (`llm_sess`, `ecto_1_sess` fallback, `dev.meta.ai`). Passive read
+  from the user's everyday browser every poll — no standing Chrome process.
+  Firefox/Safari read without an OS keychain prompt; Chrome users pick it in
+  the TUI browser picker (persisted per account).
+- `team_id` from the account's `team_id` path; volatile page-load params
+  (`fb_dtsg`, `lsd`, `doc_id`, …) from the account's `quota_tokens_file`
+  (user-managed JSON, chmod 600 — values never enter settings).
+- Exact-envelope POST, meters `muse.session` / `muse.weekly` (Used/Limit
+  with Resets) above the local spend, tier/as-of/model-count attributes.
+- Degradation: any auth-shaped failure (no cookie, HTTP 401/403, GraphQL
+  errors, empty payload) records a `muse_quota_auth` diagnostic reading
+  "quota … — visit https://dev.meta.ai in Chrome, then re-poll". Local
+  spend meters always stand.
+
+No periodic Chrome runner: merely launching Chrome refreshes nothing — a
+page visit is what renews cookies and page tokens, and the cookie half is
+already free via the passive re-read. If token shelf life (still measured
+by the daily replay) ever justifies automation, the honest shape is a
+harvest-on-degradation page visit, not a schedule. Expect maintainer
+pushback: undocumented route.
