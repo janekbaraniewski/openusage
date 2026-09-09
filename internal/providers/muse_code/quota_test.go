@@ -143,12 +143,12 @@ func TestEnrichQuota_SubscriptionUsageNoEvent(t *testing.T) {
 
 func TestQuotaPlanName(t *testing.T) {
 	for in, want := range map[string]string{
-		"Muse Code Everyday Usage": "Everyday Usage",
-		"Muse Code High Usage":     "High Usage",
-		"Muse Code Power Usage":    "Power Usage",
-		"27681393394859588":        "27681393394859588",
+		"Muse Code Everyday Usage":     "Everyday Usage",
+		"Muse Code High Usage":         "High Usage",
+		"Muse Code Power Usage":        "Power Usage",
+		"27681393394859588":            "27681393394859588",
 		"  Muse Code Everyday Usage  ": "Everyday Usage",
-		"":                         "",
+		"":                             "",
 	} {
 		if got := quotaPlanName(in); got != want {
 			t.Errorf("quotaPlanName(%q) = %q, want %q", in, got, want)

@@ -81,7 +81,7 @@ func (m Model) apiKeysTabIDs() []string {
 	var ids []string
 	for _, id := range m.providerOrder {
 		providerID := m.accountProviders[id]
-		if isAPIKeyProvider(providerID) || supportsBrowserSessionProvider(providerID) {
+		if isAPIKeyProvider(providerID) || supportsBrowserSessionProvider(providerID) || localAuthEnvHintForProvider(providerID) != "" {
 			ids = append(ids, id)
 			registered[providerID] = true
 		}
