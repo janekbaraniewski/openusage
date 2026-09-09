@@ -267,11 +267,26 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	if windowCost > 0 {
 		snap.Metrics["window_cost"] = core.Metric{Used: core.Float64Ptr(windowCost), Unit: "USD", Window: windowLabel}
 	}
-	// window_tokens represents billable token volume — input + output + cache writes
-	// + reasoning. Cache reads are excluded because they're discounted 90% and
-	// represent repeated reads of cached bytes, which inflates apparent usage
-	// by orders of magnitude without reflecting actual consumption.
-	if windowBillable > 0 {
+	// window_tokens: total tokens in the window, consistent with
+	// total_tokens (input + output + cache reads + cache writes + reasoning).
+	// Previously this was billable-only (excluded cache reads), which made the
+	// 26.6M headline (input+output) disagree with the 388.9M total that
+	// included cache reads. Now both use the same total definition, with
+	// the breakdown available in the Model Burn detail.
+	windowTotalTokens := windowInput + windowCacheRead + windowCacheWrite
+	for _, m := range agg.Models {
+		// Use TotalTokens if available, otherwise Billable + CacheRead
+		_ = m
+	}
+	// Recompute as total of all token buckets for the window.
+	windowTotalTokens = 0
+	for _, model := range agg.Models {
+		windowTotalTokens += model.InputTokens + model.OutputTokens + model.CacheReadTokens + model.CacheWriteTokens + model.Reasoning
+	}
+	if windowTotalTokens > 0 {
+		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowTotalTokens), Unit: "tokens", Window: windowLabel}
+	} else if windowBillable > 0 {
+		// Fallback to billable if total is not available (should not happen)
 		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowBillable), Unit: "tokens", Window: windowLabel}
 	}
 	if windowCacheRead > 0 {
