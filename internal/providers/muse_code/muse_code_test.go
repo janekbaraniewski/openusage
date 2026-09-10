@@ -111,6 +111,12 @@ func TestProvider_BasicMetadata(t *testing.T) {
 func TestProvider_Fetch_AuthRequired(t *testing.T) {
 	t.Setenv("META_API_KEY", "")
 	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing-auth.json"))
+	// Isolate from real ~/.config/openusage/muse.json which now also counts as
+	// a credential for quota (muse.json file-only quota). Without this, a
+	// developer with a saved key would make this "no credential" test pass
+	// incorrectly as quota-capable.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	p := New()
 	acct := core.AccountConfig{ID: "muse-code", Provider: "muse_code", Auth: "local"}
 	acct.SetPath("sessions_dir", filepath.Join(t.TempDir(), "missing"))

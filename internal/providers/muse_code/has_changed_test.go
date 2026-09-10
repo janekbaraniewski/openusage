@@ -10,11 +10,14 @@ import (
 )
 
 // uncredentialedAcct points sessions + config at temp dirs so HasCredential
-// sees neither META_API_KEY nor a real auth.json.
+// sees neither META_API_KEY nor a real auth.json nor the persisted
+// muse.json file.
 func uncredentialedAcct(t *testing.T, sessionsDir string) core.AccountConfig {
 	t.Helper()
 	t.Setenv("META_API_KEY", "")
 	t.Setenv("MUSE_AUTH_PATH", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	emptyCfg := t.TempDir()
 	t.Setenv("MUSE_CONFIG_DIR", emptyCfg)
 	acct := core.AccountConfig{ID: "muse-code", Provider: "muse_code"}
