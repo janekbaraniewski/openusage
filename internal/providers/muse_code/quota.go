@@ -92,26 +92,40 @@ func loadMuseAPIKeyFromFile() (string, bool) {
 	}
 	path := filepath.Join(home, ".config", "openusage", "muse.json")
 	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" {
-		return "", false
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err == nil {
-		for _, field := range []string{"apiKey", "api_key", "key"} {
-			if v, ok := obj[field].(string); ok && strings.TrimSpace(v) != "" {
-				return strings.TrimSpace(v), true
+	if err == nil {
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed != "" {
+			var obj map[string]any
+			if err := json.Unmarshal(data, &obj); err == nil {
+				for _, field := range []string{"apiKey", "api_key", "key"} {
+					if v, ok := obj[field].(string); ok && strings.TrimSpace(v) != "" {
+						return strings.TrimSpace(v), true
+					}
+				}
+			} else if !strings.Contains(trimmed, "{") {
+				return trimmed, true
 			}
 		}
-		return "", false
 	}
-	if strings.Contains(trimmed, "{") {
-		return "", false
+	// Fallback: the Muse CLI's own auth file on Linux stores the api_key
+	// inline as providers.meta.api_key (alongside the dca: access_token).
+	// On darwin it is in the keychain, but on Linux the file is the source
+	// of truth and avoids needing a separate ~/.config/openusage/muse.json
+	// copy. This makes `muse login` on Linux immediately quota-capable.
+	authPath := filepath.Join(home, ".config", "muse", "auth.json")
+	if data, err := os.ReadFile(authPath); err == nil {
+		var doc struct {
+			Providers map[string]struct {
+				APIKey string `json:"api_key"`
+			} `json:"providers"`
+		}
+		if err := json.Unmarshal(data, &doc); err == nil {
+			if prov, ok := doc.Providers["meta"]; ok && strings.TrimSpace(prov.APIKey) != "" {
+				return strings.TrimSpace(prov.APIKey), true
+			}
+		}
 	}
-	return trimmed, true
+	return "", false
 }
 
 func saveMuseAPIKeyToFile(key string) error {
