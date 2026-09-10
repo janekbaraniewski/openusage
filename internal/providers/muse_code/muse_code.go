@@ -78,7 +78,19 @@ func HasCredential(acct core.AccountConfig) bool {
 	if strings.TrimSpace(os.Getenv("META_API_KEY")) != "" {
 		return true
 	}
-	return fileExists(authFilePath(acct))
+	if fileExists(authFilePath(acct)) {
+		return true
+	}
+	// Also consider the persisted quota key file that both apps share
+	// (~/.config/openusage/muse.json, written by Swift/Go after first
+	// keychain read). A file-only quota setup with no auth.json should still
+	// be considered credentialed for HasChanged/HasChanged and detection.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if fileExists(filepath.Join(home, ".config", "openusage", "muse.json")) {
+			return true
+		}
+	}
+	return false
 }
 
 // HasChanged reports whether Muse Code data may have moved since the given
@@ -89,12 +101,17 @@ func HasCredential(acct core.AccountConfig) bool {
 // mtime, so a top-level stat alone misses active sessions and the daemon
 // would re-serve a stale snapshot indefinitely.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
+	// Check credential first, before dirs, so a file-only quota setup with
+	// no sessions dir (new machine, cleaned logs, or META_API_KEY/muse.json
+	// only) still polls for remote quota. Previously this returned false for
+	// missing dirs before checking credential, hiding quota on empty-log
+	// machines (P2-5).
+	if HasCredential(acct) {
+		return true, nil
+	}
 	dirs := resolveSessionsDirs(acct)
 	if len(dirs) == 0 {
 		return false, nil
-	}
-	if HasCredential(acct) {
-		return true, nil
 	}
 	files, err := shared.CollectFilesWithStat(dirs, map[string]bool{".jsonl": true})
 	if err != nil {
@@ -137,15 +154,27 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if len(entries) == 0 {
 		snap.Status = core.StatusOK
 		snap.Message = "No Muse sessions recorded"
+		// Still enrich quota if we have a key — Weekly 0% left / 100% blocked
+		// should show even with no local sessions (P2-5). A new machine or
+		// cleaned log dir with META_API_KEY / muse.json should still display
+		// remote quota, not just "No sessions".
+		enrichQuota(ctx, acct, &snap)
+		applyPlanNameOverride(acct, &snap)
+		// If quota added metrics, surface them alongside the no-sessions note
+		// rather than hiding the quota behind the early return.
+		if len(snap.Metrics) > 0 {
+			if summary := quotaSummary(snap); summary != "quota n/a" {
+				snap.Message = summary + " · " + snap.Message
+			}
+		}
 		return snap, nil
 	}
 
 	populateSnapshot(ctx, &snap, entries, p.now())
 	snap.Status = core.StatusOK
 	snap.Message = buildStatusMessage(snap)
-	// Optional quota enrichment: passive browser-session replay of the
-	// dashboard's private quota route. Non-fatal — failures only add
-	// diagnostics, the local spend meters above always stand.
+	// Optional quota enrichment: quota is independent of local logs, but
+	// enrich after populating so local spend and quota can coexist.
 	enrichQuota(ctx, acct, &snap)
 	applyPlanNameOverride(acct, &snap)
 	return snap, nil
