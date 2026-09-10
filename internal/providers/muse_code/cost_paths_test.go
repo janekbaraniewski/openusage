@@ -45,6 +45,8 @@ func TestHasCredential(t *testing.T) {
 	acct := core.AccountConfig{ID: "muse-code", Provider: "muse_code"}
 	t.Setenv("META_API_KEY", "")
 	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if HasCredential(acct) {
 		t.Error("no credential signals, want false")
 	}

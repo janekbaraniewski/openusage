@@ -163,7 +163,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		// If quota added metrics, surface them alongside the no-sessions note
 		// rather than hiding the quota behind the early return.
 		if len(snap.Metrics) > 0 {
-			if summary := quotaSummary(snap); summary != "quota n/a" {
+			if summary := quotaSummary(&snap); summary != "quota n/a" {
 				snap.Message = summary + " · " + snap.Message
 			}
 		}
