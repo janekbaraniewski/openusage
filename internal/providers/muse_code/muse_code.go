@@ -151,6 +151,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Message = "Failed to read Muse sessions directory"
 		return snap, err
 	}
+	// Also read tool calls for Tool Usage, even when model entries are empty
+	// the quota should still show. Tool data is best-effort, like quota.
+	// We do this before the len==0 check so the empty-log branch also gets
+	// tool data if any (e.g. failed sessions with tool calls but no model_completed).
+	toolEntries, _ := readAllToolCalls(ctx, dirs)
 	if len(entries) == 0 {
 		snap.Status = core.StatusOK
 		snap.Message = "No Muse sessions recorded"
@@ -170,10 +175,21 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		if isMuseQuotaLimited(&snap) {
 			snap.Status = core.StatusLimited
 		}
+		// Even with no model entries, tool calls can exist (e.g. failed
+		// sessions) — populate those so Tool Usage shows something.
+		if len(toolEntries) > 0 {
+			populateToolMetrics(&snap, toolEntries)
+		}
 		return snap, nil
 	}
 
 	populateSnapshot(ctx, &snap, entries, p.now())
+	// Add tool usage, like codex does, so the tile shows Tool Usage
+	// instead of "No tool data". Muse's 1,920 tool_call events in the
+	// 2026-09-07 session are now counted.
+	if len(toolEntries) > 0 {
+		populateToolMetrics(&snap, toolEntries)
+	}
 	snap.Status = core.StatusOK
 	snap.Message = buildStatusMessage(snap)
 	// Optional quota enrichment: quota is independent of local logs, but
@@ -496,6 +512,45 @@ func isMuseQuotaLimited(snap *core.UsageSnapshot) bool {
 		return true
 	}
 	return false
+}
+
+func populateToolMetrics(snap *core.UsageSnapshot, toolEntries []museToolEntry) {
+	if len(toolEntries) == 0 {
+		return
+	}
+	counts := make(map[string]int, len(toolEntries))
+	for _, e := range toolEntries {
+		// Normalize already done in museToolEntryFromRecord (shell->exec)
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		if name == "" {
+			continue
+		}
+		counts[name]++
+	}
+	total := float64(len(toolEntries))
+	setUsedMetric(snap, "tool_calls_total", total, "calls", allTimeWindow)
+	// Per-tool breakdown, like codex's tool_<name> metrics
+	for name, cnt := range counts {
+		key := "tool_" + sanitizeMetricID(name)
+		setUsedMetric(snap, key, float64(cnt), "calls", allTimeWindow)
+	}
+}
+
+func sanitizeMetricID(s string) string {
+	// Lowercase, replace non-alphanumeric with underscore, like codex does
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	out := b.String()
+	// Collapse multiple underscores and trim
+	out = strings.ReplaceAll(out, "__", "_")
+	return strings.Trim(out, "_")
 }
 
 func fileExists(path string) bool {
