@@ -68,3 +68,5 @@ drafts/
 # Python bytecode (font scripts)
 scripts/__pycache__/
 __pycache__/
+OPENUSAGE-*.md
+SPARKTHINKING.md

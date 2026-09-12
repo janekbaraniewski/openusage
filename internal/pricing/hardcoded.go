@@ -172,6 +172,22 @@ var hardcodedTable = map[string]Price{
 		OutputCostPerMillion: 0.08,
 		ContextWindow:        128_000,
 	},
+	"muse-spark-1.3": {
+		ModelID:                 "muse-spark-1.3",
+		Provider:                "meta",
+		InputCostPerMillion:     1.25,
+		OutputCostPerMillion:    4.25,
+		CacheReadCostPerMillion: 0.15,
+		ContextWindow:           1_000_000,
+	},
+	"muse-spark-1.3-contributor": {
+		ModelID:                 "muse-spark-1.3-contributor",
+		Provider:                "meta",
+		InputCostPerMillion:     0.1,
+		OutputCostPerMillion:    0.2,
+		CacheReadCostPerMillion: 0.01,
+		ContextWindow:           1_000_000,
+	},
 	"mistral-large": {
 		ModelID:              "mistral-large",
 		Provider:             "mistral",

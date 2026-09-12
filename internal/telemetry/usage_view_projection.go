@@ -267,11 +267,32 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	if windowCost > 0 {
 		snap.Metrics["window_cost"] = core.Metric{Used: core.Float64Ptr(windowCost), Unit: "USD", Window: windowLabel}
 	}
-	// window_tokens represents billable token volume — input + output + cache writes
-	// + reasoning. Cache reads are excluded because they're discounted 90% and
-	// represent repeated reads of cached bytes, which inflates apparent usage
-	// by orders of magnitude without reflecting actual consumption.
-	if windowBillable > 0 {
+	// window_tokens: total tokens in the window, consistent with
+	// total_tokens (input + output + cache reads + cache writes + reasoning).
+	// Previously this was billable-only (excluded cache reads, and here also
+	// reasoning), which made the 26.6M/19.1M headline (input+output) disagree
+	// with the 388.9M/307.7M total that included cache reads. Now both use the
+	// same total definition, with the breakdown available in the Model Burn
+	// detail. Also fix the Go/Swift dedup parity: window now uses the deduped
+	// total (307.7M) so both apps agree.
+	windowTotalTokens := 0.0
+	for _, model := range agg.Models {
+		windowTotalTokens += model.InputTokens + model.OutputTokens + model.CacheReadTokens + model.CacheWriteTokens + model.Reasoning
+	}
+	// For providers like muse_code that don't go through telemetry's Model
+	// aggregation (local provider), agg.Models may be empty but the snapshot
+	// already has total_* metrics. In that case, window_tokens should still
+	// be total_tokens for the window, not billable-only. Fall back to
+	// total_tokens if windowTotalTokens is still 0 but total exists.
+	if windowTotalTokens == 0 {
+		if m, ok := snap.Metrics["total_tokens"]; ok && m.Used != nil {
+			windowTotalTokens = *m.Used
+		}
+	}
+	if windowTotalTokens > 0 {
+		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowTotalTokens), Unit: "tokens", Window: windowLabel}
+	} else if windowBillable > 0 {
+		// Fallback to billable if total is not available (should not happen)
 		snap.Metrics["window_tokens"] = core.Metric{Used: core.Float64Ptr(windowBillable), Unit: "tokens", Window: windowLabel}
 	}
 	if windowCacheRead > 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -141,6 +142,18 @@ func (r *Resolver) resolve(ctx context.Context, model string, contextLen int) (*
 	if p, ok := lookupCustomOverride(r.overrides.get(), model); ok {
 		out := ApplyTier(p, contextLen)
 		return &out, nil
+	}
+
+	// Muse Spark contributor cache-read rate is not authoritative in LiteLLM
+	// (0.002) vs Swift's supplement fallback (0.01 = 1/10 input). Prefer the
+	// hardcoded explicit 0.01 for this model so both apps agree, as verified
+	// against the local logs (MUSE-PARITY-DIAGNOSIS.md) pending authoritative
+	// pricing.
+	if strings.Contains(strings.ToLower(model), "muse-spark") {
+		if p, ok := lookupHardcoded(model); ok {
+			out := ApplyTier(p, contextLen)
+			return &out, nil
+		}
 	}
 
 	if p, ok := r.tryLiteLLM(ctx, model); ok {
