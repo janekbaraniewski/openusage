@@ -167,6 +167,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 				snap.Message = summary + " · " + snap.Message
 			}
 		}
+		if isMuseQuotaLimited(&snap) {
+			snap.Status = core.StatusLimited
+		}
 		return snap, nil
 	}
 
@@ -177,6 +180,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	// enrich after populating so local spend and quota can coexist.
 	enrichQuota(ctx, acct, &snap)
 	applyPlanNameOverride(acct, &snap)
+	// If quota is at/over limit, mark the snapshot as StatusLimited so the
+	// TUI header shows "30 Days LIMIT" in red (like codex 5h/7d 100% does),
+	// not "30 Days OK" in green. Both codex and muse have hit their limits
+	// in the screenshot, so both should show LIMIT when weekly is 100% blocked.
+	if isMuseQuotaLimited(&snap) {
+		snap.Status = core.StatusLimited
+	}
 	return snap, nil
 }
 
@@ -468,6 +478,24 @@ func formatCostUSD(v float64) string {
 		return fmt.Sprintf("$%.2f", v)
 	}
 	return fmt.Sprintf("$%.4f", v)
+}
+
+func isMuseQuotaLimited(snap *core.UsageSnapshot) bool {
+	if snap == nil {
+		return false
+	}
+	for _, key := range []string{"muse.weekly", "muse.session", "muse.quota"} {
+		if m, ok := snap.Metrics[key]; ok && m.Used != nil && m.Limit != nil && *m.Limit > 0 && *m.Used >= *m.Limit {
+			return true
+		}
+		if m, ok := snap.Metrics[key]; ok && m.Used != nil && *m.Used >= 100 {
+			return true
+		}
+	}
+	if _, ok := snap.Diagnostics["muse_quota_blocked"]; ok {
+		return true
+	}
+	return false
 }
 
 func fileExists(path string) bool {
