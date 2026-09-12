@@ -191,10 +191,18 @@ func readMuseToolCalls(path string) ([]museToolEntry, error) {
 }
 
 func parseMuseToolRecords(line []byte) []museToolEntry {
+	// First check for batched assistant_tool_calls_committed
+	if batched := parseMuseToolRecordsBatched(line); len(batched) > 0 {
+		return batched
+	}
 	var frame museRetainedFrame
 	if err := json.Unmarshal(line, &frame); err != nil || frame.Children == nil {
 		if entry, ok := museToolEntryFromRecord(line); ok {
 			return []museToolEntry{entry}
+		}
+		// Also check batched in bare record
+		if batched := parseMuseToolRecordsBatched(line); len(batched) > 0 {
+			return batched
 		}
 		return nil
 	}
@@ -202,6 +210,8 @@ func parseMuseToolRecords(line []byte) []museToolEntry {
 	for _, child := range frame.Children {
 		if entry, ok := museToolEntryFromRecord([]byte(child.RecordJSON)); ok {
 			entries = append(entries, entry)
+		} else if batched := parseMuseToolRecordsBatched([]byte(child.RecordJSON)); len(batched) > 0 {
+			entries = append(entries, batched...)
 		}
 	}
 	return entries
@@ -217,6 +227,11 @@ func museToolEntryFromRecord(data []byte) (museToolEntry, bool) {
 				ToolCallID string `json:"tool_call_id"`
 				Name       string `json:"name"`
 				Tool       string `json:"tool"`
+				ToolCalls  []struct {
+					Name   string `json:"name"`
+					CallID string `json:"call_id"`
+					ID     string `json:"id"`
+				} `json:"tool_calls"`
 			} `json:"event"`
 		} `json:"payload"`
 	}
@@ -226,28 +241,74 @@ func museToolEntryFromRecord(data []byte) (museToolEntry, bool) {
 	if rec.PayloadType != "runtime.session" {
 		return museToolEntry{}, false
 	}
-	// Muse logs tool calls as event.kind == "tool_call" with name/tool,
-	// and results as "tool_result" / "tool_result_batch_committed" with tool_call_id.
-	// We count the call, not the result, to avoid double-counting.
 	kind := rec.Payload.Event.Kind
-	if kind != "tool_call" {
+	// Muse logs tool calls as event.kind == "tool_call" (single) or
+	// "assistant_tool_calls_committed" (batch with tool_calls array), and
+	// results as "tool_result" / "tool_result_batch_committed".
+	// We count the call, not the result, to avoid double-counting.
+	if kind == "tool_call" {
+		name := strings.TrimSpace(rec.Payload.Event.Name)
+		if name == "" {
+			name = strings.TrimSpace(rec.Payload.Event.Tool)
+		}
+		if name == "" {
+			return museToolEntry{}, false
+		}
+		if name == "shell" || name == "bash" {
+			name = "exec"
+		}
+		return museToolEntry{
+			ToolCallID: rec.Payload.Event.ToolCallID,
+			Name:       name,
+		}, true
+	}
+	if kind == "assistant_tool_calls_committed" {
+		// Batch of tool calls; count each by name
+		// Use the first for now, the outer loop will handle each
+		// This path is handled via parseMuseToolRecords returning multiple
 		return museToolEntry{}, false
 	}
-	name := strings.TrimSpace(rec.Payload.Event.Name)
-	if name == "" {
-		name = strings.TrimSpace(rec.Payload.Event.Tool)
+	return museToolEntry{}, false
+}
+
+func parseMuseToolRecordsBatched(line []byte) []museToolEntry {
+	// Special handling for assistant_tool_calls_committed which contains
+	// multiple tool_calls in one record
+	var rec struct {
+		PayloadType string `json:"payload_type"`
+		Payload     struct {
+			Kind  string `json:"kind"`
+			Event struct {
+				Kind      string `json:"kind"`
+				ToolCalls []struct {
+					Name   string `json:"name"`
+					CallID string `json:"call_id"`
+					ID     string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"event"`
+		} `json:"payload"`
 	}
-	if name == "" {
-		return museToolEntry{}, false
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return nil
 	}
-	// Normalize: exec / shell / bash are the same tool family in Muse
-	if name == "shell" || name == "bash" {
-		name = "exec"
+	if rec.PayloadType != "runtime.session" || rec.Payload.Event.Kind != "assistant_tool_calls_committed" {
+		return nil
 	}
-	return museToolEntry{
-		ToolCallID: rec.Payload.Event.ToolCallID,
-		Name:       name,
-	}, true
+	var entries []museToolEntry
+	for _, tc := range rec.Payload.Event.ToolCalls {
+		name := strings.TrimSpace(tc.Name)
+		if name == "" {
+			continue
+		}
+		if name == "shell" || name == "bash" {
+			name = "exec"
+		}
+		entries = append(entries, museToolEntry{
+			ToolCallID: tc.CallID,
+			Name:       name,
+		})
+	}
+	return entries
 }
 
 func readAllToolCalls(ctx context.Context, dirs []string) ([]museToolEntry, error) {
