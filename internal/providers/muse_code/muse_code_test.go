@@ -132,6 +132,10 @@ func TestProvider_Fetch_AuthRequired(t *testing.T) {
 
 func TestProvider_Fetch_HappyPath(t *testing.T) {
 	stubPricing(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("META_API_KEY", "")
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
 	writeSession(t, root, "2026/09/07/s1/session.jsonl", testRecord(t, now, "muse-spark-1.3"))
@@ -172,6 +176,10 @@ func TestProvider_Fetch_HappyPath(t *testing.T) {
 
 func TestProvider_Fetch_SkipsSubagentTranscripts(t *testing.T) {
 	stubPricing(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("META_API_KEY", "")
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
 	rec := testRecord(t, now, "muse-spark-1.3")
@@ -195,6 +203,10 @@ func TestProvider_Fetch_SkipsSubagentTranscripts(t *testing.T) {
 
 func TestProvider_Fetch_Sessions7dCountsDistinctSessions(t *testing.T) {
 	stubPricing(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("META_API_KEY", "")
 	day1 := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	day2 := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -218,6 +230,10 @@ func TestProvider_Fetch_Sessions7dCountsDistinctSessions(t *testing.T) {
 
 func TestProvider_Fetch_UnpricedModelKeepsTokensOmitsCost(t *testing.T) {
 	stubPricing(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MUSE_AUTH_PATH", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("META_API_KEY", "")
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
 	writeSession(t, root, "2026/09/07/s1/session.jsonl", testRecord(t, now, "muse-spark-9.9"))

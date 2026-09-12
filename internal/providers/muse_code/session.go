@@ -2,6 +2,7 @@ package muse_code
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -158,4 +159,143 @@ func museRecordEntry(data []byte) (museModelEntry, bool) {
 		StreamID:    rec.Stream.ID,
 		Sequence:    rec.Sequence,
 	}, true
+}
+
+// museToolEntry is one tool invocation, normalized from tool_call and
+// tool_result events. Muse's session logs store tool calls as
+// `tool_call` (with tool_call_id + name) and results as
+// `tool_result_batch_committed` (with tool_call_id). We count calls by name.
+type museToolEntry struct {
+	ToolCallID string
+	Name       string
+}
+
+// readMuseToolCalls parses every tool_call of one session file.
+// It handles both bare records and retained-frame wrappers, like
+// readMuseSessionFile, but looks for tool_call/tool_result events.
+func readMuseToolCalls(path string) ([]museToolEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var entries []museToolEntry
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if !bytes.Contains(line, []byte("tool_call")) && !bytes.Contains(line, []byte("tool_result")) {
+			continue
+		}
+		for _, entry := range parseMuseToolRecords(line) {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
+}
+
+func parseMuseToolRecords(line []byte) []museToolEntry {
+	var frame museRetainedFrame
+	if err := json.Unmarshal(line, &frame); err != nil || frame.Children == nil {
+		if entry, ok := museToolEntryFromRecord(line); ok {
+			return []museToolEntry{entry}
+		}
+		return nil
+	}
+	var entries []museToolEntry
+	for _, child := range frame.Children {
+		if entry, ok := museToolEntryFromRecord([]byte(child.RecordJSON)); ok {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func museToolEntryFromRecord(data []byte) (museToolEntry, bool) {
+	var rec struct {
+		PayloadType string `json:"payload_type"`
+		Payload     struct {
+			Kind  string `json:"kind"`
+			Event struct {
+				Kind       string `json:"kind"`
+				ToolCallID string `json:"tool_call_id"`
+				Name       string `json:"name"`
+				Tool       string `json:"tool"`
+			} `json:"event"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return museToolEntry{}, false
+	}
+	if rec.PayloadType != "runtime.session" {
+		return museToolEntry{}, false
+	}
+	// Muse logs tool calls as event.kind == "tool_call" with name/tool,
+	// and results as "tool_result" / "tool_result_batch_committed" with tool_call_id.
+	// We count the call, not the result, to avoid double-counting.
+	kind := rec.Payload.Event.Kind
+	if kind != "tool_call" {
+		return museToolEntry{}, false
+	}
+	name := strings.TrimSpace(rec.Payload.Event.Name)
+	if name == "" {
+		name = strings.TrimSpace(rec.Payload.Event.Tool)
+	}
+	if name == "" {
+		return museToolEntry{}, false
+	}
+	// Normalize: exec / shell / bash are the same tool family in Muse
+	if name == "shell" || name == "bash" {
+		name = "exec"
+	}
+	return museToolEntry{
+		ToolCallID: rec.Payload.Event.ToolCallID,
+		Name:       name,
+	}, true
+}
+
+func readAllToolCalls(ctx context.Context, dirs []string) ([]museToolEntry, error) {
+	var all []museToolEntry
+	seen := make(map[string]struct{})
+	for _, dir := range dirs {
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if filepath.Ext(path) != ".jsonl" {
+				return nil
+			}
+			if isSubagentTranscript(path) {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			canonical := canonicalPath(path)
+			if _, dup := seen[canonical]; dup {
+				return nil
+			}
+			seen[canonical] = struct{}{}
+			entries, err := readMuseToolCalls(path)
+			if err != nil {
+				return nil
+			}
+			all = append(all, entries...)
+			return nil
+		})
+	}
+	// Dedup by tool_call_id across files (same call can appear in feedback-session)
+	seenCalls := make(map[string]struct{}, len(all))
+	deduped := make([]museToolEntry, 0, len(all))
+	for _, e := range all {
+		key := e.ToolCallID
+		if key == "" {
+			key = e.Name + "|" + string(rune(len(deduped)))
+		}
+		if _, dup := seenCalls[key]; dup {
+			continue
+		}
+		seenCalls[key] = struct{}{}
+		deduped = append(deduped, e)
+	}
+	return deduped, nil
 }

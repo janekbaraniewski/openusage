@@ -57,41 +57,41 @@ func dashboardWidget() core.DashboardWidget {
 			"total_cost_usd":      "USD",
 			"today_cost":          "today",
 		}),
-		// Muse Code only has local session logs and quota — no client,
-		// tool, MCP, language, or code-stats telemetry. Hide those
-		// composition panels so the tile doesn't render a stack of
-		// "No X data for this time range" placeholders. ModelBurn and
-		// DailyUsage are also hidden: ModelBurn expects `model_*` metrics
-		// (`ExtractModelBreakdown`) while Muse Code only populates
-		// `ModelUsage`/`DailySeries`, so it would always be empty.
+		// Muse Code has local session logs, quota, and now tool calls
+		// (1,920 tool_call in the 2026-09-07 session). Hide the still-empty
+		// client/language/code-stats/MCP panels so the tile doesn't render a
+		// stack of "No X data" placeholders, but show Tool Usage like Codex
+		// does (Tool Usage 6.4k calls · exec 88% etc. in the Codex tile).
 		providerbase.WithSectionOrder(
 			core.DashboardSectionHeader,
 			core.DashboardSectionTopUsageProgress,
+			core.DashboardSectionToolUsage,
 			core.DashboardSectionOtherData,
 		),
 		func(cfg *core.DashboardWidget) {
 			cfg.ShowClientComposition = false
 			cfg.ShowLanguageComposition = false
 			cfg.ShowCodeStatsComposition = false
-			cfg.ShowActualToolUsage = false
+			cfg.ShowActualToolUsage = true
 			cfg.ShowMCPUsage = false
 		},
 	)
 }
 
 func detailWidget() core.DetailWidget {
-	// Detail view: usage, model cost, and trends only. The full
-	// CodingToolDetailWidget would add Clients/Projects/Tools/MCP/Language/
-	// CodeStats sections that Muse Code never populates — they'd render as
-	// empty and the user asked to hide them.
+	// Detail view: usage, model cost, trends, tools, tokens, activity.
+	// Was slimmed to 6 sections to hide empty Clients/Projects/MCP/Language/
+	// CodeStats, but Tool Usage is now populated (1,920 tool_call in the
+	// 2026-09-07 session, like Codex's 6.4k calls) so re-add Tools.
 	return core.DetailWidget{
 		Sections: []core.DetailSection{
 			{Name: "Usage", Order: 1, Style: core.DetailSectionStyleUsage},
 			{Name: "Models", Order: 2, Style: core.DetailSectionStyleModels},
-			{Name: "Spending", Order: 3, Style: core.DetailSectionStyleSpending},
-			{Name: "Trends", Order: 4, Style: core.DetailSectionStyleTrends},
-			{Name: "Tokens", Order: 5, Style: core.DetailSectionStyleTokens},
-			{Name: "Activity", Order: 6, Style: core.DetailSectionStyleActivity},
+			{Name: "Tools", Order: 3, Style: core.DetailSectionStyleList},
+			{Name: "Spending", Order: 4, Style: core.DetailSectionStyleSpending},
+			{Name: "Trends", Order: 5, Style: core.DetailSectionStyleTrends},
+			{Name: "Tokens", Order: 6, Style: core.DetailSectionStyleTokens},
+			{Name: "Activity", Order: 7, Style: core.DetailSectionStyleActivity},
 		},
 	}
 }
