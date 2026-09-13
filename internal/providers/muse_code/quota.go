@@ -10,8 +10,10 @@ package muse_code
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -211,18 +213,15 @@ func parseQuotaExhaustedResetsAt(body string) int64 {
 	return payload.Error.ResetsAt
 }
 
-// parseQuotaExhausted is deprecated; use parseQuotaExhaustedResetsAt.
-func parseQuotaExhausted(body string) *subscriptionUsage {
-	if resetsAt := parseQuotaExhaustedResetsAt(body); resetsAt != 0 {
-		sub := &subscriptionUsage{}
-		sub.Weekly.UsedPercent = 100
-		sub.Weekly.ResetsAt = resetsAt
-		sub.Window.UsedPercent = 100
-		sub.Window.ResetsAt = resetsAt
-		sub.Window.WindowDurationMins = 300
-		return sub
-	}
-	return nil
+// quotaExhaustedError is the blocked-subscription signal from a 429
+// "Subscription quota exhausted" probe response. Carries the reset instant
+// as a typed field so callers don't string-parse it back out of an error.
+type quotaExhaustedError struct {
+	ResetsAt int64
+}
+
+func (e *quotaExhaustedError) Error() string {
+	return fmt.Sprintf("quota exhausted, resets at %d", e.ResetsAt)
 }
 
 // postSubscriptionUsage sends the minimal streamed probe and returns the
@@ -241,7 +240,7 @@ func postSubscriptionUsage(ctx context.Context, apiKey string) (*subscriptionUsa
 	if err != nil {
 		return nil, 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/responses", strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/responses", bytes.NewReader(payload))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -262,7 +261,7 @@ func postSubscriptionUsage(ctx context.Context, apiKey string) (*subscriptionUsa
 		// can render it without claiming measured percentages.
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if resetsAt := parseQuotaExhaustedResetsAt(trimmed); resetsAt != 0 {
-				return nil, resp.StatusCode, fmt.Errorf("quota exhausted, resets at %d", resetsAt)
+				return nil, resp.StatusCode, &quotaExhaustedError{ResetsAt: resetsAt}
 			}
 		}
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, shared.Truncate(trimmed, 160))
@@ -381,9 +380,10 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 		// failure. Don't fabricate 100% for both windows (P1-1); surface the
 		// blocked state with the reset so the TUI can render it without
 		// claiming measured percentages.
-		if status == http.StatusTooManyRequests && strings.Contains(strings.ToLower(err.Error()), "quota exhausted") {
-			var resetsAt int64
-			if _, scanErr := fmt.Sscanf(err.Error(), "quota exhausted, resets at %d", &resetsAt); scanErr == nil && resetsAt > 0 {
+		var exhausted *quotaExhaustedError
+		if status == http.StatusTooManyRequests && errors.As(err, &exhausted) {
+			resetsAt := exhausted.ResetsAt
+			if resetsAt > 0 {
 				// Surface the weekly window as 100% with the reset from the
 				// error (typically ~6 days out, e.g. Sep 14). We don't fabricate
 				// both windows at 100%; the weekly is the honest one for the
