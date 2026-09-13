@@ -146,10 +146,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	entries, err := readAllSessions(ctx, dirs)
 	if err != nil {
+		// Return snap, nil (not err) like codex does: the daemon renders
+		// the StatusError tile with the diagnostic instead of treating
+		// the fetch as failed and discarding the snapshot.
 		snap.SetDiagnostic("walk_error", err.Error())
 		snap.Status = core.StatusError
 		snap.Message = "Failed to read Muse sessions directory"
-		return snap, err
+		return snap, nil
 	}
 	// Also read tool calls for Tool Usage, even when model entries are empty
 	// the quota should still show. Tool data is best-effort, like quota.
@@ -349,10 +352,11 @@ func populateSnapshot(ctx context.Context, snap *core.UsageSnapshot, entries []m
 		totalCacheWrite += e.CacheWrite
 		totalTokens += e.TotalTokens
 
-		if cost, ok := estimateEntryCost(ctx, e); ok {
-			bucket.cost += cost
+		entryCost, entryPriced := estimateEntryCost(ctx, e)
+		if entryPriced {
+			bucket.cost += entryCost
 			bucket.priced = true
-			totalCost += cost
+			totalCost += entryCost
 		} else if e.TotalTokens > 0 {
 			unpriced[e.Model] = struct{}{}
 		}
@@ -366,10 +370,10 @@ func populateSnapshot(ctx context.Context, snap *core.UsageSnapshot, entries []m
 		}
 		day := e.Timestamp.UTC().Format("2006-01-02")
 		tokensByDay[day] += float64(e.TotalTokens)
-		if cost, ok := estimateEntryCost(ctx, e); ok {
-			costByDay[day] += cost
+		if entryPriced {
+			costByDay[day] += entryCost
 			if day == today {
-				todayCost += cost
+				todayCost += entryCost
 			}
 		}
 		seen, ok := sessionsSeenPerDay[day]
@@ -531,26 +535,9 @@ func populateToolMetrics(snap *core.UsageSnapshot, toolEntries []museToolEntry) 
 	setUsedMetric(snap, "tool_calls_total", total, "calls", allTimeWindow)
 	// Per-tool breakdown, like codex's tool_<name> metrics
 	for name, cnt := range counts {
-		key := "tool_" + sanitizeMetricID(name)
+		key := "tool_" + shared.SanitizeMetricName(name)
 		setUsedMetric(snap, key, float64(cnt), "calls", allTimeWindow)
 	}
-}
-
-func sanitizeMetricID(s string) string {
-	// Lowercase, replace non-alphanumeric with underscore, like codex does
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('_')
-		}
-	}
-	out := b.String()
-	// Collapse multiple underscores and trim
-	out = strings.ReplaceAll(out, "__", "_")
-	return strings.Trim(out, "_")
 }
 
 func fileExists(path string) bool {

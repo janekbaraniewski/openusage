@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -147,14 +148,18 @@ func museRecordEntry(data []byte) (museModelEntry, bool) {
 		input = 0
 	}
 	return museModelEntry{
-		Timestamp:   time.UnixMicro(rec.RecordedAt).UTC(),
-		Model:       model,
-		Input:       input,
-		Output:      usage.OutputTokens,
-		Reasoning:   usage.ReasoningTokens,
-		CacheRead:   cacheRead,
-		CacheWrite:  usage.CacheWriteTokens,
-		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.ReasoningTokens,
+		Timestamp:  time.UnixMicro(rec.RecordedAt).UTC(),
+		Model:      model,
+		Input:      input,
+		Output:     usage.OutputTokens,
+		Reasoning:  usage.ReasoningTokens,
+		CacheRead:  cacheRead,
+		CacheWrite: usage.CacheWriteTokens,
+		// Same total definition as populateSnapshot's per-model total
+		// (input + output + reasoning + cacheRead + cacheWrite, where
+		// input is already net of cacheRead). usage.InputTokens includes
+		// the cached slice, so add only the cache-write remainder.
+		TotalTokens: usage.InputTokens + usage.OutputTokens + usage.ReasoningTokens + usage.CacheWriteTokens,
 		RecordID:    rec.ID,
 		StreamID:    rec.Stream.ID,
 		Sequence:    rec.Sequence,
@@ -350,7 +355,7 @@ func readAllToolCalls(ctx context.Context, dirs []string) ([]museToolEntry, erro
 	for _, e := range all {
 		key := e.ToolCallID
 		if key == "" {
-			key = e.Name + "|" + string(rune(len(deduped)))
+			key = e.Name + "|" + strconv.Itoa(len(deduped))
 		}
 		if _, dup := seenCalls[key]; dup {
 			continue

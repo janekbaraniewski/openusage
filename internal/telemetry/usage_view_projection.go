@@ -281,10 +281,10 @@ func applyUsageViewToSnapshot(snap *core.UsageSnapshot, agg *telemetryUsageAgg, 
 	}
 	// For providers like muse_code that don't go through telemetry's Model
 	// aggregation (local provider), agg.Models may be empty but the snapshot
-	// already has total_* metrics. In that case, window_tokens should still
-	// be total_tokens for the window, not billable-only. Fall back to
-	// total_tokens if windowTotalTokens is still 0 but total exists.
-	if windowTotalTokens == 0 {
+	// already has total_* metrics. Only fall back to total_tokens when the
+	// window is all-time: assigning the all-time total to a 7d/30d window
+	// would overstate the window.
+	if windowTotalTokens == 0 && windowLabel == "all-time" {
 		if m, ok := snap.Metrics["total_tokens"]; ok && m.Used != nil {
 			windowTotalTokens = *m.Used
 		}
