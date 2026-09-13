@@ -111,10 +111,10 @@ func querySessions(ctx context.Context, dbPath string) ([]crushSession, error) {
 			promptTokens sql.NullInt64
 			complTokens  sql.NullInt64
 			cost         sql.NullFloat64
-			createdMS    sql.NullInt64
-			updatedMS    sql.NullInt64
+			createdAt    sql.NullInt64
+			updatedAt    sql.NullInt64
 		)
-		if err := rows.Scan(&id, &msgCount, &promptTokens, &complTokens, &cost, &createdMS, &updatedMS); err != nil {
+		if err := rows.Scan(&id, &msgCount, &promptTokens, &complTokens, &cost, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("crush: scanning session row: %w", err)
 		}
 
@@ -123,8 +123,8 @@ func querySessions(ctx context.Context, dbPath string) ([]crushSession, error) {
 			MessageCount:     nonNegativeInt64(msgCount),
 			PromptTokens:     nonNegativeInt64(promptTokens),
 			CompletionTokens: nonNegativeInt64(complTokens),
-			CreatedAt:        millisToTime(createdMS),
-			UpdatedAt:        millisToTime(updatedMS),
+			CreatedAt:        unixSecondsToTime(createdAt),
+			UpdatedAt:        unixSecondsToTime(updatedAt),
 		}
 		if cost.Valid && cost.Float64 > 0 {
 			s.Cost = cost.Float64
@@ -177,14 +177,20 @@ func latestAssistantModel(ctx context.Context, db *sql.DB, sessionID string, has
 	return strings.TrimSpace(model.String), strings.TrimSpace(provider.String), nil
 }
 
-// millisToTime converts a nullable Unix-milliseconds column into a UTC
+// unixSecondsToTime converts a nullable Unix-seconds column into a UTC
 // time.Time. NULL or zero values return the zero time; callers must
 // check before formatting day buckets.
-func millisToTime(v sql.NullInt64) time.Time {
+//
+// Despite the "milliseconds" claim in Crush's initial migration comment,
+// the stored values are seconds: the update_sessions_updated_at trigger
+// writes strftime('%s','now') and the Crush CLI renders
+// time.Unix(CreatedAt, 0). Verified against real Crush DBs (see
+// TestQuerySessions_TimestampsAreUnixSeconds).
+func unixSecondsToTime(v sql.NullInt64) time.Time {
 	if !v.Valid || v.Int64 <= 0 {
 		return time.Time{}
 	}
-	return time.UnixMilli(v.Int64).UTC()
+	return time.Unix(v.Int64, 0).UTC()
 }
 
 func nonNegativeInt64(v sql.NullInt64) int64 {
