@@ -12,6 +12,9 @@ import (
 )
 
 func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int) []string {
+	if snap.ProviderID == "codex" {
+		return buildCodexQuotaLines(snap, innerW, m.warnThreshold, m.critThreshold)
+	}
 	maxLabelW := 14
 	gaugeW := innerW - maxLabelW - 10 // label + gauge + " XX.X%" + spaces
 	if gaugeW < 6 {
