@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,11 +17,22 @@ import (
 )
 
 type codexCLIRateLimitsSnapshot struct {
+	LimitID           string              `json:"limitId,omitempty"`
+	LimitName         string              `json:"limitName,omitempty"`
+	Primary           *codexCLIWindow     `json:"primary,omitempty"`
+	Secondary         *codexCLIWindow     `json:"secondary,omitempty"`
 	Credits           *usageCredits       `json:"credits,omitempty"`
 	IndividualLimit   *creditLimitDetails `json:"individual_limit,omitempty"`
 	IndividualLimitV2 *creditLimitDetails `json:"individualLimit,omitempty"`
 	PlanType          string              `json:"plan_type,omitempty"`
 	PlanTypeV2        string              `json:"planType,omitempty"`
+}
+
+type codexCLIWindow struct {
+	UsedPercent        *float64 `json:"usedPercent"`
+	WindowDurationMins int      `json:"windowDurationMins"`
+	ResetsAt           int64    `json:"resetsAt"`
+	usageWindowInfo
 }
 
 type codexCLIRateLimitsResult struct {
@@ -59,23 +71,63 @@ func applyCodexCLIRateLimits(result codexCLIRateLimitsResult, snap *core.UsageSn
 		return false
 	}
 
-	candidates := make([]codexCLIRateLimitsSnapshot, 0, 1+len(result.RateLimitsByLimitID)+len(result.RateLimitsByLimitIDV2))
-	if result.RateLimitsV2 != nil {
-		candidates = append(candidates, *result.RateLimitsV2)
+	snap.EnsureMaps()
+	clearRateLimitMetrics(snap)
+	candidates := result.RateLimitsByLimitIDV2
+	if len(candidates) == 0 {
+		candidates = result.RateLimitsByLimitID
 	}
-	if result.RateLimits != nil {
-		candidates = append(candidates, *result.RateLimits)
-	}
-	for _, candidate := range result.RateLimitsByLimitIDV2 {
-		candidates = append(candidates, candidate)
-	}
-	for _, candidate := range result.RateLimitsByLimitID {
-		candidates = append(candidates, candidate)
+	if len(candidates) == 0 {
+		legacy := result.RateLimitsV2
+		if legacy == nil {
+			legacy = result.RateLimits
+		}
+		if legacy != nil {
+			candidates = map[string]codexCLIRateLimitsSnapshot{core.FirstNonEmpty(legacy.LimitID, "codex"): *legacy}
+		}
 	}
 
 	applied := false
-	creditLimitApplied := false
-	for _, candidate := range candidates {
+	for _, id := range core.SortedStringKeys(candidates) {
+		candidate := candidates[id]
+		if candidate.LimitID != "" && candidate.LimitID != id {
+			continue // Do not attribute a conflicting bucket to the wrong identity.
+		}
+		prefix := "rate_limit_" + sanitizeMetricName(id) + "_"
+		if id == "codex" {
+			prefix = "rate_limit_"
+		}
+		name := core.FirstNonEmpty(candidate.LimitName, id)
+		for slot, window := range map[string]*codexCLIWindow{"primary": candidate.Primary, "secondary": candidate.Secondary} {
+			key := prefix + slot
+			snap.Raw[key+"_bucket"] = name
+			if window == nil {
+				continue
+			}
+			used := window.UsedPercent
+			if used == nil {
+				used = window.usageWindowInfo.UsedPercent
+			}
+			minutes := window.WindowDurationMins
+			if minutes == 0 {
+				minutes = resolveWindowMinutes(&window.usageWindowInfo)
+			}
+			if used == nil || math.IsNaN(*used) || math.IsInf(*used, 0) || *used < 0 || *used > 100 || minutes <= 0 {
+				continue
+			}
+			snap.Metrics[key] = core.Metric{Used: core.Float64Ptr(*used), Remaining: core.Float64Ptr(100 - *used), Limit: core.Float64Ptr(100), Unit: "%", Window: formatWindow(minutes)}
+			reset := window.ResetsAt
+			if reset == 0 {
+				reset = resolveWindowResetAt(&window.usageWindowInfo)
+			}
+			if reset > 0 {
+				snap.Resets[key] = time.Unix(reset, 0)
+			}
+			applied = true
+		}
+		if id != "codex" {
+			continue
+		}
 		planType := core.FirstNonEmpty(candidate.PlanTypeV2, candidate.PlanType)
 		if planType != "" {
 			snap.Raw["plan_type"] = planType
@@ -85,16 +137,13 @@ func applyCodexCLIRateLimits(result codexCLIRateLimitsResult, snap *core.UsageSn
 			applyUsageCredits(candidate.Credits, snap)
 			applied = true
 		}
-		if !creditLimitApplied {
-			details := firstCreditLimit(candidate.IndividualLimitV2, candidate.IndividualLimit)
-			if applyCreditLimitDetails(details, snap, "cli") {
-				creditLimitApplied = true
-				applied = true
-			}
+		if applyCreditLimitDetails(firstCreditLimit(candidate.IndividualLimitV2, candidate.IndividualLimit), snap, "cli") {
+			applied = true
 		}
 	}
 	if applied {
 		snap.Raw["quota_api"] = "cli_rpc"
+		snap.Raw["rate_limit_source"] = "cli_rpc"
 	}
 	return applied
 }
@@ -110,7 +159,7 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 
 	rpcCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(rpcCtx, binary, "-s", "read-only", "-a", "untrusted", "app-server")
+	cmd := exec.CommandContext(rpcCtx, binary, "app-server", "--stdio")
 	cmd.Stderr = io.Discard
 	if configDir != "" {
 		cmd.Env = append(os.Environ(), "CODEX_HOME="+configDir)
@@ -141,6 +190,12 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 		return codexCLIRateLimitsResult{}, err
 	}
 	if _, err := readCodexRPCResponse(scanner, 1); err != nil {
+		if rpcCtx.Err() != nil {
+			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize timed out: %w", rpcCtx.Err())
+		}
+		if err == io.EOF {
+			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server exited before initialize: %v", cmd.Wait())
+		}
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize failed: %w", err)
 	}
 	if err := writeCodexRPCRequest(stdin, `{"method":"initialized","params":{}}`); err != nil {
@@ -155,9 +210,6 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server rate limits timed out: %w", rpcCtx.Err())
 		}
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: reading app-server rate limits: %w", err)
-	}
-	if len(message.Error) > 0 && string(message.Error) != "null" {
-		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server rate limits error: %s", string(message.Error))
 	}
 	var result codexCLIRateLimitsResult
 	if err := json.Unmarshal(message.Result, &result); err != nil {
@@ -180,11 +232,18 @@ func readCodexRPCResponse(scanner *bufio.Scanner, id int) (codexRPCMessage, erro
 			continue
 		}
 		if strings.TrimSpace(string(message.ID)) == fmt.Sprintf("%d", id) {
+			if len(message.Error) > 0 && string(message.Error) != "null" {
+				var rpcError struct {
+					Code int `json:"code"`
+				}
+				_ = json.Unmarshal(message.Error, &rpcError)
+				return codexRPCMessage{}, fmt.Errorf("app-server request %d failed (RPC code %d)", id, rpcError.Code)
+			}
 			return message, nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return codexRPCMessage{}, fmt.Errorf("reading app-server response: %w", err)
 	}
-	return codexRPCMessage{}, fmt.Errorf("app-server returned no response for request %d", id)
+	return codexRPCMessage{}, io.EOF
 }

@@ -207,6 +207,9 @@ func buildDetailUsageSection(snap core.UsageSnapshot, widget core.DashboardWidge
 
 // buildDetailGaugeLines builds gauge bars for the detail view.
 func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget, innerW int, warnThresh, critThresh float64, now time.Time) []string {
+	if snap.ProviderID == "codex" {
+		return buildCodexQuotaLines(snap, innerW, warnThresh, critThresh)
+	}
 	maxLabelW := 18
 	gaugeW := innerW - maxLabelW - 10
 	if gaugeW < 8 {

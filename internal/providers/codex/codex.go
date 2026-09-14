@@ -316,6 +316,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	// Fetch quota first: scanning a large local history can exhaust the
+	// poller's deadline before the account request even starts.
+	quota := core.NewUsageSnapshot("codex", acct.ID)
+	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &quota)
 	var hasLocalData bool
 
 	sessionsDir := filepath.Join(configDir, "sessions")
@@ -340,12 +344,18 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["session_breakdowns"] = "disabled"
 	}
 
-	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)
-	if liveErr != nil {
-		snap.Raw["quota_api_error"] = liveErr.Error()
+	// Subscription quotas must come from the current account, not old logs.
+	clearRateLimitMetrics(&snap)
+	snap.Raw["rate_limit_source"] = "cli_rpc_unavailable"
+	for key, metric := range quota.Metrics {
+		snap.Metrics[key] = metric
 	}
-
-	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
+	for key, reset := range quota.Resets {
+		snap.Resets[key] = reset
+	}
+	for key, value := range quota.Raw {
+		snap.Raw[key] = value
+	}
 	if cliErr != nil {
 		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
 	}
@@ -370,15 +380,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasData := hasLocalData || hasLiveData || hasCLIData
+	hasData := hasLocalData || hasCLIData
 	if !hasData {
-		if errors.Is(liveErr, errLiveUsageAuth) {
-			snap.Status = core.StatusAuth
-			snap.Message = "Codex auth required — run `codex login`"
-		} else {
-			snap.Status = core.StatusUnknown
-			snap.Message = "No Codex usage data found"
-		}
+		snap.Status = core.StatusUnknown
+		snap.Message = "Quotas unavailable"
 		return snap, nil
 	}
 
@@ -387,9 +392,9 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	p.applyRateLimitStatus(&snap)
 
 	switch {
-	case (hasLiveData || hasCLIData) && hasLocalData:
+	case hasCLIData && hasLocalData:
 		snap.Message = "Codex live usage + local session data"
-	case hasLiveData || hasCLIData:
+	case hasCLIData:
 		snap.Message = "Codex live usage data"
 	default:
 		snap.Message = "Codex CLI session data"

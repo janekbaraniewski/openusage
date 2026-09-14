@@ -140,47 +140,8 @@ func TestFetchWithSessionData(t *testing.T) {
 		t.Error("expected session_reasoning_tokens metric")
 	}
 
-	if m, ok := snap.Metrics["rate_limit_primary"]; ok {
-		if m.Used == nil || *m.Used != 20.0 {
-			t.Errorf("expected primary used=20.0, got %v", m.Used)
-		}
-		if m.Remaining == nil || *m.Remaining != 80.0 {
-			t.Errorf("expected primary remaining=80.0, got %v", m.Remaining)
-		}
-		if m.Window != "5h" {
-			t.Errorf("expected window '5h', got %q", m.Window)
-		}
-	} else {
-		t.Error("expected rate_limit_primary metric")
-	}
-
-	if m, ok := snap.Metrics["rate_limit_secondary"]; ok {
-		if m.Used == nil || *m.Used != 80.0 {
-			t.Errorf("expected secondary used=80.0, got %v", m.Used)
-		}
-		if m.Window != "7d" {
-			t.Errorf("expected window '7d', got %q", m.Window)
-		}
-	} else {
-		t.Error("expected rate_limit_secondary metric")
-	}
-
-	if got := metricUsed(t, snap, "plan_auto_percent_used"); got != 20.0 {
-		t.Errorf("expected plan_auto_percent_used=20.0, got %.1f", got)
-	}
-	if got := metricUsed(t, snap, "plan_api_percent_used"); got != 80.0 {
-		t.Errorf("expected plan_api_percent_used=80.0, got %.1f", got)
-	}
-	if got := metricUsed(t, snap, "plan_percent_used"); got != 80.0 {
-		t.Errorf("expected plan_percent_used=80.0, got %.1f", got)
-	}
-
-	if reset, ok := snap.Resets["rate_limit_primary"]; ok {
-		if reset.Unix() != 1770700100 {
-			t.Errorf("expected primary reset at 1770700100, got %d", reset.Unix())
-		}
-	} else {
-		t.Error("expected rate_limit_primary reset time")
+	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
+		t.Fatal("historical session quota must not be exported as current quota")
 	}
 
 	if snap.Raw["credits"] != "available" {
@@ -217,6 +178,7 @@ func TestFetchWithSessionData(t *testing.T) {
 
 func TestFetchNearLimit(t *testing.T) {
 	tmpDir := t.TempDir()
+	stubCodexRPC(t, tmpDir, `{"rateLimits":{"limitId":"codex","primary":{"usedPercent":95,"windowDurationMins":300}}}`, nil)
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	os.MkdirAll(sessionsDir, 0755)
 
@@ -243,6 +205,7 @@ func TestFetchNearLimit(t *testing.T) {
 
 func TestFetchLimited(t *testing.T) {
 	tmpDir := t.TempDir()
+	stubCodexRPC(t, tmpDir, `{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300}}}`, nil)
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	os.MkdirAll(sessionsDir, 0755)
 
@@ -345,7 +308,7 @@ func TestHasChangedPollsAuthenticatedRemoteQuota(t *testing.T) {
 	}
 }
 
-func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
+func TestLegacyHTTPUsesLiveUsageEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -424,7 +387,9 @@ func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
 		},
 	}
 
-	snap, err := p.Fetch(context.Background(), acct)
+	snap := core.NewUsageSnapshot("codex", acct.ID)
+	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
+	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
@@ -455,7 +420,7 @@ func TestFetchUsesLiveUsageEndpoint(t *testing.T) {
 	}
 }
 
-func TestFetchParsesNestedLiveRateLimitStatus(t *testing.T) {
+func TestLegacyHTTPParsesNestedLiveRateLimitStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -524,7 +489,9 @@ func TestFetchParsesNestedLiveRateLimitStatus(t *testing.T) {
 		},
 	}
 
-	snap, err := p.Fetch(context.Background(), acct)
+	snap := core.NewUsageSnapshot("codex", acct.ID)
+	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
+	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
@@ -549,7 +516,7 @@ func TestFetchParsesNestedLiveRateLimitStatus(t *testing.T) {
 	}
 }
 
-func TestFetchClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
+func TestLegacyHTTPClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -597,7 +564,9 @@ func TestFetchClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
 		},
 	}
 
-	snap, err := p.Fetch(context.Background(), acct)
+	snap := core.NewUsageSnapshot("codex", acct.ID)
+	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
+	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
@@ -616,7 +585,7 @@ func TestFetchClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
 	}
 }
 
-func TestFetchFallsBackToSessionWhenLiveUsageFails(t *testing.T) {
+func TestFetchDoesNotUseSessionOrHTTPQuotaWhenRPCFails(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -660,19 +629,20 @@ func TestFetchFallsBackToSessionWhenLiveUsageFails(t *testing.T) {
 		},
 	}
 
+	stubCodexRPC(t, tmpDir, `{}`, fmt.Errorf("test RPC failure"))
 	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
 
-	if got := metricUsed(t, snap, "rate_limit_primary"); got != 20 {
-		t.Fatalf("rate_limit_primary used = %.1f, want 20", got)
+	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
+		t.Fatal("RPC failure must not expose historical quota")
 	}
-	if !strings.Contains(snap.Raw["quota_api_error"], "HTTP 500") {
-		t.Fatalf("quota_api_error = %q, want HTTP 500", snap.Raw["quota_api_error"])
+	if snap.Raw["cli_rate_limits_error"] != "test RPC failure" {
+		t.Fatalf("missing RPC diagnostic: %v", snap.Raw["cli_rate_limits_error"])
 	}
-	if snap.Raw["rate_limit_source"] != "session" {
-		t.Fatalf("rate_limit_source = %q, want session", snap.Raw["rate_limit_source"])
+	if snap.Raw["rate_limit_source"] != "cli_rpc_unavailable" {
+		t.Fatal("RPC quota should be unavailable")
 	}
 }
 
