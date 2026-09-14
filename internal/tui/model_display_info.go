@@ -303,6 +303,37 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		return info
 	}
 
+	// opencode's console-derived quota metrics follow a different naming
+	// convention than claude_code's (rolling_usage/weekly_usage/
+	// monthly_usage_pct vs usage_five_hour/usage_seven_day) — same "quota
+	// window usage" concept, so it gets the same Usage tag treatment
+	// rather than falling through to a cost-based Credits branch below.
+	if ru, ok := snap.Metrics["rolling_usage"]; ok && ru.Used != nil {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = "rolling_usage"
+		info.gaugePercent = *ru.Used
+		parts := []string{fmt.Sprintf("5h %.0f%%", *ru.Used)}
+		if wu, ok2 := snap.Metrics["weekly_usage"]; ok2 && wu.Used != nil {
+			parts = append(parts, fmt.Sprintf("7d %.0f%%", *wu.Used))
+			if *wu.Used > info.gaugePercent {
+				info.gaugePercent = *wu.Used
+			}
+		}
+		if mu, ok2 := snap.Metrics["monthly_usage_pct"]; ok2 && mu.Used != nil {
+			parts = append(parts, fmt.Sprintf("mo %.0f%%", *mu.Used))
+			if *mu.Used > info.gaugePercent {
+				info.gaugePercent = *mu.Used
+			}
+		}
+		info.summary = strings.Join(parts, " · ")
+		if bal, ok2 := snap.Metrics["console_balance"]; ok2 && bal.Remaining != nil && !hideCosts {
+			info.detail = fmt.Sprintf("$%.2f balance", *bal.Remaining)
+		}
+		core.Tracef("[display] %s: branch=rolling_usage used=%.1f gauge=%.1f -> tag=Usage", snap.ProviderID, *ru.Used, info.gaugePercent)
+		return info
+	}
+
 	if _, hasBillingBlock := snap.Resets["billing_block"]; hasBillingBlock {
 		info.tagEmoji = "⚡"
 		info.tagLabel = "Usage"
