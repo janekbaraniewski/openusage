@@ -452,6 +452,39 @@ func TestComputeDisplayInfo_UsageFiveHourBranch(t *testing.T) {
 	}
 }
 
+// Muse Code surfaces subscription quota as muse.session / muse.weekly while
+// still reporting local cost estimates. The quota meters must win the header
+// tag over today_api_cost — a subscription tile reads "Usage", not "Credits".
+func TestComputeDisplayInfo_MuseQuotaBranchBeatsTodayCost(t *testing.T) {
+	sessionUsed, sessionLimit := 18.0, 100.0
+	weeklyUsed, weeklyLimit := 89.0, 100.0
+	todayCost := 0.85
+	snap := core.UsageSnapshot{
+		ProviderID: "muse_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"muse.session":   {Used: &sessionUsed, Limit: &sessionLimit, Unit: "quota", Window: "session"},
+			"muse.weekly":    {Used: &weeklyUsed, Limit: &weeklyLimit, Unit: "quota", Window: "weekly"},
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "today"},
+			"total_cost_usd": {Used: &todayCost, Unit: "USD", Window: "all-time"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.gaugePercent != 18.0 {
+		t.Fatalf("gaugePercent = %v, want 18.0 (session leads)", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "18%") {
+		t.Fatalf("summary = %q, want session percent", got.summary)
+	}
+}
+
 func TestComputeDisplayInfo_TodayApiCostBranchWithoutFiveHour(t *testing.T) {
 	todayCost := 55.57
 	snap := core.UsageSnapshot{
