@@ -480,13 +480,13 @@ func TestComputeDisplayInfo_MuseQuotaBranchBeatsTodayCost(t *testing.T) {
 	if got.gaugePercent != 18.0 {
 		t.Fatalf("gaugePercent = %v, want 18.0 (session leads)", got.gaugePercent)
 	}
-	if got.summary != "Session 18% used" {
-		t.Fatalf("summary = %q, want window-named session percent", got.summary)
+	if got.summary != "" {
+		t.Fatalf("summary = %q, want empty (bars already show both windows)", got.summary)
 	}
 }
 
-// Weekly-only quota names its window too.
-func TestComputeDisplayInfo_MuseWeeklyQuotaNamesWindow(t *testing.T) {
+// Weekly-only quota stays hero-less too: the bar carries the percent.
+func TestComputeDisplayInfo_MuseWeeklyQuotaOmitsHeroSummary(t *testing.T) {
 	weeklyUsed, weeklyLimit := 32.0, 100.0
 	todayCost := 3.14
 	snap := core.UsageSnapshot{
@@ -502,8 +502,8 @@ func TestComputeDisplayInfo_MuseWeeklyQuotaNamesWindow(t *testing.T) {
 	if got.tagLabel != "Usage" {
 		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
 	}
-	if got.summary != "Weekly 32% used" {
-		t.Fatalf("summary = %q, want window-named weekly percent", got.summary)
+	if got.summary != "" {
+		t.Fatalf("summary = %q, want empty (bar carries the percent)", got.summary)
 	}
 }
 
