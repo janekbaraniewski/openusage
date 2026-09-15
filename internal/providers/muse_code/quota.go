@@ -70,6 +70,8 @@ var museAPIKeyCache struct {
 type museQuotaMemory struct {
 	weeklyUsed      float64
 	weeklyResetUnix int64
+	windowUsed      float64
+	windowResetUnix int64
 	tier            string
 	observedAt      time.Time
 }
@@ -91,6 +93,8 @@ func rememberQuotaMemory(sub *subscriptionUsage) {
 	mem := museQuotaMemory{
 		weeklyUsed:      sub.Weekly.UsedPercent,
 		weeklyResetUnix: sub.Weekly.ResetsAt,
+		windowUsed:      sub.Window.UsedPercent,
+		windowResetUnix: sub.Window.ResetsAt,
 		tier:            sub.Tier,
 		observedAt:      time.Now(),
 	}
@@ -120,6 +124,8 @@ type museQuotaMemoryFile struct {
 	SchemaVersion   int     `json:"schema_version"`
 	WeeklyUsed      float64 `json:"weekly_used"`
 	WeeklyResetUnix int64   `json:"weekly_reset_unix"`
+	WindowUsed      float64 `json:"window_used"`
+	WindowResetUnix int64   `json:"window_reset_unix"`
 	Tier            string  `json:"tier"`
 	ObservedAtUnix  int64   `json:"observed_at_unix"`
 }
@@ -133,9 +139,11 @@ func persistQuotaMemory(mem museQuotaMemory) error {
 		return err
 	}
 	raw, err := json.Marshal(museQuotaMemoryFile{
-		SchemaVersion:   1,
+		SchemaVersion:   2,
 		WeeklyUsed:      mem.weeklyUsed,
 		WeeklyResetUnix: mem.weeklyResetUnix,
+		WindowUsed:      mem.windowUsed,
+		WindowResetUnix: mem.windowResetUnix,
 		Tier:            mem.tier,
 		ObservedAtUnix:  mem.observedAt.Unix(),
 	})
@@ -179,9 +187,13 @@ func loadQuotaMemory() (museQuotaMemory, bool) {
 	if file.WeeklyResetUnix <= 0 {
 		return museQuotaMemory{}, false
 	}
+	// Schema is additive: v1 files simply lack the window fields and
+	// carry the week only.
 	return museQuotaMemory{
 		weeklyUsed:      file.WeeklyUsed,
 		weeklyResetUnix: file.WeeklyResetUnix,
+		windowUsed:      file.WindowUsed,
+		windowResetUnix: file.WindowResetUnix,
 		tier:            file.Tier,
 		observedAt:      time.Unix(file.ObservedAtUnix, 0),
 	}, true
@@ -591,7 +603,30 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 			return true
 		}
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			// A rejected key may mean a different account: never carry
+			// memory across it.
 			snap.SetDiagnostic("muse_quota_auth", "quota API key rejected — re-authenticate via `muse login`, then re-poll")
+		} else if mem, ok := currentQuotaMemory(time.Now()); ok {
+			// Transient probe failure with valid memory: carry the
+			// remembered meters forward marked stale instead of wiping
+			// the gauges and flipping the tile to Credits.
+			snap.EnsureMaps()
+			hundred := 100.0
+			if mem.windowResetUnix > 0 {
+				window := mem.windowUsed
+				snap.Metrics["muse.session"] = core.Metric{Used: &window, Limit: &hundred, Unit: "quota", Window: "session"}
+				snap.Resets["muse.session"] = time.Unix(mem.windowResetUnix, 0).UTC()
+			}
+			weekly := mem.weeklyUsed
+			snap.Metrics["muse.weekly"] = core.Metric{Used: &weekly, Limit: &hundred, Unit: "quota", Window: "weekly"}
+			snap.Resets["muse.weekly"] = time.Unix(mem.weeklyResetUnix, 0).UTC()
+			snap.SetDiagnostic("muse_quota_stale", fmt.Sprintf("quota as of %s; live probe failed: %v", mem.observedAt.Format("15:04"), shared.Truncate(err.Error(), 120)))
+			if summary := quotaSummary(snap); summary != "quota n/a" {
+				if snap.Message != "" {
+					snap.Message += " · "
+				}
+				snap.Message += summary
+			}
 		} else {
 			snap.SetDiagnostic("muse_quota_error", fmt.Sprintf("quota probe failed: %v", shared.Truncate(err.Error(), 160)))
 		}

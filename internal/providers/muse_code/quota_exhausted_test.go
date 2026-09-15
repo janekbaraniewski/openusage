@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,88 @@ func TestTrySubscriptionUsage429_CorruptFileFallsBack(t *testing.T) {
 	}
 	if got := metricUsed(t, &snap, "muse.weekly"); got != 100 {
 		t.Fatalf("muse.weekly = %v, want legacy 100 fallback", got)
+	}
+}
+
+// A transient probe failure (not a 429, not a rejected key) must not wipe
+// the gauges: remembered meters carry forward marked stale, like /usage.
+func TestTrySubscriptionUsage_ProbeErrorCarriesMemory(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      32,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		windowUsed:      60,
+		windowResetUnix: now.Add(2 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-10 * time.Minute),
+	})
+	stubMuseAPIKey(t, "test-key", true)
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("transient network failure")
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.session"); got != 60 {
+		t.Fatalf("muse.session = %v, want remembered 60", got)
+	}
+	if got := metricUsed(t, &snap, "muse.weekly"); got != 32 {
+		t.Fatalf("muse.weekly = %v, want remembered 32", got)
+	}
+	if _, ok := snap.Diagnostics["muse_quota_stale"]; !ok {
+		t.Fatal("expected muse_quota_stale diagnostic")
+	}
+	if got := snap.Message; !strings.Contains(got, "60%") || !strings.Contains(got, "32%") {
+		t.Fatalf("message = %q, want remembered percents", got)
+	}
+}
+
+// Same transient failure with no memory anywhere: today's behavior stands
+// (diagnostic only, no fabricated meters).
+func TestTrySubscriptionUsage_ProbeErrorWithoutMemory(t *testing.T) {
+	seedQuotaMemory(t, museQuotaMemory{})
+	stubMuseAPIKey(t, "test-key", true)
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("transient network failure")
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if _, ok := snap.Metrics["muse.session"]; ok {
+		t.Fatal("unexpected fabricated session meter")
+	}
+	if _, ok := snap.Metrics["muse.weekly"]; ok {
+		t.Fatal("unexpected fabricated weekly meter")
+	}
+}
+
+// A rejected key is not transient: no carry-forward, even with memory
+// (the account behind the key may have changed).
+func TestTrySubscriptionUsage_AuthRejectedIgnoresMemory(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      32,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		observedAt:      now.Add(-time.Hour),
+	})
+	stubMuseAPIKey(t, "test-key", true)
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		return quotaTestResponse(http.StatusUnauthorized, `{"error":"invalid key"}`), nil
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if _, ok := snap.Metrics["muse.weekly"]; ok {
+		t.Fatal("unexpected carried meter on rejected key")
+	}
+	if _, ok := snap.Diagnostics["muse_quota_auth"]; !ok {
+		t.Fatal("expected auth diagnostic")
 	}
 }
 

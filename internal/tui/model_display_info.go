@@ -232,6 +232,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
 			info.gaugePercent = pct
 			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
+			// Multi-window meters name their window: the tile reads
+			// "Session 60% used", never a bare figure of unknown scope.
+			switch quotaKey {
+			case "muse.session":
+				info.summary = fmt.Sprintf("Session %.0f%% used", pct)
+			case "muse.weekly":
+				info.summary = fmt.Sprintf("Weekly %.0f%% used", pct)
+			}
 		}
 		if m.Remaining != nil {
 			info.detail = fmt.Sprintf("%.0f%% usage left", *m.Remaining)

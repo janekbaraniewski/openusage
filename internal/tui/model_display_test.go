@@ -480,8 +480,30 @@ func TestComputeDisplayInfo_MuseQuotaBranchBeatsTodayCost(t *testing.T) {
 	if got.gaugePercent != 18.0 {
 		t.Fatalf("gaugePercent = %v, want 18.0 (session leads)", got.gaugePercent)
 	}
-	if !strings.Contains(got.summary, "18%") {
-		t.Fatalf("summary = %q, want session percent", got.summary)
+	if got.summary != "Session 18% used" {
+		t.Fatalf("summary = %q, want window-named session percent", got.summary)
+	}
+}
+
+// Weekly-only quota names its window too.
+func TestComputeDisplayInfo_MuseWeeklyQuotaNamesWindow(t *testing.T) {
+	weeklyUsed, weeklyLimit := 32.0, 100.0
+	todayCost := 3.14
+	snap := core.UsageSnapshot{
+		ProviderID: "muse_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"muse.weekly":    {Used: &weeklyUsed, Limit: &weeklyLimit, Unit: "quota", Window: "weekly"},
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "today"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.summary != "Weekly 32% used" {
+		t.Fatalf("summary = %q, want window-named weekly percent", got.summary)
 	}
 }
 
