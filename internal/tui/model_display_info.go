@@ -215,7 +215,11 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	}
 
 	quotaKey := ""
-	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
+	// muse.session / muse.weekly are Muse Code's subscription meters (same
+	// order as its widget gauge priority). Without them a quota-bearing
+	// Muse snapshot falls through to today_api_cost and mislabels the
+	// header "Credits".
+	for _, key := range []string{"quota_pro", "quota", "quota_flash", "muse.session", "muse.weekly"} {
 		if _, ok := snap.Metrics[key]; ok {
 			quotaKey = key
 			break
