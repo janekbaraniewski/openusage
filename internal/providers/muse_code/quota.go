@@ -61,6 +61,61 @@ var museAPIKeyCache struct {
 	set bool
 }
 
+// museQuotaMemoryState holds the last successful subscription payload so a
+// later 429 can be attributed to the right window. The 429 body carries
+// only a reset instant — no window marker — so without memory every block
+// looks like the week. Long-lived processes (daemon, TUI) get real memory;
+// one-shot runs fall back to the legacy weekly assumption.
+type museQuotaMemory struct {
+	weeklyUsed      float64
+	weeklyResetUnix int64
+	tier            string
+	observedAt      time.Time
+}
+
+var (
+	museQuotaMemoryMu    sync.Mutex
+	museQuotaMemoryState museQuotaMemory
+)
+
+// sessionResetAmbiguity separates the windows: a 429 reset this much sooner
+// than the remembered weekly reset belongs to the session window. Window
+// durations are 5h; weekly resets sit days out, so 6h has wide margin.
+const sessionResetAmbiguity = 6 * time.Hour
+
+func rememberQuotaMemory(sub *subscriptionUsage) {
+	if sub.Weekly.ResetsAt <= 0 {
+		return
+	}
+	museQuotaMemoryMu.Lock()
+	defer museQuotaMemoryMu.Unlock()
+	museQuotaMemoryState = museQuotaMemory{
+		weeklyUsed:      sub.Weekly.UsedPercent,
+		weeklyResetUnix: sub.Weekly.ResetsAt,
+		tier:            sub.Tier,
+		observedAt:      time.Now(),
+	}
+}
+
+// classifyQuotaExhaustion reports whether a 429 reset belongs to the session
+// window, returning the memory it decided on. False means weekly (or
+// unknown): the legacy assumption.
+func classifyQuotaExhaustion(resetsAt int64, now time.Time) (bool, museQuotaMemory) {
+	museQuotaMemoryMu.Lock()
+	mem := museQuotaMemoryState
+	museQuotaMemoryMu.Unlock()
+	if mem.weeklyResetUnix <= 0 || mem.observedAt.IsZero() {
+		return false, museQuotaMemory{}
+	}
+	if now.Unix() >= mem.weeklyResetUnix {
+		return false, museQuotaMemory{} // memory expired with the old week
+	}
+	if time.Unix(mem.weeklyResetUnix, 0).Sub(time.Unix(resetsAt, 0)) <= sessionResetAmbiguity {
+		return false, museQuotaMemory{}
+	}
+	return true, mem
+}
+
 var loadMuseAPIKey = func(ctx context.Context) (string, bool) {
 	if k := strings.TrimSpace(os.Getenv("META_API_KEY")); k != "" {
 		return k, true
@@ -340,6 +395,7 @@ func applyPlanNameOverride(acct core.AccountConfig, snap *core.UsageSnapshot) {
 
 func applySubscriptionUsage(snap *core.UsageSnapshot, sub *subscriptionUsage) {
 	snap.EnsureMaps()
+	rememberQuotaMemory(sub)
 	hundred := 100.0
 	window, weekly := sub.Window.UsedPercent, sub.Weekly.UsedPercent
 	snap.Metrics["muse.session"] = core.Metric{Used: &window, Limit: &hundred, Unit: "quota", Window: "session"}
@@ -384,11 +440,32 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 		if status == http.StatusTooManyRequests && errors.As(err, &exhausted) {
 			resetsAt := exhausted.ResetsAt
 			if resetsAt > 0 {
-				// Surface the weekly window as 100% with the reset from the
-				// error (typically ~6 days out, e.g. Sep 14). We don't fabricate
-				// both windows at 100%; the weekly is the honest one for the
-				// observed reset, and the diagnostic makes the blocked state
-				// explicit (P1-1).
+				// The 429 names no window, so attribute it with memory: a
+				// reset far sooner than the remembered weekly reset is the
+				// session window exhausting while the week still has room.
+				if session, mem := classifyQuotaExhaustion(resetsAt, time.Now()); session {
+					snap.EnsureMaps()
+					hundred := 100.0
+					snap.Metrics["muse.session"] = core.Metric{Used: &hundred, Limit: &hundred, Unit: "quota", Window: "session"}
+					snap.Resets["muse.session"] = time.Unix(resetsAt, 0).UTC()
+					weekly := mem.weeklyUsed
+					snap.Metrics["muse.weekly"] = core.Metric{Used: &weekly, Limit: &hundred, Unit: "quota", Window: "weekly"}
+					snap.Resets["muse.weekly"] = time.Unix(mem.weeklyResetUnix, 0).UTC()
+					snap.SetDiagnostic("muse_quota_blocked", fmt.Sprintf("session quota exhausted, resets at %s", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339)))
+					snap.SetDiagnostic("muse_quota_weekly_stale", fmt.Sprintf("weekly %.0f%% as of %s; live probe blocked", mem.weeklyUsed, mem.observedAt.Format("15:04")))
+					snap.SetAttribute("muse_quota_blocked_resets_at", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339))
+					if summary := quotaSummary(snap); summary != "quota n/a" {
+						if snap.Message != "" {
+							snap.Message += " · "
+						}
+						snap.Message += summary
+					}
+					return true
+				}
+				// No (or matching) memory: the reset belongs to the week, or
+				// can't be placed. Surface the weekly window as 100% with the
+				// reset from the error. We don't fabricate both windows at
+				// 100%; the diagnostic makes the blocked state explicit.
 				snap.EnsureMaps()
 				hundred := 100.0
 				snap.Metrics["muse.weekly"] = core.Metric{Used: &hundred, Limit: &hundred, Unit: "quota", Window: "weekly"}
