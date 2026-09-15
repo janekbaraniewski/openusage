@@ -454,6 +454,23 @@ func populateSnapshot(ctx context.Context, snap *core.UsageSnapshot, entries []m
 			rec.CostUSD = core.Float64Ptr(bucket.cost)
 		}
 		snap.AppendModelUsage(rec)
+
+		// Mirror the per-model totals as model_<slug>_<kind> metrics (the
+		// codex/cursor convention). The Model Burn section feeds off these
+		// keys — without them Muse has records but no visible model mix.
+		// setUsedMetric skips non-positive buckets so sparse models stay
+		// out of the snapshot.
+		slug := shared.SanitizeMetricName(model)
+		prefix := "model_" + slug + "_"
+		setUsedMetric(snap, prefix+"input_tokens", float64(bucket.input), "tokens", allTimeWindow)
+		setUsedMetric(snap, prefix+"output_tokens", float64(bucket.output), "tokens", allTimeWindow)
+		setUsedMetric(snap, prefix+"cache_read_tokens", float64(bucket.cacheRead), "tokens", allTimeWindow)
+		setUsedMetric(snap, prefix+"cache_write_tokens", float64(bucket.cacheWrite), "tokens", allTimeWindow)
+		setUsedMetric(snap, prefix+"reasoning_tokens", float64(bucket.reasoning), "tokens", allTimeWindow)
+		setUsedMetric(snap, prefix+"requests", float64(bucket.requests), "requests", allTimeWindow)
+		if bucket.priced {
+			setUsedMetric(snap, prefix+"cost_usd", bucket.cost, "USD", allTimeWindow)
+		}
 	}
 }
 
