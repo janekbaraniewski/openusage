@@ -89,6 +89,16 @@ func TestChangeDetectorReturnsFalse_WhenNoFiles(t *testing.T) {
 			continue
 		}
 
+		// muse_code with a credential should still poll for quota even when
+		// sessions_dir is missing (P2-5 file-only quota). Isolate from real
+		// ~/.config/openusage/muse.json so the test stays uncredentialed.
+		if provider.ID() == "muse_code" {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv("META_API_KEY", "")
+			t.Setenv("MUSE_AUTH_PATH", "")
+		}
+
 		acct := core.AccountConfig{
 			ID:       "test",
 			Provider: provider.ID(),

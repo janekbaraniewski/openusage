@@ -61,6 +61,19 @@ var apiKeyEnvAliases = map[string][]string{
 	"zai":        {"ZHIPUAI_API_KEY"},
 }
 
+// localAuthEnvHints gives the AUTH SOURCE label for providers whose primary
+// auth is not API-key based but which still accept an optional env
+// credential. Muse Code reads local session logs with no key required;
+// META_API_KEY (or the macOS keychain entry written by `muse login`) only
+// feeds the optional quota probe.
+var localAuthEnvHints = map[string]string{
+	"muse_code": "META_API_KEY",
+}
+
+func localAuthEnvHintForProvider(providerID string) string {
+	return strings.TrimSpace(localAuthEnvHints[providerID])
+}
+
 func apiKeyProviderEntries() []apiKeyProviderEntry {
 	loadProviderSpecs()
 

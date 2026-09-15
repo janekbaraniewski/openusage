@@ -215,7 +215,11 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	}
 
 	quotaKey := ""
-	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
+	// muse.session / muse.weekly are Muse Code's subscription meters (same
+	// order as its widget gauge priority). Without them a quota-bearing
+	// Muse snapshot falls through to today_api_cost and mislabels the
+	// header "Credits".
+	for _, key := range []string{"quota_pro", "quota", "quota_flash", "muse.session", "muse.weekly"} {
 		if _, ok := snap.Metrics[key]; ok {
 			quotaKey = key
 			break
@@ -228,6 +232,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
 			info.gaugePercent = pct
 			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
+			// Muse windows are percent-only (the API exposes no absolute
+			// token limits) and the tile already bars both windows with
+			// resets, so a hero line would only repeat the session bar.
+			// Leave it empty: the tile falls through to the detail row.
+			switch quotaKey {
+			case "muse.session", "muse.weekly":
+				info.summary = ""
+			}
 		}
 		if m.Remaining != nil {
 			info.detail = fmt.Sprintf("%.0f%% usage left", *m.Remaining)
