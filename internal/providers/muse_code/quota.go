@@ -27,6 +27,7 @@ import (
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
+	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
 // quotaHTTPClient builds the POST client. A var (not a plain func) so tests
@@ -87,28 +88,134 @@ func rememberQuotaMemory(sub *subscriptionUsage) {
 	if sub.Weekly.ResetsAt <= 0 {
 		return
 	}
-	museQuotaMemoryMu.Lock()
-	defer museQuotaMemoryMu.Unlock()
-	museQuotaMemoryState = museQuotaMemory{
+	mem := museQuotaMemory{
 		weeklyUsed:      sub.Weekly.UsedPercent,
 		weeklyResetUnix: sub.Weekly.ResetsAt,
 		tier:            sub.Tier,
 		observedAt:      time.Now(),
 	}
+	museQuotaMemoryMu.Lock()
+	museQuotaMemoryState = mem
+	museQuotaMemoryMu.Unlock()
+	// Best effort: a restart during a block must still find this. Failures
+	// stay silent — the poll outcome never depends on the file.
+	_ = persistQuotaMemory(mem)
+}
+
+// museQuotaMemoryPath is the state file for the last successful subscription
+// payload. MUSE_QUOTA_MEMORY_PATH overrides it (tests). Otherwise it lives
+// next to the telemetry state so daemon, TUI, and one-shot runs share it.
+func museQuotaMemoryPath() string {
+	if override := strings.TrimSpace(os.Getenv("MUSE_QUOTA_MEMORY_PATH")); override != "" {
+		return override
+	}
+	dir, err := telemetry.DefaultStateDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "muse-quota-memory.json")
+}
+
+type museQuotaMemoryFile struct {
+	SchemaVersion   int     `json:"schema_version"`
+	WeeklyUsed      float64 `json:"weekly_used"`
+	WeeklyResetUnix int64   `json:"weekly_reset_unix"`
+	Tier            string  `json:"tier"`
+	ObservedAtUnix  int64   `json:"observed_at_unix"`
+}
+
+func persistQuotaMemory(mem museQuotaMemory) error {
+	path := museQuotaMemoryPath()
+	if path == "" {
+		return fmt.Errorf("no state dir")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(museQuotaMemoryFile{
+		SchemaVersion:   1,
+		WeeklyUsed:      mem.weeklyUsed,
+		WeeklyResetUnix: mem.weeklyResetUnix,
+		Tier:            mem.tier,
+		ObservedAtUnix:  mem.observedAt.Unix(),
+	})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".muse-quota-memory-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func loadQuotaMemory() (museQuotaMemory, bool) {
+	path := museQuotaMemoryPath()
+	if path == "" {
+		return museQuotaMemory{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return museQuotaMemory{}, false
+	}
+	var file museQuotaMemoryFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return museQuotaMemory{}, false
+	}
+	if file.WeeklyResetUnix <= 0 {
+		return museQuotaMemory{}, false
+	}
+	return museQuotaMemory{
+		weeklyUsed:      file.WeeklyUsed,
+		weeklyResetUnix: file.WeeklyResetUnix,
+		tier:            file.Tier,
+		observedAt:      time.Unix(file.ObservedAtUnix, 0),
+	}, true
+}
+
+// currentQuotaMemory returns the valid unexpired memory, consulting the
+// state file when the process started cold (e.g. restarted mid-block).
+func currentQuotaMemory(now time.Time) (museQuotaMemory, bool) {
+	museQuotaMemoryMu.Lock()
+	mem := museQuotaMemoryState
+	museQuotaMemoryMu.Unlock()
+	if mem.weeklyResetUnix <= 0 || mem.observedAt.IsZero() {
+		fileMem, ok := loadQuotaMemory()
+		if !ok {
+			return museQuotaMemory{}, false
+		}
+		museQuotaMemoryMu.Lock()
+		museQuotaMemoryState = fileMem
+		museQuotaMemoryMu.Unlock()
+		mem = fileMem
+	}
+	if now.Unix() >= mem.weeklyResetUnix {
+		return museQuotaMemory{}, false // memory expired with the old week
+	}
+	return mem, true
 }
 
 // classifyQuotaExhaustion reports whether a 429 reset belongs to the session
 // window, returning the memory it decided on. False means weekly (or
 // unknown): the legacy assumption.
 func classifyQuotaExhaustion(resetsAt int64, now time.Time) (bool, museQuotaMemory) {
-	museQuotaMemoryMu.Lock()
-	mem := museQuotaMemoryState
-	museQuotaMemoryMu.Unlock()
-	if mem.weeklyResetUnix <= 0 || mem.observedAt.IsZero() {
+	mem, ok := currentQuotaMemory(now)
+	if !ok {
 		return false, museQuotaMemory{}
-	}
-	if now.Unix() >= mem.weeklyResetUnix {
-		return false, museQuotaMemory{} // memory expired with the old week
 	}
 	if time.Unix(mem.weeklyResetUnix, 0).Sub(time.Unix(resetsAt, 0)) <= sessionResetAmbiguity {
 		return false, museQuotaMemory{}

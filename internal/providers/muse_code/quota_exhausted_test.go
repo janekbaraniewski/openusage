@@ -2,8 +2,10 @@ package muse_code
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 
 func seedQuotaMemory(t *testing.T, mem museQuotaMemory) {
 	t.Helper()
+	// Hermetic file layer: every test gets a fresh dir so the real
+	// ~/.local/state file can neither leak in nor out.
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", t.TempDir()+"/muse-quota-memory.json")
 	museQuotaMemoryMu.Lock()
 	old := museQuotaMemoryState
 	museQuotaMemoryState = mem
@@ -21,6 +26,81 @@ func seedQuotaMemory(t *testing.T, mem museQuotaMemory) {
 		museQuotaMemoryState = old
 		museQuotaMemoryMu.Unlock()
 	})
+}
+
+// A restart during a session block must not flip the week to 100%: with
+// cold process memory but a persisted weekly reset far out, the 429 still
+// attributes to the session window.
+func TestTrySubscriptionUsage429_RestartKeepsWeeklyMemory(t *testing.T) {
+	now := time.Now()
+	stub429(t, now.Add(3*time.Hour).Unix()) // session reset, hours out
+	seedQuotaMemory(t, museQuotaMemory{})   // cold process, hermetic file
+	rememberQuotaMemory(&subscriptionUsage{
+		Tier: "tier-123",
+	})
+	// Fill the rest the way a real event would (rememberQuotaMemory only
+	// persists when Weekly.ResetsAt is set).
+	persistQuotaMemory(museQuotaMemory{
+		weeklyUsed:      68,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-time.Hour),
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.session"); got != 100 {
+		t.Fatalf("muse.session = %v, want 100 (exhausted window)", got)
+	}
+	if got := metricUsed(t, &snap, "muse.weekly"); got != 68 {
+		t.Fatalf("muse.weekly = %v, want persisted 68", got)
+	}
+}
+
+// A corrupt state file is indistinguishable from no memory: legacy fallback.
+func TestTrySubscriptionUsage429_CorruptFileFallsBack(t *testing.T) {
+	stub429(t, time.Now().Add(3*time.Hour).Unix())
+	seedQuotaMemory(t, museQuotaMemory{})
+	if err := os.WriteFile(os.Getenv("MUSE_QUOTA_MEMORY_PATH"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.weekly"); got != 100 {
+		t.Fatalf("muse.weekly = %v, want legacy 100 fallback", got)
+	}
+}
+
+// Successful events persist the memory so the next process starts warm.
+func TestRememberQuotaMemory_PersistsToFile(t *testing.T) {
+	seedQuotaMemory(t, museQuotaMemory{})
+	now := time.Now()
+	sub := &subscriptionUsage{Tier: "tier-123"}
+	sub.Weekly.UsedPercent = 68
+	sub.Weekly.ResetsAt = now.Add(6 * 24 * time.Hour).Unix()
+	sub.Window.UsedPercent = 18
+	rememberQuotaMemory(sub)
+
+	raw, err := os.ReadFile(os.Getenv("MUSE_QUOTA_MEMORY_PATH"))
+	if err != nil {
+		t.Fatalf("expected state file: %v", err)
+	}
+	var decoded struct {
+		WeeklyUsed      float64 `json:"weekly_used"`
+		WeeklyResetUnix int64   `json:"weekly_reset_unix"`
+		Tier            string  `json:"tier"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("state file not JSON: %v", err)
+	}
+	if decoded.WeeklyUsed != 68 || decoded.WeeklyResetUnix != sub.Weekly.ResetsAt || decoded.Tier != "tier-123" {
+		t.Fatalf("state file = %+v, want persisted values", decoded)
+	}
 }
 
 func stub429(t *testing.T, resetsAt int64) {
