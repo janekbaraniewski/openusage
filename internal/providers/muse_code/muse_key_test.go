@@ -3,6 +3,8 @@ package muse_code
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +16,51 @@ func stubMuseOAuthToken(t *testing.T, token string, ok bool) {
 	prev := loadMuseOAuthToken
 	loadMuseOAuthToken = func(ctx context.Context) (string, bool) { return token, ok }
 	t.Cleanup(func() { loadMuseOAuthToken = prev })
+}
+
+func stubMuseKeychainBlob(t *testing.T, raw []byte, ok bool) {
+	t.Helper()
+	prev := readMuseSecretBlobFromKeychain
+	readMuseSecretBlobFromKeychain = func(ctx context.Context) ([]byte, bool) { return raw, ok }
+	t.Cleanup(func() { readMuseSecretBlobFromKeychain = prev })
+}
+
+func resetMuseOAuthTokenCache(t *testing.T) {
+	t.Helper()
+	museOAuthTokenCache.Lock()
+	prev := museOAuthTokenCache
+	museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set = "", false, false
+	museOAuthTokenCache.Unlock()
+	t.Cleanup(func() {
+		museOAuthTokenCache.Lock()
+		museOAuthTokenCache = prev
+		museOAuthTokenCache.Unlock()
+	})
+}
+
+// useRealMuseOAuthLoader restores the real OAuth loader (the fetch-test
+// stubs pin it off) while keeping the API-key loader stubbed off and the
+// memo cleared, so refresh tests exercise real file reads under a fake
+// HOME without touching real credentials or the real keychain.
+func useRealMuseOAuthLoader(t *testing.T) {
+	t.Helper()
+	orig := loadMuseOAuthToken
+	stubMuseAPIKey(t, "", false)
+	loadMuseOAuthToken = orig
+	t.Cleanup(func() { loadMuseOAuthToken = orig })
+	resetMuseOAuthTokenCache(t)
+}
+
+func plantMuseCLIAuthFile(t *testing.T, home, token string) {
+	t.Helper()
+	dir := filepath.Join(home, ".config", "muse")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir cli auth: %v", err)
+	}
+	doc := `{"providers":{"meta":{"access_token":"` + token + `"}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(doc), 0o600); err != nil {
+		t.Fatalf("write cli auth: %v", err)
+	}
 }
 
 // Fixture values are invented ("tier-999" / "Test Usage") — never real
@@ -75,6 +122,11 @@ func TestEnrichQuota_KeyEndpointFirst(t *testing.T) {
 }
 
 func TestEnrichQuota_KeyUnauthorizedFallsBackToProbe(t *testing.T) {
+	// Fake HOME plus a stubbed keychain: the 401 refresh path uses real
+	// file/keychain readers, which must never see real credentials here.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(os.TempDir(), "muse-quota-memory-test-"+strings.Replace(t.Name(), "/", "-", -1)+".json"))
+	stubMuseKeychainBlob(t, nil, false)
 	stubMuseAPIKey(t, "test-key", true)
 	stubMuseOAuthToken(t, "expired-token", true)
 	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
@@ -171,5 +223,172 @@ func TestSubscriptionUsageFromKey_FallsBackToOuterTierID(t *testing.T) {
 	}
 	if sub.PlanName != "" {
 		t.Errorf("plan = %q, want empty without a display name", sub.PlanName)
+	}
+}
+
+func TestOAuthOwnedRoundTripPreservesAPIKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
+	if err := writeMuseOwnedKeys(map[string]string{"apiKey": "k"}); err != nil {
+		t.Fatalf("seed owned file: %v", err)
+	}
+	if err := saveMuseOAuthTokenToOwnedFile("o"); err != nil {
+		t.Fatalf("save oauth: %v", err)
+	}
+	token, ok := loadMuseOAuthTokenFromOwnedFile()
+	if !ok || token != "o" {
+		t.Errorf("oauth = %q, %v; want o, true", token, ok)
+	}
+	key, ok := loadMuseAPIKeyFromFile()
+	if !ok || key != "k" {
+		t.Errorf("api key = %q, %v; want k, true", key, ok)
+	}
+	info, err := os.Stat(filepath.Join(home, ".config", "openusage", "muse.json"))
+	if err != nil {
+		t.Fatalf("stat owned file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("owned file perm = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestOAuthOwnedRefusesMalformed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
+	dir := filepath.Join(home, ".config", "openusage")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Raw-string key file (a supported apiKey shape): must not be clobbered.
+	if err := os.WriteFile(filepath.Join(dir, "muse.json"), []byte("raw-key"), 0o600); err != nil {
+		t.Fatalf("seed raw file: %v", err)
+	}
+	if err := saveMuseOAuthTokenToOwnedFile("o"); err == nil {
+		t.Error("save over unparseable file should refuse")
+	}
+	if token, ok := loadMuseOAuthTokenFromOwnedFile(); ok || token != "" {
+		t.Errorf("oauth = %q, %v; want empty", token, ok)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "muse.json")); string(raw) != "raw-key" {
+		t.Errorf("raw file clobbered: %q", raw)
+	}
+}
+
+func TestOAuthFirstBootstrapsFromCLIFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
+	plantMuseCLIAuthFile(t, home, "fresh-token")
+	useRealMuseOAuthLoader(t)
+	stubMuseKeychainBlob(t, nil, false)
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/muse-code/key") {
+			t.Errorf("unexpected path %s on first boot", r.URL.Path)
+			return quotaTestResponse(http.StatusInternalServerError, ""), nil
+		}
+		return quotaTestResponse(http.StatusOK, keySubscriptionFixture), nil
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	snap.Status = core.StatusOK
+
+	enrichQuota(context.Background(), core.AccountConfig{ID: "muse-code"}, &snap)
+
+	if got := snap.Raw["plan_name"]; got != "Test Usage" {
+		t.Errorf("plan_name = %q", got)
+	}
+	// The CLI-file token must now be cached in the owned file for later
+	// boots, which never touch CLI sources again.
+	token, ok := loadMuseOAuthTokenFromOwnedFile()
+	if !ok || token != "fresh-token" {
+		t.Errorf("cached oauth = %q, %v; want fresh-token", token, ok)
+	}
+}
+
+func TestOAuthRefresh_StaleOwnedRebootstraps(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
+	if err := writeMuseOwnedKeys(map[string]string{"oauthToken": "stale-token"}); err != nil {
+		t.Fatalf("seed owned file: %v", err)
+	}
+	plantMuseCLIAuthFile(t, home, "fresh-token")
+	useRealMuseOAuthLoader(t)
+	stubMuseKeychainBlob(t, nil, false)
+	var probeCalled bool
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			probeCalled = true
+			return quotaTestResponse(http.StatusInternalServerError, ""), nil
+		}
+		if strings.HasSuffix(r.Header.Get("Authorization"), "stale-token") {
+			return quotaTestResponse(http.StatusUnauthorized, `{"title":"Authentication Error","status":401}`), nil
+		}
+		if !strings.HasSuffix(r.Header.Get("Authorization"), "fresh-token") {
+			t.Errorf("retry used wrong token")
+			return quotaTestResponse(http.StatusUnauthorized, ""), nil
+		}
+		return quotaTestResponse(http.StatusOK, keySubscriptionFixture), nil
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	snap.Status = core.StatusOK
+
+	enrichQuota(context.Background(), core.AccountConfig{ID: "muse-code"}, &snap)
+
+	if probeCalled {
+		t.Error("probe ran despite a successful refresh retry")
+	}
+	if got := snap.Raw["plan_name"]; got != "Test Usage" {
+		t.Errorf("plan_name = %q", got)
+	}
+	if _, ok := snap.Diagnostics["muse_quota_oauth"]; ok {
+		t.Error("stale 401 diagnostic survived the successful retry")
+	}
+	token, ok := loadMuseOAuthTokenFromOwnedFile()
+	if !ok || token != "fresh-token" {
+		t.Errorf("cached oauth = %q, %v; want fresh-token", token, ok)
+	}
+}
+
+func TestOAuthRefresh_NoRefreshFallsBackToProbe(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
+	if err := writeMuseOwnedKeys(map[string]string{"oauthToken": "stale-token"}); err != nil {
+		t.Fatalf("seed owned file: %v", err)
+	}
+	// No CLI auth file and a stubbed keychain: nothing to re-bootstrap from.
+	useRealMuseOAuthLoader(t)
+	// The probe fallback needs an API key; useRealMuseOAuthLoader leaves
+	// it stubbed off, so re-enable just that loader (the OAuth var stays
+	// real — stubMuseAPIKey would re-pin it off).
+	prevAPI := loadMuseAPIKey
+	loadMuseAPIKey = func(ctx context.Context) (string, bool) { return "test-key", true }
+	t.Cleanup(func() { loadMuseAPIKey = prevAPI })
+	stubMuseKeychainBlob(t, nil, false)
+	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/muse-code/key") {
+			return quotaTestResponse(http.StatusUnauthorized, `{"title":"Authentication Error","status":401}`), nil
+		}
+		return quotaTestResponse(http.StatusOK, subscriptionSSEFixture), nil
+	})
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	snap.Status = core.StatusOK
+
+	enrichQuota(context.Background(), core.AccountConfig{ID: "muse-code"}, &snap)
+
+	if sess, ok := snap.Metrics["muse.session"]; !ok || sess.Used == nil || *sess.Used != 42 {
+		t.Errorf("muse.session = %+v, want probe fallback 42", sess)
+	}
+	if hint := snap.Diagnostics["muse_quota_oauth"]; !strings.Contains(hint, "muse login") {
+		t.Errorf("oauth hint = %q, want re-authenticate guidance", hint)
+	}
+	// The stale copy must be gone so the next boot doesn't retry it blindly.
+	if token, ok := loadMuseOAuthTokenFromOwnedFile(); ok || token != "" {
+		t.Errorf("stale owned copy survived: %q", token)
 	}
 }
