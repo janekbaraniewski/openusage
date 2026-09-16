@@ -134,7 +134,20 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 		return "", fmt.Errorf("no session files found in %s", sessionsDir)
 	}
 
+	// Newest session by filename timestamp, NOT mtime: Codex rewrites old
+	// rollout files during compaction/archival (bumping their mtime past the
+	// live session's), so mtime order promotes stale files and their dead
+	// rate limits. mtime is only the tiebreak and the fallback for
+	// unparseable names.
 	sort.Slice(files, func(i, j int) bool {
+		ti, oki := sessionFileTime(files[i])
+		tj, okj := sessionFileTime(files[j])
+		if oki && okj && !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		if oki != okj {
+			return oki
+		}
 		si := fileInfos[files[i]]
 		sj := fileInfos[files[j]]
 		if si == nil || sj == nil {
@@ -144,6 +157,27 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 	})
 
 	return files[0], nil
+}
+
+// sessionFileTime parses the session start time from a rollout basename:
+// rollout-2026-09-15T23-59-18-<uuid>.jsonl. Only relative order matters, so
+// the absent zone is irrelevant — every file in a sessions dir shares the
+// writer's convention. Reports false for anything else (legacy flat files,
+// foreign drops), leaving those to mtime order.
+func sessionFileTime(path string) (time.Time, bool) {
+	base := filepath.Base(path)
+	if !strings.HasPrefix(base, "rollout-") || !strings.HasSuffix(base, ".jsonl") {
+		return time.Time{}, false
+	}
+	stamp := strings.TrimSuffix(strings.TrimPrefix(base, "rollout-"), ".jsonl")
+	if len(stamp) < 19 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02T15-04-05", stamp[:19])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func findLastTokenCount(path string) (*eventPayload, error) {
