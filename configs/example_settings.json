@@ -173,6 +173,12 @@
       "binary": "gh"
     },
     {
+      "id": "copilot-acme",
+      "provider": "copilot",
+      "auth": "cli",
+      "options": { "gh_host": "acme.ghe.com" }
+    },
+    {
       "id": "alibaba_cloud",
       "provider": "alibaba_cloud",
       "api_key_env": "ALIBABA_CLOUD_API_KEY"

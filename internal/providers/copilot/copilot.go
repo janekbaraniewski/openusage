@@ -58,8 +58,27 @@ type copilotAPICache struct {
 type Provider struct {
 	providerbase.Base
 
-	cacheMu  sync.Mutex
-	apiCache *copilotAPICache
+	cacheMu sync.Mutex
+	// apiCache is keyed by account ID: one Provider instance serves all
+	// copilot accounts, and accounts may target different GitHub hosts, so
+	// auth/version/snapshot results must never cross account boundaries.
+	apiCache map[string]*copilotAPICache
+}
+
+// cacheFor returns the cache entry for one account, creating it on first use.
+// Callers must hold no lock; the mutex is taken here.
+func (p *Provider) cacheFor(acctID string) *copilotAPICache {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+	if p.apiCache == nil {
+		p.apiCache = make(map[string]*copilotAPICache)
+	}
+	entry, ok := p.apiCache[acctID]
+	if !ok {
+		entry = &copilotAPICache{}
+		p.apiCache[acctID] = entry
+	}
+	return entry
 }
 
 func New() *Provider {
@@ -78,6 +97,12 @@ func New() *Provider {
 			Auth: core.ProviderAuthSpec{
 				Type: core.ProviderAuthTypeCLI,
 			},
+			Options: []core.ProviderOption{{
+				Key:         "gh_host",
+				Label:       "GitHub host",
+				Placeholder: "github.com",
+				Help:        "Target a GitHub Enterprise host instead of github.com.",
+			}},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
 					"Install GitHub CLI and run `gh auth login`.",
@@ -298,9 +323,12 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	// Fast path: return cached snapshot if still fresh and successful.
+	// The cache is per account (see cacheFor): accounts may target different
+	// GitHub hosts, so entries must never cross account boundaries.
 	p.cacheMu.Lock()
-	if p.apiCache != nil && time.Since(p.apiCache.lastSnapAt) < ttlSnapshot && p.apiCache.lastSnap.Status == core.StatusOK {
-		snap := p.apiCache.lastSnap
+	entry := p.apiCache[acct.ID]
+	if entry != nil && time.Since(entry.lastSnapAt) < ttlSnapshot && entry.lastSnap.Status == core.StatusOK {
+		snap := entry.lastSnap
 		p.cacheMu.Unlock()
 		return snap, nil
 	}
@@ -327,7 +355,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
-	version, versionSource, err := p.detectAndCacheVersion(ctx, ghBinary, copilotBinary)
+	version, versionSource, err := p.detectAndCacheVersion(ctx, acct.ID, ghBinary, copilotBinary)
 	if err != nil {
 		snap.Status = core.StatusError
 		snap.Message = "copilot command not available"
@@ -339,9 +367,17 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap.Raw["copilot_version"] = version
 	snap.Raw["copilot_version_source"] = versionSource
 
+	// gh_host (account options) targets a GitHub Enterprise instance for
+	// every gh call below. Empty means the gh default (github.com). The host
+	// is applied once as GH_HOST inside ghCLI.run — see api_data.go.
+	gh := ghCLI{binary: ghBinary, host: acct.Option("gh_host", "")}
+	if strings.TrimSpace(gh.host) != "" {
+		snap.Raw["gh_host"] = strings.TrimSpace(gh.host)
+	}
+
 	authOutput := ""
 	if ghBinary != "" {
-		authOut, authOK := p.checkAndCacheAuth(ctx, ghBinary)
+		authOut, authOK := p.checkAndCacheAuth(ctx, gh, acct.ID)
 		authOutput = authOut
 		snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
 
@@ -351,13 +387,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			return snap, nil
 		}
 
-		p.fetchUserInfo(ctx, ghBinary, &snap)
+		p.fetchUserInfo(ctx, gh, &snap)
 
-		p.fetchCopilotInternalUser(ctx, ghBinary, &snap)
+		p.fetchCopilotInternalUser(ctx, gh, &snap)
 
-		p.fetchRateLimits(ctx, ghBinary, &snap)
+		p.fetchRateLimits(ctx, gh, &snap)
 
-		p.fetchOrgData(ctx, ghBinary, &snap)
+		p.fetchOrgData(ctx, gh, &snap)
 	} else {
 		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
@@ -368,12 +404,10 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	// Cache successful snapshots for quick return on subsequent polls.
 	if snap.Status == core.StatusOK {
+		entry := p.cacheFor(acct.ID)
 		p.cacheMu.Lock()
-		if p.apiCache == nil {
-			p.apiCache = &copilotAPICache{}
-		}
-		p.apiCache.lastSnap = snap
-		p.apiCache.lastSnapAt = time.Now()
+		entry.lastSnap = snap
+		entry.lastSnapAt = time.Now()
 		p.cacheMu.Unlock()
 	}
 
@@ -381,13 +415,15 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 // resolveAndCacheBinaries returns cached binary paths if the TTL has not expired,
-// otherwise resolves them fresh and caches the result.
+// otherwise resolves them fresh and caches the result. The cache entry is per
+// account (see cacheFor).
 func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, string) {
+	entry := p.cacheFor(acct.ID)
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 
-	if p.apiCache != nil && !p.apiCache.binaryResolvedAt.IsZero() && time.Since(p.apiCache.binaryResolvedAt) < ttlBinaryResolution {
-		return p.apiCache.ghBinary, p.apiCache.copilotBinary
+	if !entry.binaryResolvedAt.IsZero() && time.Since(entry.binaryResolvedAt) < ttlBinaryResolution {
+		return entry.ghBinary, entry.copilotBinary
 	}
 
 	configuredBinary := strings.TrimSpace(acct.Binary)
@@ -396,21 +432,20 @@ func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, str
 	}
 	gh, copilot := resolveCopilotBinaries(configuredBinary, acct)
 
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
-	}
-	p.apiCache.ghBinary = gh
-	p.apiCache.copilotBinary = copilot
-	p.apiCache.binaryResolvedAt = time.Now()
+	entry.ghBinary = gh
+	entry.copilotBinary = copilot
+	entry.binaryResolvedAt = time.Now()
 	return gh, copilot
 }
 
 // detectAndCacheVersion returns cached version info if the TTL has not expired,
-// otherwise runs the version command and caches the result.
-func (p *Provider) detectAndCacheVersion(ctx context.Context, ghBinary, copilotBinary string) (string, string, error) {
+// otherwise runs the version command and caches the result. The cache entry
+// is per account (see cacheFor).
+func (p *Provider) detectAndCacheVersion(ctx context.Context, acctID, ghBinary, copilotBinary string) (string, string, error) {
+	entry := p.cacheFor(acctID)
 	p.cacheMu.Lock()
-	if p.apiCache != nil && p.apiCache.version != "" && time.Since(p.apiCache.versionFetchedAt) < ttlVersion {
-		v, src := p.apiCache.version, p.apiCache.versionSource
+	if entry.version != "" && time.Since(entry.versionFetchedAt) < ttlVersion {
+		v, src := entry.version, entry.versionSource
 		p.cacheMu.Unlock()
 		return v, src, nil
 	}
@@ -422,38 +457,34 @@ func (p *Provider) detectAndCacheVersion(ctx context.Context, ghBinary, copilotB
 	}
 
 	p.cacheMu.Lock()
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
-	}
-	p.apiCache.version = version
-	p.apiCache.versionSource = source
-	p.apiCache.versionFetchedAt = time.Now()
+	entry.version = version
+	entry.versionSource = source
+	entry.versionFetchedAt = time.Now()
 	p.cacheMu.Unlock()
 
 	return version, source, nil
 }
 
 // checkAndCacheAuth returns cached auth status if the TTL has not expired,
-// otherwise runs `gh auth status` and caches the result.
-func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary string) (string, bool) {
+// otherwise runs `gh auth status` and caches the result. The cache entry is
+// per account (see cacheFor); the host travels as GH_HOST inside gh.
+func (p *Provider) checkAndCacheAuth(ctx context.Context, gh ghCLI, acctID string) (string, bool) {
+	entry := p.cacheFor(acctID)
 	p.cacheMu.Lock()
-	if p.apiCache != nil && !p.apiCache.authFetchedAt.IsZero() && time.Since(p.apiCache.authFetchedAt) < ttlAuthStatus {
-		out, ok := p.apiCache.authOutput, p.apiCache.authOK
+	if !entry.authFetchedAt.IsZero() && time.Since(entry.authFetchedAt) < ttlAuthStatus {
+		out, ok := entry.authOutput, entry.authOK
 		p.cacheMu.Unlock()
 		return out, ok
 	}
 	p.cacheMu.Unlock()
 
-	authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
+	authOut, authErr := gh.run(ctx, "auth", "status")
 	authOK := authErr == nil
 
 	p.cacheMu.Lock()
-	if p.apiCache == nil {
-		p.apiCache = &copilotAPICache{}
-	}
-	p.apiCache.authOutput = authOut
-	p.apiCache.authOK = authOK
-	p.apiCache.authFetchedAt = time.Now()
+	entry.authOutput = authOut
+	entry.authOK = authOK
+	entry.authFetchedAt = time.Now()
 	p.cacheMu.Unlock()
 
 	return authOut, authOK

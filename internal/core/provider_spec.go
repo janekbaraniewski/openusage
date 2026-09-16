@@ -112,6 +112,23 @@ type ProviderSpec struct {
 	// must know whether a value is a monotonic counter, a draining balance, or a
 	// fixed cap. Leave empty for providers that expose no money metrics.
 	CreditMetrics map[string]BalanceSemantics
+
+	// Options declares the provider-specific configuration knobs this
+	// provider understands (AccountConfig.Options keys), so the settings UI
+	// and validation can be generated rather than hand-maintained.
+	// Empty for providers that need nothing.
+	Options []ProviderOption
+}
+
+// ProviderOption describes one provider-specific configuration knob: the
+// AccountConfig.Options key, how the settings UI labels it, and whether it
+// is required. Values stay stringly-typed; Required is the only validation.
+type ProviderOption struct {
+	Key         string // e.g. "gh_host"
+	Label       string // "GitHub host", shown in settings
+	Placeholder string // "my-org.ghe.com"
+	Help        string // one line
+	Required    bool
 }
 
 // BalanceSemantics classifies how a money metric's value moves over time, which
