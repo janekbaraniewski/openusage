@@ -20,6 +20,10 @@ func stubMuseAPIKey(t *testing.T, key string, ok bool) {
 	prev := loadMuseAPIKey
 	loadMuseAPIKey = func(ctx context.Context) (string, bool) { return key, ok }
 	t.Cleanup(func() { loadMuseAPIKey = prev })
+	// Quota-fetch tests must isolate both credential loaders: the account
+	// endpoint runs first whenever OAuth resolves, so leave it pinned off
+	// here and opt back in per test with stubMuseOAuthToken.
+	stubMuseOAuthToken(t, "", false)
 }
 
 func stubQuotaTransport(t *testing.T, fn roundTripFunc) {

@@ -1,11 +1,15 @@
-// Muse Code live quota: the same POST api.meta.ai/v1/responses SSE probe
-// the TUI's `/usage` view renders — a minimal `store:false, stream:true,
-// input:"hi"` probe returns `response.subscription_usage` with weekly + window
-// percentages, authenticated by the CLI's own keychain `api_key`
-// (service `ai.meta.dev.credentials`, account `meta`). No browser session
-// or page-load tokens. See `openusage/OPENUSAGE-GO-MUSECODE.md` for the
-// current design; the archived `MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md` is the
-// historical GraphQL investigation and is not shipped.
+// Muse Code live quota: POST api.meta.ai/muse-code/key with the CLI's OAuth
+// token returns the subscription snapshot (weekly + window percentages,
+// resets, and the server-provided plan name) with no inference cost. When
+// OAuth is absent or rejected it falls back to the same POST
+// api.meta.ai/v1/responses SSE probe the TUI's `/usage` view renders — a
+// minimal `store:false, stream:true, input:"hi"` probe returns
+// `response.subscription_usage`, authenticated by the CLI's own keychain
+// `api_key` (service `ai.meta.dev.credentials`, account `meta`; that blob
+// also carries the OAuth `access_token`). No browser session or page-load
+// tokens. See `openusage/OPENUSAGE-GO-MUSECODE.md` for the current design;
+// the archived `MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md` is the historical
+// GraphQL investigation and is not shipped.
 package muse_code
 
 import (
@@ -60,6 +64,19 @@ var museAPIKeyCache struct {
 	key string
 	ok  bool
 	set bool
+}
+
+// museOAuthTokenCache memoizes the OAuth token within the process. The
+// OAuth token authenticates the muse-code/key account endpoint, which the
+// Model API key cannot touch (401). Separate from the API-key cache: the
+// two credentials have different sources (META_API_KEY and
+// ~/.config/openusage/muse.json carry the API key only) and different
+// lifetimes.
+var museOAuthTokenCache struct {
+	sync.Mutex
+	token string
+	ok    bool
+	set   bool
 }
 
 // museQuotaMemoryState holds the last successful subscription payload so a
@@ -304,6 +321,60 @@ func loadMuseAPIKeyFromFile() (string, bool) {
 	return "", false
 }
 
+// loadMuseOAuthTokenFromFile reads the OAuth token from the CLI's own auth
+// file. On Linux `muse login` (device_code) stores providers.meta inline
+// including access_token; on darwin the file is metadata-only and the
+// secret lives in the keychain, so this returns nothing there — the
+// keychain path below covers darwin.
+func loadMuseOAuthTokenFromFile() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".config", "muse", "auth.json"))
+	if err != nil {
+		return "", false
+	}
+	var doc struct {
+		Providers map[string]struct {
+			AccessToken string `json:"access_token"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return "", false
+	}
+	if prov, ok := doc.Providers["meta"]; ok && strings.TrimSpace(prov.AccessToken) != "" {
+		return strings.TrimSpace(prov.AccessToken), true
+	}
+	return "", false
+}
+
+// loadMuseOAuthToken returns the CLI's OAuth token for the muse-code/key
+// account endpoint. Unlike the API key it has no env/file override:
+// META_API_KEY and ~/.config/openusage/muse.json carry the Model API key
+// only, which that endpoint rejects. A var so tests can stub it.
+var loadMuseOAuthToken = func(ctx context.Context) (string, bool) {
+	if token, ok := loadMuseOAuthTokenFromFile(); ok {
+		return token, true
+	}
+	museOAuthTokenCache.Lock()
+	cached, cachedOK, set := museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set
+	museOAuthTokenCache.Unlock()
+	if set {
+		return cached, cachedOK
+	}
+	token, ok := "", false
+	if raw, found := readMuseSecretBlobFromKeychain(ctx); found {
+		if parsed, _ := parseMuseSecretBlob(raw); parsed != "" {
+			token, ok = parsed, true
+		}
+	}
+	museOAuthTokenCache.Lock()
+	museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set = token, ok, true
+	museOAuthTokenCache.Unlock()
+	return token, ok
+}
+
 func saveMuseAPIKeyToFile(key string) error {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
@@ -327,30 +398,57 @@ func saveMuseAPIKeyToFile(key string) error {
 	return os.Rename(tmp, path)
 }
 
-func readMuseAPIKeyFromKeychain(ctx context.Context) (string, bool) {
+// parseMuseSecretBlob extracts the API key and OAuth token from the CLI's
+// secret blob (secret_schema_version, api_key, access_token). Either may be
+// absent — API-key-only setups have no access_token. Empty means missing.
+// Values are secrets and must never be logged.
+func parseMuseSecretBlob(data []byte) (apiKey, oauthToken string) {
+	var blob struct {
+		APIKey      string `json:"api_key"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(data, &blob); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(blob.APIKey), strings.TrimSpace(blob.AccessToken)
+}
+
+func readMuseSecretBlobFromKeychain(ctx context.Context) ([]byte, bool) {
 	if runtime.GOOS != "darwin" {
-		return "", false
+		return nil, false
 	}
 	probe, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(probe, "/usr/bin/security", "find-generic-password", "-s", "ai.meta.dev.credentials", "-a", "meta", "-w").Output()
 	if err != nil {
+		return nil, false
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return nil, false
+	}
+	return []byte(trimmed), true
+}
+
+func readMuseAPIKeyFromKeychain(ctx context.Context) (string, bool) {
+	raw, ok := readMuseSecretBlobFromKeychain(ctx)
+	if !ok {
 		return "", false
 	}
-	var blob struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &blob); err != nil {
-		return "", false
-	}
-	key := strings.TrimSpace(blob.APIKey)
+	key, _ := parseMuseSecretBlob(raw)
 	return key, key != ""
 }
 
 // subscriptionUsage mirrors the response.subscription_usage SSE event.
 type subscriptionUsage struct {
-	Tier   string `json:"tier"`
-	Weekly struct {
+	Tier string `json:"tier"`
+	// PlanName is the server-provided display label ("Muse Code High
+	// Usage"). The SSE event carries only the opaque tier ID, so this
+	// stays empty on the probe path and plan_name falls back to
+	// quotaPlanName(Tier). The muse-code/key path sets it from
+	// subs_tier_name.
+	PlanName string `json:"-"`
+	Weekly   struct {
 		ResetsAt    int64   `json:"resets_at"`
 		UsedPercent float64 `json:"used_percent"`
 	} `json:"weekly"`
@@ -482,6 +580,83 @@ func postSubscriptionUsage(ctx context.Context, apiKey string) (*subscriptionUsa
 	return &ev.Subscription, resp.StatusCode, nil
 }
 
+// keyBaseURL is the Meta account API root behind the CLI's own payment
+// poll. POST <base>/muse-code/key with the OAuth token returns the
+// subscription snapshot including the server-provided plan display name
+// (subs_tier_name) — no inference, so unlike the Responses probe it costs
+// no usage. The Model API key is rejected here (401); that path falls back
+// to the Responses probe.
+const keyBaseURL = "https://api.meta.ai"
+
+// keyEndpointOverride swaps the account endpoint target in tests.
+var keyEndpointOverride = ""
+
+// keySubscription mirrors POST muse-code/key.
+type keySubscription struct {
+	SubsTierID   string `json:"subs_tier_id"`
+	SubsTierName string `json:"subs_tier_name"`
+	SubsUsage    struct {
+		Window struct {
+			UsedPercent        float64 `json:"used_percent"`
+			ResetsAt           int64   `json:"resets_at"`
+			WindowDurationMins int     `json:"window_duration_mins"`
+		} `json:"window"`
+		Weekly struct {
+			UsedPercent float64 `json:"used_percent"`
+			ResetsAt    int64   `json:"resets_at"`
+		} `json:"weekly"`
+		Tier string `json:"tier"`
+	} `json:"subs_usage"`
+}
+
+// postKeySubscription fetches the account subscription snapshot. A 401
+// means the OAuth token is expired or API-key-only: the caller falls back
+// to the Responses probe rather than failing the poll.
+func postKeySubscription(ctx context.Context, oauthToken string) (*keySubscription, int, error) {
+	base := keyBaseURL
+	if keyEndpointOverride != "" {
+		base = keyEndpointOverride
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/muse-code/key", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+oauthToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := quotaHTTPClient().Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, shared.Truncate(strings.TrimSpace(string(body)), 160))
+	}
+	var sub keySubscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("cannot parse key subscription: %w", err)
+	}
+	return &sub, resp.StatusCode, nil
+}
+
+// subscriptionUsageFromKey converts the account snapshot to the shared
+// subscription shape. Tier keeps the stable numeric ID (memory and
+// attribution key off it on both paths); PlanName carries the
+// server-provided display label through quotaPlanName's prefix trim.
+func subscriptionUsageFromKey(k *keySubscription) *subscriptionUsage {
+	sub := &subscriptionUsage{Tier: k.SubsUsage.Tier}
+	if sub.Tier == "" {
+		sub.Tier = k.SubsTierID
+	}
+	sub.PlanName = quotaPlanName(k.SubsTierName)
+	sub.Weekly.UsedPercent = k.SubsUsage.Weekly.UsedPercent
+	sub.Weekly.ResetsAt = k.SubsUsage.Weekly.ResetsAt
+	sub.Window.UsedPercent = k.SubsUsage.Window.UsedPercent
+	sub.Window.ResetsAt = k.SubsUsage.Window.ResetsAt
+	sub.Window.WindowDurationMins = k.SubsUsage.Window.WindowDurationMins
+	return sub
+}
+
 // quotaPlanName turns a raw tier into a display name: "Muse Code Everyday
 // Usage" becomes "Everyday Usage". Opaque IDs (the Responses event carries
 // an account-scoped tier ID, not a plan name) pass through unchanged rather
@@ -530,7 +705,11 @@ func applySubscriptionUsage(snap *core.UsageSnapshot, sub *subscriptionUsage) {
 		if snap.Raw == nil {
 			snap.Raw = make(map[string]string)
 		}
-		snap.Raw["plan_name"] = quotaPlanName(sub.Tier)
+		name := sub.PlanName
+		if name == "" {
+			name = quotaPlanName(sub.Tier)
+		}
+		snap.Raw["plan_name"] = name
 	}
 	if summary := quotaSummary(snap); summary != "quota n/a" {
 		if snap.Message != "" {
@@ -540,11 +719,38 @@ func applySubscriptionUsage(snap *core.UsageSnapshot, sub *subscriptionUsage) {
 	}
 }
 
-// trySubscriptionUsage polls the Responses SSE probe when an API key is
+// tryKeySubscription polls the account endpoint when an OAuth token is
+// available. True means the quota outcome is decided; false means fall
+// through to the Responses probe (rejected/expired token, or a transient
+// failure the probe's stale-memory path handles better).
+func tryKeySubscription(ctx context.Context, snap *core.UsageSnapshot, oauth string) bool {
+	sub, status, err := postKeySubscription(ctx, oauth)
+	if err != nil {
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			snap.SetDiagnostic("muse_quota_oauth", "OAuth token rejected — re-authenticate via `muse login`; falling back to API-key probe")
+		} else {
+			snap.SetDiagnostic("muse_quota_key", fmt.Sprintf("account endpoint failed: %v", shared.Truncate(err.Error(), 120)))
+		}
+		return false
+	}
+	applySubscriptionUsage(snap, subscriptionUsageFromKey(sub))
+	return true
+}
+
+// trySubscriptionUsage polls the account endpoint first (OAuth, no
+// inference cost), then the Responses SSE probe when an API key is
 // available. It reports true when the quota outcome is decided either way,
 // so enrichQuota only falls through to the legacy dashboard-cookie path when
 // no key exists.
 func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
+	// OAuth account endpoint first: same percentages plus the
+	// server-provided plan name. Falls through to the Responses probe
+	// when OAuth is absent or fails.
+	if oauth, ok := loadMuseOAuthToken(ctx); ok && oauth != "" {
+		if tryKeySubscription(ctx, snap, oauth) {
+			return true
+		}
+	}
 	key, ok := loadMuseAPIKey(ctx)
 	if !ok {
 		return false
@@ -640,10 +846,11 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 // It is non-fatal: on any failure it records a diagnostic and leaves the
 // local spend meters untouched. No browser session is required.
 func enrichQuota(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) {
-	// Single clean probe: POST api.meta.ai/v1/responses with the keychain
-	// or file API key. No GraphQL fallback — that path required opening
-	// dev.meta.ai periodically and is intentionally removed. The history
-	// remains in git (MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md) for reference.
+	// OAuth account endpoint first, Responses probe fallback: POST
+	// api.meta.ai/v1/responses with the keychain or file API key. No
+	// GraphQL fallback — that path required opening dev.meta.ai
+	// periodically and is intentionally removed. The history remains in
+	// git (MUSE_CODE_GRAPHQL_QUOTA_RESEARCH.md) for reference.
 	if trySubscriptionUsage(ctx, snap) {
 		return
 	}
