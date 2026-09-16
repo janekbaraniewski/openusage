@@ -321,12 +321,12 @@ func loadMuseAPIKeyFromFile() (string, bool) {
 	return "", false
 }
 
-// loadMuseOAuthTokenFromFile reads the OAuth token from the CLI's own auth
-// file. On Linux `muse login` (device_code) stores providers.meta inline
-// including access_token; on darwin the file is metadata-only and the
-// secret lives in the keychain, so this returns nothing there — the
+// loadMuseOAuthTokenFromCLIFile reads the OAuth token from the CLI's own
+// auth file. On Linux `muse login` (device_code) stores providers.meta
+// inline including access_token; on darwin the file is metadata-only and
+// the secret lives in the keychain, so this returns nothing there — the
 // keychain path below covers darwin.
-func loadMuseOAuthTokenFromFile() (string, bool) {
+func loadMuseOAuthTokenFromCLIFile() (string, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return "", false
@@ -349,38 +349,176 @@ func loadMuseOAuthTokenFromFile() (string, bool) {
 	return "", false
 }
 
+// loadMuseOAuthTokenFromOwnedFile reads the cached token from the
+// app-owned file. Silent and prompt-free: the preferred source after the
+// first successful bootstrap.
+func loadMuseOAuthTokenFromOwnedFile() (string, bool) {
+	obj, _, err := readMuseOwnedKeys()
+	if err != nil {
+		return "", false
+	}
+	token := strings.TrimSpace(obj["oauthToken"])
+	return token, token != ""
+}
+
+// saveMuseOAuthTokenToOwnedFile caches the token alongside any saved API
+// key. Refuses content it couldn't parse rather than overwriting it.
+func saveMuseOAuthTokenToOwnedFile(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("empty token")
+	}
+	obj, _, err := readMuseOwnedKeys()
+	if err != nil {
+		return err
+	}
+	if obj["oauthToken"] == token {
+		return nil // already cached
+	}
+	obj["oauthToken"] = token
+	return writeMuseOwnedKeys(obj)
+}
+
+// clearMuseOAuthTokenOwnedFile drops the cached token (e.g. after a 401)
+// while preserving a saved API key. An absent file or field is a no-op;
+// unparseable content is left untouched.
+func clearMuseOAuthTokenOwnedFile() {
+	obj, present, err := readMuseOwnedKeys()
+	if err != nil || !present {
+		return
+	}
+	if _, ok := obj["oauthToken"]; !ok {
+		return
+	}
+	delete(obj, "oauthToken")
+	if len(obj) == 0 {
+		if path, ok := museOwnedKeysPath(); ok {
+			_ = os.Remove(path)
+		}
+		return
+	}
+	_ = writeMuseOwnedKeys(obj)
+}
+
 // loadMuseOAuthToken returns the CLI's OAuth token for the muse-code/key
-// account endpoint. Unlike the API key it has no env/file override:
-// META_API_KEY and ~/.config/openusage/muse.json carry the Model API key
-// only, which that endpoint rejects. A var so tests can stub it.
+// account endpoint: owned copy first, then CLI sources with memoization.
+// Unlike the API key it has no env override: META_API_KEY carries the
+// Model API key only, which that endpoint rejects. A var so tests can
+// stub it.
 var loadMuseOAuthToken = func(ctx context.Context) (string, bool) {
-	if token, ok := loadMuseOAuthTokenFromFile(); ok {
+	// Owned copy first: silent, no keychain prompt after the first boot.
+	if token, ok := loadMuseOAuthTokenFromOwnedFile(); ok {
 		return token, true
 	}
+	return readAndMemoizeMuseOAuthToken(ctx)
+}
+
+// readAndMemoizeMuseOAuthToken resolves the token from CLI sources and
+// caches a copy in the owned file, so later boots never touch the CLI
+// keychain entry (and its approval prompt) again.
+func readAndMemoizeMuseOAuthToken(ctx context.Context) (string, bool) {
 	museOAuthTokenCache.Lock()
 	cached, cachedOK, set := museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set
 	museOAuthTokenCache.Unlock()
 	if set {
 		return cached, cachedOK
 	}
-	token, ok := "", false
-	if raw, found := readMuseSecretBlobFromKeychain(ctx); found {
-		if parsed, _ := parseMuseSecretBlob(raw); parsed != "" {
-			token, ok = parsed, true
-		}
-	}
+	token, ok := readMuseOAuthTokenFromCLISources(ctx)
 	museOAuthTokenCache.Lock()
 	museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set = token, ok, true
 	museOAuthTokenCache.Unlock()
+	if ok {
+		_ = saveMuseOAuthTokenToOwnedFile(token)
+	}
 	return token, ok
 }
 
-func saveMuseAPIKeyToFile(key string) error {
+// readMuseOAuthTokenFromCLISources reads the Linux auth file, then the
+// macOS keychain blob. No owned file, no memo: the refresh path.
+func readMuseOAuthTokenFromCLISources(ctx context.Context) (string, bool) {
+	if token, ok := loadMuseOAuthTokenFromCLIFile(); ok {
+		return token, true
+	}
+	if raw, found := readMuseSecretBlobFromKeychain(ctx); found {
+		if parsed, _ := parseMuseSecretBlob(raw); parsed != "" {
+			return parsed, true
+		}
+	}
+	return "", false
+}
+
+// refreshMuseOAuthToken drops the owned copy and its memo, then re-reads
+// from CLI sources (which the CLI keeps fresh) and caches the result.
+// Called once after a 401 before falling back to the Responses probe.
+func refreshMuseOAuthToken(ctx context.Context) (string, bool) {
+	clearMuseOAuthTokenOwnedFile()
+	museOAuthTokenCache.Lock()
+	museOAuthTokenCache.token, museOAuthTokenCache.ok, museOAuthTokenCache.set = "", false, false
+	museOAuthTokenCache.Unlock()
+	return readAndMemoizeMuseOAuthToken(ctx)
+}
+
+// museOwnedKeysPath is the app-owned credential file shared by the saved
+// API key and the cached OAuth token. 0600, never logged.
+func museOwnedKeysPath() (string, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
+		return "", false
+	}
+	return filepath.Join(home, ".config", "openusage", "muse.json"), true
+}
+
+// readMuseOwnedKeys parses the owned file into a mutable map. A missing
+// file means no cache (not an error); present-but-unparseable stays an
+// error so callers never silently overwrite content they couldn't read
+// (e.g. a hand-maintained raw-string key file).
+func readMuseOwnedKeys() (obj map[string]string, present bool, err error) {
+	path, ok := museOwnedKeysPath()
+	if !ok {
+		return nil, false, fmt.Errorf("no home dir")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, false, nil
+		}
+		return nil, false, err
+	}
+	var parsed map[string]string
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, true, err
+	}
+	if parsed == nil {
+		parsed = map[string]string{}
+	}
+	return parsed, true, nil
+}
+
+// writeMuseOwnedKeys persists the map atomically with 0600.
+func writeMuseOwnedKeys(obj map[string]string) error {
+	path, ok := museOwnedKeysPath()
+	if !ok {
 		return fmt.Errorf("no home dir")
 	}
-	path := filepath.Join(home, ".config", "openusage", "muse.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func saveMuseAPIKeyToFile(key string) error {
+	path, ok := museOwnedKeysPath()
+	if !ok {
+		return fmt.Errorf("no home dir")
+	}
 	if _, err := os.Stat(path); err == nil {
 		// Don't overwrite an existing file — user may have set it
 		// explicitly or Swift already persisted it.
@@ -413,7 +551,9 @@ func parseMuseSecretBlob(data []byte) (apiKey, oauthToken string) {
 	return strings.TrimSpace(blob.APIKey), strings.TrimSpace(blob.AccessToken)
 }
 
-func readMuseSecretBlobFromKeychain(ctx context.Context) ([]byte, bool) {
+// readMuseSecretBlobFromKeychain is a var so tests can stub the keychain
+// without popping a real approval dialog.
+var readMuseSecretBlobFromKeychain = func(ctx context.Context) ([]byte, bool) {
 	if runtime.GOOS != "darwin" {
 		return nil, false
 	}
@@ -720,21 +860,22 @@ func applySubscriptionUsage(snap *core.UsageSnapshot, sub *subscriptionUsage) {
 }
 
 // tryKeySubscription polls the account endpoint when an OAuth token is
-// available. True means the quota outcome is decided; false means fall
-// through to the Responses probe (rejected/expired token, or a transient
-// failure the probe's stale-memory path handles better).
-func tryKeySubscription(ctx context.Context, snap *core.UsageSnapshot, oauth string) bool {
+// available. Decided means the quota outcome is settled; unauthorized
+// means the token was rejected (as opposed to a transient failure the
+// probe's stale-memory path handles better) and the caller may want to
+// re-bootstrap the token before falling through to the Responses probe.
+func tryKeySubscription(ctx context.Context, snap *core.UsageSnapshot, oauth string) (decided, unauthorized bool) {
 	sub, status, err := postKeySubscription(ctx, oauth)
 	if err != nil {
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			snap.SetDiagnostic("muse_quota_oauth", "OAuth token rejected — re-authenticate via `muse login`; falling back to API-key probe")
-		} else {
-			snap.SetDiagnostic("muse_quota_key", fmt.Sprintf("account endpoint failed: %v", shared.Truncate(err.Error(), 120)))
+			return false, true
 		}
-		return false
+		snap.SetDiagnostic("muse_quota_key", fmt.Sprintf("account endpoint failed: %v", shared.Truncate(err.Error(), 120)))
+		return false, false
 	}
 	applySubscriptionUsage(snap, subscriptionUsageFromKey(sub))
-	return true
+	return true, false
 }
 
 // trySubscriptionUsage polls the account endpoint first (OAuth, no
@@ -747,8 +888,20 @@ func trySubscriptionUsage(ctx context.Context, snap *core.UsageSnapshot) bool {
 	// server-provided plan name. Falls through to the Responses probe
 	// when OAuth is absent or fails.
 	if oauth, ok := loadMuseOAuthToken(ctx); ok && oauth != "" {
-		if tryKeySubscription(ctx, snap, oauth) {
+		decided, unauthorized := tryKeySubscription(ctx, snap, oauth)
+		if decided {
 			return true
+		}
+		if unauthorized {
+			// The owned copy may have gone stale while the CLI refreshed
+			// its own token. Re-bootstrap once from CLI sources and retry
+			// before paying for a probe.
+			if fresh, ok := refreshMuseOAuthToken(ctx); ok && fresh != "" && fresh != oauth {
+				if decided, _ := tryKeySubscription(ctx, snap, fresh); decided {
+					delete(snap.Diagnostics, "muse_quota_oauth")
+					return true
+				}
+			}
 		}
 	}
 	key, ok := loadMuseAPIKey(ctx)
