@@ -327,21 +327,25 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		DailySeries: make(map[string][]core.TimePoint),
 	}
 
+	// Version detection (e.g. via the optional "gh copilot" extension) is
+	// informational only and must not block fetching real usage data: many
+	// setups (including GHE Cloud/Server) don't have that extension
+	// installed but still expose usage via the GitHub API.
 	version, versionSource, err := p.detectAndCacheVersion(ctx, ghBinary, copilotBinary)
 	if err != nil {
-		snap.Status = core.StatusError
-		snap.Message = "copilot command not available"
 		if errMsg := strings.TrimSpace(err.Error()); errMsg != "" {
 			snap.Raw["copilot_version_error"] = errMsg
 		}
-		return snap, nil
+	} else {
+		snap.Raw["copilot_version"] = version
+		snap.Raw["copilot_version_source"] = versionSource
 	}
-	snap.Raw["copilot_version"] = version
-	snap.Raw["copilot_version_source"] = versionSource
+
+	hostname := ghHostnameFromBaseURL(acct.BaseURL)
 
 	authOutput := ""
 	if ghBinary != "" {
-		authOut, authOK := p.checkAndCacheAuth(ctx, ghBinary)
+		authOut, authOK := p.checkAndCacheAuth(ctx, ghBinary, hostname)
 		authOutput = authOut
 		snap.Raw["auth_status"] = strings.TrimSpace(authOutput)
 
@@ -351,13 +355,13 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 			return snap, nil
 		}
 
-		p.fetchUserInfo(ctx, ghBinary, &snap)
+		p.fetchUserInfo(ctx, ghBinary, hostname, &snap)
 
-		p.fetchCopilotInternalUser(ctx, ghBinary, &snap)
+		p.fetchCopilotInternalUser(ctx, ghBinary, hostname, &snap)
 
-		p.fetchRateLimits(ctx, ghBinary, &snap)
+		p.fetchRateLimits(ctx, ghBinary, hostname, &snap)
 
-		p.fetchOrgData(ctx, ghBinary, &snap)
+		p.fetchOrgData(ctx, ghBinary, hostname, &snap)
 	} else {
 		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
@@ -435,7 +439,7 @@ func (p *Provider) detectAndCacheVersion(ctx context.Context, ghBinary, copilotB
 
 // checkAndCacheAuth returns cached auth status if the TTL has not expired,
 // otherwise runs `gh auth status` and caches the result.
-func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary string) (string, bool) {
+func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary, hostname string) (string, bool) {
 	p.cacheMu.Lock()
 	if p.apiCache != nil && !p.apiCache.authFetchedAt.IsZero() && time.Since(p.apiCache.authFetchedAt) < ttlAuthStatus {
 		out, ok := p.apiCache.authOutput, p.apiCache.authOK
@@ -444,7 +448,11 @@ func (p *Provider) checkAndCacheAuth(ctx context.Context, ghBinary string) (stri
 	}
 	p.cacheMu.Unlock()
 
-	authOut, authErr := runGH(ctx, ghBinary, "auth", "status")
+	args := []string{"auth", "status"}
+	if hostname != "" {
+		args = append(args, "--hostname", hostname)
+	}
+	authOut, authErr := runGH(ctx, ghBinary, args...)
 	authOK := authErr == nil
 
 	p.cacheMu.Lock()
@@ -481,6 +489,31 @@ func resolveCopilotBinaries(configuredBinary string, acct core.AccountConfig) (s
 	}
 
 	return ghBinary, copilotBinary
+}
+
+// ghHostnameFromBaseURL extracts the GitHub host (for `gh --hostname`) from an
+// account's configured BaseURL, so GitHub Enterprise Cloud/Server accounts
+// (e.g. "https://my-company.ghe.com") work without hardcoding any hostname.
+// Returns "" for github.com or an unset BaseURL, meaning gh's default host
+// should be used.
+func ghHostnameFromBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return ""
+	}
+	host := baseURL
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	host = strings.TrimPrefix(host, "api.")
+	if idx := strings.IndexAny(host, "/:"); idx >= 0 {
+		host = host[:idx]
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "github.com" {
+		return ""
+	}
+	return host
 }
 
 func isGHCliBinary(binary string) bool {

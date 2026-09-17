@@ -296,7 +296,7 @@ exit 1
 	p := New()
 	ctx := context.Background()
 
-	out1, ok1 := p.checkAndCacheAuth(ctx, ghBin)
+	out1, ok1 := p.checkAndCacheAuth(ctx, ghBin, "")
 	if !ok1 {
 		t.Fatal("checkAndCacheAuth() #1 expected ok=true")
 	}
@@ -305,7 +305,7 @@ exit 1
 	}
 
 	// Second call returns from cache.
-	out2, ok2 := p.checkAndCacheAuth(ctx, ghBin)
+	out2, ok2 := p.checkAndCacheAuth(ctx, ghBin, "")
 	if !ok2 || out1 != out2 {
 		t.Fatalf("auth cache mismatch: (%q,%v) vs (%q,%v)", out1, ok1, out2, ok2)
 	}
@@ -315,7 +315,7 @@ exit 1
 	p.apiCache.authFetchedAt = time.Now().Add(-10 * time.Minute)
 	p.cacheMu.Unlock()
 
-	out3, ok3 := p.checkAndCacheAuth(ctx, ghBin)
+	out3, ok3 := p.checkAndCacheAuth(ctx, ghBin, "")
 	if !ok3 {
 		t.Fatal("checkAndCacheAuth() #3 expected ok=true after expiry")
 	}
