@@ -107,6 +107,78 @@ func TestEnrichQuota_SubscriptionUsageSSE(t *testing.T) {
 	}
 }
 
+func TestFlooredExhaustion_Weekly99ShowsLimitReached(t *testing.T) {
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	sub := &subscriptionUsage{Tier: "tier-123", UpgradeAvailable: true}
+	sub.Weekly.UsedPercent = 99
+	sub.Weekly.ResetsAt = 1789948800
+	sub.Window.UsedPercent = 64
+	sub.Window.ResetsAt = 1789727758
+	sub.Window.WindowDurationMins = 300
+	applySubscriptionUsage(&snap, sub)
+
+	// Measured gauges stay intact — no fabricated 100%.
+	if w := snap.Metrics["muse.weekly"]; w.Used == nil || *w.Used != 99 {
+		t.Fatalf("muse.weekly = %+v, want measured 99", w)
+	}
+	got, ok := snap.Diagnostics["muse_quota_blocked"]
+	if !ok {
+		t.Fatal("muse_quota_blocked missing for floored-99 weekly")
+	}
+	for _, want := range []string{"Usage limit reached", "/upgrade", "accountscenter.meta.com", "usage to reset at"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diagnostic %q missing %q", got, want)
+		}
+	}
+	// Reset instant is the server's resets_at, rendered UTC in the attribute
+	// (the diagnostic itself uses local time, so TZ-dependent assertions
+	// stay out of tests).
+	if attr := snap.Attributes["muse_quota_blocked_resets_at"]; attr != "2026-09-21T00:00:00Z" {
+		t.Errorf("blocked resets_at = %q, want 2026-09-21T00:00:00Z", attr)
+	}
+	if !isMuseQuotaLimited(&snap) {
+		t.Error("isMuseQuotaLimited = false, want LIMIT header for floored-99 weekly")
+	}
+}
+
+func TestFlooredExhaustion_BelowThresholdStaysHealthy(t *testing.T) {
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	sub := &subscriptionUsage{Tier: "tier-123"}
+	sub.Weekly.UsedPercent = 98
+	sub.Weekly.ResetsAt = 1789948800
+	sub.Window.UsedPercent = 64
+	sub.Window.ResetsAt = 1789727758
+	applySubscriptionUsage(&snap, sub)
+
+	if _, ok := snap.Diagnostics["muse_quota_blocked"]; ok {
+		t.Errorf("muse_quota_blocked set at 98%%: %q", snap.Diagnostics["muse_quota_blocked"])
+	}
+	if isMuseQuotaLimited(&snap) {
+		t.Error("isMuseQuotaLimited = true at 98%, want healthy")
+	}
+}
+
+func TestFlooredExhaustion_NoUpgradeLinkWithoutFlag(t *testing.T) {
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	sub := &subscriptionUsage{Tier: "tier-123"} // probe path: upgrade unknown
+	sub.Weekly.UsedPercent = 99
+	sub.Weekly.ResetsAt = 1789948800
+	sub.Window.UsedPercent = 10
+	sub.Window.ResetsAt = 1789727758
+	applySubscriptionUsage(&snap, sub)
+
+	got, ok := snap.Diagnostics["muse_quota_blocked"]
+	if !ok {
+		t.Fatal("muse_quota_blocked missing")
+	}
+	if strings.Contains(got, "/upgrade") {
+		t.Errorf("upgrade link without known flag: %q", got)
+	}
+	if !strings.Contains(got, "Usage limit reached") {
+		t.Errorf("missing limit language: %q", got)
+	}
+}
+
 func TestEnrichQuota_SubscriptionUsageUnauthorized(t *testing.T) {
 	stubMuseAPIKey(t, "stale-key", true)
 	stubQuotaTransport(t, func(r *http.Request) (*http.Response, error) {
