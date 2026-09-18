@@ -1,10 +1,11 @@
 // Package kimi_cli implements a local-data provider that reads usage
-// telemetry from Kimi CLI's per-session wire.jsonl files at
-// ~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl.
+// telemetry from the per-session wire.jsonl files of Kimi CLI
+// (~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl) and Kimi Code CLI
+// (~/.kimi-code/sessions/<group-id>/<session-uuid>/agents/<agent>/wire.jsonl).
 //
 // No network calls are made and no authentication is required. The
-// companion ~/.kimi/config.json supplies the default model name when
-// individual records don't include one.
+// companion config.json supplies the default model name when individual
+// records don't include one.
 package kimi_cli
 
 import (
@@ -53,8 +54,8 @@ func New() *Provider {
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
-					"Install Kimi CLI and run at least one session.",
-					"openusage auto-detects ~/.kimi/sessions/<group>/<session>/wire.jsonl; no configuration required.",
+					"Install Kimi CLI or Kimi Code CLI and run at least one session.",
+					"openusage auto-detects wire.jsonl under ~/.kimi/sessions and ~/.kimi-code/sessions; no configuration required.",
 				},
 			},
 			Dashboard: dashboardWidget(),

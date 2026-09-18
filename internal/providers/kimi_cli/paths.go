@@ -14,24 +14,43 @@ const PathHintSessionsDirKey = "sessions_dir"
 // PathHintConfigPathKey overrides the resolved config.json location.
 const PathHintConfigPathKey = "config_path"
 
+// kimiDataDirNames lists the per-user data directories of the supported
+// Kimi clients in preference order: ".kimi" is the original Python Kimi CLI,
+// ".kimi-code" is the Kimi Code CLI.
+var kimiDataDirNames = []string{".kimi", ".kimi-code"}
+
 // defaultSessionsDir returns the canonical location of Kimi CLI's
-// per-session wire.jsonl files: $HOME/.kimi/sessions
+// per-session wire.jsonl files: $HOME/.kimi/sessions, falling back to
+// $HOME/.kimi-code/sessions for Kimi Code CLI installs.
 func defaultSessionsDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".kimi", "sessions")
+	for _, name := range kimiDataDirNames {
+		candidate := filepath.Join(home, name, "sessions")
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(home, kimiDataDirNames[0], "sessions")
 }
 
-// defaultConfigPath returns the canonical location of Kimi CLI's
-// config.json at $HOME/.kimi/config.json.
+// defaultConfigPath returns the canonical location of the client's
+// config.json at $HOME/.kimi/config.json, falling back to
+// $HOME/.kimi-code/config.json.
 func defaultConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".kimi", "config.json")
+	for _, name := range kimiDataDirNames {
+		candidate := filepath.Join(home, name, "config.json")
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(home, kimiDataDirNames[0], "config.json")
 }
 
 // resolveSessionsDir returns the path to the sessions directory, preferring

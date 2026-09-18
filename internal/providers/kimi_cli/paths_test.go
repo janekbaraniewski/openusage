@@ -83,3 +83,27 @@ func TestResolveConfigPath_DefaultAndOverride(t *testing.T) {
 		t.Errorf("override: resolveConfigPath = %q, want %q", got, override)
 	}
 }
+
+func TestResolveSessionsDir_KimiCodeFallback(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}
+
+	// Only the Kimi Code CLI location exists → picked up as the default.
+	kimiCodeDir := filepath.Join(home, ".kimi-code", "sessions")
+	if err := os.MkdirAll(kimiCodeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if got := resolveSessionsDir(acct); got != kimiCodeDir {
+		t.Errorf("kimi-code fallback: resolveSessionsDir = %q, want %q", got, kimiCodeDir)
+	}
+
+	// The Python Kimi CLI location wins when both exist.
+	kimiDir := filepath.Join(home, ".kimi", "sessions")
+	if err := os.MkdirAll(kimiDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if got := resolveSessionsDir(acct); got != kimiDir {
+		t.Errorf("preference: resolveSessionsDir = %q, want %q", got, kimiDir)
+	}
+}
