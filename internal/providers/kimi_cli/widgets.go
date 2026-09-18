@@ -8,10 +8,18 @@ import (
 func dashboardWidget() core.DashboardWidget {
 	return providerbase.CodingToolDashboard(
 		providerbase.WithColorRole(core.DashboardColorRoleFlamingo),
-		// No quota/rate-limit metrics: leave GaugePriority at the default
-		// credit keys (absent here) so no gauge area or shimmer placeholder
-		// renders for this local-stats-only provider.
+		// Subscription quota windows (from the coding API's usages endpoint)
+		// feed gauges like other coding tools. When no credentials are
+		// configured none of these keys exist, so no gauge area renders.
+		providerbase.WithGaugePriority(
+			"usage_five_hour", "usage_monthly", "usage_monthly_code", "rate_limit_primary",
+		),
 		providerbase.WithCompactRows(
+			core.DashboardCompactRow{
+				Label:       "Usage",
+				Keys:        []string{"usage_five_hour", "usage_monthly", "usage_monthly_code", "rate_limit_primary"},
+				MaxSegments: 4,
+			},
 			core.DashboardCompactRow{
 				Label:       "Sessions",
 				Keys:        []string{"sessions_7d", "sessions_today", "total_sessions"},
@@ -44,6 +52,10 @@ func dashboardWidget() core.DashboardWidget {
 			"total_cache_write":   "Cache Write",
 			"sessions_today":      "Sessions Today",
 			"sessions_7d":         "Sessions 7d",
+			"usage_five_hour":     "5-Hour Usage",
+			"usage_monthly":       "Monthly Usage",
+			"usage_monthly_code":  "Monthly Code Usage",
+			"rate_limit_primary":  "Rate Limit",
 			// The hero summary falls back to the alphabetically first
 			// valued metric — in windowed views that is
 			// provider_kimi_cli_input_tokens; give it a readable label.
@@ -63,6 +75,10 @@ func dashboardWidget() core.DashboardWidget {
 			"provider_kimi_cli_input_tokens":  "in",
 			"provider_kimi_cli_output_tokens": "out",
 			"provider_kimi_cli_requests":      "reqs",
+			"usage_five_hour":                 "5h",
+			"usage_monthly":                   "mo",
+			"usage_monthly_code":              "mo code",
+			"rate_limit_primary":              "rate",
 		}),
 	)
 }
