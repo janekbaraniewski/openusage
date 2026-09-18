@@ -238,6 +238,19 @@ func currentQuotaMemory(now time.Time) (museQuotaMemory, bool) {
 	return mem, true
 }
 
+// attributionFreshness bounds the percentage deduction: the remembered
+// meters must be recent enough that neither window could have moved from
+// fresh to exhausted since. Daemon polls land every ~30s, so 15min is
+// generous; post-sleep stale file memory is excluded.
+const attributionFreshness = 15 * time.Minute
+
+// notExhaustedBelow is the reported whole percent at or below which a
+// window cannot be the exhausted one. The server floors (and even under
+// rounding this holds): true usage below 99% — below 98.5% rounded —
+// still serves requests, so a 429 with the other window above the
+// floored-99 threshold is placed by elimination.
+const notExhaustedBelow = 98.0
+
 // classifyQuotaExhaustion reports whether a 429 reset belongs to the session
 // window, returning the memory it decided on. False means weekly (or
 // unknown): the legacy assumption.
@@ -245,6 +258,25 @@ func classifyQuotaExhaustion(resetsAt int64, now time.Time) (bool, museQuotaMemo
 	mem, ok := currentQuotaMemory(now)
 	if !ok {
 		return false, museQuotaMemory{}
+	}
+	// Percentage deduction first: a window reporting ≤98 cannot be
+	// exhausted, so a 429 with a fresh session window at 0% is weekly by
+	// elimination — no reset arithmetic needed. Requires fresh memory and
+	// an actually observed window reading (v1 files carry the week only;
+	// their zero windowUsed must not force the verdict).
+	if !mem.observedAt.IsZero() && !mem.observedAt.After(now) &&
+		now.Sub(mem.observedAt) <= attributionFreshness {
+		if mem.windowResetUnix > 0 && mem.windowUsed <= notExhaustedBelow {
+			return false, mem // session window has room → the week is maxed
+		}
+		if mem.weeklyUsed <= notExhaustedBelow {
+			return true, mem // week has room → the session window is maxed
+		}
+	}
+	// Window already reset since the reading: current window usage restarted
+	// at ~0 by definition, so it cannot be exhausted either.
+	if mem.windowResetUnix > 0 && now.Unix() >= mem.windowResetUnix {
+		return false, mem
 	}
 	if time.Unix(mem.weeklyResetUnix, 0).Sub(time.Unix(resetsAt, 0)) <= sessionResetAmbiguity {
 		return false, museQuotaMemory{}

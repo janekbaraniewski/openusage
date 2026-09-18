@@ -275,6 +275,96 @@ func TestTrySubscriptionUsage429_NoMemoryFallsBackToWeekly(t *testing.T) {
 	}
 }
 
+// Percentage deduction: a 429 with a FRESH session window at 0% is weekly
+// by elimination, even when the reset instant looks like a session reset.
+// Reported integers are floored, so ≤98 cannot be exhausted.
+func TestTrySubscriptionUsage429_FreshWindowZeroDeducesWeekly(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      99,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		windowUsed:      0,
+		windowResetUnix: now.Add(4 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-time.Minute),
+	})
+	stub429(t, now.Add(3*time.Hour).Unix()) // reset-distance alone would say session
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.weekly"); got != 100 {
+		t.Fatalf("muse.weekly = %v, want 100 (fresh 0%% window cannot be exhausted)", got)
+	}
+}
+
+// Symmetric direction: a fresh week at 50% cannot be exhausted either.
+func TestTrySubscriptionUsage429_FreshWeeklyLowDeducesSession(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      50,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		windowUsed:      99,
+		windowResetUnix: now.Add(4 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-time.Minute),
+	})
+	stub429(t, now.Add(6*24*time.Hour).Unix()) // reset-distance alone would say weekly
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.session"); got != 100 {
+		t.Fatalf("muse.session = %v, want 100 (fresh 50%% week cannot be exhausted)", got)
+	}
+}
+
+// Stale memory must not place the block: same shape as the weekly case but
+// observed an hour ago falls back to reset-distance (session here).
+func TestTrySubscriptionUsage429_StaleMemorySkipsDeduction(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      99,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		windowUsed:      0,
+		windowResetUnix: now.Add(4 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-time.Hour),
+	})
+	stub429(t, now.Add(3*time.Hour).Unix())
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.session"); got != 100 {
+		t.Fatalf("muse.session = %v, want reset-distance verdict without fresh meters", got)
+	}
+}
+
+// v1 files carry the week only: a zero windowUsed with no window reset must
+// not force the weekly verdict.
+func TestTrySubscriptionUsage429_WeekOnlyMemorySkipsWindowRule(t *testing.T) {
+	now := time.Now()
+	seedQuotaMemory(t, museQuotaMemory{
+		weeklyUsed:      99,
+		weeklyResetUnix: now.Add(6 * 24 * time.Hour).Unix(),
+		tier:            "tier-123",
+		observedAt:      now.Add(-time.Minute),
+	})
+	stub429(t, now.Add(3*time.Hour).Unix())
+
+	snap := core.NewUsageSnapshot("muse_code", "muse-code")
+	if !trySubscriptionUsage(context.Background(), &snap) {
+		t.Fatal("expected decided outcome")
+	}
+	if got := metricUsed(t, &snap, "muse.session"); got != 100 {
+		t.Fatalf("muse.session = %v, want reset-distance verdict for week-only memory", got)
+	}
+}
+
 // Expired memory (remembered weekly reset already passed) must not classify.
 func TestTrySubscriptionUsage429_ExpiredMemoryIgnored(t *testing.T) {
 	now := time.Now()
