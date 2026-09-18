@@ -588,7 +588,12 @@ type subscriptionUsage struct {
 	// quotaPlanName(Tier). The muse-code/key path sets it from
 	// subs_tier_name.
 	PlanName string `json:"-"`
-	Weekly   struct {
+	// UpgradeAvailable mirrors is_subs_upgrade_available from the
+	// muse-code/key account snapshot. Only the key path knows it; the
+	// Responses probe leaves it false and the limit-reached message
+	// omits the /upgrade hint rather than assuming it.
+	UpgradeAvailable bool `json:"-"`
+	Weekly           struct {
 		ResetsAt    int64   `json:"resets_at"`
 		UsedPercent float64 `json:"used_percent"`
 	} `json:"weekly"`
@@ -733,9 +738,10 @@ var keyEndpointOverride = ""
 
 // keySubscription mirrors POST muse-code/key.
 type keySubscription struct {
-	SubsTierID   string `json:"subs_tier_id"`
-	SubsTierName string `json:"subs_tier_name"`
-	SubsUsage    struct {
+	SubsTierID         string `json:"subs_tier_id"`
+	SubsTierName       string `json:"subs_tier_name"`
+	IsSubsUpgradeAvail bool   `json:"is_subs_upgrade_available"`
+	SubsUsage          struct {
 		Window struct {
 			UsedPercent        float64 `json:"used_percent"`
 			ResetsAt           int64   `json:"resets_at"`
@@ -789,6 +795,7 @@ func subscriptionUsageFromKey(k *keySubscription) *subscriptionUsage {
 		sub.Tier = k.SubsTierID
 	}
 	sub.PlanName = quotaPlanName(k.SubsTierName)
+	sub.UpgradeAvailable = k.IsSubsUpgradeAvail
 	sub.Weekly.UsedPercent = k.SubsUsage.Weekly.UsedPercent
 	sub.Weekly.ResetsAt = k.SubsUsage.Weekly.ResetsAt
 	sub.Window.UsedPercent = k.SubsUsage.Window.UsedPercent
@@ -851,6 +858,14 @@ func applySubscriptionUsage(snap *core.UsageSnapshot, sub *subscriptionUsage) {
 		}
 		snap.Raw["plan_name"] = name
 	}
+	// The server reports whole percentages, floored: a live 99% reads as
+	// exhausted while the gauge still suggests 1% left (real requests 429
+	// against the sliver). Match the app's own "Usage limit reached"
+	// language and surface the reset instead of a healthy-looking 99%.
+	// Measured values stay untouched — only the blocked state is added,
+	// reusing the muse_quota_blocked key so the LIMIT header follows.
+	markFlooredExhaustion(snap, "weekly", sub.Weekly.UsedPercent, sub.Weekly.ResetsAt, sub.UpgradeAvailable)
+	markFlooredExhaustion(snap, "session", sub.Window.UsedPercent, sub.Window.ResetsAt, sub.UpgradeAvailable)
 	if summary := quotaSummary(snap); summary != "quota n/a" {
 		if snap.Message != "" {
 			snap.Message += " · "
@@ -876,6 +891,38 @@ func tryKeySubscription(ctx context.Context, snap *core.UsageSnapshot, oauth str
 	}
 	applySubscriptionUsage(snap, subscriptionUsageFromKey(sub))
 	return true, false
+}
+
+// museUpgradeURL is the accounts-center upsell link from the app's own
+// limit-reached message ("... /upgrade (<url>) for increased limits ...").
+const museUpgradeURL = "https://accountscenter.meta.com/muse_code/?ep=xgrade"
+
+// flooredExhaustionThreshold is the reported whole percent at which the
+// bucket reads as exhausted. The server floors, so a live 99% means
+// 99.0–99.99% with no usable room for real requests.
+const flooredExhaustionThreshold = 99.0
+
+// markFlooredExhaustion surfaces the app's "Usage limit reached" state for
+// a window whose reported percentage sits at the floor threshold. It sets
+// the shared muse_quota_blocked diagnostic (driving the LIMIT header)
+// without touching the measured gauge values.
+func markFlooredExhaustion(snap *core.UsageSnapshot, window string, usedPercent float64, resetsAt int64, upgradeAvailable bool) {
+	if usedPercent < flooredExhaustionThreshold || resetsAt <= 0 {
+		return
+	}
+	if _, ok := snap.Diagnostics["muse_quota_blocked"]; ok {
+		return // 429 path already stated the block with its own reset
+	}
+	resetLocal := time.Unix(resetsAt, 0).Local().Format("Jan 2 at 3:04 PM")
+	var msg string
+	if upgradeAvailable {
+		msg = fmt.Sprintf("Usage limit reached · /upgrade (%s) for increased limits, or wait for %s usage to reset at %s", museUpgradeURL, window, resetLocal)
+	} else {
+		msg = fmt.Sprintf("Usage limit reached, wait for %s usage to reset at %s", window, resetLocal)
+	}
+	snap.EnsureMaps()
+	snap.SetDiagnostic("muse_quota_blocked", msg)
+	snap.SetAttribute("muse_quota_blocked_resets_at", time.Unix(resetsAt, 0).UTC().Format(time.RFC3339))
 }
 
 // trySubscriptionUsage polls the account endpoint first (OAuth, no
