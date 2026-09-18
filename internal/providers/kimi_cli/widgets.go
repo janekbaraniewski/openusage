@@ -8,13 +8,13 @@ import (
 func dashboardWidget() core.DashboardWidget {
 	return providerbase.CodingToolDashboard(
 		providerbase.WithColorRole(core.DashboardColorRoleFlamingo),
-		providerbase.WithGaugePriority(
-			"total_sessions", "total_tokens",
-		),
+		// No quota/rate-limit metrics: leave GaugePriority at the default
+		// credit keys (absent here) so no gauge area or shimmer placeholder
+		// renders for this local-stats-only provider.
 		providerbase.WithCompactRows(
 			core.DashboardCompactRow{
 				Label:       "Sessions",
-				Keys:        []string{"total_sessions", "sessions_today", "sessions_7d"},
+				Keys:        []string{"sessions_7d", "sessions_today", "total_sessions"},
 				MaxSegments: 4,
 			},
 			core.DashboardCompactRow{
@@ -23,6 +23,15 @@ func dashboardWidget() core.DashboardWidget {
 				MaxSegments: 4,
 			},
 		),
+		// The daemon's windowed projection re-exports this provider's numbers
+		// as provider_kimi_cli_* metrics; without hiding they show up as raw
+		// "Provider Kimi Cli Input Tokens" lines duplicating the compact rows
+		// and the window activity line.
+		providerbase.WithHideMetricPrefixes("provider_kimi_cli_"),
+		// window_* duplicates the tile's "N reqs · M tok in <window>" activity
+		// line; total_cache_write is noise while zero.
+		providerbase.WithHideMetricKeys("window_requests", "window_tokens"),
+		providerbase.WithSuppressZeroMetricKeys("total_cache_write"),
 		providerbase.WithMetricLabels(map[string]string{
 			"total_sessions":      "Sessions",
 			"total_tokens":        "Total Tokens",
