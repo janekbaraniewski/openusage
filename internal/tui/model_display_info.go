@@ -19,9 +19,6 @@ type providerDisplayInfo struct {
 }
 
 func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool) providerDisplayInfo {
-	if snap.ProviderID == "codex" {
-		return providerDisplayInfo{tagLabel: "Usage", tagEmoji: "⚡", gaugePercent: -1, reason: "codex_quota"}
-	}
 	return normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget, hideCosts))
 }
 
