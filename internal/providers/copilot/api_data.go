@@ -13,8 +13,8 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	userJSON, err := runGHAPI(ctx, binary, "/user")
+func (p *Provider) fetchUserInfo(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
+	userJSON, err := runGHAPI(ctx, binary, hostname, "/user")
 	if err != nil {
 		return
 	}
@@ -33,8 +33,8 @@ func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.
 	}
 }
 
-func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, "/copilot_internal/user")
+func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
+	body, err := runGHAPI(ctx, binary, hostname, "/copilot_internal/user")
 	if err != nil {
 		return
 	}
@@ -184,8 +184,8 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 	}
 }
 
-func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, "/rate_limit")
+func (p *Provider) fetchRateLimits(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
+	body, err := runGHAPI(ctx, binary, hostname, "/rate_limit")
 	if err != nil {
 		return
 	}
@@ -219,7 +219,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 	}
 }
 
-func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.UsageSnapshot) {
+func (p *Provider) fetchOrgData(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
 	orgs := snap.Raw["copilot_orgs"]
 	if orgs == "" {
 		return
@@ -230,13 +230,13 @@ func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.U
 		if org == "" {
 			continue
 		}
-		p.fetchOrgBilling(ctx, binary, org, snap)
-		p.fetchOrgMetrics(ctx, binary, org, snap)
+		p.fetchOrgBilling(ctx, binary, hostname, org, snap)
+		p.fetchOrgMetrics(ctx, binary, hostname, org, snap)
 	}
 }
 
-func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/billing", org))
+func (p *Provider) fetchOrgBilling(ctx context.Context, binary, hostname, org string, snap *core.UsageSnapshot) {
+	body, err := runGHAPI(ctx, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/billing", org))
 	if err != nil {
 		return
 	}
@@ -265,8 +265,8 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap
 	}
 }
 
-func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
+func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, hostname, org string, snap *core.UsageSnapshot) {
+	body, err := runGHAPI(ctx, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
 	if err != nil {
 		return
 	}
@@ -362,13 +362,15 @@ func runGH(ctx context.Context, binary string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func runGHAPI(ctx context.Context, binary, endpoint string) (string, error) {
-	return runGH(
-		ctx,
-		binary,
+func runGHAPI(ctx context.Context, binary, hostname, endpoint string) (string, error) {
+	args := []string{
 		"api",
 		"-H", "Cache-Control: no-cache",
 		"-H", "Pragma: no-cache",
 		endpoint,
-	)
+	}
+	if hostname != "" {
+		args = append(args, "--hostname", hostname)
+	}
+	return runGH(ctx, binary, args...)
 }
