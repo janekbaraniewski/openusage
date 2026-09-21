@@ -1,0 +1,3 @@
+;0x00000120;((self.$R=self.$R||{})["server-fn:1"]=[],($R=>$R[0]={
+workspaces:[{id:"wrk_TESTWORKSPACE123",name:"My Workspace",role:"owner"},{id:"wrk_SECONDWORKSPACE",name:"Secondary",role:"member"}]
+})($R["server-fn:1"]))
