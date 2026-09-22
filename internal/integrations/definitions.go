@@ -486,6 +486,33 @@ func antigravityStatuslineCommand(targetFile string) string {
 	return fmt.Sprintf("\"%s\" antigravity statusline", escapeForShellString(targetFile))
 }
 
+// antigravityCommandBinary returns the executable of a status-line command:
+// the leading double-quoted word with sh escapes removed (the form
+// antigravityStatuslineCommand writes), or the first bare word.
+func antigravityCommandBinary(command string) string {
+	command = strings.TrimSpace(command)
+	if !strings.HasPrefix(command, `"`) {
+		if fields := strings.Fields(command); len(fields) > 0 {
+			return fields[0]
+		}
+		return ""
+	}
+	var b strings.Builder
+	for i := 1; i < len(command); i++ {
+		c := command[i]
+		switch {
+		case c == '"':
+			return b.String()
+		case c == '\\' && i+1 < len(command) && strings.IndexByte("\\\"$`", command[i+1]) >= 0:
+			i++
+			b.WriteByte(command[i])
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return "" // unterminated quote
+}
+
 func isAntigravityOpenUsageCommand(command string) bool {
 	command = strings.ToLower(strings.TrimSpace(command))
 	return strings.Contains(command, "antigravity statusline")
@@ -623,10 +650,12 @@ func detectAntigravityStatus(dirs Dirs) Status {
 		return st
 	}
 
+	command := ""
 	var cfg map[string]any
 	if json.Unmarshal(data, &cfg) == nil {
 		if statusLine, ok := cfg["statusLine"].(map[string]any); ok {
-			st.Configured = isAntigravityOpenUsageCommand(stringOrEmpty(statusLine["command"]))
+			command = stringOrEmpty(statusLine["command"])
+			st.Configured = isAntigravityOpenUsageCommand(command)
 		}
 	}
 	// This integration registers the OpenUsage binary directly, so configured
@@ -636,6 +665,20 @@ func detectAntigravityStatus(dirs Dirs) Status {
 		st.InstalledVersion = IntegrationVersion
 	}
 	deriveState(&st)
+	// Antigravity disables a status-line command that keeps failing, so a
+	// binary that moved away (e.g. an uninstalled Homebrew copy) silently
+	// freezes the tile on its last snapshot. Report it as needing an upgrade,
+	// which reinstalls the command with the current binary.
+	if st.Configured {
+		bin := antigravityCommandBinary(command)
+		if filepath.IsAbs(bin) {
+			if _, err := os.Stat(bin); err != nil {
+				st.NeedsUpgrade = true
+				st.State = "outdated"
+				st.Summary = "OpenUsage binary not found: " + bin
+			}
+		}
+	}
 	return st
 }
 
