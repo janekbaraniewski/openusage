@@ -163,6 +163,31 @@ func TestParseStatusLineRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestFetchIgnoresQuotaWindowsPastReset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "antigravity-status.json")
+	payload := `{"quota": {
+  "gemini-5h": {"remaining_fraction": 0.1, "reset_time": "2020-01-01T00:00:00Z", "reset_in_seconds": 0},
+  "gemini-weekly": {"remaining_fraction": 0.5, "reset_time": "2030-01-01T00:00:00Z"}
+}}`
+	if _, err := CaptureStatusLine([]byte(payload), path); err != nil {
+		t.Fatalf("CaptureStatusLine() error = %v", err)
+	}
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:            "antigravity",
+		Provider:      "antigravity",
+		ProviderPaths: map[string]string{"status_file": path},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if metric, ok := snap.Metrics["quota_gemini_5h"]; ok {
+		t.Fatalf("expired window survived: %+v", metric)
+	}
+	if got := metricRemaining(t, snap, "quota"); got != 50 {
+		t.Fatalf("worst quota remaining = %v, want 50", got)
+	}
+}
+
 func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 	t.Helper()
 	metric, ok := snap.Metrics[key]
