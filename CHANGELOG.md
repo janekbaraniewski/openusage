@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.25.1 (2026-09-24)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump fast-uri from 3.1.5 to 3.1.7 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/348
+* deps(docs): bump browserslist from 4.28.6 to 4.28.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/350
+* deps(docs): bump fflate from 0.4.8 to 0.4.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/352
+* deps(website): bump fflate from 0.4.8 to 0.4.9 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/351
+* deps(deps): bump the go-minor-and-patch group with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/353
+* deps(docs): bump posthog-js from 1.422.1 to 1.426.4 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/355
+* ci(actions): bump actions/deploy-pages from 5.0.0 to 5.0.1 in the actions-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/356
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/354
+* deps(docs): bump @swc/html from 1.15.43 to 1.16.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/358
+* deps(docs): bump svgo from 3.3.4 to 3.3.5 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/361
+* deps(docs): bump js-yaml from 4.3.1 to 4.3.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/363
+* deps(docs): bump joi from 17.13.4 to 17.13.7 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/364
+* deps(docs): bump colord from 2.9.3 to 2.10.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/362
+* deps(deps): bump the go-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/367
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/368
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/370
+* deps(website): bump the website-minor-and-patch group in /website with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/369
+* deps(docs): bump posthog-js from 1.430.1 to 1.434.0 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/375
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/376
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/377
+* deps(docs): bump image-size from 2.0.2 to 2.0.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/380
+### Other Changes
+* fix(crush): read session timestamps as Unix seconds, not milliseconds by @LarsArtmann in https://github.com/janekbaraniewski/openusage/pull/357
+* fix(codex): fix model detection for CLI 0.153+ and cached token double-billing by @tomck in https://github.com/janekbaraniewski/openusage/pull/365
+
+## New Contributors
+* @LarsArtmann made their first contribution in https://github.com/janekbaraniewski/openusage/pull/357
+* @tomck made their first contribution in https://github.com/janekbaraniewski/openusage/pull/365
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.25.0...v0.25.1
+
 ## 0.25.0 (2026-08-31)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
