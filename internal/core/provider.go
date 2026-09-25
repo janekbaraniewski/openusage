@@ -36,6 +36,13 @@ type AccountConfig struct {
 	// "tracking_db", "state_db", "stats_cache", "account_config").
 	ProviderPaths map[string]string `json:"provider_paths,omitempty"`
 
+	// Options holds provider-specific, persisted, non-secret configuration
+	// knobs that are not paths, URLs, or credentials — e.g. a gh hostname, an
+	// org filter, a feature toggle. Keys are provider-defined and declared in
+	// ProviderSpec. Never store secrets here (they belong in the credentials
+	// store / api_key_env).
+	Options map[string]string `json:"options,omitempty"`
+
 	// Paths is a legacy persisted alias for provider-specific paths. New code
 	// should use ProviderPaths through Path/SetPath helpers.
 	Paths map[string]string `json:"paths,omitempty"`
@@ -78,6 +85,29 @@ func (c *AccountConfig) SetPath(key, value string) {
 		c.ProviderPaths = make(map[string]string)
 	}
 	c.ProviderPaths[key] = strings.TrimSpace(value)
+}
+
+// Option returns the named provider-specific option, or fallback when unset.
+// Unlike Path, it does NOT fall through to RuntimeHints — Options is
+// persisted configuration only, kept distinct from transient detection state.
+func (c AccountConfig) Option(key, fallback string) string {
+	if c.Options != nil {
+		if v, ok := c.Options[key]; ok && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return fallback
+}
+
+// SetOption stores a named provider-specific option.
+func (c *AccountConfig) SetOption(key, value string) {
+	if c == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return
+	}
+	if c.Options == nil {
+		c.Options = make(map[string]string)
+	}
+	c.Options[strings.TrimSpace(key)] = strings.TrimSpace(value)
 }
 
 func (c AccountConfig) Hint(key, fallback string) string {

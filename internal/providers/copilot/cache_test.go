@@ -180,9 +180,10 @@ exit 1
 		t.Fatalf("Fetch() #1 status = %q, want %q", snap1.Status, core.StatusOK)
 	}
 
-	// Manually expire the snapshot cache.
+	// Manually expire the snapshot cache (per-account entry).
+	entry := p.cacheFor(acct.ID)
 	p.cacheMu.Lock()
-	p.apiCache.lastSnapAt = time.Now().Add(-3 * time.Minute)
+	entry.lastSnapAt = time.Now().Add(-3 * time.Minute)
 	p.cacheMu.Unlock()
 
 	snap2, err := p.Fetch(context.Background(), acct)
@@ -229,8 +230,9 @@ exit 1
 	}
 
 	// Verify cache was populated.
+	entry := p.cacheFor(acct.ID)
 	p.cacheMu.Lock()
-	if p.apiCache == nil || p.apiCache.binaryResolvedAt.IsZero() {
+	if entry.binaryResolvedAt.IsZero() {
 		t.Fatal("expected binaryResolvedAt to be set")
 	}
 	p.cacheMu.Unlock()
@@ -254,7 +256,7 @@ exit 1
 	ctx := context.Background()
 
 	// First detection spawns subprocess.
-	v1, s1, err := p.detectAndCacheVersion(ctx, "", copilotBin)
+	v1, s1, err := p.detectAndCacheVersion(ctx, "test-acct", "", copilotBin)
 	if err != nil {
 		t.Fatalf("detectAndCacheVersion() #1 error: %v", err)
 	}
@@ -263,7 +265,7 @@ exit 1
 	}
 
 	// Second call should return from cache.
-	v2, s2, err := p.detectAndCacheVersion(ctx, "", copilotBin)
+	v2, s2, err := p.detectAndCacheVersion(ctx, "test-acct", "", copilotBin)
 	if err != nil {
 		t.Fatalf("detectAndCacheVersion() #2 error: %v", err)
 	}
@@ -272,8 +274,9 @@ exit 1
 	}
 
 	// Verify cache timestamps.
+	entry := p.cacheFor("test-acct")
 	p.cacheMu.Lock()
-	if p.apiCache == nil || p.apiCache.versionFetchedAt.IsZero() {
+	if entry.versionFetchedAt.IsZero() {
 		t.Fatal("expected versionFetchedAt to be set")
 	}
 	p.cacheMu.Unlock()
@@ -296,7 +299,7 @@ exit 1
 	p := New()
 	ctx := context.Background()
 
-	out1, ok1 := p.checkAndCacheAuth(ctx, ghBin)
+	out1, ok1 := p.checkAndCacheAuth(ctx, ghCLI{binary: ghBin}, "test-acct")
 	if !ok1 {
 		t.Fatal("checkAndCacheAuth() #1 expected ok=true")
 	}
@@ -305,17 +308,18 @@ exit 1
 	}
 
 	// Second call returns from cache.
-	out2, ok2 := p.checkAndCacheAuth(ctx, ghBin)
+	out2, ok2 := p.checkAndCacheAuth(ctx, ghCLI{binary: ghBin}, "test-acct")
 	if !ok2 || out1 != out2 {
 		t.Fatalf("auth cache mismatch: (%q,%v) vs (%q,%v)", out1, ok1, out2, ok2)
 	}
 
 	// Expire and re-check.
+	entry := p.cacheFor("test-acct")
 	p.cacheMu.Lock()
-	p.apiCache.authFetchedAt = time.Now().Add(-10 * time.Minute)
+	entry.authFetchedAt = time.Now().Add(-10 * time.Minute)
 	p.cacheMu.Unlock()
 
-	out3, ok3 := p.checkAndCacheAuth(ctx, ghBin)
+	out3, ok3 := p.checkAndCacheAuth(ctx, ghCLI{binary: ghBin}, "test-acct")
 	if !ok3 {
 		t.Fatal("checkAndCacheAuth() #3 expected ok=true after expiry")
 	}

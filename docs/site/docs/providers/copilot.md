@@ -54,6 +54,25 @@ Run `gh auth status` to confirm you're signed in.
 
 Set `binary` to the `gh` path; `copilot_binary` is only needed if the standalone CLI lives somewhere unusual.
 
+### GitHub Enterprise
+
+If your Copilot subscription lives on a GitHub Enterprise Cloud instance, `gh` targets `github.com` by default and the `github.com` calls return `401`. Point one copilot account at the enterprise host with the `gh_host` option — every `gh` invocation for that account then runs with `GH_HOST` set to it:
+
+```json
+{
+  "accounts": [
+    {
+      "id": "copilot-acme",
+      "provider": "copilot",
+      "auth": "cli",
+      "options": { "gh_host": "acme.ghe.com" }
+    }
+  ]
+}
+```
+
+Authenticate that host first (`gh auth login --hostname acme.ghe.com`). Multiple instances are multiple accounts, each with its own `gh_host`; the default `github.com` account needs no option. Caches are kept per account, so mixed-host setups never serve one host's auth or snapshot to another.
+
 ## Data sources & how each metric is computed
 
 Copilot has two data paths:

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -13,8 +14,18 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
-func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	userJSON, err := runGHAPI(ctx, binary, "/user")
+// ghCLI carries the gh invocation context: the binary plus the target host.
+// host is "" for the gh default (github.com); a GitHub Enterprise hostname
+// otherwise. The host is applied once, as the GH_HOST environment variable
+// in run, so every subcommand (auth status, api, ...) targets the right
+// host uniformly — no per-command --hostname flags.
+type ghCLI struct {
+	binary string
+	host   string
+}
+
+func (p *Provider) fetchUserInfo(ctx context.Context, gh ghCLI, snap *core.UsageSnapshot) {
+	userJSON, err := gh.api(ctx, "/user")
 	if err != nil {
 		return
 	}
@@ -33,8 +44,8 @@ func (p *Provider) fetchUserInfo(ctx context.Context, binary string, snap *core.
 	}
 }
 
-func (p *Provider) fetchCopilotInternalUser(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, "/copilot_internal/user")
+func (p *Provider) fetchCopilotInternalUser(ctx context.Context, gh ghCLI, snap *core.UsageSnapshot) {
+	body, err := gh.api(ctx, "/copilot_internal/user")
 	if err != nil {
 		return
 	}
@@ -184,8 +195,8 @@ func (p *Provider) applySingleUsageSnapshot(key, unit string, quota *copilotUsag
 	}
 }
 
-func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, "/rate_limit")
+func (p *Provider) fetchRateLimits(ctx context.Context, gh ghCLI, snap *core.UsageSnapshot) {
+	body, err := gh.api(ctx, "/rate_limit")
 	if err != nil {
 		return
 	}
@@ -219,7 +230,7 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary string, snap *cor
 	}
 }
 
-func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.UsageSnapshot) {
+func (p *Provider) fetchOrgData(ctx context.Context, gh ghCLI, snap *core.UsageSnapshot) {
 	orgs := snap.Raw["copilot_orgs"]
 	if orgs == "" {
 		return
@@ -230,13 +241,13 @@ func (p *Provider) fetchOrgData(ctx context.Context, binary string, snap *core.U
 		if org == "" {
 			continue
 		}
-		p.fetchOrgBilling(ctx, binary, org, snap)
-		p.fetchOrgMetrics(ctx, binary, org, snap)
+		p.fetchOrgBilling(ctx, gh, org, snap)
+		p.fetchOrgMetrics(ctx, gh, org, snap)
 	}
 }
 
-func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/billing", org))
+func (p *Provider) fetchOrgBilling(ctx context.Context, gh ghCLI, org string, snap *core.UsageSnapshot) {
+	body, err := gh.api(ctx, fmt.Sprintf("/orgs/%s/copilot/billing", org))
 	if err != nil {
 		return
 	}
@@ -265,8 +276,8 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, org string, snap
 	}
 }
 
-func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
+func (p *Provider) fetchOrgMetrics(ctx context.Context, gh ghCLI, org string, snap *core.UsageSnapshot) {
+	body, err := gh.api(ctx, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
 	if err != nil {
 		return
 	}
@@ -350,11 +361,19 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, org string, snap
 	}
 }
 
-func runGH(ctx context.Context, binary string, args ...string) (string, error) {
+// run is the single choke point for every gh invocation. The target host
+// is applied here as the GH_HOST environment variable (gh's documented
+// default-host override), so auth and api calls target the right host
+// uniformly. Empty host means the gh default (github.com).
+func (g ghCLI) run(ctx context.Context, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, g.binary, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = os.Environ()
+	if strings.TrimSpace(g.host) != "" {
+		cmd.Env = append(cmd.Env, "GH_HOST="+strings.TrimSpace(g.host))
+	}
 
 	if err := cmd.Run(); err != nil {
 		return stdout.String() + stderr.String(), err
@@ -362,13 +381,18 @@ func runGH(ctx context.Context, binary string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-func runGHAPI(ctx context.Context, binary, endpoint string) (string, error) {
-	return runGH(
+// api invokes `gh api` for one endpoint with the no-cache headers.
+// The endpoint stays the last argv word.
+func (g ghCLI) api(ctx context.Context, endpoint string) (string, error) {
+	return g.run(
 		ctx,
-		binary,
 		"api",
 		"-H", "Cache-Control: no-cache",
 		"-H", "Pragma: no-cache",
 		endpoint,
 	)
+}
+
+func runGH(ctx context.Context, binary string, args ...string) (string, error) {
+	return ghCLI{binary: binary}.run(ctx, args...)
 }
