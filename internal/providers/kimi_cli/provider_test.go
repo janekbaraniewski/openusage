@@ -51,6 +51,8 @@ func TestProvider_Fetch_MissingDir(t *testing.T) {
 
 func TestProvider_Fetch_HappyPath(t *testing.T) {
 	root := t.TempDir()
+	// No credentials under the isolated HOME: quota fetch stays inert.
+	t.Setenv("HOME", t.TempDir())
 
 	// Session 1 in group-a.
 	s1 := filepath.Join(root, "group-a", "sess-1")
@@ -149,6 +151,7 @@ func TestProvider_Fetch_HappyPath(t *testing.T) {
 
 func TestProvider_Fetch_EmptyDir(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	p := New()
 	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
 	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}

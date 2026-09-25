@@ -8,7 +8,8 @@ import (
 )
 
 // detectKimiCLI registers a local Kimi CLI account when ~/.kimi/sessions/
-// exists, ~/.kimi/config.json exists, or the `kimi` binary is on PATH. The
+// (or ~/.kimi-code/sessions/ for Kimi Code CLI) exists, a config.json exists
+// in either data dir, or the `kimi` binary is on PATH. The
 // account id is "kimi_cli", which is intentionally distinct from the
 // API-key based "moonshot-ai" account so the two coexist as separate tiles.
 func detectKimiCLI(result *Result) {
@@ -55,12 +56,23 @@ func detectKimiCLI(result *Result) {
 	addAccount(result, acct)
 }
 
+// kimiDataDirNames lists the per-user data directories of the supported
+// Kimi clients in preference order: ".kimi" is the original Python Kimi CLI,
+// ".kimi-code" is the Kimi Code CLI.
+var kimiDataDirNames = []string{".kimi", ".kimi-code"}
+
 func defaultKimiSessionsDir() string {
 	home := homeDir()
 	if home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".kimi", "sessions")
+	for _, name := range kimiDataDirNames {
+		candidate := filepath.Join(home, name, "sessions")
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(home, kimiDataDirNames[0], "sessions")
 }
 
 func defaultKimiConfigPath() string {
@@ -68,7 +80,13 @@ func defaultKimiConfigPath() string {
 	if home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".kimi", "config.json")
+	for _, name := range kimiDataDirNames {
+		candidate := filepath.Join(home, name, "config.json")
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(home, kimiDataDirNames[0], "config.json")
 }
 
 func defaultKimiConfigDir() string {
@@ -76,5 +94,11 @@ func defaultKimiConfigDir() string {
 	if home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".kimi")
+	for _, name := range kimiDataDirNames {
+		candidate := filepath.Join(home, name)
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(home, kimiDataDirNames[0])
 }

@@ -1,10 +1,11 @@
 // Package kimi_cli implements a local-data provider that reads usage
-// telemetry from Kimi CLI's per-session wire.jsonl files at
-// ~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl.
+// telemetry from the per-session wire.jsonl files of Kimi CLI
+// (~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl) and Kimi Code CLI
+// (~/.kimi-code/sessions/<group-id>/<session-uuid>/agents/<agent>/wire.jsonl).
 //
 // No network calls are made and no authentication is required. The
-// companion ~/.kimi/config.json supplies the default model name when
-// individual records don't include one.
+// companion config.json supplies the default model name when individual
+// records don't include one.
 package kimi_cli
 
 import (
@@ -35,6 +36,9 @@ const allTimeWindow = "all-time"
 type Provider struct {
 	providerbase.Base
 	clock core.Clock
+
+	quotaCache     *kimiUsagesResponse
+	quotaFetchedAt time.Time
 }
 
 // New constructs a Kimi CLI provider with sensible widget defaults.
@@ -53,8 +57,8 @@ func New() *Provider {
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
-					"Install Kimi CLI and run at least one session.",
-					"openusage auto-detects ~/.kimi/sessions/<group>/<session>/wire.jsonl; no configuration required.",
+					"Install Kimi CLI or Kimi Code CLI and run at least one session.",
+					"openusage auto-detects wire.jsonl under ~/.kimi/sessions and ~/.kimi-code/sessions; no configuration required.",
 				},
 			},
 			Dashboard: dashboardWidget(),
@@ -91,10 +95,12 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 	return shared.AnyPathModifiedAfter(paths, since), nil
 }
 
-// Fetch walks the sessions directory and aggregates per-model totals.
+// Fetch walks the sessions directory and aggregates per-model totals, then
+// enriches the snapshot with live subscription quota when OAuth credentials
+// are available.
 //
 // Missing-directory is not an error: we return an Unknown-status snapshot
-// with a friendly message.
+// with a friendly message unless the quota API still yielded data.
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	if strings.TrimSpace(acct.Provider) == "" {
 		acct.Provider = p.ID()
@@ -105,31 +111,39 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap.DailySeries = make(map[string][]core.TimePoint)
 
 	dir := resolveSessionsDir(acct)
-	if dir == "" {
+	var entries []kimiModelEntry
+	if dir != "" {
+		snap.Raw["sessions_dir"] = dir
+		fallbackModel := readKimiConfigModel(resolveConfigPath(acct))
+		var err error
+		entries, err = readAllSessions(ctx, dir, fallbackModel)
+		if err != nil {
+			snap.SetDiagnostic("walk_error", err.Error())
+			snap.Status = core.StatusError
+			snap.Message = "Failed to read Kimi CLI sessions directory"
+			return snap, err
+		}
+		if len(entries) > 0 {
+			populateSnapshot(&snap, entries, p.now())
+		}
+	}
+
+	// Live subscription quota (5h / monthly pools + request-rate limits) on
+	// top of the local session stats; failures degrade to diagnostics.
+	p.addQuota(ctx, acct, &snap)
+
+	if dir == "" && len(snap.Metrics) == 0 {
 		snap.Status = core.StatusUnknown
 		snap.Message = "Kimi CLI sessions directory not found"
 		return snap, nil
 	}
-	snap.Raw["sessions_dir"] = dir
 
-	fallbackModel := readKimiConfigModel(resolveConfigPath(acct))
-
-	entries, err := readAllSessions(ctx, dir, fallbackModel)
-	if err != nil {
-		snap.SetDiagnostic("walk_error", err.Error())
-		snap.Status = core.StatusError
-		snap.Message = "Failed to read Kimi CLI sessions directory"
-		return snap, err
-	}
-	if len(entries) == 0 {
-		snap.Status = core.StatusOK
-		snap.Message = "No Kimi CLI sessions recorded"
-		return snap, nil
-	}
-
-	populateSnapshot(&snap, entries, p.now())
 	snap.Status = core.StatusOK
-	snap.Message = buildStatusMessage(snap)
+	if len(entries) == 0 {
+		snap.Message = "No Kimi CLI sessions recorded"
+	} else {
+		snap.Message = buildStatusMessage(snap)
+	}
 	return snap, nil
 }
 

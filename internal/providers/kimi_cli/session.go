@@ -19,10 +19,19 @@ const defaultProvider = "moonshot"
 
 // kimiWireRecord mirrors one line of wire.jsonl. The shape is mixed across
 // record kinds; we only decode the fields needed to recognise StatusUpdate
-// frames carrying token_usage.
+// frames carrying token_usage (Python Kimi CLI) and usage.record frames
+// (Kimi Code CLI).
 type kimiWireRecord struct {
 	Timestamp float64          `json:"timestamp"`
 	Message   *kimiWireMessage `json:"message,omitempty"`
+
+	// Kimi Code CLI usage.record fields. The timestamp is epoch
+	// milliseconds and the usage fields are camelCase, unlike the
+	// StatusUpdate frames above.
+	Type  string              `json:"type,omitempty"`
+	Model string              `json:"model,omitempty"`
+	Usage *kimiCodeTokenUsage `json:"usage,omitempty"`
+	Time  int64               `json:"time,omitempty"`
 }
 
 type kimiWireMessage struct {
@@ -41,6 +50,15 @@ type kimiTokenUsage struct {
 	Output             *int64 `json:"output,omitempty"`
 	InputCacheRead     *int64 `json:"input_cache_read,omitempty"`
 	InputCacheCreation *int64 `json:"input_cache_creation,omitempty"`
+}
+
+// kimiCodeTokenUsage mirrors the usage object of a Kimi Code CLI
+// usage.record frame.
+type kimiCodeTokenUsage struct {
+	InputOther         *int64 `json:"inputOther,omitempty"`
+	Output             *int64 `json:"output,omitempty"`
+	InputCacheRead     *int64 `json:"inputCacheRead,omitempty"`
+	InputCacheCreation *int64 `json:"inputCacheCreation,omitempty"`
 }
 
 // kimiModelEntry is the flattened representation we emit downstream.
@@ -102,8 +120,14 @@ func readKimiWireFileWithModel(path, fallbackModel string) ([]kimiModelEntry, er
 	defer f.Close()
 
 	// Layout is <root>/<group>/<uuid>/wire.jsonl; combine both to avoid
-	// collisions when the same UUID appears under different groups.
+	// collisions when the same UUID appears under different groups. Kimi
+	// Code CLI nests logs deeper at <root>/<group>/<uuid>/agents/<agent>/
+	// wire.jsonl, so climb out of the agents directory to keep the same
+	// <group>/<uuid> session id.
 	uuidDir := filepath.Dir(path)
+	if filepath.Base(filepath.Dir(uuidDir)) == "agents" {
+		uuidDir = filepath.Dir(filepath.Dir(uuidDir))
+	}
 	sessionID := filepath.Base(uuidDir)
 	if group := filepath.Base(filepath.Dir(uuidDir)); group != "" && group != "." && group != string(filepath.Separator) {
 		sessionID = group + "/" + sessionID
@@ -127,28 +151,35 @@ func readKimiWireFileWithModel(path, fallbackModel string) ([]kimiModelEntry, er
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}
-		if rec.Message == nil || rec.Message.Type != "StatusUpdate" {
+		entry, ok := rec.toEntry(sessionID, fallbackModel)
+		if !ok {
 			continue
 		}
-		if rec.Message.Payload == nil || rec.Message.Payload.TokenUsage == nil {
-			continue
-		}
+		out = append(out, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		return out, fmt.Errorf("kimi_cli: scanning %s: %w", path, err)
+	}
+	return out, nil
+}
 
-		usage := rec.Message.Payload.TokenUsage
-		input := derefInt64(usage.InputOther)
-		output := derefInt64(usage.Output)
-		cacheRead := derefInt64(usage.InputCacheRead)
-		cacheWrite := derefInt64(usage.InputCacheCreation)
+// toEntry flattens one decoded wire record into a usage entry, recognising
+// both kimi-cli StatusUpdate frames and Kimi Code CLI usage.record frames.
+// ok is false for records that carry no token usage.
+func (rec kimiWireRecord) toEntry(sessionID, fallbackModel string) (entry kimiModelEntry, ok bool) {
+	if rec.Type == "usage.record" && rec.Usage != nil {
+		input := derefInt64(rec.Usage.InputOther)
+		output := derefInt64(rec.Usage.Output)
+		cacheRead := derefInt64(rec.Usage.InputCacheRead)
+		cacheWrite := derefInt64(rec.Usage.InputCacheCreation)
 		if input == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 {
-			continue
+			return kimiModelEntry{}, false
 		}
-
-		model := rec.Message.Payload.Model
+		model := rec.Model
 		if model == "" {
 			model = fallbackModel
 		}
-
-		out = append(out, kimiModelEntry{
+		return kimiModelEntry{
 			SessionID:  sessionID,
 			Provider:   defaultProvider,
 			Model:      model,
@@ -156,13 +187,41 @@ func readKimiWireFileWithModel(path, fallbackModel string) ([]kimiModelEntry, er
 			Output:     output,
 			CacheRead:  cacheRead,
 			CacheWrite: cacheWrite,
-			Timestamp:  floatToTime(rec.Timestamp),
-		})
+			Timestamp:  millisToTime(rec.Time),
+		}, true
 	}
-	if err := scanner.Err(); err != nil {
-		return out, fmt.Errorf("kimi_cli: scanning %s: %w", path, err)
+
+	if rec.Message == nil || rec.Message.Type != "StatusUpdate" {
+		return kimiModelEntry{}, false
 	}
-	return out, nil
+	if rec.Message.Payload == nil || rec.Message.Payload.TokenUsage == nil {
+		return kimiModelEntry{}, false
+	}
+
+	usage := rec.Message.Payload.TokenUsage
+	input := derefInt64(usage.InputOther)
+	output := derefInt64(usage.Output)
+	cacheRead := derefInt64(usage.InputCacheRead)
+	cacheWrite := derefInt64(usage.InputCacheCreation)
+	if input == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 {
+		return kimiModelEntry{}, false
+	}
+
+	model := rec.Message.Payload.Model
+	if model == "" {
+		model = fallbackModel
+	}
+
+	return kimiModelEntry{
+		SessionID:  sessionID,
+		Provider:   defaultProvider,
+		Model:      model,
+		Input:      input,
+		Output:     output,
+		CacheRead:  cacheRead,
+		CacheWrite: cacheWrite,
+		Timestamp:  floatToTime(rec.Timestamp),
+	}, true
 }
 
 func derefInt64(p *int64) int64 {
@@ -174,6 +233,16 @@ func derefInt64(p *int64) int64 {
 		return 0
 	}
 	return v
+}
+
+// millisToTime converts an epoch-milliseconds timestamp (Kimi Code CLI
+// usage.record "time" field) into a UTC time.Time. Returns the zero time
+// for non-positive inputs.
+func millisToTime(ms int64) time.Time {
+	if ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms).UTC()
 }
 
 // floatToTime converts a float-seconds-since-epoch timestamp (with sub-second
