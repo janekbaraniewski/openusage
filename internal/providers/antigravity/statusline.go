@@ -28,6 +28,9 @@ type statusLinePayload struct {
 	PlanTier       string                     `json:"plan_tier"`
 	Email          string                     `json:"email"`
 	ReceivedAt     time.Time                  `json:"received_at"`
+
+	// expiredQuotaWindows counts windows dropped because their reset passed.
+	expiredQuotaWindows int
 }
 
 type statusLineModel struct {
@@ -117,6 +120,7 @@ func parseStatusLinePayload(data []byte) (statusLinePayload, error) {
 	for name, quota := range payload.Quota {
 		if reset := quotaResetTime(quota, payloadReceivedAt(payload)); !reset.IsZero() && !reset.After(now) {
 			delete(payload.Quota, name)
+			payload.expiredQuotaWindows++
 		}
 	}
 	return payload, nil

@@ -188,6 +188,39 @@ func TestFetchIgnoresQuotaWindowsPastReset(t *testing.T) {
 	}
 }
 
+func TestFetchAllQuotaWindowsExpired(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "antigravity-status.json")
+	payload := `{"model": {"id": "gemini-pro", "display_name": "Gemini Pro"}, "quota": {
+  "gemini-5h": {"remaining_fraction": 0.0, "reset_time": "2020-01-01T00:00:00Z"},
+  "gemini-weekly": {"remaining_fraction": 0.2, "reset_time": "2020-01-02T00:00:00Z"}
+}}`
+	if _, err := CaptureStatusLine([]byte(payload), path); err != nil {
+		t.Fatalf("CaptureStatusLine() error = %v", err)
+	}
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{
+		ID:            "antigravity",
+		Provider:      "antigravity",
+		ProviderPaths: map[string]string{"status_file": path},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if snap.Status != core.StatusOK {
+		t.Fatalf("status = %q, want %q", snap.Status, core.StatusOK)
+	}
+	for key := range snap.Metrics {
+		if strings.HasPrefix(key, "quota") {
+			t.Fatalf("expired quota metric %q survived", key)
+		}
+	}
+	if want := "Quota windows expired, waiting for fresh data"; snap.Message != want {
+		t.Fatalf("message = %q, want %q", snap.Message, want)
+	}
+	if got := snap.Attributes["model"]; got != "Gemini Pro" {
+		t.Fatalf("model attribute = %q, want Gemini Pro", got)
+	}
+}
+
 func metricUsed(t *testing.T, snap core.UsageSnapshot, key string) float64 {
 	t.Helper()
 	metric, ok := snap.Metrics[key]
