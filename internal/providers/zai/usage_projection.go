@@ -12,10 +12,14 @@ import (
 func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	today := time.Now().UTC().Format("2006-01-02")
 	hasNamedModelRows := false
+	hasAggregateRows := false
 	for _, sample := range samples {
+		if sample.Aggregate {
+			hasAggregateRows = true
+			continue
+		}
 		if strings.TrimSpace(sample.Name) != "" {
 			hasNamedModelRows = true
-			break
 		}
 	}
 
@@ -37,6 +41,16 @@ func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	sourceTodayReq := make(map[string]float64)
 
 	for _, sample := range samples {
+		if sample.Aggregate {
+			// Whole-window rollups are the authoritative totals for the
+			// window; the per-model breakdown below still feeds the model
+			// metrics but must not be summed on top of the rollup.
+			accumulateRollupValues(&total, sample)
+			if sample.Date == today {
+				accumulateRollupValues(&todayRollup, sample)
+			}
+			continue
+		}
 		modelName := strings.TrimSpace(sample.Name)
 		useRow := !hasNamedModelRows || modelName != ""
 		if !useRow {
@@ -75,7 +89,9 @@ func projectModelUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 			}
 			continue
 		}
-		accumulateRollupValues(&total, sample)
+		if !hasAggregateRows {
+			accumulateRollupValues(&total, sample)
+		}
 		if modelName != "" {
 			accumulateUsageRollup(modelTotals, modelName, sample)
 		}
@@ -349,7 +365,30 @@ func projectToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 	toolTotals := make(map[string]*usageRollup)
 	dailyCalls := make(map[string]float64)
 
+	// Rollup totals are a fallback for payloads whose per-tool breakdown is
+	// empty (the live tool-usage payload reports window totals in totalUsage
+	// next to toolDataList/toolSummaryList).
+	hasRollupRows := false
+	rollupWindowCalls := 0.0
+	rollupTodayCalls := 0.0
+
 	for _, sample := range samples {
+		if sample.Aggregate {
+			// Whole-window rollups (totalNetworkSearchCount, …) total the
+			// payload rather than name a tool, so they never become tool rows.
+			// Z.AI reports overlapping rollups — a group total next to its
+			// parts (totalSearchMcpCount over the per-tool totals) — so they
+			// are not summed either; the largest is the best available window
+			// figure and is only used when no per-tool rows exist.
+			hasRollupRows = true
+			if sample.Requests > rollupWindowCalls {
+				rollupWindowCalls = sample.Requests
+			}
+			if sample.Date == today && sample.Requests > rollupTodayCalls {
+				rollupTodayCalls = sample.Requests
+			}
+			continue
+		}
 		tool := sample.Name
 		if tool == "" {
 			tool = "unknown"
@@ -368,6 +407,14 @@ func projectToolUsageSamples(samples []usageSample, snap *core.UsageSnapshot) {
 		if sample.Date != "" {
 			dailyCalls[sample.Date] += sample.Requests
 		}
+	}
+
+	if hasRollupRows && totalCalls == 0 {
+		// The per-tool rows carried no usable counts (or there were none), so
+		// fall back to the payload's own window figures rather than reporting
+		// nothing.
+		totalCalls = rollupWindowCalls
+		todayCalls = rollupTodayCalls
 	}
 
 	setUsedMetric(snap, "tool_calls_today", todayCalls, "calls", "today")
