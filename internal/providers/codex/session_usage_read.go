@@ -15,21 +15,12 @@ import (
 )
 
 func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapshot) error {
-	latestFile, err := findLatestSessionFile(sessionsDir)
+	latestFile, lastPayload, err := findLatestUsableSession(sessionsDir)
 	if err != nil {
-		return fmt.Errorf("finding latest session: %w", err)
+		return err
 	}
 
 	snap.Raw["latest_session_file"] = filepath.Base(latestFile)
-
-	lastPayload, err := findLastTokenCount(latestFile)
-	if err != nil {
-		return fmt.Errorf("reading session: %w", err)
-	}
-
-	if lastPayload == nil {
-		return fmt.Errorf("no token_count events in latest session")
-	}
 
 	if lastPayload.Info != nil {
 		info := lastPayload.Info
@@ -121,9 +112,23 @@ func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapsho
 }
 
 func findLatestSessionFile(sessionsDir string) (string, error) {
+	files, err := sortedSessionFilesNewestFirst(sessionsDir)
+	if err != nil {
+		return "", err
+	}
+	return files[0], nil
+}
+
+// sortedSessionFilesNewestFirst lists session files newest-first. Order comes
+// from the session start time parsed from the rollout basename, NOT mtime:
+// Codex rewrites old rollout files during compaction/archival (bumping their
+// mtime past the live session's), so mtime order promotes stale files and
+// their dead rate limits. mtime stays as tiebreak and fallback for
+// unparseable names.
+func sortedSessionFilesNewestFirst(sessionsDir string) ([]string, error) {
 	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
 	if err != nil {
-		return "", fmt.Errorf("collect codex latest session files: %w", err)
+		return nil, fmt.Errorf("collect codex latest session files: %w", err)
 	}
 	files := make([]string, 0, len(fileInfos))
 	for path := range fileInfos {
@@ -131,10 +136,18 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 	}
 
 	if len(files) == 0 {
-		return "", fmt.Errorf("no session files found in %s", sessionsDir)
+		return nil, fmt.Errorf("no session files found in %s", sessionsDir)
 	}
 
 	sort.Slice(files, func(i, j int) bool {
+		ti, oki := sessionFileTime(files[i])
+		tj, okj := sessionFileTime(files[j])
+		if oki && okj && !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		if oki != okj {
+			return oki
+		}
 		si := fileInfos[files[i]]
 		sj := fileInfos[files[j]]
 		if si == nil || sj == nil {
@@ -143,7 +156,64 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 		return si.ModTime().After(sj.ModTime())
 	})
 
-	return files[0], nil
+	return files, nil
+}
+
+// maxSessionFallbackFiles bounds how far back the "latest usable session"
+// scan goes. Rate limits move slowly, but an unbounded walk over hundreds of
+// stale files would tax every 30s poll.
+const maxSessionFallbackFiles = 20
+
+// findLatestUsableSession returns the newest session file holding token_count
+// events plus its last payload. The newest file is often a just-started stub
+// (session_meta only) — using it blindly drops rate limits and session
+// meters, so dead files are skipped in favor of the freshest live one.
+func findLatestUsableSession(sessionsDir string) (string, *eventPayload, error) {
+	files, err := sortedSessionFilesNewestFirst(sessionsDir)
+	if err != nil {
+		return "", nil, err
+	}
+	limit := maxSessionFallbackFiles
+	if len(files) < limit {
+		limit = len(files)
+	}
+	var lastErr error
+	for _, path := range files[:limit] {
+		payload, err := findLastTokenCount(path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if payload == nil {
+			continue
+		}
+		return path, payload, nil
+	}
+	if lastErr != nil {
+		return "", nil, fmt.Errorf("reading recent sessions: %w", lastErr)
+	}
+	return "", nil, fmt.Errorf("no token_count events in %d most recent sessions", limit)
+}
+
+// sessionFileTime parses the session start time from a rollout basename:
+// rollout-2026-09-15T23-59-18-<uuid>.jsonl. Only relative order matters, so
+// the absent zone is irrelevant — every file in a sessions dir shares the
+// writer's convention. Reports false for anything else (legacy flat files,
+// foreign drops), leaving those to mtime order.
+func sessionFileTime(path string) (time.Time, bool) {
+	base := filepath.Base(path)
+	if !strings.HasPrefix(base, "rollout-") || !strings.HasSuffix(base, ".jsonl") {
+		return time.Time{}, false
+	}
+	stamp := strings.TrimSuffix(strings.TrimPrefix(base, "rollout-"), ".jsonl")
+	if len(stamp) < 19 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02T15-04-05", stamp[:19])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func findLastTokenCount(path string) (*eventPayload, error) {

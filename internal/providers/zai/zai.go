@@ -79,6 +79,13 @@ type usageSample struct {
 	Reasoning float64
 	Total     float64
 	CostUSD   float64
+	// Aggregate marks a whole-window rollup rather than a per-entity row.
+	// Rollups are never treated as a named model/tool row: the model
+	// projection treats them as the authoritative window totals (the per-model
+	// breakdown still feeds model_* metrics, but is not summed on top), and
+	// the tool projection uses them as a fallback window total only when no
+	// per-tool rows are present.
+	Aggregate bool
 }
 
 type usageRollup struct {
@@ -580,8 +587,8 @@ func (p *Provider) finalizeStatusAndMessage(snap *core.UsageSnapshot, state *pro
 	if state.nearLimit {
 		snap.Status = core.StatusNearLimit
 		if snap.Message == "" {
-			if usage, ok := snap.Metrics["usage_five_hour"]; ok && usage.Used != nil {
-				snap.Message = fmt.Sprintf("5h token usage %.0f%%", *usage.Used)
+			if msg := quotaWindowMessage(snap); msg != "" {
+				snap.Message = msg
 			} else {
 				snap.Message = "Usage nearing limit"
 			}
@@ -594,8 +601,7 @@ func (p *Provider) finalizeStatusAndMessage(snap *core.UsageSnapshot, state *pro
 		return
 	}
 
-	if usage, ok := snap.Metrics["usage_five_hour"]; ok && usage.Used != nil {
-		msg := fmt.Sprintf("5h token usage %.0f%%", *usage.Used)
+	if msg := quotaWindowMessage(snap); msg != "" {
 		if mcp, ok := snap.Metrics["mcp_monthly_usage"]; ok && mcp.Used != nil && mcp.Limit != nil {
 			msg += fmt.Sprintf(" · MCP %.0f/%.0f", *mcp.Used, *mcp.Limit)
 		}
@@ -614,4 +620,31 @@ func (p *Provider) finalizeStatusAndMessage(snap *core.UsageSnapshot, state *pro
 	}
 
 	snap.Message = "OK"
+}
+
+// quotaWindowMessage renders a plan-usage summary for the most-consumed tracked
+// quota window. It is deliberately unit-agnostic ("usage", not "token usage")
+// because CREDIT_LIMIT plans meter the same windows in credits, and it prefers
+// whichever window is furthest along so a near-limit weekly quota is not
+// reported as an empty 5h one.
+func quotaWindowMessage(snap *core.UsageSnapshot) string {
+	best := ""
+	bestUsed := -1.0
+	for _, candidate := range []struct {
+		key   string
+		label string
+	}{
+		{key: "usage_five_hour", label: "5h"},
+		{key: "usage_seven_day", label: "7d"},
+	} {
+		metric, ok := snap.Metrics[candidate.key]
+		if !ok || metric.Used == nil {
+			continue
+		}
+		if *metric.Used > bestUsed {
+			bestUsed = *metric.Used
+			best = fmt.Sprintf("%s usage %.0f%%", candidate.label, *metric.Used)
+		}
+	}
+	return best
 }

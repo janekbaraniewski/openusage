@@ -207,19 +207,34 @@ Given live variability, use resilient parsing:
 
 Primary metrics:
 
-- `usage_five_hour`:
-  - from quota item `type == TOKENS_LIMIT`
-  - `Used = percentage`
+- Windowed quota rows (`type == TOKENS_LIMIT`, the pre-credits shape, or
+  `type == CREDIT_LIMIT`, the credits-metered shape) are routed by their
+  `unit`/`number` pair: `unit: 3, number: 5` is the 5-hour rolling window and
+  `unit: 6, number: 1` is the weekly window. Any other duration is left
+  unmapped rather than guessed at. A legacy `TOKENS_LIMIT` row with no
+  `unit`/`number` at all is still treated as the 5-hour window.
+
+- `usage_five_hour` / `usage_seven_day`:
+  - `Used = percentage` (clamped 0-100; `percentage` is an integer percent, so
+    `1` means `1%`)
   - `Limit = 100`
   - `Unit = "%"`
-  - `Window = "5h"`
+  - `Window = "5h"` / `"7d"`
 
-- `tokens_five_hour` (if both numeric fields available):
+- `tokens_five_hour` / `tokens_seven_day` (if both numeric fields available):
   - `Used = currentValue`
   - `Limit = usage`
   - `Remaining = usage-currentValue`
   - `Unit = "tokens"`
-  - `Window = "5h"`
+  - `Window = "5h"` / `"7d"`
+
+- `credits_five_hour` / `credits_seven_day` (same numeric fields, for
+  `CREDIT_LIMIT` rows):
+  - `Used = currentValue`
+  - `Limit = usage`
+  - `Remaining = usage-currentValue`
+  - `Unit = "credits"`
+  - `Window = "5h"` / `"7d"`
 
 - `mcp_monthly_usage`:
   - from quota item `type == TIME_LIMIT`
@@ -237,13 +252,45 @@ Best-effort aggregated activity metrics (when monitor usage payload is populated
 - `today_api_cost`
 - `7d_api_cost`
 
+Model-usage aggregation:
+
+- Live `model-usage` payloads expose a per-model time series (`modelDataList`),
+  a summary list repeated both at the top level and inside `totalUsage`, and
+  whole-window rollups (`totalUsage.totalModelCallCount`,
+  `totalUsage.totalTokensUsage`).
+- Scalar numeric keys are classified by name. Token-count keys map to token
+  totals and are never read as requests, so a token rollup cannot surface as a
+  request count; `total*` call/token keys are whole-window rollups rather than
+  per-entity counts.
+- Rollups are authoritative for `window_requests`/`window_tokens`. The
+  per-model breakdown still feeds `model_*` metrics but is not summed on top of
+  the rollups, and a mirrored summary list is dropped when the richer
+  `modelDataList` is present, so repeated copies cannot multiply totals. A
+  summary list repeated without `modelDataList` is compared by content and read
+  once.
+
+Tool-usage aggregation:
+
+- Live `tool-usage` payloads use the same shape: per-tool time series arrays,
+  a `toolDataList` breakdown, a `toolSummaryList` repeated at the top level and
+  inside `totalUsage`, and whole-window rollups
+  (`totalUsage.totalNetworkSearchCount`, `totalUsage.totalSearchMcpCount`).
+- `total*` rollups never become tool rows. They can overlap — a group total
+  (`totalSearchMcpCount`) next to the per-tool totals — so they are not summed
+  either; they only supply the window call total when the per-tool breakdown is
+  empty or carries no readable counts, and the largest reported rollup is taken
+  there.
+- A repeated `toolSummaryList` is read once, exactly like the model summary
+  list.
+
 These keys are chosen to align with existing TUI summary logic.
 
 ### 7.2 Resets
 
-- If `TOKENS_LIMIT.nextResetTime` present:
+- If a windowed quota row has `nextResetTime`:
   - convert ms epoch -> `time.Time`
-  - set `snap.Resets["usage_five_hour"]`.
+  - set `snap.Resets["usage_five_hour"]` (5h window) or
+    `snap.Resets["usage_seven_day"]` (weekly window).
 
 ### 7.3 DailySeries
 
@@ -289,7 +336,10 @@ Status precedence:
 
 Message templates:
 
-- Active quota: `"5h token usage XX% · MCP YY/ZZ"`
+- Active quota: `"5h usage XX%"` or `"7d usage XX%"` — the tracked window
+  (`5h`/`7d`) that is furthest along, with no unit in the label because
+  `CREDIT_LIMIT` plans meter the same windows in credits — with ` · MCP YY/ZZ`
+  appended when the monthly MCP `used`/`limit` pair is known.
 - Empty/free state: `"Connected, but no active coding package/balance"`
 - Auth state: `"HTTP 401/403 - check API key"`
 - Limited by business code: `"Insufficient balance or no resource package"`

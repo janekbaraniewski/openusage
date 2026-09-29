@@ -2,6 +2,7 @@ package zai
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 	}
 
 	rows := extractUsageRows(payload)
+	rows = dropMirroredUsageRows(rows)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -129,6 +131,14 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 		))
 		bucket := strings.ToLower(strings.TrimSpace(firstStringByPaths(row, []string{"__usage_bucket"})))
 		usageKey := normalizeUsageDimension(firstStringByPaths(row, []string{"__usage_key"}))
+		// Whole-window rollups describe the payload as a whole, not an
+		// entity, so they are never treated as a named model/tool row (the
+		// name fallbacks below are skipped) and the projections treat them as
+		// window totals instead of per-entity values. Both monitor payloads use
+		// the same shape: model-usage carries totalModelCallCount/
+		// totalTokensUsage, tool-usage carries totalNetworkSearchCount and
+		// friends.
+		sample.Aggregate = isUsageRollupRow(row)
 
 		if sample.Language == "" && usageKey != "" && strings.Contains(bucket, "language") {
 			sample.Language = usageKey
@@ -148,10 +158,10 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 		if sample.Endpoint == "" && usageKey != "" && strings.Contains(bucket, "endpoint") {
 			sample.Endpoint = usageKey
 		}
-		if kind == "model" && sample.Name == "" && usageKey != "" && (strings.Contains(bucket, "model") || bucket == "") {
+		if kind == "model" && sample.Name == "" && !sample.Aggregate && usageKey != "" && (strings.Contains(bucket, "model") || bucket == "") {
 			sample.Name = usageKey
 		}
-		if kind == "tool" && sample.Name == "" && usageKey != "" && (strings.Contains(bucket, "tool") || bucket == "") {
+		if kind == "tool" && sample.Name == "" && !sample.Aggregate && usageKey != "" && (strings.Contains(bucket, "tool") || bucket == "") {
 			sample.Name = usageKey
 		}
 
@@ -180,10 +190,18 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 			[]string{"request_num"},
 			[]string{"requestNum"},
 			[]string{"calls"},
+			[]string{"callCount"},
 			[]string{"count"},
 			[]string{"usageCount"},
 			[]string{"usage", "requests"},
 			[]string{"stats", "requests"},
+			// Rollup-style names, mirroring totalTokens on the token side, so a
+			// per-entity row carrying only a total* count still reports calls.
+			[]string{"totalCalls"},
+			[]string{"totalCallCount"},
+			[]string{"totalCount"},
+			[]string{"totalRequestCount"},
+			[]string{"totalRequests"},
 		)
 		sample.Input, _ = firstNumberByPaths(row,
 			[]string{"input_tokens"},
@@ -235,20 +253,28 @@ func extractUsageSamples(raw json.RawMessage, kind string) []usageSample {
 }
 
 func extractUsageRows(v any) []map[string]any {
+	return extractUsageRowsAt(v, "")
+}
+
+// extractUsageRowsAt walks a generic usage payload and returns the row maps it
+// holds. path is the "."-joined payload location of v, recorded on every list
+// of rows as __usage_path so a mirrored list can be told apart from another
+// list that merely shares its key.
+func extractUsageRowsAt(v any, path string) []map[string]any {
 	switch value := v.(type) {
 	case []any:
 		rows := mapsFromArray(value)
 		if len(rows) > 0 {
-			return rows
+			return tagUsageRowPath(rows, path)
 		}
 		var nested []map[string]any
 		for _, item := range value {
-			nested = append(nested, extractUsageRows(item)...)
+			nested = append(nested, extractUsageRowsAt(item, path)...)
 		}
 		return nested
 	case map[string]any:
 		if looksLikeUsageRow(value) {
-			return []map[string]any{value}
+			return tagUsageRowPath([]map[string]any{value}, path)
 		}
 
 		keys := []string{
@@ -265,7 +291,7 @@ func extractUsageRows(v any) []map[string]any {
 		var combined []map[string]any
 		for _, key := range keys {
 			if nested, ok := mapValue(value, key); ok {
-				rows := extractUsageRows(nested)
+				rows := extractUsageRowsAt(nested, joinUsagePath(path, key))
 				if len(rows) > 0 {
 					for _, row := range rows {
 						tagged := row
@@ -287,7 +313,7 @@ func extractUsageRows(v any) []map[string]any {
 		var all []map[string]any
 		for _, key := range mapKeys {
 			nested := value[key]
-			rows := extractUsageRows(nested)
+			rows := extractUsageRowsAt(nested, joinUsagePath(path, key))
 			if len(rows) > 0 {
 				for _, row := range rows {
 					tagged := row
@@ -300,16 +326,191 @@ func extractUsageRows(v any) []map[string]any {
 				continue
 			}
 			if numeric, ok := parseFloat(nested); ok {
-				all = append(all, map[string]any{
-					"requests":    numeric,
+				field, rollup := scalarUsageField(key)
+				row := map[string]any{
+					field:         numeric,
 					"__usage_key": key,
-				})
+				}
+				if rollup {
+					row["__usage_rollup"] = true
+				}
+				all = append(all, row)
 			}
 		}
 		return all
 	default:
 		return nil
 	}
+}
+
+func joinUsagePath(path, key string) string {
+	if path == "" {
+		return key
+	}
+	return path + "." + key
+}
+
+// tagUsageRowPath records a row's payload location, leaving rows that already
+// carry one alone: an inner list keeps its own, more specific, location.
+func tagUsageRowPath(rows []map[string]any, path string) []map[string]any {
+	if path == "" {
+		return rows
+	}
+	tagged := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if firstStringFromMap(row, "__usage_path") != "" {
+			tagged = append(tagged, row)
+			continue
+		}
+		clone := cloneStringAnyMap(row)
+		clone["__usage_path"] = path
+		tagged = append(tagged, clone)
+	}
+	return tagged
+}
+
+// scalarUsageField classifies a scalar numeric key found while walking a
+// generic usage payload into the usageSample field it represents.
+//
+// Z.AI's monitor payloads mix per-entity counts with whole-window rollups
+// (totalTokensUsage, totalModelCallCount) in the same object, and the walker
+// previously assumed every scalar was a request count — so a token
+// rollup surfaced as a request count. Token-count keys are routed to
+// total_tokens; other scalars keep the historical request meaning so keyed
+// breakdowns like {"go": 3} still work.
+//
+// rollup is true for keys that total the whole payload rather than count a
+// single entity; those values are the window totals (authoritative for model
+// usage; a fallback for tool usage, whose per-tool totals may overlap).
+func scalarUsageField(key string) (field string, rollup bool) {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if normalized == "" {
+		return "requests", false
+	}
+	rollup = strings.HasPrefix(normalized, "total") &&
+		(strings.Contains(normalized, "token") ||
+			strings.Contains(normalized, "call") ||
+			strings.Contains(normalized, "request") ||
+			strings.Contains(normalized, "count"))
+	if strings.Contains(normalized, "token") {
+		return "total_tokens", rollup
+	}
+	return "requests", rollup
+}
+
+func isUsageRollupRow(row map[string]any) bool {
+	raw, ok := row["__usage_rollup"]
+	if !ok {
+		return false
+	}
+	rollup, ok := raw.(bool)
+	return ok && rollup
+}
+
+// mirroredUsageBreakdowns maps a summary key that repeats a richer sibling
+// breakdown to the key it mirrors. Z.AI's model- and tool-usage payloads carry
+// the same summary list at the top level and again inside totalUsage, next to
+// the richer data list; accumulating every copy triples the model token totals
+// and doubles the tool call counts.
+var mirroredUsageBreakdowns = map[string]string{
+	"modelSummaryList": "modelDataList",
+	"toolSummaryList":  "toolDataList",
+}
+
+// dropMirroredUsageRows removes the redundant copies of a mirrored breakdown
+// list. A summary list is dropped when the richer list it mirrors is present,
+// so the per-entity values feed the metrics once. A repeated copy of the
+// summary is dropped even when the richer list is absent, because the live
+// payload nests the same summary both under totalUsage and at the top level;
+// copies are compared by content so genuinely different lists are never
+// collapsed into one.
+func dropMirroredUsageRows(rows []map[string]any) []map[string]any {
+	if len(rows) == 0 {
+		return rows
+	}
+
+	runs := mirroredRowRuns(rows)
+	present := make(map[string]bool, len(runs))
+	for _, run := range runs {
+		present[run.key] = true
+	}
+
+	drop := make([]bool, len(rows))
+	keptSignature := make(map[string]string, len(mirroredUsageBreakdowns))
+	for _, run := range runs {
+		primary, mirrored := mirroredUsageBreakdowns[run.key]
+		if !mirrored {
+			continue
+		}
+		if present[primary] {
+			// The richer list this summary mirrors is present; the entities
+			// are read from it, so every copy of the summary is redundant.
+			for _, i := range run.indices {
+				drop[i] = true
+			}
+			continue
+		}
+		signature := mirroredGroupSignature(rows, run.indices)
+		if previous, ok := keptSignature[run.key]; ok && previous == signature {
+			// The same summary repeated at another payload location.
+			for _, i := range run.indices {
+				drop[i] = true
+			}
+			continue
+		}
+		keptSignature[run.key] = signature
+	}
+
+	kept := make([]map[string]any, 0, len(rows))
+	for i, row := range rows {
+		if drop[i] {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	return kept
+}
+
+// mirroredRowRun is the set of rows contributed by one breakdown list; the
+// rows of a list share the key and payload path they were read from.
+type mirroredRowRun struct {
+	key     string
+	indices []int
+}
+
+func mirroredRowRuns(rows []map[string]any) []mirroredRowRun {
+	index := make(map[[2]string]int, len(rows))
+	runs := make([]mirroredRowRun, 0, len(rows))
+	for i, row := range rows {
+		id := [2]string{
+			firstStringFromMap(row, "__usage_key"),
+			firstStringFromMap(row, "__usage_path"),
+		}
+		if at, ok := index[id]; ok {
+			runs[at].indices = append(runs[at].indices, i)
+			continue
+		}
+		index[id] = len(runs)
+		runs = append(runs, mirroredRowRun{key: id[0], indices: []int{i}})
+	}
+	return runs
+}
+
+// mirroredGroupSignature renders a breakdown group in a comparable form so a
+// repeated copy of the same list can be recognised. Internal __usage_* tags are
+// excluded because they record where the copy was found, not what it contains.
+func mirroredGroupSignature(rows []map[string]any, indices []int) string {
+	var b strings.Builder
+	for _, i := range indices {
+		for _, key := range core.SortedStringKeys(rows[i]) {
+			if strings.HasPrefix(key, "__") {
+				continue
+			}
+			fmt.Fprintf(&b, "%s=%v;", key, rows[i][key])
+		}
+		b.WriteByte('|')
+	}
+	return b.String()
 }
 
 func extractLimitRows(v any) []map[string]any {
