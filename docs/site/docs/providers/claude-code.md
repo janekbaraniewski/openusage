@@ -163,7 +163,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-â€¦` â
 
 ### How fresh is the data?
 
-- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache.
+- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache. Each file's all-time totals are cached too, so a poll where only the live session grew recomputes that one file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
 - Hook (when integration is installed): real-time per turn.
 
 ## Files read
