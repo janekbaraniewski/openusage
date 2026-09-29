@@ -25,6 +25,10 @@ type Provider struct {
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
 
+	// nowFn overrides the wall clock used for today/7d/5h-block windows.
+	// Tests set it to pin golden values; nil means time.Now.
+	nowFn func() time.Time
+
 	telemetryCacheMu             sync.Mutex
 	telemetryCache               map[string]*telemetryCacheEntry // keyed by file path
 	telemetryBaselineInitialized bool
