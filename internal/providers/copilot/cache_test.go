@@ -182,7 +182,7 @@ exit 1
 
 	// Manually expire the snapshot cache.
 	p.cacheMu.Lock()
-	p.apiCache.lastSnapAt = time.Now().Add(-3 * time.Minute)
+	p.cacheLocked(accountCacheKey(acct)).lastSnapAt = time.Now().Add(-3 * time.Minute)
 	p.cacheMu.Unlock()
 
 	snap2, err := p.Fetch(context.Background(), acct)
@@ -230,7 +230,7 @@ exit 1
 
 	// Verify cache was populated.
 	p.cacheMu.Lock()
-	if p.apiCache == nil || p.apiCache.binaryResolvedAt.IsZero() {
+	if p.cacheLocked(accountCacheKey(acct)).binaryResolvedAt.IsZero() {
 		t.Fatal("expected binaryResolvedAt to be set")
 	}
 	p.cacheMu.Unlock()
@@ -254,7 +254,7 @@ exit 1
 	ctx := context.Background()
 
 	// First detection spawns subprocess.
-	v1, s1, err := p.detectAndCacheVersion(ctx, "", copilotBin)
+	v1, s1, err := p.detectAndCacheVersion(ctx, "test", "", copilotBin)
 	if err != nil {
 		t.Fatalf("detectAndCacheVersion() #1 error: %v", err)
 	}
@@ -263,7 +263,7 @@ exit 1
 	}
 
 	// Second call should return from cache.
-	v2, s2, err := p.detectAndCacheVersion(ctx, "", copilotBin)
+	v2, s2, err := p.detectAndCacheVersion(ctx, "test", "", copilotBin)
 	if err != nil {
 		t.Fatalf("detectAndCacheVersion() #2 error: %v", err)
 	}
@@ -273,7 +273,7 @@ exit 1
 
 	// Verify cache timestamps.
 	p.cacheMu.Lock()
-	if p.apiCache == nil || p.apiCache.versionFetchedAt.IsZero() {
+	if p.cacheLocked("test").versionFetchedAt.IsZero() {
 		t.Fatal("expected versionFetchedAt to be set")
 	}
 	p.cacheMu.Unlock()
@@ -296,7 +296,7 @@ exit 1
 	p := New()
 	ctx := context.Background()
 
-	out1, ok1 := p.checkAndCacheAuth(ctx, ghBin, "")
+	out1, ok1 := p.checkAndCacheAuth(ctx, "test", ghBin, "")
 	if !ok1 {
 		t.Fatal("checkAndCacheAuth() #1 expected ok=true")
 	}
@@ -305,17 +305,17 @@ exit 1
 	}
 
 	// Second call returns from cache.
-	out2, ok2 := p.checkAndCacheAuth(ctx, ghBin, "")
+	out2, ok2 := p.checkAndCacheAuth(ctx, "test", ghBin, "")
 	if !ok2 || out1 != out2 {
 		t.Fatalf("auth cache mismatch: (%q,%v) vs (%q,%v)", out1, ok1, out2, ok2)
 	}
 
 	// Expire and re-check.
 	p.cacheMu.Lock()
-	p.apiCache.authFetchedAt = time.Now().Add(-10 * time.Minute)
+	p.cacheLocked("test").authFetchedAt = time.Now().Add(-10 * time.Minute)
 	p.cacheMu.Unlock()
 
-	out3, ok3 := p.checkAndCacheAuth(ctx, ghBin, "")
+	out3, ok3 := p.checkAndCacheAuth(ctx, "test", ghBin, "")
 	if !ok3 {
 		t.Fatal("checkAndCacheAuth() #3 expected ok=true after expiry")
 	}
