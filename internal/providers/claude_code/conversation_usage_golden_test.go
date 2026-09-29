@@ -1,6 +1,7 @@
 package claude_code
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/pricing"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/conversation_usage.golden")
@@ -315,4 +317,134 @@ func lineDiff(want, got string) string {
 		}
 	}
 	return b.String()
+}
+
+func appendFixtureLines(t testing.TB, path string, lines ...fxLine) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+	for _, l := range lines {
+		if _, err := f.WriteString(l.json() + "\n"); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+}
+
+// TestReadConversationJSONL_IncrementalMatchesFresh mutates the history the
+// way live sessions do and checks that a warm provider (reusing per-file
+// partials) always agrees with a cold one.
+func TestReadConversationJSONL_IncrementalMatchesFresh(t *testing.T) {
+	primary, alt := writeGoldenHistory(t, t.TempDir())
+	warm := newGoldenProvider()
+	now := goldenNow
+	sessA := filepath.Join(primary, "repo-a", "sess-a.jsonl")
+	sessC := filepath.Join(primary, "repo-b", "sess-c.jsonl")
+
+	steps := []struct {
+		name   string
+		mutate func()
+	}{
+		{"initial", func() {}},
+		{"append to live file", func() {
+			appendFixtureLines(t, sessA, fxLine{ts: now.Add(-time.Minute), sess: "sess-a", req: "a12", msg: "m-a12", cwd: "/work/repo-a",
+				model: "claude-opus-4-6", in: 10, out: 1, tools: []string{toolUse("t-a12", "Edit", `{"file_path":"x.rs","old_string":"a","new_string":"b"}`)}})
+		}},
+		{"append later duplicate of another file's record", func() {
+			// Later copy of e1: must lose to the alt-dir original.
+			appendFixtureLines(t, sessA, fxLine{ts: now.Add(-30 * time.Second), sess: "sess-a", req: "e1", msg: "m-e1", cwd: "/work/repo-e",
+				model: "claude-opus-4-6", in: 5000, out: 500})
+		}},
+		{"new file steals ownership with an earlier copy", func() {
+			// Earlier copy of b2 (and its tool): takes it over from sess-b/sess-e.
+			writeFixtureFile(t, filepath.Join(primary, "repo-z", "sess-z.jsonl"), []fxLine{
+				{ts: now.Add(-6 * time.Minute), sess: "sess-z", req: "b2", msg: "m-b2", cwd: "/work/repo-z", model: "claude-haiku-4-5",
+					in: 7, out: 7, tools: []string{toolUse("t-b2", "Edit", `{"file_path":"z.go","old_string":"a","new_string":"b\nc"}`)}},
+			})
+		}},
+		{"append opens a new 5h block", func() {
+			appendFixtureLines(t, sessC, fxLine{ts: now.Add(2 * time.Hour), sess: "sess-c", req: "c9", msg: "m-c9", model: "claude-sonnet-4-5", in: 1, out: 1})
+		}},
+		{"delete a file", func() {
+			if err := os.Remove(filepath.Join(primary, "repo-a", "sess-b.jsonl")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"rewrite a file smaller", func() {
+			writeFixtureFile(t, sessC, []fxLine{{ts: now.Add(-3 * time.Hour), sess: "sess-c", req: "c1", msg: "m-c1", model: "claude-opus-4-6", in: 3, out: 3}})
+		}},
+	}
+	for _, step := range steps {
+		step.mutate()
+		got := fetchConversationDump(t, warm, primary, alt)
+		want := fetchConversationDump(t, newGoldenProvider(), primary, alt)
+		if got != want {
+			t.Fatalf("step %q: warm provider diverged from fresh\n%s", step.name, lineDiff(want, got))
+		}
+	}
+}
+
+// TestReadConversationJSONL_ReusesAggregates checks the incremental paths:
+// an unchanged poll reuses the whole merge, and a poll where one file grew
+// rebuilds only that file's all-time partial.
+func TestReadConversationJSONL_ReusesAggregates(t *testing.T) {
+	primary, alt := writeGoldenHistory(t, t.TempDir())
+	p := newGoldenProvider()
+	fetchConversationDump(t, p, primary, alt)
+
+	first := p.convAgg
+	partials := make(map[string]*conversationAllTime)
+	for path, e := range p.jsonlCache {
+		if e.allTime == nil {
+			t.Fatalf("%s: no all-time partial after first fetch", path)
+		}
+		partials[path] = e.allTime
+	}
+
+	fetchConversationDump(t, p, primary, alt)
+	if p.convAgg != first {
+		t.Fatal("unchanged poll recomputed the cross-file merge")
+	}
+
+	live := filepath.Join(alt, "repo-a", "sess-e.jsonl")
+	appendFixtureLines(t, live, fxLine{ts: goldenNow.Add(-time.Minute), sess: "sess-e", req: "e3", msg: "m-e3", cwd: "/work/repo-e",
+		model: "claude-opus-4-6", in: 1, out: 1})
+	fetchConversationDump(t, p, primary, alt)
+	if p.convAgg == first {
+		t.Fatal("poll after an append reused the stale merge")
+	}
+	for path, e := range p.jsonlCache {
+		rebuilt := e.allTime != partials[path]
+		if path == live && !rebuilt {
+			t.Errorf("%s: changed file's partial was not rebuilt", path)
+		}
+		if path != live && rebuilt {
+			t.Errorf("%s: unchanged file's partial was rebuilt", path)
+		}
+	}
+}
+
+// TestReadConversationJSONL_PriceGenerationInvalidatesCosts: once the pricing
+// tables load (generation bump), memoised costs must be re-estimated.
+func TestReadConversationJSONL_PriceGenerationInvalidatesCosts(t *testing.T) {
+	primary, alt := writeGoldenHistory(t, t.TempDir())
+	p := newGoldenProvider()
+	before := fetchConversationDump(t, p, primary, alt)
+
+	prevLookup, prevGen := priceLookup, priceGeneration
+	t.Cleanup(func() { priceLookup, priceGeneration = prevLookup, prevGen })
+	priceLookup = func(_ context.Context, _ string, _ int) (*pricing.Price, error) {
+		return &pricing.Price{InputCostPerMillion: 100, OutputCostPerMillion: 100}, nil
+	}
+	priceGeneration = func() uint64 { return 42 }
+
+	after := fetchConversationDump(t, p, primary, alt)
+	if after == before {
+		t.Fatal("costs did not change after the pricing generation changed")
+	}
+	if fresh := fetchConversationDump(t, newGoldenProvider(), primary, alt); after != fresh {
+		t.Fatalf("warm provider diverged from fresh after price change\n%s", lineDiff(fresh, after))
+	}
 }
