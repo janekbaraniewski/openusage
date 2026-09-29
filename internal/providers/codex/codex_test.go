@@ -920,6 +920,31 @@ func TestFindLatestSessionFile(t *testing.T) {
 	}
 }
 
+func TestFindLatestUsableSession_SkipsStubFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Newest file is a just-started stub with no usage yet; the usable
+	// session right behind it must win so rate limits survive.
+	stubFile := filepath.Join(tmpDir, "rollout-2026-09-27T17-37-14-01a0e503.jsonl")
+	os.WriteFile(stubFile, []byte("{\"timestamp\":\"2026-09-27T17:37:14Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"s-stub\"}}\n"), 0644)
+	liveFile := filepath.Join(tmpDir, "rollout-2026-09-26T01-02-21-01a0dc4e.jsonl")
+	os.WriteFile(liveFile, []byte("{\"timestamp\":\"2026-09-26T01:02:21Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":80,\"cached_input_tokens\":0,\"output_tokens\":20,\"reasoning_output_tokens\":0,\"total_tokens\":100},\"model_context_window\":128000},\"rate_limits\":{\"primary\":{\"used_percent\":8,\"window_minutes\":300}}}}\n"), 0644)
+
+	path, payload, err := findLatestUsableSession(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != liveFile {
+		t.Errorf("expected %q, got %q", liveFile, path)
+	}
+	if payload == nil || payload.Info == nil {
+		t.Fatal("expected token_count payload")
+	}
+	if payload.RateLimits == nil || payload.RateLimits.Primary == nil {
+		t.Error("expected rate limits in payload")
+	}
+}
+
 // TestFetchResolvesModelIDFromSessionHeaderAndPerEventOverride verifies the
 // three-layer model_id resolution we expect Codex to perform: a model on the
 // session_meta header is treated as the session default, a turn_context can
