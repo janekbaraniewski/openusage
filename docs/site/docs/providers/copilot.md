@@ -54,6 +54,34 @@ Run `gh auth status` to confirm you're signed in.
 
 Set `binary` to the `gh` path; `copilot_binary` is only needed if the standalone CLI lives somewhere unusual.
 
+### GitHub Enterprise Cloud/Server
+
+If your organization uses a GitHub Enterprise Cloud (`*.ghe.com`) or Server hostname instead of `github.com`, set `base_url` on the account. OpenUsage derives the `gh --hostname` flag from it automatically:
+
+```json
+{
+  "accounts": [
+    {
+      "id": "copilot",
+      "provider": "copilot",
+      "binary": "/usr/bin/gh",
+      "base_url": "https://my-company.ghe.com"
+    }
+  ]
+}
+```
+
+The host must be logged in with `gh` first. OpenUsage never runs `gh auth login` for you, so run it once per host before starting OpenUsage:
+
+```bash
+gh auth login --hostname my-company.ghe.com
+gh auth status --hostname my-company.ghe.com   # verify
+```
+
+If the host is not logged in, the tile shows an auth error ("not authenticated with GitHub").
+
+To track both `github.com` and a GHE host, add two accounts with different `id` values, one with `base_url` and one without. Each account/host pair keeps its own cached auth status and snapshot, so the two never show each other's data.
+
 ## Data sources & how each metric is computed
 
 Copilot has two data paths:
@@ -138,6 +166,7 @@ All via `gh` subprocess; no direct HTTP calls:
 
 ## Troubleshooting
 
-- **No data** — run `gh auth login` and ensure the `copilot` extension is installed (`gh extension install github/gh-copilot`).
+- **No data** — run `gh auth login` and check auth status with `gh auth status`. The optional `gh copilot` extension (`gh extension install github/gh-copilot`) is *not* required — OpenUsage only uses it to display a version string, and treats it as informational if missing.
 - **Org metrics missing** — your account isn't a Copilot Business/Enterprise admin; this is expected.
 - **Stale rate limits** — the GraphQL query is rate-limited; OpenUsage respects the polling interval to avoid hammering it.
+- **GitHub Enterprise Cloud/Server** — set `base_url` on the account (see the Setup section above) so `gh` calls target the right hostname instead of `github.com`, and make sure you ran `gh auth login --hostname <host>` for that host first.
