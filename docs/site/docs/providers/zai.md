@@ -7,7 +7,7 @@ keywords: [z.ai usage tracker, z.ai quota tracking, z.ai cost tracking, z.ai tok
 
 # Z.AI
 
-Deep visibility for Z.AI coding subscriptions. Tracks the 5-hour rolling token window, monthly usage, per-model and per-tool breakdowns, and credit grants with expiry warnings.
+Deep visibility for Z.AI coding subscriptions. Tracks the 5-hour and weekly rolling quota windows, monthly usage, per-model and per-tool breakdowns, and credit grants with expiry warnings.
 
 ## At a glance
 
@@ -17,7 +17,7 @@ Deep visibility for Z.AI coding subscriptions. Tracks the 5-hour rolling token w
 - **Type** — API platform (full billing data)
 - **Tracks**:
   - Coding models
-  - 5-hour token usage percentage
+  - 5-hour and weekly rolling quota usage percentage
   - Monthly usage
   - Per-model: requests, input/output/reasoning/cached tokens, cost (USD), tools
   - Tool usage: web search, web fetch, other
@@ -70,7 +70,7 @@ Each poll (default every 30 seconds in daemon mode) hits up to five endpoints. A
 | Call | Endpoint | What it provides |
 |---|---|---|
 | 1 | `GET <coding>/models` | Coding model catalog |
-| 2 | `GET <monitor>/api/monitor/usage/quota/limit` | 5h window usage % + active subscription |
+| 2 | `GET <monitor>/api/monitor/usage/quota/limit` | 5h/weekly window usage % + active subscription |
 | 3 | `GET <monitor>/api/monitor/usage/model-usage` | Per-model request, token, cost samples |
 | 4 | `GET <monitor>/api/monitor/usage/tool-usage` | Web search, web fetch, other tool invocations |
 | 5 | `GET <monitor>/api/paas/v4/user/credit_grants` | Credit grants list with expiries |
@@ -80,10 +80,11 @@ Each poll (default every 30 seconds in daemon mode) hits up to five endpoints. A
 - Source: `data[].id` from `<coding>/models`.
 - Transform: stored under `Raw["coding_models"]`. The detail view renders one row per model.
 
-### `5h_window` — 5-hour rolling token usage
+### `5h_window` / `7d_window` — rolling quota usage
 
-- Source: the `quota/limit` JSON. The body is wrapped in a monitor envelope; the inner data carries the rolling 5-hour percentage and remaining tokens.
-- Transform: percentage stored as `Used`/`Remaining` against `Limit = 100`. The window is rolling — not aligned to wall-clock — so heavy bursts push the gauge up quickly.
+- Source: the `quota/limit` JSON. The body is wrapped in a monitor envelope; the inner `data.limits` array carries one row per window.
+- Transform: each windowed row (`TOKENS_LIMIT`, or `CREDIT_LIMIT` on credits-based plans) is routed by its `unit`/`number` pair — `unit: 3, number: 5` is the 5-hour window, `unit: 6, number: 1` is the weekly window. The percentage becomes `usage_five_hour` / `usage_seven_day` (`Used` against `Limit = 100`), and `usage`/`currentValue` become `tokens_*` or `credits_*` rows depending on the limit type, so credits plans show credits rather than tokens. Resets come from `nextResetTime` (epoch ms). Unsupported `unit`/`number` pairs are ignored instead of being labeled as 5-hour. The windows are rolling — not aligned to wall-clock — so heavy bursts push the gauges up quickly.
+- Legacy note: a `TOKENS_LIMIT` row with no `unit`/`number` predates the windowed shape and is still read as the 5-hour window.
 
 ### Subscription status
 
@@ -91,18 +92,20 @@ Each poll (default every 30 seconds in daemon mode) hits up to five endpoints. A
 - Transform: stored as `Attributes["subscription_status"]`. When no coding package is active, the value is `inactive_or_free` and the tile flags it.
 
 :::note Cost values hidden by default on `glm_coding_plan*`
-Z.AI's coding packages (anything whose subscription status starts with `glm_coding_plan`) bill a flat package fee — the per-call dollar figures on `model-usage` are reference numbers, not what your card is charged. OpenUsage hides cost columns by default for those subscriptions; the 5h window, monthly usage, and credit grants stay visible. Free / `inactive_or_free` accounts pay per-call and keep costs visible. Override with [`dashboard.hide_costs`](../reference/configuration.md#dashboardhide_costs) or the <kbd>c</kbd> keystroke.
+Z.AI's coding packages (anything whose subscription status starts with `glm_coding_plan`) bill a flat package fee — the per-call dollar figures on `model-usage` are reference numbers, not what your card is charged. OpenUsage hides cost columns by default for those subscriptions; the 5h/weekly windows, monthly usage, and credit grants stay visible. Free / `inactive_or_free` accounts pay per-call and keep costs visible. Override with [`dashboard.hide_costs`](../reference/configuration.md#dashboardhide_costs) or the <kbd>c</kbd> keystroke.
 :::
 
 ### Per-model rows
 
-- Source: rows under `data` of `model-usage`. Each row carries a model name, request count, input/output/reasoning/cached tokens, cost in USD, and tool calls.
-- Transform: aggregated into `usageRollup` totals per model and emitted as detail rows. Reasoning and cached tokens are kept separate from input/output. Cost is in USD even on China endpoints.
+- Source: `data` of `model-usage`. Live payloads carry a per-model time series (`modelDataList`), a summary list repeated at the top level and inside `totalUsage`, and whole-window rollups (`totalUsage.totalModelCallCount`, `totalUsage.totalTokensUsage`). Older payloads used flat rows under `data`, each carrying a model name, request count, input/output/reasoning/cached tokens, cost in USD, and tool calls.
+- Transform: model rows are aggregated into `usageRollup` totals per model and emitted as detail rows. Reasoning and cached tokens are kept separate from input/output. Cost is in USD even on China endpoints.
+- Token totals are never read as request counts: `totalTokensUsage` feeds tokens and `totalModelCallCount` feeds requests, so a large token rollup no longer shows up as that many requests. A summary list repeated at several levels is only read once, so token totals are not multiplied.
 
 ### Tool usage (`web_search`, `web_fetch`, other)
 
 - Source: `tool-usage` response.
 - Transform: counted by name into `Metrics["tool_web_search"]`, `Metrics["tool_web_fetch"]`, and an aggregate `tool_other` for everything else.
+- Live payloads carry a per-tool breakdown (`toolDataList`) plus a `toolSummaryList` repeated at the top level and inside `totalUsage`, next to whole-window rollups (`totalUsage.totalNetworkSearchCount`, `totalUsage.totalSearchMcpCount`). A repeated summary is read once, and the `total*` rollups never surface as tool names; they only supply the window call total when the per-tool breakdown is empty.
 
 ### `credits_available` / `credits_used` and grants
 
@@ -133,7 +136,7 @@ Z.AI's coding packages (anything whose subscription status starts with `glm_codi
 ## Caveats
 
 :::note
-The 5-hour window is rolling, not aligned to the wall clock. Heavy bursts of activity will push the gauge up quickly.
+The 5-hour and weekly quota windows are rolling, not aligned to the wall clock. Heavy bursts of activity will push the gauges up quickly.
 :::
 
 - Subscription status reads `inactive_or_free` if no coding package is active.

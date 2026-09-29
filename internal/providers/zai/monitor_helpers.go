@@ -186,6 +186,32 @@ func doMonitorRequest(ctx context.Context, reqURL, token string, bearer bool, cl
 	return resp.StatusCode, body, nil
 }
 
+// zaiLimitWindow identifies which rolling quota window a limits[] row belongs
+// to. Z.AI encodes window durations as a (unit, number) pair: unit 3 with
+// number 5 is the 5-hour rolling window, unit 6 with number 1 is the weekly
+// window.
+type zaiLimitWindow struct {
+	key    string // metric key suffix, e.g. "five_hour"
+	window string // window tag surfaced on the metric, e.g. "5h"
+}
+
+// resolveZaiLimitWindow maps a (unit, number) pair onto a supported quota
+// window. ok is false when the pair is unknown, so callers can skip the row
+// instead of guessing (and mislabeling an unsupported duration as 5h).
+func resolveZaiLimitWindow(unit, number float64, hasUnit, hasNumber bool) (zaiLimitWindow, bool) {
+	if !hasUnit || !hasNumber {
+		return zaiLimitWindow{}, false
+	}
+	switch {
+	case unit == 3 && number == 5:
+		return zaiLimitWindow{key: "five_hour", window: "5h"}, true
+	case unit == 6 && number == 1:
+		return zaiLimitWindow{key: "seven_day", window: "7d"}, true
+	default:
+		return zaiLimitWindow{}, false
+	}
+}
+
 func applyQuotaData(raw json.RawMessage, snap *core.UsageSnapshot, state *providerState) bool {
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -198,21 +224,67 @@ func applyQuotaData(raw json.RawMessage, snap *core.UsageSnapshot, state *provid
 	}
 
 	found := false
+	// resolvedWindows tracks windows described by a row carrying explicit
+	// unit/number metadata. A legacy unit-less TOKENS_LIMIT row also maps onto
+	// the 5h window, and a payload mixing both shapes must not produce a
+	// result that depends on the order of limits[].
+	resolvedWindows := make(map[string]bool)
 	for _, row := range rows {
 		kind := strings.ToUpper(strings.TrimSpace(firstStringFromMap(row, "type", "limitType")))
+
+		// Z.AI reports percentage as an integer 0-100: 1 means 1%, not a
+		// 0..1 fraction, so it is never rescaled here.
 		percentage, hasPct := parseNumberFromMap(row, "percentage", "usedPercent", "used_percentage")
-		if hasPct && percentage <= 1 {
-			percentage *= 100
+		if hasPct {
+			percentage = clamp(percentage, 0, 100)
 		}
 
+		limit, hasLimit := parseNumberFromMap(row, "usage", "limit", "quota")
+		current, hasCurrent := parseNumberFromMap(row, "currentValue", "current", "used")
+
 		switch kind {
-		case "TOKENS_LIMIT":
+		// TOKENS_LIMIT was the pre-credits shape; CREDIT_LIMIT is the same
+		// windowed quota metered in credits instead of tokens.
+		case "TOKENS_LIMIT", "CREDIT_LIMIT":
+			unit, hasUnit := parseNumberFromMap(row, "unit")
+			number, hasNumber := parseNumberFromMap(row, "number")
+			window, hasWindow := resolveZaiLimitWindow(unit, number, hasUnit, hasNumber)
+			if !hasWindow {
+				// Legacy payloads carried a single TOKENS_LIMIT row with no
+				// window metadata at all; it always described the 5-hour
+				// window, so keep honoring that shape.
+				if kind == "TOKENS_LIMIT" && !hasUnit && !hasNumber {
+					window = zaiLimitWindow{key: "five_hour", window: "5h"}
+				} else {
+					// Recognized limit type, unsupported duration: record that
+					// quota data exists but emit no mislabeled window metrics.
+					found = true
+					continue
+				}
+			}
+
+			if !hasPct && hasLimit && hasCurrent && limit > 0 {
+				percentage = clamp(current/limit*100, 0, 100)
+				hasPct = true
+			}
+
+			usageKey := "usage_" + window.key
+			if !hasWindow && resolvedWindows[window.key] {
+				// An explicit unit/number row already described this window;
+				// keep it rather than letting the legacy copy overwrite the
+				// metrics or the reset timestamp.
+				found = true
+				continue
+			}
+			if hasWindow {
+				resolvedWindows[window.key] = true
+			}
 			if hasPct {
-				snap.Metrics["usage_five_hour"] = core.Metric{
-					Used:   core.Float64Ptr(clamp(percentage, 0, 100)),
+				snap.Metrics[usageKey] = core.Metric{
+					Used:   core.Float64Ptr(percentage),
 					Limit:  core.Float64Ptr(100),
 					Unit:   "%",
-					Window: "5h",
+					Window: window.window,
 				}
 				if percentage >= 100 {
 					state.limited = true
@@ -221,29 +293,29 @@ func applyQuotaData(raw json.RawMessage, snap *core.UsageSnapshot, state *provid
 				}
 			}
 
-			limit, hasLimit := parseNumberFromMap(row, "usage", "limit", "quota")
-			current, hasCurrent := parseNumberFromMap(row, "currentValue", "current", "used")
+			detailUnit := "tokens"
+			if kind == "CREDIT_LIMIT" {
+				detailUnit = "credits"
+			}
 			if hasLimit && hasCurrent {
 				remaining := math.Max(limit-current, 0)
-				snap.Metrics["tokens_five_hour"] = core.Metric{
+				snap.Metrics[detailUnit+"_"+window.key] = core.Metric{
 					Limit:     core.Float64Ptr(limit),
 					Used:      core.Float64Ptr(current),
 					Remaining: core.Float64Ptr(remaining),
-					Unit:      "tokens",
-					Window:    "5h",
+					Unit:      detailUnit,
+					Window:    window.window,
 				}
 			}
 
 			if resetRaw := firstAnyFromMap(row, "nextResetTime", "resetTime", "reset_at"); resetRaw != nil {
 				if reset, ok := parseTimeValue(resetRaw); ok {
-					snap.Resets["usage_five_hour"] = reset
+					snap.Resets[usageKey] = reset
 				}
 			}
 			found = true
 
 		case "TIME_LIMIT":
-			limit, hasLimit := parseNumberFromMap(row, "usage", "limit", "quota")
-			current, hasCurrent := parseNumberFromMap(row, "currentValue", "current", "used")
 			if hasLimit && hasCurrent {
 				remaining := math.Max(limit-current, 0)
 				snap.Metrics["mcp_monthly_usage"] = core.Metric{

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/zai"
 )
 
 // makeUsageMetric returns a Metric with the given used+limit+window suitable
@@ -239,6 +240,47 @@ func TestBuildTileGaugeLines_RespectsMaxLines(t *testing.T) {
 	// suppressed because GaugeMaxLines=1 counts gauges, not annotation rows.
 	if len(lines) != 2 {
 		t.Fatalf("expected exactly 2 entries (1 gauge + 1 annotation), got %d: %v", len(lines), lines)
+	}
+}
+
+func TestBuildTileGaugeLines_ZaiQuotaWindowsSurviveBalance(t *testing.T) {
+	// Z.AI credits plans expose a gauge-eligible balance (credit_balance /
+	// spend_limit) alongside the quota windows. With two gauge lines, a
+	// non-zero balance must not crowd out the weekly window: the widget's
+	// gauge priority has to surface the 5h and 7d windows first, even when the
+	// 5h window sits at 0%.
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	used27 := 27.5
+	rem72 := 72.5
+	limit100 := 100.0
+	zero := 0.0
+	twentyFive := 25.0
+
+	snap := core.UsageSnapshot{
+		ProviderID: "zai",
+		Metrics: map[string]core.Metric{
+			"credit_balance":  {Used: &used27, Limit: &limit100, Remaining: &rem72, Unit: "USD", Window: "current"},
+			"spend_limit":     {Used: &used27, Limit: &limit100, Remaining: &rem72, Unit: "USD", Window: "current"},
+			"usage_five_hour": {Used: &zero, Limit: &limit100, Unit: "%", Window: "5h"},
+			"usage_seven_day": {Used: &twentyFive, Limit: &limit100, Unit: "%", Window: "7d"},
+		},
+	}
+
+	widget := zai.New().DashboardWidget()
+	m := tileGaugeTestModel(now)
+	lines := m.buildTileGaugeLines(snap, widget, 60)
+
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly the two quota gauges, got %d lines: %v", len(lines), lines)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, key := range []string{"usage_five_hour", "usage_seven_day"} {
+		if label := core.MetricLabel(widget, key); !strings.Contains(joined, label) {
+			t.Errorf("expected %q gauge, got %q", label, joined)
+		}
+	}
+	if label := "Credit Limit"; strings.Contains(joined, label) {
+		t.Errorf("balance gauge %q should not crowd out the quota windows, got %q", label, joined)
 	}
 }
 
