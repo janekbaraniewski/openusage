@@ -31,6 +31,9 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	snap.Raw["jsonl_files_found"] = fmt.Sprintf("%d", len(jsonlFiles))
 
 	now := time.Now()
+	if p.nowFn != nil {
+		now = p.nowFn()
+	}
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	weekStart := now.Add(-7 * 24 * time.Hour)
 
