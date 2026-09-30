@@ -7,7 +7,7 @@ keywords: [kimi cli usage tracker, kimi cli quota tracking, kimi cli cost tracki
 
 # Kimi CLI
 
-Local-file provider for the [Kimi CLI](https://github.com/MoonshotAI/kimi-cli). Reads per-session `wire.jsonl` files under `~/.kimi/sessions/` and aggregates per-model token totals. No network calls and no authentication.
+Local-file provider for the [Kimi CLI](https://github.com/MoonshotAI/kimi-cli). Reads per-session `wire.jsonl` files under `~/.kimi/sessions/` and aggregates per-model token totals. When Kimi Code CLI credentials are available, it also fetches subscription quota through a read-only API call. Local session tracking works offline.
 
 This is a different provider from the [Moonshot](./moonshot.md) API tile. Moonshot reports remote quota and balance via API key; Kimi CLI reports local session activity. Both can be configured at the same time and they will appear as separate tiles.
 
@@ -15,13 +15,14 @@ This is a different provider from the [Moonshot](./moonshot.md) API tile. Moonsh
 
 - **Provider ID** — `kimi_cli`
 - **Detection** — `~/.kimi/sessions/` exists, `~/.kimi/config.json` exists, or a `kimi` binary on `PATH`
-- **Auth** — local file
+- **Auth** — local file; optional existing Kimi Code OAuth access token for quota
 - **Type** — coding agent
 - **Tracks**:
   - Total sessions, sessions today, sessions in the last 7 days
   - Total input, output, cache-read, and cache-write tokens
   - Per-model token totals with upstream provider hint (`moonshot`)
   - Daily series for sessions and tokens
+  - Optional 5-hour and monthly Kimi Code subscription quota
 
 ## Setup
 
@@ -37,9 +38,9 @@ OpenUsage registers the provider when `~/.kimi/sessions/` exists, `~/.kimi/confi
     {
       "id": "kimi_cli",
       "provider": "kimi_cli",
-      "extra": {
-        "sessions_dir": "~/.kimi/sessions",
-        "config_path": "~/.kimi/config.json"
+      "provider_paths": {
+        "sessions_dir": "/home/you/.kimi/sessions",
+        "config_path": "/home/you/.kimi/config.json"
       }
     }
   ]
@@ -49,7 +50,32 @@ OpenUsage registers the provider when `~/.kimi/sessions/` exists, `~/.kimi/confi
 - `sessions_dir` — replaces the default search with an explicit sessions directory
 - `config_path` — points at the `config.json` that provides the default model name
 
-Both overrides are independent. Either can be omitted to keep its default.
+Both overrides are independent. Either can be omitted to keep its default. JSON paths must be absolute; a literal `~` is not expanded.
+
+### Kimi Code subscription quota
+
+OpenUsage reads the existing access token from the newest JSON file in `~/.kimi-code/credentials/` and calls `GET https://api.kimi.com/coding/v1/usages`. The response supplies `usage_five_hour`, `usage_monthly`, and `usage_monthly_code` percentage gauges and reset times. Short-term request-rate limits are ignored because they are not subscription quota.
+
+The credential file is read-only to OpenUsage. It never sends the refresh token, refreshes OAuth, or writes Kimi Code credentials. When the access token expires, quota disappears until Kimi Code refreshes its own token; local session stats continue working. Successful and failed quota reads are cached per account for one minute, and the daemon checks again after cache expiry when it next polls the provider.
+
+Optional `provider_paths` overrides:
+
+~~~json
+{
+  "accounts": [
+    {
+      "id": "kimi_cli",
+      "provider": "kimi_cli",
+      "provider_paths": {
+        "credentials_path": "/home/you/.kimi-code/credentials/account.json",
+        "usage_api_base_url": "https://api.kimi.com/coding/v1"
+      }
+    }
+  ]
+}
+~~~
+
+`credentials_path` selects one Kimi Code credential file. A missing explicit path does not fall back to another account. `usage_api_base_url` overrides the coding API root, including its `/coding/v1` prefix. The earlier PR draft's `oauth_host` setting was removed because OpenUsage no longer refreshes tokens.
 
 ## Data sources & how each metric is computed
 
@@ -96,7 +122,7 @@ Each `wire.jsonl` record carries a float-seconds-since-epoch timestamp (with sub
 
 ## Caveats
 
-- The Kimi CLI and Moonshot providers are intentionally separate. Configure both for full visibility: Moonshot gives you remote balance / quota; Kimi CLI gives you local activity.
+- The Kimi CLI and Moonshot providers are separate. Moonshot reports API-key balance; Kimi CLI reports local activity and, when credentials are available, Kimi Code subscription quota.
 - Buffer size for scanning `wire.jsonl` is 1 MiB per line; very long tool-call payloads inside a single StatusUpdate frame may be skipped if they exceed that. Per-line decode failures are silently dropped.
 - The fallback model `kimi-for-coding` exists so that per-model rows always have a label. Seeing it on the tile means the installed CLI version is not emitting per-StatusUpdate model names and `~/.kimi/config.json` does not declare one either.
 
