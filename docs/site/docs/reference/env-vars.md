@@ -72,7 +72,7 @@ Some providers don't use API keys; they read local files or shell out to a tool 
 | `goose` | Goose's session SQLite store | `binary` field |
 | `hermes` | `$HERMES_HOME/state.db` (fallback `~/.hermes/state.db`) | `HERMES_HOME`, `binary` field |
 | `kilocode` | `~/.config/Code/User/globalStorage/kilocode.kilo-code/tasks/` (+ VS Code Server path) | `binary` field |
-| `kimi_cli` | `~/.kimi/sessions/<group>/<uuid>/wire.jsonl` | `sessions_dir`, `config_path` path hints |
+| `kimi_cli` | Kimi CLI `~/.kimi/sessions/<group>/<uuid>/wire.jsonl` or Kimi Code CLI `~/.kimi-code/sessions/<group>/<uuid>/agents/<agent>/wire.jsonl` | `sessions_dir`, `config_path` in `provider_paths` |
 | `kiro` | `~/.kiro/sessions/cli/` JSON/JSONL + local SQLite | `binary` field |
 | `mux` | `~/.mux/sessions/<workspaceId>/session-usage.json` | `sessions_dir` path hint |
 | `openclaw` | `~/.openclaw/agents/` (+ legacy `.clawdbot/`, `.moltbot/`, `.moldbot/`) | `agents_dir` path hint |
