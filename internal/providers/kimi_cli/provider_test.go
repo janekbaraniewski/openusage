@@ -31,7 +31,7 @@ func TestProvider_BasicMetadata(t *testing.T) {
 }
 
 func TestProvider_Fetch_MissingDir(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	p := New()
 	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
 	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}
@@ -50,6 +50,7 @@ func TestProvider_Fetch_MissingDir(t *testing.T) {
 }
 
 func TestProvider_Fetch_HappyPath(t *testing.T) {
+	setHome(t, t.TempDir())
 	root := t.TempDir()
 
 	// Session 1 in group-a.
@@ -148,6 +149,7 @@ func TestProvider_Fetch_HappyPath(t *testing.T) {
 }
 
 func TestProvider_Fetch_EmptyDir(t *testing.T) {
+	setHome(t, t.TempDir())
 	root := t.TempDir()
 	p := New()
 	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
@@ -180,7 +182,7 @@ func TestProvider_Fetch_DefaultModelFallback(t *testing.T) {
 	}
 
 	// Point HOME elsewhere so resolveConfigPath returns "".
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 
 	p := New()
 	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
