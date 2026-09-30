@@ -19,7 +19,18 @@ type providerDisplayInfo struct {
 }
 
 func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget, hideCosts bool) providerDisplayInfo {
-	return normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget, hideCosts))
+	info := normalizeProviderDisplayInfoType(computeDisplayInfoRaw(snap, widget, hideCosts))
+	if snap.ProviderID != "codex" || snap.Status == core.StatusError || snap.Status == core.StatusAuth || snap.Status == core.StatusUnsupported {
+		return info
+	}
+	for key, metric := range snap.Metrics {
+		if strings.HasPrefix(key, "rate_limit_") && metricUsedPercent(key, metric) >= 0 {
+			return info
+		}
+	}
+	info.tagLabel, info.tagEmoji = "Usage", "⚡"
+	info.summary, info.detail, info.gaugePercent = "Quotas unavailable", "", -1
+	return info
 }
 
 func normalizeProviderDisplayInfoType(info providerDisplayInfo) providerDisplayInfo {
