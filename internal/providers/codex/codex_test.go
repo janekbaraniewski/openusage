@@ -140,8 +140,19 @@ func TestFetchWithSessionData(t *testing.T) {
 		t.Error("expected session_reasoning_tokens metric")
 	}
 
-	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
-		t.Fatal("historical session quota must not be exported as current quota")
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 20 {
+		t.Fatalf("session primary used = %.1f, want 20", got)
+	}
+	if got := metricUsed(t, snap, "rate_limit_secondary"); got != 80 {
+		t.Fatalf("session secondary used = %.1f, want 80", got)
+	}
+	if snap.Raw["rate_limit_source"] != "session" {
+		t.Fatalf("rate_limit_source = %q, want session", snap.Raw["rate_limit_source"])
+	}
+	for _, key := range []string{"plan_auto_percent_used", "plan_api_percent_used", "plan_percent_used"} {
+		if _, ok := snap.Metrics[key]; !ok {
+			t.Fatalf("missing compatibility metric %s", key)
+		}
 	}
 
 	if snap.Raw["credits"] != "available" {
@@ -308,7 +319,7 @@ func TestHasChangedPollsAuthenticatedRemoteQuota(t *testing.T) {
 	}
 }
 
-func TestLegacyHTTPUsesLiveUsageEndpoint(t *testing.T) {
+func TestFetchUsesHTTPWhenRPCFails(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -387,9 +398,8 @@ func TestLegacyHTTPUsesLiveUsageEndpoint(t *testing.T) {
 		},
 	}
 
-	snap := core.NewUsageSnapshot("codex", acct.ID)
-	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
-	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
+	stubCodexRPC(t, tmpDir, `{}`, fmt.Errorf("test RPC failure"))
+	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
@@ -420,7 +430,7 @@ func TestLegacyHTTPUsesLiveUsageEndpoint(t *testing.T) {
 	}
 }
 
-func TestLegacyHTTPParsesNestedLiveRateLimitStatus(t *testing.T) {
+func TestFetchParsesNestedHTTPRateLimitStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -489,9 +499,8 @@ func TestLegacyHTTPParsesNestedLiveRateLimitStatus(t *testing.T) {
 		},
 	}
 
-	snap := core.NewUsageSnapshot("codex", acct.ID)
-	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
-	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
+	stubCodexRPC(t, tmpDir, `{}`, fmt.Errorf("test RPC failure"))
+	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
@@ -516,7 +525,7 @@ func TestLegacyHTTPParsesNestedLiveRateLimitStatus(t *testing.T) {
 	}
 }
 
-func TestLegacyHTTPClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
+func TestFetchKeepsSessionRateLimitsWhenHTTPHasNoWindows(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -564,28 +573,27 @@ func TestLegacyHTTPClearsSessionRateLimitsWhenLiveHasNoWindows(t *testing.T) {
 		},
 	}
 
-	snap := core.NewUsageSnapshot("codex", acct.ID)
-	_ = p.readLatestSession(filepath.Join(tmpDir, "sessions"), &snap)
-	_, err := p.fetchLiveUsage(context.Background(), acct, tmpDir, &snap)
+	stubCodexRPC(t, tmpDir, `{}`, fmt.Errorf("test RPC failure"))
+	snap, err := p.Fetch(context.Background(), acct)
 	if err != nil {
 		t.Fatalf("Fetch() error: %v", err)
 	}
 
-	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
-		t.Fatalf("rate_limit_primary should be cleared when live payload has no windows")
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 0 {
+		t.Fatalf("session primary used = %.1f, want 0", got)
 	}
-	if _, ok := snap.Metrics["rate_limit_secondary"]; ok {
-		t.Fatalf("rate_limit_secondary should be cleared when live payload has no windows")
+	if got := metricUsed(t, snap, "rate_limit_secondary"); got != 100 {
+		t.Fatalf("session secondary used = %.1f, want 100", got)
 	}
-	if snap.Raw["rate_limit_source"] != "live_unavailable" {
-		t.Fatalf("rate_limit_source = %q, want live_unavailable", snap.Raw["rate_limit_source"])
+	if snap.Raw["rate_limit_source"] != "session" {
+		t.Fatalf("rate_limit_source = %q, want session", snap.Raw["rate_limit_source"])
 	}
 	if snap.Raw["rate_limit_warning"] == "" {
 		t.Fatalf("expected rate_limit_warning to be populated")
 	}
 }
 
-func TestFetchDoesNotUseSessionOrHTTPQuotaWhenRPCFails(t *testing.T) {
+func TestFetchFallsBackToSessionWhenLiveSourcesFail(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "10")
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -635,14 +643,73 @@ func TestFetchDoesNotUseSessionOrHTTPQuotaWhenRPCFails(t *testing.T) {
 		t.Fatalf("Fetch() error: %v", err)
 	}
 
-	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
-		t.Fatal("RPC failure must not expose historical quota")
+	if got := metricUsed(t, snap, "rate_limit_primary"); got != 20 {
+		t.Fatalf("session primary used = %.1f, want 20", got)
 	}
 	if snap.Raw["cli_rate_limits_error"] != "test RPC failure" {
 		t.Fatalf("missing RPC diagnostic: %v", snap.Raw["cli_rate_limits_error"])
 	}
-	if snap.Raw["rate_limit_source"] != "cli_rpc_unavailable" {
-		t.Fatal("RPC quota should be unavailable")
+	if snap.Raw["rate_limit_source"] != "session" {
+		t.Fatalf("rate_limit_source = %q, want session", snap.Raw["rate_limit_source"])
+	}
+	if !strings.Contains(snap.Raw["quota_api_error"], "HTTP 500") {
+		t.Fatalf("quota_api_error = %q, want HTTP 500", snap.Raw["quota_api_error"])
+	}
+}
+
+func TestFetchPrefersRPCWithoutCallingHTTP(t *testing.T) {
+	dir := t.TempDir()
+	stubCodexRPC(t, dir, `{"rateLimits":{"primary":{"usedPercent":34,"windowDurationMins":300}}}`, nil)
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"tokens":{"access_token":"test-token"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{ID: "rpc-first", RuntimeHints: map[string]string{
+		"config_dir": dir, "chatgpt_base_url": server.URL + "/backend-api",
+	}})
+	if err != nil || snap.Raw["rate_limit_source"] != "cli_rpc" || metricUsed(t, snap, "rate_limit_primary") != 34 || requests != 0 {
+		t.Fatalf("RPC quota should avoid HTTP: source=%q requests=%d err=%v", snap.Raw["rate_limit_source"], requests, err)
+	}
+}
+
+func TestFetchKeepsSessionWindowsWithMetadataOnlyRPC(t *testing.T) {
+	dir := t.TempDir()
+	sessions := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"total_tokens":100}},"rate_limits":{"primary":{"used_percent":20,"window_minutes":300}}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "rollout-2026-09-30T12-00-00-test.jsonl"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stubCodexRPC(t, dir, `{"rateLimits":{"limitId":"codex","credits":{"hasCredits":true,"balance":"9.99"}}}`, nil)
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{ID: "metadata-only", RuntimeHints: map[string]string{"config_dir": dir}})
+	if err != nil || metricUsed(t, snap, "rate_limit_primary") != 20 || snap.Raw["rate_limit_source"] != "session" || snap.Raw["credit_balance"] != "$9.99" {
+		t.Fatalf("metadata-only RPC must retain session windows and credits: %+v err=%v", snap, err)
+	}
+}
+
+func TestFetchReportsHTTPAuthFailureWithoutSession(t *testing.T) {
+	dir := t.TempDir()
+	stubCodexRPC(t, dir, `{}`, fmt.Errorf("test RPC failure"))
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"tokens":{"access_token":"test-token"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	snap, err := New().Fetch(context.Background(), core.AccountConfig{ID: "auth-failure", RuntimeHints: map[string]string{
+		"config_dir": dir, "chatgpt_base_url": server.URL + "/backend-api",
+	}})
+	if err != nil || snap.Status != core.StatusAuth || !strings.Contains(snap.Raw["quota_api_error"], "HTTP 401") {
+		t.Fatalf("HTTP auth failure should require login: status=%v diagnostic=%q err=%v", snap.Status, snap.Raw["quota_api_error"], err)
 	}
 }
 

@@ -21,6 +21,8 @@ func TestCodexQuotaDisplay(t *testing.T) {
 	snap.Attributes["rate_limit_primary_bucket"] = "codex"
 	snap.Metrics["rate_limit_codex_other_primary"] = core.Metric{Used: core.Float64Ptr(0), Remaining: core.Float64Ptr(100), Limit: core.Float64Ptr(100), Unit: "%", Window: "5h"}
 	snap.Attributes["rate_limit_codex_other_primary_bucket"] = "Special pool"
+	snap.Metrics["rate_limit_codex_weekly_primary"] = core.Metric{Used: core.Float64Ptr(12), Limit: core.Float64Ptr(100), Unit: "%", Window: "7d"}
+	snap.Attributes["rate_limit_codex_weekly_primary_bucket"] = "Weekly-only pool"
 	for _, width := range []int{32, 72, 120} {
 		got := strings.Join(buildCodexQuotaLines(snap, width, .2, .05, now), "\n")
 		for _, want := range []string{"Usage 7d", "34.0%", "5h: window unavailable", "Special pool", "Usage 5h", "0.0%", "resets 2h"} {
@@ -31,5 +33,36 @@ func TestCodexQuotaDisplay(t *testing.T) {
 		if strings.Contains(got, "Cache") {
 			t.Fatalf("unrelated gauge: %s", got)
 		}
+		if strings.Count(got, "5h: window unavailable") != 1 || strings.Contains(got, "7d: window unavailable") {
+			t.Fatalf("missing-window note belongs only to the main pool: %s", got)
+		}
+	}
+}
+
+func TestCodexDisplayKeepsAuthAndErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status core.Status
+		label  string
+	}{
+		{core.StatusAuth, "Auth"},
+		{core.StatusError, "Error"},
+	} {
+		snap := core.NewUsageSnapshot("codex", "test")
+		snap.Status = tc.status
+		snap.Message = "Codex unavailable"
+		got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+		if got.tagLabel != tc.label || got.summary == "" {
+			t.Fatalf("status=%v display=%+v", tc.status, got)
+		}
+	}
+}
+
+func TestCodexDisplayDoesNotUseCacheAsQuotaSummary(t *testing.T) {
+	snap := core.NewUsageSnapshot("codex", "test")
+	snap.Status = core.StatusOK
+	snap.Metrics["cache_hit_ratio"] = core.Metric{Used: core.Float64Ptr(12), Unit: "%"}
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.summary != "Quotas unavailable" || got.gaugePercent != -1 {
+		t.Fatalf("cache metric became quota summary: %+v", got)
 	}
 }

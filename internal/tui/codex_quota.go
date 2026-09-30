@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -67,10 +66,8 @@ func buildCodexQuotaLines(snap core.UsageSnapshot, width int, warn, crit float64
 				lines = append(lines, annotationIndent+dimStyle.Render(annot))
 			}
 		}
-		for _, window := range []string{"5h", "7d"} {
-			if !seen[window] {
-				lines = append(lines, dimStyle.Render(fmt.Sprintf("%s: window unavailable", window)))
-			}
+		if prefix == "rate_limit_" && seen["7d"] && !seen["5h"] {
+			lines = append(lines, dimStyle.Render("5h: window unavailable"))
 		}
 	}
 	if len(lines) == 0 {

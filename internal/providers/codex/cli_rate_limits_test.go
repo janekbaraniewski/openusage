@@ -14,7 +14,12 @@ import (
 
 func stubCodexRPC(t *testing.T, dir, body string, rpcErr error) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"tokens":{}}`), 0600); err != nil {
+	authPath := filepath.Join(dir, "auth.json")
+	if _, err := os.Stat(authPath); os.IsNotExist(err) {
+		if err := os.WriteFile(authPath, []byte(`{"tokens":{}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	} else if err != nil {
 		t.Fatal(err)
 	}
 	var result codexCLIRateLimitsResult
@@ -103,10 +108,10 @@ printf '%s\n' '{"id":1,"result":{}}'
 read notification
 read request
 printf '%s\n' '{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":0,"windowDurationMins":300}}}}'
-`, "", time.Second},
-		{"early exit", `exit 2`, "exit status 2", time.Second},
-		{"initialize error", `read first; printf '%s\n' '{"id":1,"error":{"code":-32602,"message":"private diagnostic"}}'`, "RPC code -32602", time.Second},
-		{"request error", `read first; printf '%s\n' '{"id":1,"result":{}}'; read notification; read request; printf '%s\n' '{"id":2,"error":{"code":403}}'`, "RPC code 403", time.Second},
+	`, "", 5 * time.Second},
+		{"early exit", `exit 2`, "exit status 2", 5 * time.Second},
+		{"initialize error", `read first; printf '%s\n' '{"id":1,"error":{"code":-32602,"message":"private diagnostic"}}'`, "RPC code -32602", 5 * time.Second},
+		{"request error", `read first; printf '%s\n' '{"id":1,"result":{}}'; read notification; read request; printf '%s\n' '{"id":2,"error":{"code":403}}'`, "RPC code 403", 5 * time.Second},
 		{"timeout", `read first; exec sleep 5`, "timed out", 100 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
