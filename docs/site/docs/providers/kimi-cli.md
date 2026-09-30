@@ -7,7 +7,7 @@ keywords: [kimi cli usage tracker, kimi code cli token usage, track kimi cli spe
 
 # Kimi CLI
 
-The `kimi_cli` provider reads local session logs from [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code). It aggregates sessions and per-model input, output, cache-read, and cache-write tokens. This local-data integration makes no network calls. It is separate from the [Moonshot API provider](./moonshot.md).
+The `kimi_cli` provider reads local session logs from [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code). It aggregates sessions and per-model input, output, cache-read, and cache-write tokens. Local session tracking works offline; existing Kimi Code credentials also enable read-only subscription quota requests. It is separate from the [Moonshot API provider](./moonshot.md).
 
 ## Detection and paths
 
@@ -40,6 +40,30 @@ Use `provider_paths` for provider-specific overrides. JSON paths must be absolut
 ~~~
 
 `sessions_dir` selects a sessions directory. `config_path` selects the model fallback config. Either override can be omitted; without `config_path`, OpenUsage looks beside the selected sessions directory.
+
+## Kimi Code subscription quota
+OpenUsage reads the existing access token from the newest JSON file in `~/.kimi-code/credentials/` and calls `GET https://api.kimi.com/coding/v1/usages`. The response supplies `usage_five_hour`, `usage_monthly`, and `usage_monthly_code` percentage gauges and reset times. Short-term request-rate limits are ignored because they are not subscription quota.
+
+The credential file is read-only to OpenUsage. It never sends the refresh token, refreshes OAuth, or writes Kimi Code credentials. When the access token expires, quota disappears until Kimi Code refreshes its own token; local session stats continue working. Successful and failed quota reads are cached per account for one minute, and the daemon checks again after cache expiry when it next polls the provider.
+
+Optional `provider_paths` overrides:
+
+~~~json
+{
+  "accounts": [
+    {
+      "id": "kimi_cli",
+      "provider": "kimi_cli",
+      "provider_paths": {
+        "credentials_path": "/home/you/.kimi-code/credentials/account.json",
+        "usage_api_base_url": "https://api.kimi.com/coding/v1"
+      }
+    }
+  ]
+}
+~~~
+
+`credentials_path` selects one Kimi Code credential file. A missing explicit path does not fall back to another account. `usage_api_base_url` overrides the coding API root, including its `/coding/v1` prefix. The earlier PR draft's `oauth_host` setting was removed because OpenUsage no longer refreshes tokens.
 
 ## Metrics
 
