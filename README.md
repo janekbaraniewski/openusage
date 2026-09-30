@@ -201,6 +201,7 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **Cursor** | `cursor` binary + local SQLite DBs | Plan spend & limits, per-model aggregation, Composer sessions |
 | **GitHub Copilot** | `gh` CLI + Copilot extension | Chat & completions quota, org billing, session tracking |
 | **Codex CLI** | `codex` binary + `~/.codex` | Session tokens, per-model breakdown, credits, rate limits |
+| **Muse Code** | `muse` binary + `~/.config/muse` + session logs | Session tokens, per-model breakdown, estimated cost |
 | **Gemini CLI** | `gemini` binary + `~/.gemini` | OAuth status, conversation count, per-model tokens |
 | **Antigravity CLI** | `agy` binary + `~/.gemini/antigravity-cli` | Status-line context, session tokens, model quotas |
 | **OpenCode** | `OPENCODE_API_KEY` / `ZEN_API_KEY` | Credits, activity, generation stats |

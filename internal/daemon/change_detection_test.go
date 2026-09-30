@@ -83,6 +83,15 @@ func TestChangeDetectorReturnsTrue_WhenFileModified(t *testing.T) {
 // TestChangeDetectorReturnsFalse_WhenNoFiles verifies that if data dirs don't exist,
 // HasChanged returns false (not an error).
 func TestChangeDetectorReturnsFalse_WhenNoFiles(t *testing.T) {
+	// Isolate ambient credentials: providers with global credentials (env
+	// keys, CLI auth files under HOME such as muse_code's) re-poll when
+	// credentialed, so a real login on the test machine must not leak in.
+	emptyHome := t.TempDir()
+	t.Setenv("HOME", emptyHome)
+	t.Setenv("XDG_DATA_HOME", emptyHome)
+	t.Setenv("XDG_CONFIG_HOME", emptyHome)
+	t.Setenv("META_API_KEY", "")
+	t.Setenv("MUSE_AUTH_PATH", "")
 	for _, provider := range providers.AllProviders() {
 		detector, ok := provider.(core.ChangeDetector)
 		if !ok {
