@@ -452,6 +452,46 @@ func TestComputeDisplayInfo_UsageFiveHourBranch(t *testing.T) {
 	}
 }
 
+func TestComputeDisplayInfo_RollingUsageBranchClassifiesAsUsageNotCredits(t *testing.T) {
+	// opencode's console-derived quota metrics (rolling_usage etc.) previously
+	// weren't recognized by any branch, so an account with real quota data
+	// AND a console_balance/today_api_cost metric fell through to the
+	// cost-based Credits branch instead of showing Usage like claude_code.
+	rolling := 15.0
+	weekly := 3.0
+	monthly := 49.0
+	balance := 0.0
+	todayCost := 1.55
+	snap := core.UsageSnapshot{
+		ProviderID: "opencode",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rolling_usage":     {Used: &rolling, Unit: "percent", Window: "rolling-5h"},
+			"weekly_usage":      {Used: &weekly, Unit: "percent", Window: "7d"},
+			"monthly_usage_pct": {Used: &monthly, Unit: "percent", Window: "month"},
+			"console_balance":   {Remaining: &balance, Unit: "USD", Window: "current"},
+			"today_api_cost":    {Used: &todayCost, Unit: "USD", Window: "1d"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage (opencode's rolling_usage metric should win over today_api_cost)", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.gaugePercent != 49.0 {
+		t.Fatalf("gaugePercent = %v, want 49.0 (highest of rolling/weekly/monthly)", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "5h 15%") || !strings.Contains(got.summary, "7d 3%") || !strings.Contains(got.summary, "mo 49%") {
+		t.Fatalf("summary = %q, want 5h/7d/mo percentages", got.summary)
+	}
+	if got.reason != "rolling_usage" {
+		t.Fatalf("reason = %q, want rolling_usage", got.reason)
+	}
+}
+
 func TestComputeDisplayInfo_TodayApiCostBranchWithoutFiveHour(t *testing.T) {
 	todayCost := 55.57
 	snap := core.UsageSnapshot{
