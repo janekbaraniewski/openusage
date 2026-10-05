@@ -32,3 +32,15 @@ Publish the fix for review. Build a local integration preserving Codex changes,
 back up the installed binary, atomically install it, and restart telemetry.
 Verify through the read model and dashboard. Live percentages require a valid
 access token supplied by Kimi Code itself.
+
+## Completed validation (2026-10-05)
+
+Affected Kimi, detect, daemon, telemetry, and TUI race tests passed. The local
+integration also passed Codex race tests, vet, and the CGO build. The documentation
+build succeeded without broken links. golangci-lint is not installed locally.
+A real-history probe took about three seconds cold and 25 milliseconds warm.
+The installed daemon recovered stale quota from existing SQLite history, then
+returned fresh subscription metrics after Kimi Code renewed its own access token.
+The new dashboard showed both the five-hour and monthly gauges. The previous
+binary was backed up before installation; the local integration retains the
+existing Codex quota changes.
