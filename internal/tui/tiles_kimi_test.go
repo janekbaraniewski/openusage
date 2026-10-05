@@ -73,6 +73,13 @@ func TestKimiStaleQuotaVisibleWithOtherDataDisabled(t *testing.T) {
 	snap.Resets["usage_monthly"] = now.Add(14 * 24 * time.Hour)
 	widget := kimi_cli.New().DashboardWidget()
 	widget.StandardSectionOrder = []core.DashboardStandardSection{core.DashboardSectionTopUsageProgress}
+	// A failed local scan must not hide available historical subscription gauges.
+	snap.Status = core.StatusError
+	snap.Message = "context deadline exceeded"
+	info := computeDisplayInfo(snap, widget, false)
+	if !strings.Contains(info.summary, "stale") || !strings.Contains(info.summary, "mo 70%") || info.gaugePercent != 69.8 {
+		t.Fatalf("failed poll hid quota in provider list: %+v", info)
+	}
 	for _, lines := range [][]string{
 		model.buildTileBodyLines(snap, widget, providerDisplayInfo{}, 60, false, false),
 		buildDetailGaugeLines(snap, widget, 60, 0.8, 0.9, now),
@@ -86,6 +93,10 @@ func TestKimiStaleQuotaVisibleWithOtherDataDisabled(t *testing.T) {
 		if strings.Contains(rendered, "100% in") || strings.Contains(rendered, "by reset") {
 			t.Errorf("stale quota must not project current usage: %q", rendered)
 		}
+	}
+	snap.Diagnostics = map[string]string{}
+	if text := strings.Join(kimiQuotaNotice(snap, 60), "\n"); !strings.Contains(text, "Kimi poll timed out") {
+		t.Fatalf("failed poll has no visible reason: %q", text)
 	}
 	snap.Attributes["quota_state"] = "unavailable"
 	snap.Metrics = map[string]core.Metric{}

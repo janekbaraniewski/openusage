@@ -39,6 +39,9 @@ type Provider struct {
 
 	quotaMu    sync.Mutex
 	quotaCache map[string]quotaCacheEntry
+
+	sessionMu    sync.Mutex
+	sessionCache map[string]kimiSessionCacheEntry
 }
 
 // New constructs a Kimi CLI provider with sensible widget defaults.
@@ -113,7 +116,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	if dir != "" {
 		snap.Raw["sessions_dir"] = dir
 		var err error
-		entries, err = readAllSessions(ctx, dir, readKimiConfigModel(resolveConfigPath(acct)))
+		entries, err = p.readAllSessions(ctx, dir, readKimiConfigModel(resolveConfigPath(acct)))
 		if err != nil {
 			snap.SetDiagnostic("walk_error", err.Error())
 			snap.Status = core.StatusError
@@ -145,7 +148,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 // readAllSessions walks the sessions directory and decodes every
 // wire.jsonl file it finds.
-func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiModelEntry, error) {
+func (p *Provider) readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiModelEntry, error) {
 	var all []kimiModelEntry
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -161,7 +164,7 @@ func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiMode
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		entries, perFileErr := readKimiWireFileWithModel(path, fallbackModel)
+		entries, perFileErr := p.readCachedSession(path, fallbackModel)
 		if perFileErr != nil {
 			return nil
 		}
@@ -172,6 +175,38 @@ func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiMode
 		return all, walkErr
 	}
 	return all, nil
+}
+
+type kimiSessionCacheEntry struct {
+	signature     shared.FileSignature
+	fallbackModel string
+	entries       []kimiModelEntry
+}
+
+// Reuse unchanged logs so minute-level quota retries do not repeatedly parse
+// the entire local history inside the daemon's eight-second fetch budget.
+func (p *Provider) readCachedSession(path, fallbackModel string) ([]kimiModelEntry, error) {
+	signature, err := shared.StatSignature(path)
+	if err != nil {
+		return nil, err
+	}
+	p.sessionMu.Lock()
+	cached, ok := p.sessionCache[path]
+	p.sessionMu.Unlock()
+	if ok && cached.signature.Equal(signature) && cached.fallbackModel == fallbackModel {
+		return cached.entries, nil
+	}
+	entries, err := readKimiWireFileWithModel(path, fallbackModel)
+	if err != nil {
+		return nil, err
+	}
+	p.sessionMu.Lock()
+	if p.sessionCache == nil {
+		p.sessionCache = make(map[string]kimiSessionCacheEntry)
+	}
+	p.sessionCache[path] = kimiSessionCacheEntry{signature, fallbackModel, entries}
+	p.sessionMu.Unlock()
+	return entries, nil
 }
 
 // populateSnapshot folds the per-record entries into the snapshot.

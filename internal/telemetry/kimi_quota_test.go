@@ -91,6 +91,15 @@ func TestKimiQuotaRecoveryLifecycle(t *testing.T) {
 	if snap := read("no-history"); snap.Attributes["quota_state"] != "unavailable" || snap.Metrics["usage_monthly"].Used != nil {
 		t.Fatalf("invented quota without history: %+v", snap)
 	}
+	failure.AccountID = "kimi"
+	failure.Timestamp = t0.Add(4 * time.Minute)
+	failure.Status, failure.Message = core.StatusError, "context deadline exceeded"
+	failure.Metrics = map[string]core.Metric{}
+	failure.Diagnostics = map[string]string{}
+	write(failure)
+	if snap := read("kimi"); snap.Status != core.StatusError || snap.Attributes["quota_state"] != "stale" || snap.Metrics["usage_monthly"].Used == nil || snap.Metrics["total_sessions"].Used != nil {
+		t.Fatalf("fatal poll must preserve only quota and the current error: %+v", snap)
+	}
 
 	// Equal percentages after recovery are current observations, not stale.
 	good.Timestamp = t0.Add(5 * time.Minute)

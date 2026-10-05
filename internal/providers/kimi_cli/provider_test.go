@@ -14,6 +14,47 @@ type fixedClock struct{ t time.Time }
 
 func (f fixedClock) Now() time.Time { return f.t }
 
+func TestSessionCacheTracksContentAndFallbackModel(t *testing.T) {
+	p := New()
+	path := filepath.Join(t.TempDir(), "wire.jsonl")
+	first := `{"timestamp":1735689600,"message":{"type":"StatusUpdate","payload":{"token_usage":{"input_other":1}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(first), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(model string, count int, input int64) []kimiModelEntry {
+		t.Helper()
+		entries, err := p.readCachedSession(path, model)
+		if err != nil || len(entries) != count || entries[0].Input != input || entries[0].Model != model {
+			t.Fatalf("cached session: entries=%+v err=%v", entries, err)
+		}
+		return entries
+	}
+	one := read("model-a", 1, 1)
+	if again := read("model-a", 1, 1); &one[0] != &again[0] {
+		t.Fatal("unchanged log was reparsed")
+	}
+	read("model-b", 1, 1)
+	second := `{"timestamp":1735689600,"message":{"type":"StatusUpdate","payload":{"token_usage":{"input_other":2}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(second), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Now().Add(time.Second)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	read("model-b", 1, 2)
+	if err := os.WriteFile(path, []byte(second+first), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read("model-b", 2, 2)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.readCachedSession(path, "model-b"); err == nil {
+		t.Fatal("deleted log should not remain available from cache")
+	}
+}
+
 func TestProvider_BasicMetadata(t *testing.T) {
 	p := New()
 	if p.ID() != ID {

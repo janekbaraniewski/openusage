@@ -8,6 +8,9 @@ network or credential failures, then replace them after a successful read.
 Combine the session, tile, and read-only quota work from PRs #374, #393, #394.
 Kimi Code retains exclusive ownership of OAuth refresh and credential writes.
 Check quota TTL and credential changes before adaptive local-provider backoff.
+Reuse parsed unchanged session files within each provider instance to prevent
+repeated history scans from exhausting the eight-second fetch budget. Keep
+stale quota visible in the compact provider list even during a failed poll.
 Record `quota_state` and `quota_fetched_at` in snapshot attributes and retain
 failure diagnostics. Include freshness transitions in daemon change detection.
 The daemon read model borrows only the three subscription metrics and their

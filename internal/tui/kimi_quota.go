@@ -30,6 +30,12 @@ func kimiQuotaNotice(snap core.UsageSnapshot, width int) []string {
 	if reason == "" {
 		reason = snap.Diagnostics["quota_error"]
 	}
+	if reason == "" && snap.Status == core.StatusError {
+		reason = snap.Message
+		if strings.Contains(reason, "deadline exceeded") {
+			reason = "Kimi poll timed out"
+		}
+	}
 	switch {
 	case strings.Contains(reason, "deadline exceeded"), strings.Contains(reason, "Timeout"), strings.Contains(reason, "timeout"):
 		reason = "Kimi API timed out"
