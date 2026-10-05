@@ -18,6 +18,16 @@ func (m *Model) cachedTileBodyLines(
 ) []string {
 	hideCosts := m.resolveHideCosts(snap)
 	key := tileBodyCacheKey(snap, widget, m.timeWindow, innerW, modelMixExpanded, m.hideSectionsWithNoData, hideCosts)
+	if snap.ProviderID == "kimi_cli" {
+		key += "|" + snap.Attributes["quota_state"] + "|" + snap.Attributes["quota_fetched_at"] +
+			"|" + snap.Diagnostics["quota"] + "|" + snap.Diagnostics["quota_error"]
+		if kimiQuotaStale(snap) {
+			for _, metricKey := range []string{"usage_five_hour", "usage_monthly", "usage_monthly_code"} {
+				resetAt, ok := snap.Resets[metricKey]
+				key += "|" + strconv.FormatBool(ok && !resetAt.After(m.viewNow()))
+			}
+		}
+	}
 	if lines, ok := m.tileBodyCache[key]; ok {
 		return lines
 	}

@@ -217,8 +217,9 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 	}
 	maxLines := 6
 
+	notice := kimiQuotaNotice(snap, innerW)
 	if len(snap.Metrics) == 0 {
-		return nil
+		return notice
 	}
 
 	keys := core.SortedStringKeys(snap.Metrics)
@@ -231,7 +232,8 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		})
 	}
 
-	var lines []string
+	lines := notice
+	renderedGauges := 0
 	for _, key := range keys {
 		if gaugeAllowSet != nil && !gaugeAllowSet[key] {
 			continue
@@ -252,7 +254,7 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		gauge := RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
 		windowDur, hasWindow := gaugeWindowDuration(met.Window)
 		resetAt, hasReset := snap.Resets[key]
-		if hasWindow && hasReset {
+		if hasWindow && hasReset && !kimiQuotaStale(snap) {
 			resetIn := resetAt.Sub(now)
 			elapsed := windowDur - resetIn
 			var paceFraction float64
@@ -267,7 +269,11 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 
 		labelR := lipgloss.NewStyle().Foreground(colorSubtext).Width(maxLabelW).Render(label)
 		lines = append(lines, labelR+" "+gauge)
-		if len(lines) >= maxLines {
+		if kimiQuotaStale(snap) && hasReset && !resetAt.After(now) {
+			lines = append(lines, dimStyle.Render("previous window"))
+		}
+		renderedGauges++
+		if renderedGauges >= maxLines {
 			break
 		}
 	}

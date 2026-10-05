@@ -22,7 +22,11 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		maxLines = 2
 	}
 
+	notice := kimiQuotaNotice(snap, innerW)
 	if len(snap.Metrics) == 0 {
+		if len(notice) > 0 {
+			return notice
+		}
 		// No metrics yet — show shimmer placeholders if gauges are expected.
 		return m.buildGaugeShimmerLines(widget, maxLabelW, gaugeW, maxLines)
 	}
@@ -42,7 +46,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 	now := m.viewNow()
 	annotationIndent := strings.Repeat(" ", maxLabelW+1)
 
-	var lines []string
+	lines := notice
 	renderedGauges := 0
 	for _, key := range keys {
 		if gaugeAllowSet != nil && !gaugeAllowSet[key] {
@@ -220,6 +224,12 @@ func metricHasGauge(key string, met core.Metric) bool {
 //   - "100% in 42m"                     (pace known but no reset timestamp)
 //   - ""                                 (nothing meaningful to show)
 func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core.Metric, usedPct float64, now time.Time) string {
+	if kimiQuotaStale(snap) {
+		if resetAt, ok := snap.Resets[key]; ok && !resetAt.After(now) {
+			return "previous window"
+		}
+		return ""
+	}
 	if key == "codex_credit_percent_used" {
 		return tileCodexCreditProjectionAnnotation(snap, usedPct, now)
 	}

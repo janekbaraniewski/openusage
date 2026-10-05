@@ -283,6 +283,11 @@ func loadLatestLimitSnapshot(ctx context.Context, db *sql.DB, providerID, accoun
 		return nil, nil
 	}
 	latest := &latestDecoded
+	if providerID == "kimi_cli" {
+		if err := recoverKimiQuota(ctx, db, latest); err != nil {
+			return nil, err
+		}
+	}
 	latest.SetAttribute("telemetry_root", "limit_snapshot")
 	return latest, nil
 }

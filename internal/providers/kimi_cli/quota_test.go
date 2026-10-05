@@ -26,6 +26,49 @@ const quotaFixture = `{
   }
 }`
 
+func TestQuotaTimeoutRecoversWithSamePercentages(t *testing.T) {
+	now := time.Date(2026, 9, 19, 1, 0, 0, 0, time.UTC)
+	setHome(t, t.TempDir())
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	before := writeCredentials(t, path, "active", now.Add(time.Hour))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected credential mutation request: %s", r.Method)
+		}
+		_, _ = w.Write([]byte(quotaFixture))
+	}))
+	defer srv.Close()
+	p := New()
+	p.clock = fixedClock{t: now}
+	acct := quotaAccount("one", path, srv.URL)
+	first, err := p.Fetch(context.Background(), acct)
+	if err != nil || first.Attributes["quota_state"] != "fresh" || first.Attributes["quota_fetched_at"] != now.Format(time.RFC3339Nano) {
+		t.Fatalf("initial quota failed: %+v err=%v", first, err)
+	}
+	p.clock = fixedClock{t: now.Add(quotaCacheTTL + time.Second)}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	failed, err := p.Fetch(ctx, acct)
+	if err != nil || failed.Attributes["quota_state"] != "unavailable" || failed.Diagnostics["quota_error"] == "" || failed.Metrics["usage_five_hour"].Used != nil {
+		t.Fatalf("timeout state failed: %+v err=%v", failed, err)
+	}
+	p.clock = fixedClock{t: now.Add(2*quotaCacheTTL + 2*time.Second)}
+	if changed, err := p.HasChanged(acct, time.Now()); err != nil || !changed {
+		t.Fatal("timed-out quota was not retried after TTL")
+	}
+	recovered, err := p.Fetch(context.Background(), acct)
+	if err != nil || recovered.Attributes["quota_state"] != "fresh" || len(recovered.Diagnostics) != 0 || recovered.Attributes["quota_fetched_at"] == first.Attributes["quota_fetched_at"] {
+		t.Fatalf("recovery state failed: %+v err=%v", recovered, err)
+	}
+	if *recovered.Metrics["usage_five_hour"].Used != *first.Metrics["usage_five_hour"].Used {
+		t.Fatal("fixture should recover with unchanged percentages")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("OpenUsage changed CLI credentials")
+	}
+}
+
 func writeCredentials(t *testing.T, path, token string, expiresAt time.Time) []byte {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

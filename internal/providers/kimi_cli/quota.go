@@ -153,6 +153,7 @@ func (p *Provider) quotaChanged(acct core.AccountConfig) bool {
 // persistence of its single-use refresh token.
 func (p *Provider) addQuota(ctx context.Context, acct core.AccountConfig, snap *core.UsageSnapshot) {
 	now := p.now()
+	snap.SetAttribute("quota_state", "unavailable")
 	path := resolveCredentialsPath(acct)
 	baseURL := acct.Path(PathHintUsageAPIBaseKey, defaultUsageAPIBaseURL)
 	mtime := credentialMtime(path)
@@ -161,6 +162,8 @@ func (p *Provider) addQuota(ctx context.Context, acct core.AccountConfig, snap *
 		cached.credentialsMtime.Equal(mtime) && now.Sub(cached.fetchedAt) < quotaCacheTTL {
 		if cached.usage != nil {
 			applyQuotaToSnapshot(snap, cached.usage, now)
+			snap.SetAttribute("quota_state", "fresh")
+			snap.SetAttribute("quota_fetched_at", cached.fetchedAt.UTC().Format(time.RFC3339Nano))
 		}
 		if cached.diagnostic != "" {
 			snap.SetDiagnostic(cached.diagnosticKey, cached.diagnostic)
@@ -212,8 +215,17 @@ func (p *Provider) addQuota(ctx context.Context, acct core.AccountConfig, snap *
 		diagnose("quota_error", err.Error())
 		return
 	}
+	_, fiveHour := usage.Usages["limit_5h"]
+	_, monthly := usage.Usages["limit_month_total"]
+	_, monthlyCode := usage.Usages["limit_month_code"]
+	if !fiveHour && !monthly && !monthlyCode {
+		diagnose("quota_error", "usages: subscription quota unavailable")
+		return
+	}
 	entry.usage = usage
 	applyQuotaToSnapshot(snap, usage, now)
+	snap.SetAttribute("quota_state", "fresh")
+	snap.SetAttribute("quota_fetched_at", now.UTC().Format(time.RFC3339Nano))
 }
 
 // applyQuotaToSnapshot maps subscription windows onto the standard gauge

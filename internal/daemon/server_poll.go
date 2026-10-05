@@ -98,8 +98,9 @@ func (s *Service) pollProviders(ctx context.Context) {
 
 			_, hasDetector := provider.(core.ChangeDetector)
 
-			// Adaptive backoff: skip providers that are in a backoff window.
-			if !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
+			// Kimi checks its remote quota TTL and CLI credential rotation before
+			// adaptive local backoff; its own cache bounds API calls to one/minute.
+			if account.Provider != "kimi_cli" && !s.pollScheduler.ShouldPoll(account.ID, hasDetector) {
 				s.pollStateMu.Lock()
 				state := s.pollState[account.ID]
 				s.pollStateMu.Unlock()
@@ -110,7 +111,6 @@ func (s *Service) pollProviders(ctx context.Context) {
 				// No cached snapshot yet — must fetch.
 			}
 
-			// Check if provider data has changed since last fetch (optional interface).
 			if cached := s.skipUnchangedProvider(provider, account); cached != nil {
 				s.pollScheduler.RecordPoll(account.ID, false)
 				results <- pollProviderResult{accountID: account.ID, snapshot: *cached}

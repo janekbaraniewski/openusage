@@ -138,5 +138,15 @@ func hashSnapshotMetrics(snap core.UsageSnapshot) string {
 	if data, err := json.Marshal(snap.Metrics); err == nil {
 		h.Write(data)
 	}
+	if snap.ProviderID == "kimi_cli" {
+		// Equal percentages still need publication when freshness changes.
+		metadata := []string{
+			snap.Attributes["quota_state"], snap.Attributes["quota_fetched_at"],
+			snap.Diagnostics["quota"], snap.Diagnostics["quota_error"],
+		}
+		if data, err := json.Marshal(metadata); err == nil {
+			h.Write(data)
+		}
+	}
 	return string(h.Sum(nil))
 }
