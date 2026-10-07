@@ -59,3 +59,11 @@ the stored cache. Lifecycle coverage includes successful quota, auth failure,
 payload cleanup, restart, another success, another failure, and bounded storage.
 An HTTP regression checks that a stale cache cannot advertise old quota as fresh
 and refreshes current activity/errors despite an unchanged data version.
+
+Validation completed on 2026-10-07: affected-package and Codex race tests, vet,
+CGO build, and documentation build passed. Kimi CLI renewed its own token through
+its native local usage API; the updated installed daemon and dashboard returned
+fresh quota. On an isolated copy of the real telemetry database, a simulated
+expired-token poll followed by payload compaction and database reopening kept
+the quota visibly stale and preserved current session statistics. The original
+database was backed up before rollout.
