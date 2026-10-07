@@ -9,6 +9,17 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
 
+// Used by both recovery and retention: preserve the payload that recovery
+// will actually read, including older snapshots without freshness metadata.
+const successfulKimiQuotaPayloadSQL = `CASE WHEN json_valid(r.source_payload) THEN
+		    (json_extract(r.source_payload, '$.snapshot.metrics.usage_five_hour.used') IS NOT NULL
+		     OR json_extract(r.source_payload, '$.snapshot.metrics.usage_monthly.used') IS NOT NULL
+		     OR json_extract(r.source_payload, '$.snapshot.metrics.usage_monthly_code.used') IS NOT NULL)
+		    AND coalesce(json_extract(r.source_payload, '$.snapshot.diagnostics.quota_error'), '') = ''
+		    AND coalesce(json_extract(r.source_payload, '$.snapshot.diagnostics.quota'), '') = ''
+		    AND coalesce(json_extract(r.source_payload, '$.snapshot.attributes.quota_state'), 'fresh') = 'fresh'
+		    ELSE 0 END`
+
 var kimiQuotaKeys = []string{"usage_five_hour", "usage_monthly", "usage_monthly_code"}
 
 // recoverKimiQuota keeps the latest activity and diagnostics, borrowing only
@@ -33,14 +44,7 @@ func recoverKimiQuota(ctx context.Context, db *sql.DB, latest *core.UsageSnapsho
 		WHERE e.event_type = 'limit_snapshot'
 		  AND e.provider_id = ? AND e.account_id = ?
 		  AND r.source_system = ? AND e.occurred_at <= ?
-		  AND CASE WHEN json_valid(r.source_payload) THEN
-		    (json_extract(r.source_payload, '$.snapshot.metrics.usage_five_hour.used') IS NOT NULL
-		     OR json_extract(r.source_payload, '$.snapshot.metrics.usage_monthly.used') IS NOT NULL
-		     OR json_extract(r.source_payload, '$.snapshot.metrics.usage_monthly_code.used') IS NOT NULL)
-		    AND coalesce(json_extract(r.source_payload, '$.snapshot.diagnostics.quota_error'), '') = ''
-		    AND coalesce(json_extract(r.source_payload, '$.snapshot.diagnostics.quota'), '') = ''
-		    AND coalesce(json_extract(r.source_payload, '$.snapshot.attributes.quota_state'), 'fresh') = 'fresh'
-		    ELSE 0 END
+		  AND `+successfulKimiQuotaPayloadSQL+`
 		ORDER BY e.occurred_at DESC LIMIT 1
 	`, latest.ProviderID, latest.AccountID, string(SourceSystemPoller), latest.Timestamp.UTC().Format(time.RFC3339Nano)).Scan(&payload, &occurredAt)
 	if err == sql.ErrNoRows {

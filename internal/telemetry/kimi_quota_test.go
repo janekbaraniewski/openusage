@@ -58,6 +58,11 @@ func TestKimiQuotaRecoveryLifecycle(t *testing.T) {
 	failure.Attributes["quota_state"] = "unavailable"
 	write(failure)
 
+	// Maintenance must keep the successful payload needed after this failure.
+	if _, err := store.PruneRawEventPayloads(ctx, 0, 1000); err != nil {
+		t.Fatal(err)
+	}
+
 	// Reopen the database to prove recovery survives a daemon restart.
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -109,4 +114,59 @@ func TestKimiQuotaRecoveryLifecycle(t *testing.T) {
 	if snap := read("kimi"); snap.Attributes["quota_state"] != "fresh" || len(snap.Diagnostics) != 0 || snap.Attributes["quota_fetched_at"] != good.Timestamp.Format(time.RFC3339Nano) {
 		t.Fatalf("successful recovery kept old freshness: %+v", snap)
 	}
+}
+
+func TestKimiQuotaRetentionKeepsOnlyLatestSuccessAndLatestPoll(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	t0 := time.Now().UTC().Add(-24 * time.Hour)
+	write := func(account string, hour int, quota *float64) {
+		t.Helper()
+		snap := core.NewUsageSnapshot("kimi_cli", account)
+		snap.Timestamp, snap.Status = t0.Add(time.Duration(hour)*time.Hour), core.StatusOK
+		snap.Metrics["total_sessions"] = core.Metric{Used: float64Ptr(float64(190 + hour))}
+		if quota != nil {
+			snap.Metrics["usage_monthly"] = core.Metric{Used: quota, Limit: float64Ptr(100), Unit: "%", Window: "30d"}
+		} else {
+			snap.Diagnostics["quota"] = "access token expired"
+		}
+		if err := NewQuotaSnapshotIngestor(store).Ingest(ctx, map[string]core.UsageSnapshot{account: snap}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("kimi", 0, float64Ptr(70))
+	write("kimi", 1, float64Ptr(71))
+	write("kimi", 2, nil)
+	write("kimi", 3, nil)
+	write("other", 1, float64Ptr(99))
+	prune := func() {
+		t.Helper()
+		if _, err := store.PruneRawEventPayloads(ctx, 0, 1000); err != nil {
+			t.Fatal(err)
+		}
+		var retained int
+		if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM usage_raw_events WHERE source_payload != '{}'`).Scan(&retained); err != nil {
+			t.Fatal(err)
+		}
+		if retained != 3 {
+			t.Fatalf("retained payloads = %d, want latest poll + latest success for kimi and one for other", retained)
+		}
+	}
+	prune()
+	assertQuota := func(want float64, sessions float64) {
+		t.Helper()
+		snap, err := loadLatestLimitSnapshot(ctx, store.db, "kimi_cli", "kimi")
+		if err != nil || snap == nil || snap.Metrics["usage_monthly"].Used == nil || *snap.Metrics["usage_monthly"].Used != want || *snap.Metrics["total_sessions"].Used != sessions || snap.Attributes["quota_state"] != "stale" {
+			t.Fatalf("post-prune quota = %+v err=%v", snap, err)
+		}
+	}
+	assertQuota(71, 193)
+	write("kimi", 4, float64Ptr(72))
+	write("kimi", 5, nil)
+	prune()
+	assertQuota(72, 195)
 }

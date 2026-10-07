@@ -44,3 +44,18 @@ returned fresh subscription metrics after Kimi Code renewed its own access token
 The new dashboard showed both the five-hour and monthly gauges. The previous
 binary was backed up before installation; the local integration retains the
 existing Codex quota changes.
+
+## Maintenance regression (2026-10-07)
+
+Raw-payload compaction originally retained only the latest poll. An expired-token
+poll therefore caused the previous successful quota to be blanked after one
+hour, breaking the promised fallback after a restart. Maintenance now retains
+at most the newest poll plus the latest successful Kimi quota for each account;
+normal event retention still applies. Recovery and maintenance share the same
+successful-payload predicate. Older successful payloads remain reclaimable.
+Read-model cache refresh has a one-minute maximum age even without new ingest.
+Cached Kimi quota older than two minutes is served visibly stale without mutating
+the stored cache. Lifecycle coverage includes successful quota, auth failure,
+payload cleanup, restart, another success, another failure, and bounded storage.
+An HTTP regression checks that a stale cache cannot advertise old quota as fresh
+and refreshes current activity/errors despite an unchanged data version.

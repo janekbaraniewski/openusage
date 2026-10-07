@@ -1157,9 +1157,10 @@ func (s *Store) retentionCutoff(d time.Duration) string {
 // metrics and survives a daemon restart because the damage is in the database
 // (#293).
 //
-// Only the newest limit_snapshot per (provider_id, account_id) is protected.
-// The historical ones are never read back and are the bulk of the volume, so
-// they still get reclaimed.
+// Protect the newest limit_snapshot per provider/account and the newest
+// successful Kimi subscription quota used by recovery. Other historical
+// snapshots still get reclaimed, so fallback costs at most one extra payload
+// per Kimi account within the configured event-retention window.
 func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, limit int) (int64, error) {
 	if s == nil || s.db == nil || retentionHours < 0 || limit <= 0 {
 		return 0, nil
@@ -1189,11 +1190,23 @@ func (s *Store) PruneRawEventPayloads(ctx context.Context, retentionHours int, l
 				 AND COALESCE(e.account_id, '') = latest.account_id
 				 AND e.occurred_at = latest.occurred_at
 				WHERE e.event_type = 'limit_snapshot'
+				UNION ALL
+				SELECT e.raw_event_id
+				FROM usage_events e
+				JOIN (
+					SELECT COALESCE(c.account_id, '') AS account_id, MAX(c.occurred_at) AS occurred_at
+					FROM usage_events c
+					JOIN usage_raw_events r ON r.raw_event_id = c.raw_event_id
+					WHERE c.event_type = 'limit_snapshot' AND c.provider_id = 'kimi_cli'
+					  AND r.source_system = ? AND `+successfulKimiQuotaPayloadSQL+`
+					GROUP BY 1
+				) good ON COALESCE(e.account_id, '') = good.account_id AND e.occurred_at = good.occurred_at
+				WHERE e.event_type = 'limit_snapshot' AND e.provider_id = 'kimi_cli'
 			  )
 			ORDER BY ingested_at ASC
 			LIMIT ?
 		)
-	`, cutoff, limit)
+	`, cutoff, string(SourceSystemPoller), limit)
 	if err != nil {
 		return 0, fmt.Errorf("telemetry: prune raw event payloads: %w", err)
 	}
