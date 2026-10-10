@@ -46,6 +46,28 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		costSummary.BurnRateUSD = 0
 	}
 
+	if snap.ProviderID == "kimi_cli" {
+		var parts []string
+		for _, item := range []struct{ key, label string }{
+			{"usage_five_hour", "5h"}, {"usage_monthly", "mo"}, {"usage_monthly_code", "code"},
+		} {
+			metric, ok := snap.Metrics[item.key]
+			if !ok || metric.Used == nil || (item.key == "usage_monthly_code" && *metric.Used == 0 && len(parts) > 0) {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s %.0f%%", item.label, *metric.Used))
+			info.gaugePercent = max(info.gaugePercent, *metric.Used)
+		}
+		if len(parts) > 0 {
+			info.tagEmoji, info.tagLabel, info.reason = "⚡", "Usage", "kimi_quota"
+			info.summary = strings.Join(parts, " · ")
+			if kimiQuotaStale(snap) {
+				info.summary = "stale " + info.summary
+			}
+			return info
+		}
+	}
+
 	switch snap.Status {
 	case core.StatusError:
 		info.tagEmoji = "⚠"

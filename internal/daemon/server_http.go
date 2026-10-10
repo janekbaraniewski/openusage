@@ -127,9 +127,9 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		for id, snap := range cached {
 			core.Tracef("[read_model]   %s: %d metrics", id, len(snap.Metrics))
 		}
-		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
-		// Refresh opportunistically only when the data version advanced after
-		// this entry was built. The staleness floor still debounces bursts.
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: ageKimiQuotaSnapshots(cached, s.now())})
+		// Refresh on new data or after a minute: rolling windows and quota
+		// freshness can change even without a new ingest. Debounce bursts.
 		if shouldRefreshCachedReadModel(cachedAt, cachedVersion, s.dataVersion.Load(), time.Now()) {
 			s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
 		}

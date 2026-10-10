@@ -157,3 +157,29 @@ func TestPollScheduler_UnknownAccount(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+func TestPollSchedulerKimiQuotaFreshnessChanges(t *testing.T) {
+	ps := newPollScheduler(time.Minute)
+	snap := core.NewUsageSnapshot("kimi_cli", "kimi")
+	snap.Status = core.StatusOK
+	snap.Metrics["usage_monthly"] = core.Metric{Used: ptr(69.8), Limit: ptr(100)}
+	snap.Attributes["quota_state"] = "fresh"
+	snap.Attributes["quota_fetched_at"] = "2026-10-05T08:18:48Z"
+	if !ps.SnapshotChanged("kimi", snap) || ps.SnapshotChanged("kimi", snap) {
+		t.Fatal("initial or unchanged snapshot detection failed")
+	}
+	snap.Attributes["quota_state"] = "stale"
+	snap.Diagnostics["quota_error"] = "context deadline exceeded"
+	if !ps.SnapshotChanged("kimi", snap) {
+		t.Fatal("fresh to stale with equal percentages must be published")
+	}
+	snap.Attributes["quota_state"] = "fresh"
+	snap.Diagnostics = map[string]string{}
+	if !ps.SnapshotChanged("kimi", snap) {
+		t.Fatal("recovery with equal percentages must be published")
+	}
+	snap.Attributes["quota_fetched_at"] = "2026-10-05T08:19:48Z"
+	if !ps.SnapshotChanged("kimi", snap) {
+		t.Fatal("updated successful observation time must be published")
+	}
+}

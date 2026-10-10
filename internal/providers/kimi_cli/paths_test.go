@@ -83,3 +83,54 @@ func TestResolveConfigPath_DefaultAndOverride(t *testing.T) {
 		t.Errorf("override: resolveConfigPath = %q, want %q", got, override)
 	}
 }
+
+func TestResolveSessionsDir_KimiCodeFallback(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli", Auth: "local"}
+
+	// Only the Kimi Code CLI location exists → picked up as the default.
+	kimiCodeDir := filepath.Join(home, ".kimi-code", "sessions")
+	if err := os.MkdirAll(kimiCodeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if got := resolveSessionsDir(acct); got != kimiCodeDir {
+		t.Errorf("kimi-code fallback: resolveSessionsDir = %q, want %q", got, kimiCodeDir)
+	}
+
+	// The Python Kimi CLI location wins when both exist.
+	kimiDir := filepath.Join(home, ".kimi", "sessions")
+	if err := os.MkdirAll(kimiDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if got := resolveSessionsDir(acct); got != kimiDir {
+		t.Errorf("preference: resolveSessionsDir = %q, want %q", got, kimiDir)
+	}
+}
+
+func TestResolveConfigPath_FollowsSelectedSessions(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	oldConfig := filepath.Join(home, ".kimi", "config.json")
+	if err := os.MkdirAll(filepath.Dir(oldConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldConfig, []byte(`{"model":"old"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	codeDir := filepath.Join(home, ".kimi-code")
+	if err := os.MkdirAll(filepath.Join(codeDir, "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	acct := core.AccountConfig{ID: "kimi_cli", Provider: "kimi_cli"}
+	if got := resolveConfigPath(acct); got != "" {
+		t.Fatalf("config without matching client = %q, want empty", got)
+	}
+	codeConfig := filepath.Join(codeDir, "config.json")
+	if err := os.WriteFile(codeConfig, []byte(`{"model":"new"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveConfigPath(acct); got != codeConfig {
+		t.Errorf("config = %q, want %q", got, codeConfig)
+	}
+}

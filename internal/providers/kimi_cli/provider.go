@@ -1,10 +1,10 @@
 // Package kimi_cli implements a local-data provider that reads usage
-// telemetry from Kimi CLI's per-session wire.jsonl files at
-// ~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl.
+// telemetry from the per-session wire.jsonl files of Kimi CLI
+// (~/.kimi/sessions/<group-id>/<session-uuid>/wire.jsonl) and Kimi Code CLI
+// (~/.kimi-code/sessions/<group-id>/<session-uuid>/agents/<agent>/wire.jsonl).
 //
-// No network calls are made and no authentication is required. The
-// companion ~/.kimi/config.json supplies the default model name when
-// individual records don't include one.
+// Local activity works without authentication. When Kimi Code credentials
+// exist, the provider also reads subscription quota from the usage API.
 package kimi_cli
 
 import (
@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -35,6 +36,12 @@ const allTimeWindow = "all-time"
 type Provider struct {
 	providerbase.Base
 	clock core.Clock
+
+	quotaMu    sync.Mutex
+	quotaCache map[string]quotaCacheEntry
+
+	sessionMu    sync.Mutex
+	sessionCache map[string]kimiSessionCacheEntry
 }
 
 // New constructs a Kimi CLI provider with sensible widget defaults.
@@ -53,8 +60,8 @@ func New() *Provider {
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
-					"Install Kimi CLI and run at least one session.",
-					"openusage auto-detects ~/.kimi/sessions/<group>/<session>/wire.jsonl; no configuration required.",
+					"Install Kimi CLI or Kimi Code CLI and run at least one session.",
+					"openusage auto-detects wire.jsonl under ~/.kimi/sessions and ~/.kimi-code/sessions; no configuration required.",
 				},
 			},
 			Dashboard: dashboardWidget(),
@@ -75,8 +82,8 @@ func (p *Provider) now() time.Time {
 	return time.Now()
 }
 
-// HasChanged reports whether the sessions directory or config file have
-// been modified since the given time.
+// HasChanged also refreshes remote quota after its cache expires, even when
+// local session files are unchanged.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
 	paths := make([]string, 0, 2)
 	if dir := resolveSessionsDir(acct); dir != "" {
@@ -85,16 +92,16 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 	if cfg := resolveConfigPath(acct); cfg != "" {
 		paths = append(paths, cfg)
 	}
-	if len(paths) == 0 {
-		return false, nil
+	if len(paths) > 0 && shared.AnyPathModifiedAfter(paths, since) {
+		return true, nil
 	}
-	return shared.AnyPathModifiedAfter(paths, since), nil
+	return p.quotaChanged(acct), nil
 }
 
-// Fetch walks the sessions directory and aggregates per-model totals.
+// Fetch aggregates local sessions and adds read-only subscription quota.
 //
 // Missing-directory is not an error: we return an Unknown-status snapshot
-// with a friendly message.
+// unless quota is available.
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	if strings.TrimSpace(acct.Provider) == "" {
 		acct.Provider = p.ID()
@@ -105,37 +112,43 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	snap.DailySeries = make(map[string][]core.TimePoint)
 
 	dir := resolveSessionsDir(acct)
-	if dir == "" {
+	var entries []kimiModelEntry
+	if dir != "" {
+		snap.Raw["sessions_dir"] = dir
+		var err error
+		entries, err = p.readAllSessions(ctx, dir, readKimiConfigModel(resolveConfigPath(acct)))
+		if err != nil {
+			snap.SetDiagnostic("walk_error", err.Error())
+			snap.Status = core.StatusError
+			snap.Message = "Failed to read Kimi CLI sessions directory"
+			return snap, err
+		}
+		if len(entries) > 0 {
+			populateSnapshot(&snap, entries, p.now())
+		}
+	}
+
+	p.addQuota(ctx, acct, &snap)
+	if dir == "" && len(snap.Metrics) == 0 {
 		snap.Status = core.StatusUnknown
 		snap.Message = "Kimi CLI sessions directory not found"
 		return snap, nil
 	}
-	snap.Raw["sessions_dir"] = dir
-
-	fallbackModel := readKimiConfigModel(resolveConfigPath(acct))
-
-	entries, err := readAllSessions(ctx, dir, fallbackModel)
-	if err != nil {
-		snap.SetDiagnostic("walk_error", err.Error())
-		snap.Status = core.StatusError
-		snap.Message = "Failed to read Kimi CLI sessions directory"
-		return snap, err
-	}
-	if len(entries) == 0 {
-		snap.Status = core.StatusOK
-		snap.Message = "No Kimi CLI sessions recorded"
-		return snap, nil
-	}
-
-	populateSnapshot(&snap, entries, p.now())
 	snap.Status = core.StatusOK
-	snap.Message = buildStatusMessage(snap)
+	switch {
+	case len(entries) > 0:
+		snap.Message = buildStatusMessage(snap)
+	case dir != "":
+		snap.Message = "No Kimi CLI sessions recorded"
+	default:
+		snap.Message = "Kimi Code subscription quota available"
+	}
 	return snap, nil
 }
 
 // readAllSessions walks the sessions directory and decodes every
 // wire.jsonl file it finds.
-func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiModelEntry, error) {
+func (p *Provider) readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiModelEntry, error) {
 	var all []kimiModelEntry
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -151,7 +164,7 @@ func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiMode
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		entries, perFileErr := readKimiWireFileWithModel(path, fallbackModel)
+		entries, perFileErr := p.readCachedSession(path, fallbackModel)
 		if perFileErr != nil {
 			return nil
 		}
@@ -162,6 +175,38 @@ func readAllSessions(ctx context.Context, dir, fallbackModel string) ([]kimiMode
 		return all, walkErr
 	}
 	return all, nil
+}
+
+type kimiSessionCacheEntry struct {
+	signature     shared.FileSignature
+	fallbackModel string
+	entries       []kimiModelEntry
+}
+
+// Reuse unchanged logs so minute-level quota retries do not repeatedly parse
+// the entire local history inside the daemon's eight-second fetch budget.
+func (p *Provider) readCachedSession(path, fallbackModel string) ([]kimiModelEntry, error) {
+	signature, err := shared.StatSignature(path)
+	if err != nil {
+		return nil, err
+	}
+	p.sessionMu.Lock()
+	cached, ok := p.sessionCache[path]
+	p.sessionMu.Unlock()
+	if ok && cached.signature.Equal(signature) && cached.fallbackModel == fallbackModel {
+		return cached.entries, nil
+	}
+	entries, err := readKimiWireFileWithModel(path, fallbackModel)
+	if err != nil {
+		return nil, err
+	}
+	p.sessionMu.Lock()
+	if p.sessionCache == nil {
+		p.sessionCache = make(map[string]kimiSessionCacheEntry)
+	}
+	p.sessionCache[path] = kimiSessionCacheEntry{signature, fallbackModel, entries}
+	p.sessionMu.Unlock()
+	return entries, nil
 }
 
 // populateSnapshot folds the per-record entries into the snapshot.

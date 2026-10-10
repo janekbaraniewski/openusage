@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -26,11 +27,44 @@ func (s *Service) computeReadModel(
 	})
 	core.Tracef("[read_model_perf] computeReadModel TOTAL: %dms (window=%s, accounts=%d, results=%d)",
 		time.Since(start).Milliseconds(), tw, len(req.Accounts), len(result))
-	return result, err
+	return ageKimiQuotaSnapshots(result, s.now()), err
 }
 
 func shouldRefreshCachedReadModel(cachedAt time.Time, cachedVersion, currentVersion uint64, now time.Time) bool {
-	return currentVersion > cachedVersion && now.Sub(cachedAt) > 2*time.Second
+	age := now.Sub(cachedAt)
+	return age > 2*time.Second && (currentVersion > cachedVersion || age >= time.Minute)
+}
+
+// Cached reads must not describe an old observation as live quota while an
+// asynchronous refresh is pending. Clone only changed metadata; cache entries
+// and other provider snapshots remain immutable.
+func ageKimiQuotaSnapshots(snapshots map[string]core.UsageSnapshot, now time.Time) map[string]core.UsageSnapshot {
+	out := snapshots
+	cloned := false
+	for id, snap := range snapshots {
+		if snap.ProviderID != "kimi_cli" || snap.Attributes["quota_state"] != "fresh" {
+			continue
+		}
+		observed, err := time.Parse(time.RFC3339Nano, snap.Attributes["quota_fetched_at"])
+		if err != nil {
+			observed = snap.Timestamp
+		}
+		if !observed.IsZero() && now.Sub(observed) < 2*time.Minute {
+			continue
+		}
+		if !cloned {
+			out = maps.Clone(snapshots)
+			cloned = true
+		}
+		snap.Attributes = maps.Clone(snap.Attributes)
+		snap.Diagnostics = maps.Clone(snap.Diagnostics)
+		snap.SetAttribute("quota_state", "stale")
+		if snap.Diagnostics["quota"] == "" && snap.Diagnostics["quota_error"] == "" {
+			snap.SetDiagnostic("quota", "Waiting for updated Kimi quota")
+		}
+		out[id] = snap
+	}
+	return out
 }
 
 func (s *Service) refreshReadModelCacheAsync(
