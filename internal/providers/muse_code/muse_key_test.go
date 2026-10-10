@@ -139,6 +139,7 @@ func TestEnrichQuota_KeyUnauthorizedFallsBackToProbe(t *testing.T) {
 	// Fake HOME plus a stubbed keychain: the 401 refresh path uses real
 	// file/keychain readers, which must never see real credentials here.
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(os.TempDir(), "muse-quota-memory-test-"+strings.Replace(t.Name(), "/", "-", -1)+".json"))
 	stubMuseKeychainBlob(t, nil, false)
 	stubMuseAPIKey(t, "test-key", true)
@@ -243,6 +244,7 @@ func TestSubscriptionUsageFromKey_FallsBackToOuterTierID(t *testing.T) {
 func TestUserKeyFileReadWithoutWrite(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
 	dir := filepath.Join(home, ".config", "openusage")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -269,6 +271,7 @@ func TestUserKeyFileReadWithoutWrite(t *testing.T) {
 func TestUserKeyFileRawStringReadOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
 	dir := filepath.Join(home, ".config", "openusage")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -291,6 +294,7 @@ func TestUserKeyFileRawStringReadOnly(t *testing.T) {
 func TestOAuthFirstBootstrapsFromCLIFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
 	plantMuseCLIAuthFile(t, home, "fresh-token")
 	useRealMuseOAuthLoader(t)
@@ -321,6 +325,7 @@ func TestOAuthFirstBootstrapsFromCLIFile(t *testing.T) {
 func TestOAuthRefresh_StaleMemoRebootstraps(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
 	plantMuseCLIAuthFile(t, home, "fresh-token")
 	useRealMuseOAuthLoader(t)
@@ -361,6 +366,7 @@ func TestOAuthRefresh_StaleMemoRebootstraps(t *testing.T) {
 func TestOAuthRefresh_NoRefreshFallsBackToProbe(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("MUSE_QUOTA_MEMORY_PATH", filepath.Join(home, "muse-quota-memory.json"))
 	// NB: seed after useRealMuseOAuthLoader — it resets the memo on entry.
 	useRealMuseOAuthLoader(t)

@@ -23,8 +23,8 @@ func TestPopulateSnapshot_EmitsPerModelMetrics(t *testing.T) {
 
 	slug := "muse_spark_1_3"
 	want := map[string]float64{
-		"model_" + slug + "_input_tokens":  2000,
-		"model_" + slug + "_output_tokens": 1000,
+		"model_" + slug + "_input_tokens":      2000,
+		"model_" + slug + "_output_tokens":     1000,
 		"model_" + slug + "_cache_read_tokens": 200,
 		"model_" + slug + "_reasoning_tokens":  50,
 		"model_" + slug + "_requests":          2,
