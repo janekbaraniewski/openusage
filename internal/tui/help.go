@@ -377,11 +377,16 @@ func (m Model) splashProgressLines() []string {
 			if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
 				msg = msg[:idx]
 			}
-			if len(msg) > 60 {
-				msg = msg[:57] + "..."
-			}
 		}
-		lines = append(lines, "  "+errStyle.Render("✗")+" "+errStyle.Render(msg))
+		// Wrap rather than truncate: the useful part of a launchctl/systemctl
+		// error (exit code, reason) is at the end of the line.
+		for i, part := range wrapSplashText(msg, 64, 4) {
+			prefix := "  " + errStyle.Render("✗") + " "
+			if i > 0 {
+				prefix = "    "
+			}
+			lines = append(lines, prefix+errStyle.Render(part))
+		}
 		lines = append(lines, "  "+dim.Render("Try: openusage telemetry daemon status"))
 		lines = append(lines, "  "+dim.Render("If needed: openusage telemetry daemon install"))
 
@@ -390,12 +395,55 @@ func (m Model) splashProgressLines() []string {
 			lines = append(lines, done("Background helper installed"))
 		}
 		lines = append(lines, done("Background helper running"))
+		if warning := m.daemonWarning(); warning != "" {
+			for _, part := range wrapSplashText(warning, 64, 4) {
+				lines = append(lines, "    "+warn.Render(part))
+			}
+		}
 		if !m.hasData {
 			lines = append(lines, spin("Fetching usage data..."))
 		}
 	}
 
 	return lines
+}
+
+// wrapSplashText word-wraps text to width columns, keeping at most maxLines
+// lines (the last one ellipsised when more text remains).
+func wrapSplashText(text string, width, maxLines int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+	var out []string
+	cur := ""
+	for _, w := range words {
+		for lipgloss.Width(w) > width {
+			if cur != "" {
+				out = append(out, cur)
+				cur = ""
+			}
+			out = append(out, w[:width])
+			w = w[width:]
+		}
+		switch {
+		case cur == "":
+			cur = w
+		case lipgloss.Width(cur)+1+lipgloss.Width(w) <= width:
+			cur += " " + w
+		default:
+			out = append(out, cur)
+			cur = w
+		}
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	if maxLines > 0 && len(out) > maxLines {
+		out = out[:maxLines]
+		out[maxLines-1] = truncateToWidth(out[maxLines-1]+" ...", width)
+	}
+	return out
 }
 
 func (m Model) resolveLoadingMessage(message, fallback string) string {
