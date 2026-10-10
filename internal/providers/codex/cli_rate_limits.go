@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,13 +158,11 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 		binary = "codex"
 	}
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	rpcCtx, cancel := context.WithTimeout(ctx, codexRPCTimeout(ctx, time.Now()))
 	defer cancel()
 	cmd := exec.CommandContext(rpcCtx, binary, "app-server", "--stdio")
 	cmd.Stderr = io.Discard
-	if configDir != "" {
-		cmd.Env = append(os.Environ(), "CODEX_HOME="+configDir)
-	}
+	cmd.Env = codexAppServerEnv(os.Environ(), binary, configDir)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -246,6 +245,63 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: parsing app-server rate limits: %w", err)
 	}
 	return result, nil
+}
+
+// codexRPCMaxTimeout bounds the app-server round trip when the caller has no
+// tighter deadline.
+const codexRPCMaxTimeout = 8 * time.Second
+
+// codexRPCTimeout returns how long the app-server RPC may run. The daemon
+// polls each provider with an 8s deadline; letting the RPC use all of it
+// left no time for the HTTP quota fallback, so the RPC gets at most half of
+// the remaining budget.
+func codexRPCTimeout(ctx context.Context, now time.Time) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return codexRPCMaxTimeout
+	}
+	half := deadline.Sub(now) / 2
+	if half <= 0 {
+		return time.Millisecond
+	}
+	return min(half, codexRPCMaxTimeout)
+}
+
+// codexAppServerEnv builds the app-server environment. When codex is resolved
+// to an absolute path, its directory is put first on PATH: npm/nvm installs
+// ship codex as a `#!/usr/bin/env node` script next to the node binary, and
+// the daemon's launchd/systemd PATH usually does not include that directory.
+func codexAppServerEnv(base []string, binary, configDir string) []string {
+	env := make([]string, 0, len(base)+1)
+	binDir := ""
+	if filepath.IsAbs(binary) {
+		binDir = filepath.Dir(binary)
+	}
+	pathSet := false
+	for _, kv := range base {
+		if binDir != "" && strings.HasPrefix(kv, "PATH=") {
+			current := strings.TrimPrefix(kv, "PATH=")
+			if !slices.Contains(filepath.SplitList(current), binDir) {
+				if current == "" {
+					kv = "PATH=" + binDir
+				} else {
+					kv = "PATH=" + binDir + string(os.PathListSeparator) + current
+				}
+			}
+			pathSet = true
+		}
+		if configDir != "" && strings.HasPrefix(kv, "CODEX_HOME=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	if binDir != "" && !pathSet {
+		env = append(env, "PATH="+binDir)
+	}
+	if configDir != "" {
+		env = append(env, "CODEX_HOME="+configDir)
+	}
+	return env
 }
 
 func writeCodexRPCRequest(stdin io.Writer, request string) error {
