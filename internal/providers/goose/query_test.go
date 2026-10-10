@@ -419,9 +419,10 @@ func TestQueryGooseSessions_MissingModelConfigColumn(t *testing.T) {
 }
 
 // TestQueryGooseSessions_ConcurrentWrite simulates the host AI tool writing
-// to sessions.db while our reader is open. Read-only + immutable mode means
-// the reader sees a stable snapshot and does not race with the writer or
-// hold a shared lock.
+// to sessions.db while our reader is open. The reader must not use
+// immutable=1: on a file that is being written, immutable skips locking and
+// intermittently reads a half-written page ("database disk image is
+// malformed"). A plain read-only connection with a busy timeout does not.
 func TestQueryGooseSessions_ConcurrentWrite(t *testing.T) {
 	opts := schemaOpts{}
 	dbPath := makeTempDB(t, opts)
@@ -444,6 +445,11 @@ func TestQueryGooseSessions_ConcurrentWrite(t *testing.T) {
 	defer writer.Close()
 	if _, err := writer.Exec("PRAGMA busy_timeout = 1000"); err != nil {
 		t.Fatalf("busy_timeout: %v", err)
+	}
+	// Goose opens sessions.db in WAL mode (busy_timeout 30s), so mirror that:
+	// readers then see a committed snapshot and never wait on the writer.
+	if _, err := writer.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		t.Fatalf("journal_mode: %v", err)
 	}
 
 	stop := make(chan struct{})
@@ -485,6 +491,42 @@ func TestQueryGooseSessions_ConcurrentWrite(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// TestQueryGooseSessions_SeesUncheckpointedWALRows pins the other half of
+// dropping immutable=1: with Goose's WAL journal, a fresh session lives only
+// in sessions.db-wal until a checkpoint, and an immutable reader ignores the
+// WAL entirely, so the newest sessions never showed up.
+func TestQueryGooseSessions_SeesUncheckpointedWALRows(t *testing.T) {
+	dbPath := makeTempDB(t, schemaOpts{})
+
+	writer, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer writer.Close()
+	writer.SetMaxOpenConns(1)
+	for _, pragma := range []string{"PRAGMA journal_mode = WAL", "PRAGMA wal_autocheckpoint = 0"} {
+		if _, err := writer.Exec(pragma); err != nil {
+			t.Fatalf("%s: %v", pragma, err)
+		}
+	}
+	// Keep the writer connection open so closing it cannot checkpoint.
+	if _, err := writer.Exec(
+		`INSERT INTO sessions (id, created_at, model_config_json, provider_name,
+			accumulated_input_tokens, accumulated_output_tokens, accumulated_total_tokens)
+			VALUES ('wal_only', '2025-05-18T10:30:00Z', '{"model_name": "test-model"}', 'test', 10, 5, 15)`,
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	result, err := queryGooseSessions(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("queryGooseSessions: %v", err)
+	}
+	if len(result.Sessions) != 1 || result.Sessions[0].ID != "wal_only" {
+		t.Fatalf("sessions = %+v, want the single WAL-only row", result.Sessions)
+	}
 }
 
 // TestQueryGooseSessions_OlderSchemaNoProviderName covers a schema before
