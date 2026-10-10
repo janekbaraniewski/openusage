@@ -79,6 +79,9 @@ type DaemonStatusMsg struct {
 	Status      DaemonStatus
 	Message     string
 	InstallHint string
+	// Warning is a non-blocking notice shown while the helper is running in
+	// a degraded state (older build that could not be upgraded).
+	Warning string
 }
 
 type AppUpdateMsg struct {
@@ -101,6 +104,7 @@ type filterState struct {
 type daemonState struct {
 	status      DaemonStatus
 	message     string
+	warning     string
 	installing  bool
 	installDone bool // true after a successful install in this session
 

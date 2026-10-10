@@ -36,6 +36,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DaemonStatusMsg:
 		m.daemon.status = msg.Status
 		m.daemon.message = msg.Message
+		m.daemon.warning = strings.TrimSpace(msg.Warning)
 		if msg.Status == DaemonRunning {
 			m.daemon.installing = false
 		}
