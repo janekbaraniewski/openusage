@@ -110,7 +110,19 @@ func TestProvider_BasicMetadata(t *testing.T) {
 	}
 }
 
+// isolateHermesHome points every default Hermes location at an empty temp
+// dir so resolveDBPath cannot fall back to a real ~/.hermes/state.db on
+// machines where Hermes is installed.
+func isolateHermesHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HERMES_HOME", "")
+}
+
 func TestProvider_Fetch_MissingDB(t *testing.T) {
+	isolateHermesHome(t)
 	p := New()
 	p.clock = fixedClock{t: time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)}
 	acct := core.AccountConfig{ID: "hermes", Provider: "hermes", Auth: "local"}
