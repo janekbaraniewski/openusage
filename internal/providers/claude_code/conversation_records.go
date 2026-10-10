@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -43,50 +44,63 @@ func parseConversationRecords(path string) []conversationRecord {
 
 	for scanner.Scan() {
 		lineNumber++
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+		if rec, ok := conversationRecordFromLine(scanner.Bytes(), lineNumber, path, agentLabel); ok {
+			records = append(records, rec)
 		}
-
-		var entry jsonlEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Type != "assistant" || entry.Message == nil {
-			continue
-		}
-		ts, ok := parseJSONLTimestamp(entry.Timestamp)
-		if !ok {
-			continue
-		}
-		model := entry.Message.Model
-		if model == "" {
-			model = "unknown"
-		}
-		records = append(records, conversationRecord{
-			lineNumber: lineNumber,
-			timestamp:  ts,
-			model:      model,
-			usage:      entry.Message.Usage,
-			requestID:  entry.RequestID,
-			messageID:  entry.Message.ID,
-			sessionID:  entry.SessionID,
-			cwd:        entry.CWD,
-			sourcePath: path,
-			content:    entry.Message.Content,
-			agentID:    agentLabel,
-			costUSD:    entry.CostUSD,
-		})
 	}
 	return mergeStreamingDuplicates(records)
 }
 
+// conversationRecordFromLine decodes one JSONL line into an assistant
+// conversationRecord. The dashboard parser and both telemetry parsers (full
+// file and append-only) share it so every path runs the same records through
+// mergeStreamingDuplicates.
+func conversationRecordFromLine(line []byte, lineNumber int, path, agentLabel string) (conversationRecord, bool) {
+	if len(line) == 0 {
+		return conversationRecord{}, false
+	}
+	var entry jsonlEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return conversationRecord{}, false
+	}
+	if entry.Type != "assistant" || entry.Message == nil {
+		return conversationRecord{}, false
+	}
+	ts, ok := parseJSONLTimestamp(entry.Timestamp)
+	if !ok {
+		return conversationRecord{}, false
+	}
+	model := entry.Message.Model
+	if model == "" {
+		model = "unknown"
+	}
+	return conversationRecord{
+		lineNumber: lineNumber,
+		timestamp:  ts,
+		model:      model,
+		usage:      entry.Message.Usage,
+		requestID:  entry.RequestID,
+		messageID:  entry.Message.ID,
+		sessionID:  entry.SessionID,
+		cwd:        entry.CWD,
+		sourcePath: path,
+		content:    entry.Message.Content,
+		agentID:    agentLabel,
+		costUSD:    entry.CostUSD,
+	}, true
+}
+
 // mergeStreamingDuplicates collapses records that share a non-empty
-// `messageId:requestId` composite key into a single record whose token fields
-// are the per-field MAX across the duplicates. Claude Code streams partial
-// usage records during a turn; in the absence of this merge we either
-// undercount (first-wins) or double-count (sum). MAX preserves the final
-// totals reported for the message.
+// `messageId:requestId` composite key into a single record. Claude Code
+// streams one assistant message as several lines, one content block per line
+// (thinking, text, then each tool_use), and every line repeats the message's
+// usage: input and cache counts are identical across lines while
+// output_tokens grows to the final total on the last line. So:
+//
+//   - token fields take the per-field MAX (summing would multiply input and
+//     cache tokens by the line count; first-wins undercounts output), and
+//   - content blocks are unioned in line order, because keeping only the
+//     first line drops every tool_use that arrives on a later line.
 //
 // Records without enough information to form a composite key are passed
 // through unchanged; downstream block-level dedup still applies.
@@ -106,9 +120,10 @@ func mergeStreamingDuplicates(records []conversationRecord) []conversationRecord
 		}
 		if existingIdx, ok := indexByKey[key]; ok {
 			mergeUsageMax(out[existingIdx].usage, rec.usage)
+			out[existingIdx].content = appendNewContentBlocks(out[existingIdx].content, rec.content)
 			// Prefer the earliest timestamp so block boundaries stay
-			// stable; everything else (content, source path) stays with
-			// the first record we encountered.
+			// stable; line number and source path stay with the first
+			// record we encountered.
 			if rec.timestamp.Before(out[existingIdx].timestamp) {
 				out[existingIdx].timestamp = rec.timestamp
 			}
@@ -125,6 +140,37 @@ func mergeStreamingDuplicates(records []conversationRecord) []conversationRecord
 		out = append(out, rec)
 	}
 	return out
+}
+
+// appendNewContentBlocks appends the blocks of a later streamed line that the
+// merged record does not hold yet. Blocks with an id (tool_use) match by id,
+// id-less blocks by type, name and input, so a line repeated verbatim in the
+// same file does not count its tool call twice.
+func appendNewContentBlocks(dst, src []jsonlContent) []jsonlContent {
+	for _, block := range src {
+		if !containsContentBlock(dst, block) {
+			dst = append(dst, block)
+		}
+	}
+	return dst
+}
+
+func containsContentBlock(blocks []jsonlContent, block jsonlContent) bool {
+	for _, existing := range blocks {
+		if existing.Type != block.Type {
+			continue
+		}
+		if existing.ID != "" || block.ID != "" {
+			if existing.ID == block.ID {
+				return true
+			}
+			continue
+		}
+		if existing.Name == block.Name && reflect.DeepEqual(existing.Input, block.Input) {
+			return true
+		}
+	}
+	return false
 }
 
 func streamingMergeKey(r conversationRecord) string {
