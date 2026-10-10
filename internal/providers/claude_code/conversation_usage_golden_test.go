@@ -276,8 +276,10 @@ func TestReadConversationJSONL_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (run with -update-golden to create): %v", err)
 	}
-	if got != string(want) {
-		t.Fatalf("golden mismatch\n%s", lineDiff(string(want), got))
+	// Tolerate a CRLF checkout of the golden file (git autocrlf on Windows).
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if got != wantStr {
+		t.Fatalf("golden mismatch\n%s", lineDiff(wantStr, got))
 	}
 }
 
