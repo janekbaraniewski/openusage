@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.26.1 (2026-10-10)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump compression from 1.8.1 to 1.8.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/418
+* deps(docs): bump proxy-addr from 2.0.7 to 2.0.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/420
+* deps(docs): bump shell-quote from 1.10.0 to 1.12.0 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/419
+* deps(docs): bump joi from 17.13.7 to 17.13.8 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/417
+* deps(docs): bump source-map-js from 1.2.1 to 1.2.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/416
+* deps(website): bump source-map-js from 1.2.1 to 1.2.2 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/415
+### Other Changes
+* fix: root-cause flaky race/timing tests by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/413
+* fix(cli): refuse to start the dashboard without a TTY by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/411
+* fix(codex): register codex in the daemon when its binary is off the service PATH by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/412
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.0...v0.26.1
+
 ## 0.26.0 (2026-10-10)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
