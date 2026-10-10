@@ -36,6 +36,12 @@ Tracks session tokens, per-model and per-client breakdown, credits, and rate lim
 
 ![Codex CLI provider](../assets/codex.png)
 
+### Command Code
+
+**Detection:** `COMMAND_CODE_API_KEY` environment variable, `~/.commandcode/auth.json`, or the `command-code` / `cmd` / `cmdc` binary
+
+Tracks the credit balance, rolling 5-hour and weekly usage windows (percent used, cap, reset time), plan and billing period, and billing-period/today spend, requests, and tokens from the Command Code billing API. The CLI's stored API key is adopted automatically when present.
+
 ### Gemini CLI
 
 **Detection:** `gemini` binary + `~/.gemini` directory
