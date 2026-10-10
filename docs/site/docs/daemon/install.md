@@ -123,6 +123,8 @@ If the dashboard shows "telemetry: connected" in the Telemetry settings tab (<kb
 
 - **`go run` install rejected.** Build with `make build` and put the binary on `$PATH` before running `daemon install`.
 - **Multiple binaries on `$PATH`.** The plist or service unit pins the absolute path captured at install time. Reinstall (`uninstall` then `install`) after moving the binary.
+- **Automatic upgrades.** When the dashboard finds a helper from an older build, it reinstalls the service from its own binary, at most once per dashboard process. It never downgrades a helper that is newer than itself, and a local build without a version (`dev`) never replaces a released helper. In those cases the dashboard keeps using the running helper and shows a yellow warning in the footer. Run `openusage telemetry daemon install` from the binary you want the helper to use.
+- **Several OpenUsage versions at once.** Every dashboard shares one background service. Dashboards from 0.25.x and earlier still running in other terminals will reinstall their own version when they see a different one, which can restart the helper over and over. Quit or upgrade the old dashboards. See [Daemon issues](../troubleshooting/daemon-issues.md#dashboard-stuck-on-upgrade-telemetry-daemon-service).
 - **Linux without lingering.** If `systemctl --user` services do not survive logout, enable lingering once: `loginctl enable-linger $USER`.
 
 ## Next steps

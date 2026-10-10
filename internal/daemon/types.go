@@ -187,6 +187,9 @@ type DaemonState struct {
 	Status      DaemonStatus
 	Message     string
 	InstallHint string
+	// Warning is set while Running in a degraded state, e.g. the daemon on
+	// the socket is an older build that could not be upgraded automatically.
+	Warning string
 }
 
 type StateHandler func(DaemonState)

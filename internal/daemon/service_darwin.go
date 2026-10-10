@@ -4,11 +4,14 @@ package daemon
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 )
 
 func (m ServiceManager) Install() error {
@@ -48,29 +51,124 @@ func (m ServiceManager) installLaunchd() error {
 		return fmt.Errorf("write launchd plist: %w", err)
 	}
 
-	var lastErr error
+	unlock, err := acquireInstallLock(filepath.Join(m.stateDir, "daemon.install.lock"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	var errs []error
 	for _, domain := range m.domainCandidates() {
-		_, _ = RunCommand("launchctl", "bootout", domain+"/"+LaunchdDaemonLabel)
-		if _, err := RunCommand("launchctl", "bootstrap", domain, m.unitPath); err != nil {
-			lastErr = err
-			continue
-		}
-		if _, err := RunCommand("launchctl", "kickstart", domain+"/"+LaunchdDaemonLabel); err != nil && !isLaunchctlAlreadyRunning(err) {
-			lastErr = err
+		if err := m.reloadLaunchdService(domain); err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		return nil
 	}
-	if lastErr != nil {
-		return lastErr
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return fmt.Errorf("launchd bootstrap failed")
+}
+
+// launchctlCommand and launchctlSleep are indirections so tests can drive the
+// launchd reload sequence without touching the real launchd.
+var (
+	launchctlCommand = func(args ...string) (string, error) { return RunCommand("launchctl", args...) }
+	launchctlSleep   = time.Sleep
+)
+
+const (
+	launchdUnloadTimeout     = 5 * time.Second
+	launchdUnloadPoll        = 100 * time.Millisecond
+	launchdBootstrapAttempts = 4
+)
+
+// reloadLaunchdService replaces the loaded service in one launchd domain with
+// the plist currently on disk: bootout, wait until launchd has actually
+// unloaded the label, bootstrap, kickstart.
+//
+// `launchctl bootout` returns before the job is fully torn down, and another
+// openusage process (an older dashboard in another terminal, for example) can
+// re-bootstrap the label in between. Either way `launchctl bootstrap` then
+// fails with "Bootstrap failed: 5: Input/output error" (or 37, "Operation
+// already in progress"), so those errors are retried after another bootout.
+func (m ServiceManager) reloadLaunchdService(domain string) error {
+	target := domain + "/" + LaunchdDaemonLabel
+	var lastErr error
+	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
+		if attempt > 0 {
+			launchctlSleep(time.Duration(attempt) * 250 * time.Millisecond)
+		}
+		_, _ = launchctlCommand("bootout", target)
+		waitForLaunchdUnload(target)
+
+		_, err := launchctlCommand("bootstrap", domain, m.unitPath)
+		if err != nil {
+			lastErr = err
+			if isLaunchctlBootstrapRetryable(err) {
+				continue
+			}
+			return err
+		}
+		if _, err := launchctlCommand("kickstart", target); err != nil && !isLaunchctlAlreadyRunning(err) {
+			return err
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func waitForLaunchdUnload(target string) {
+	for waited := time.Duration(0); waited < launchdUnloadTimeout; waited += launchdUnloadPoll {
+		if _, err := launchctlCommand("print", target); err != nil {
+			return
+		}
+		launchctlSleep(launchdUnloadPoll)
+	}
+}
+
+func isLaunchctlBootstrapRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "bootstrap failed: 5:") ||
+		strings.Contains(msg, "input/output error") ||
+		strings.Contains(msg, "bootstrap failed: 37:") ||
+		strings.Contains(msg, "operation already in progress") ||
+		strings.Contains(msg, "service already loaded")
+}
+
+// acquireInstallLock serialises service (re)installs across openusage
+// processes so two dashboards don't interleave bootout/bootstrap calls.
+func acquireInstallLock(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open install lock: %w", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+			_ = f.Close()
+			return nil, fmt.Errorf("acquire install lock %s: %w", path, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 func (m ServiceManager) uninstallLaunchd() error {
 	var lastErr error
 	for _, domain := range m.domainCandidates() {
-		_, err := RunCommand("launchctl", "bootout", domain+"/"+LaunchdDaemonLabel)
+		_, err := launchctlCommand("bootout", domain+"/"+LaunchdDaemonLabel)
 		if err != nil {
 			if isLaunchctlNoSuchProcess(err) {
 				continue
@@ -106,7 +204,7 @@ func isLaunchctlAlreadyRunning(err error) bool {
 func (m ServiceManager) startLaunchd() error {
 	var lastErr error
 	for _, domain := range m.domainCandidates() {
-		if _, err := RunCommand("launchctl", "kickstart", domain+"/"+LaunchdDaemonLabel); err == nil || isLaunchctlAlreadyRunning(err) {
+		if _, err := launchctlCommand("kickstart", domain+"/"+LaunchdDaemonLabel); err == nil || isLaunchctlAlreadyRunning(err) {
 			return nil
 		} else {
 			lastErr = err
@@ -117,11 +215,11 @@ func (m ServiceManager) startLaunchd() error {
 	}
 	var bootstrapErr error
 	for _, domain := range m.domainCandidates() {
-		if _, err := RunCommand("launchctl", "bootstrap", domain, m.unitPath); err != nil {
+		if _, err := launchctlCommand("bootstrap", domain, m.unitPath); err != nil {
 			bootstrapErr = err
 			continue
 		}
-		if _, err := RunCommand("launchctl", "kickstart", domain+"/"+LaunchdDaemonLabel); err == nil || isLaunchctlAlreadyRunning(err) {
+		if _, err := launchctlCommand("kickstart", domain+"/"+LaunchdDaemonLabel); err == nil || isLaunchctlAlreadyRunning(err) {
 			return nil
 		} else {
 			bootstrapErr = err

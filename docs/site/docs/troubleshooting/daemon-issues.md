@@ -46,6 +46,44 @@ ls -ld ~/.local ~/.local/state ~/.local/state/openusage 2>/dev/null
 
 Fix permissions with `chown` / `chmod` or pick a different state dir via `XDG_STATE_HOME`.
 
+## Dashboard stuck on "upgrade telemetry daemon service"
+
+Symptoms: the startup screen shows something like
+
+```
+✗ upgrade telemetry daemon service: launchctl bootstrap user/501 ... failed:
+  exit status 5 (Bootstrap failed: 5: Input/output error)
+```
+
+and the dashboard never loads.
+
+### Cause: two OpenUsage versions fighting over one service
+
+Every dashboard talks to the same background service (`com.openusage.telemetryd` on macOS). Older dashboards (0.25.x and earlier) reinstall the service whenever its version differs from their own. If you run a new build while an older dashboard is still open in another terminal or tmux pane, each one keeps replacing the other's service. A `launchctl bootstrap` that lands while the other process has just loaded the service fails with error 5.
+
+From the release after 0.25.1, the dashboard:
+
+- waits for launchd to finish unloading the old service and retries the bootstrap on error 5 or 37,
+- serialises reinstalls across OpenUsage processes with a lock file (`~/.local/state/openusage/daemon.install.lock`),
+- upgrades the service automatically at most once per process and never downgrades it,
+- keeps going with the helper that is running and shows a yellow warning instead of stopping on the startup screen.
+
+Old dashboards that are still running don't have these fixes, so they can still reinstall their own version.
+
+Fix:
+
+```bash
+# 1. Find every running OpenUsage dashboard and the binary it runs from
+ps -axo pid,lstart,command | grep '[o]penusage'
+# 2. Quit the old ones (q in their pane, or kill <pid>), or upgrade them:
+brew upgrade openusage
+# 3. Reinstall the service from the binary you want to keep
+openusage telemetry daemon install        # or ./bin/openusage telemetry daemon install
+openusage telemetry daemon status         # "Overall compatibility: yes"
+```
+
+`openusage telemetry daemon status` shows both sides. `Service program` is the binary the installed plist or unit launches, `Executable (this binary)` is the binary you just ran, and `Daemon version` is what is actually answering on the socket. If `Service program` changes back after you install, another OpenUsage process reinstalled the service. `openusage telemetry daemon install` now checks the helper's version after installing and reports this case instead of claiming success. `Provider registry ... (compatible: no)` means the helper was built with a different set of providers.
+
 ## Socket errors (`EACCES`, `ECONNREFUSED`)
 
 Symptoms: TUI shows "daemon not reachable" or hooks log socket errors.
