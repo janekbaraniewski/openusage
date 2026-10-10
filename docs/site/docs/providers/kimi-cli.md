@@ -7,7 +7,7 @@ keywords: [kimi cli usage tracker, kimi code cli token usage, track kimi cli spe
 
 # Kimi CLI
 
-The `kimi_cli` provider reads local session logs from [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code). It aggregates sessions and per-model input, output, cache-read, and cache-write tokens. This local-data integration makes no network calls. It is separate from the [Moonshot API provider](./moonshot.md).
+The `kimi_cli` provider reads local session logs from [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code). It aggregates sessions and per-model input, output, cache-read, and cache-write tokens. Local session tracking works offline. When Kimi Code CLI credentials are available, it also reads subscription quota through a read-only API call. It is separate from the [Moonshot API provider](./moonshot.md).
 
 ## Detection and paths
 
@@ -56,10 +56,36 @@ The model comes from the record, then the selected `config.json`, then `kimi-for
 
 The logs do not contain USD prices. Configure the Moonshot API provider separately for its API balance and quota.
 
+## Kimi Code subscription quota
+
+OpenUsage reads the existing access token from the newest JSON file in `~/.kimi-code/credentials/` and calls `GET https://api.kimi.com/coding/v1/usages`. The response supplies `usage_five_hour`, `usage_monthly`, and `usage_monthly_code` percentage gauges and reset times. Short-term request-rate limits are ignored because they are not subscription quota.
+
+The credential file is read-only to OpenUsage. It never sends the refresh token, refreshes OAuth, or writes Kimi Code credentials. When the access token expires, quota disappears until Kimi Code refreshes its own token; local session stats continue working. Successful and failed quota reads are cached per account for one minute, and the daemon checks again after cache expiry when it next polls the provider.
+
+Optional `provider_paths` overrides:
+
+~~~json
+{
+  "accounts": [
+    {
+      "id": "kimi_cli",
+      "provider": "kimi_cli",
+      "provider_paths": {
+        "credentials_path": "/home/you/.kimi-code/credentials/account.json",
+        "usage_api_base_url": "https://api.kimi.com/coding/v1"
+      }
+    }
+  ]
+}
+~~~
+
+`credentials_path` selects one Kimi Code credential file. A missing explicit path does not fall back to another account. `usage_api_base_url` overrides the coding API root, including its `/coding/v1` prefix. There is no `oauth_host` setting because OpenUsage never refreshes tokens.
+
 ## Troubleshooting
 
 - **No sessions:** run a CLI session and check `openusage detect`. If both clients are installed, set `sessions_dir` explicitly to select Kimi Code.
 - **Unexpected model name:** check the record's model and the matching client's `config.json`; `kimi-for-coding` is the fallback.
+- **No quota gauges:** check the `quota` / `quota_error` diagnostics. An expired access token hides quota until Kimi Code refreshes it.
 - **Missing tokens:** malformed JSON lines are skipped. A single line larger than 1 MiB stops scanning that file.
 
 ## Related
