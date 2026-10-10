@@ -18,22 +18,12 @@ const codexOpenAIAccountID = "openai"
 
 func detectCodex(result *Result) {
 	bin := findBinary("codex")
-	if bin == "" {
-		return
-	}
 
 	home := homeDir()
-	configDir := filepath.Join(home, ".codex")
-
-	tool := DetectedTool{
-		Name:       "OpenAI Codex CLI",
-		BinaryPath: bin,
-		ConfigDir:  configDir,
-		Type:       "cli",
+	if home == "" && bin == "" {
+		return
 	}
-	result.Tools = append(result.Tools, tool)
-
-	log.Printf("[detect] Found Codex CLI at %s", bin)
+	configDir := filepath.Join(home, ".codex")
 
 	sessionsDir := filepath.Join(configDir, "sessions")
 	authFile := filepath.Join(configDir, "auth.json")
@@ -41,9 +31,29 @@ func detectCodex(result *Result) {
 	hasSessions := dirExists(sessionsDir)
 	hasAuth := fileExists(authFile)
 
+	if bin != "" {
+		result.Tools = append(result.Tools, DetectedTool{
+			Name:       "OpenAI Codex CLI",
+			BinaryPath: bin,
+			ConfigDir:  configDir,
+			Type:       "cli",
+		})
+		log.Printf("[detect] Found Codex CLI at %s", bin)
+	}
+
 	if !hasSessions && !hasAuth {
-		log.Printf("[detect] Codex CLI found but no session/auth data at expected locations")
+		if bin != "" {
+			log.Printf("[detect] Codex CLI found but no session/auth data at expected locations")
+		}
 		return
+	}
+	// The binary is optional: session logs and auth.json are enough for the
+	// provider. The daemon runs under launchd/systemd with a minimal PATH
+	// that often misses npm/nvm/bun install dirs, so requiring the binary
+	// made Codex vanish from the dashboard while `openusage detect` (run
+	// from a login shell) still found it.
+	if bin == "" {
+		log.Printf("[detect] Codex CLI binary not found; using data in %s", configDir)
 	}
 
 	log.Printf("[detect] Codex CLI data found (sessions=%v, auth=%v)", hasSessions, hasAuth)
