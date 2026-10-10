@@ -80,6 +80,12 @@ The OpenCode telemetry plugin streams events tagged with the upstream provider t
 
 If the upstream provider doesn't have an account configured in OpenUsage, the events sit in the telemetry store and surface as `telemetry_unmapped_providers` diagnostics — the OpenCode tile itself does **not** absorb them, because it's a different provider.
 
+### Tile layout
+
+- **Headline.** With OpenCode Go quota (browser session), the headline shows the 5h / weekly / monthly usage percentages and gauges. Without quota (Zen API key only), it shows request and token activity for the selected time window, for example `11 reqs · 166.7k tok in Today`, followed by tool call and session counts.
+- **Sections.** OpenCode events tagged `opencode` / `opencode-go` populate Model Burn, Provider Burn, Clients, Project Breakdown, Tool Usage, MCP Usage, and Language, the same layout other coding-tool tiles use.
+- **Cache hit ratio.** `cache_hit_ratio` is cache reads divided by (input + cache reads + cache writes). It matches the `N% cached` figure in the Token Breakdown. It is a ratio, not a quota, so it never appears as the tile's `% used` headline.
+
 ### What's NOT tracked
 
 - **Spend on the OpenCode tile from polling.** The Zen API does not expose it. The tile shows model availability and (with cookie auth) console balance only.

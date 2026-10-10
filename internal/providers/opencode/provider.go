@@ -64,8 +64,32 @@ func New() *Provider {
 					"Tile spend / model / activity metrics are populated from the OpenCode telemetry plugin; see Settings → 7 INTEG.",
 				},
 			},
-			Dashboard: providerbase.DefaultDashboard(
+			// OpenCode is a coding tool whose spend/model/client/tool data
+			// comes from the telemetry plugin, so it uses the coding-tool
+			// preset (client, tool, language and code-stats sections, with
+			// raw model_/client_/tool_/lang_ metrics folded into those
+			// sections instead of dumped as "Other Data").
+			Detail: core.CodingToolDetailWidget(true),
+			Dashboard: providerbase.CodingToolDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
+				providerbase.WithSectionOrder(
+					core.DashboardSectionHeader,
+					core.DashboardSectionTopUsageProgress,
+					core.DashboardSectionModelBurn,
+					core.DashboardSectionProviderBurn,
+					core.DashboardSectionClientBurn,
+					core.DashboardSectionProjectBreakdown,
+					core.DashboardSectionToolUsage,
+					core.DashboardSectionMCPUsage,
+					core.DashboardSectionLanguageBurn,
+					core.DashboardSectionCodeStats,
+					core.DashboardSectionOtherData,
+				),
+				providerbase.WithHideMetricPrefixes("project_", "provider_", "window_"),
+				// 7d_tool_calls is projected over the selected window (not a
+				// fixed 7 days) and duplicates tool_calls_today; the window_*
+				// figures are already the tile's hero line.
+				providerbase.WithHideMetricKeys("7d_tool_calls"),
 				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "monthly_usage_pct", "console_balance", "monthly_limit"),
 				// OpenCode Go quota has three meaningful usage-window
 				// percentages (5h / 7d / ~30d monthly) — the default cap of 2

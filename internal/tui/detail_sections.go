@@ -252,7 +252,11 @@ func buildDetailGaugeLines(snap core.UsageSnapshot, widget core.DashboardWidget,
 		gauge := RenderUsageGauge(usedPct, gaugeW, warnThresh, critThresh)
 		windowDur, hasWindow := gaugeWindowDuration(met.Window)
 		resetAt, hasReset := snap.Resets[key]
-		if hasWindow && hasReset {
+		if core.IsRatioMetricKey(key) {
+			// Ratios (cache hit, success rate) are not quota: neutral
+			// color, no pace projection.
+			gauge = RenderRatioGauge(usedPct, gaugeW)
+		} else if hasWindow && hasReset {
 			resetIn := resetAt.Sub(now)
 			elapsed := windowDur - resetIn
 			var paceFraction float64

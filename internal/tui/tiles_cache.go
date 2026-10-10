@@ -129,12 +129,20 @@ func (m *Model) buildTileBodyLines(
 
 	topUsageLines := m.buildTileGaugeLines(snap, widget, innerW)
 	if di.summary != "" {
-		topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(di.summary)))
+		summary := di.summary
+		if di.reason == displayReasonWindowActivity {
+			// The hero line is the windowed activity summary, which replaces
+			// the dim window-activity line below; keep its window label.
+			summary += " in " + m.timeWindow.Label()
+		}
+		topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(summary)))
 	}
 	if di.detail != "" {
 		topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
 	}
-	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
+	// For displayReasonWindowActivity the hero line above already is the
+	// window activity summary.
+	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" && di.reason != displayReasonWindowActivity {
 		topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
 	}
 	if len(topUsageLines) > 0 {
