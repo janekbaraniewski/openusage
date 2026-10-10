@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
+	"github.com/janekbaraniewski/openusage/internal/version"
 )
 
 const (
@@ -187,7 +189,74 @@ func InstallService(socketPath string) error {
 	if !manager.IsSupported() {
 		return fmt.Errorf("daemon service install is unsupported on %s", runtime.GOOS)
 	}
-	return manager.Install()
+	if err := manager.Install(); err != nil {
+		return err
+	}
+	return verifyInstalledDaemon(context.Background(), NewClient(manager.socketPath), installVerifyTimeout)
+}
+
+var installVerifyTimeout = 12 * time.Second
+
+// verifyInstalledDaemon confirms that, after a (re)install, the process
+// answering on the socket is the build we just installed. A daemon that never
+// becomes reachable is left to the regular startup diagnostics; a reachable
+// daemon that stays on another build means something else (usually an older
+// openusage dashboard still running) reinstalled the service, and saying so
+// beats reporting success.
+func verifyInstalledDaemon(ctx context.Context, client *Client, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var last HealthResponse
+	seen := false
+	for time.Now().Before(deadline) {
+		health, err := WaitForHealthInfo(ctx, client, 1500*time.Millisecond)
+		if err == nil {
+			if HealthCurrent(health) {
+				return nil
+			}
+			last, seen = health, true
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !seen {
+		return nil
+	}
+	return fmt.Errorf(
+		"telemetry daemon service installed, but the socket is still served by openusage %s (expected %s); "+
+			"another openusage process (often an older dashboard in another terminal) has probably reinstalled its own version. "+
+			"Find it with `ps -axo pid,lstart,command | grep '[o]penusage'`, quit it, then run install again",
+		HealthVersion(last), displayVersion(strings.TrimSpace(version.Version)),
+	)
+}
+
+// unitProgram returns the executable the installed service unit launches
+// (launchd ProgramArguments[0] or systemd ExecStart), or "" if unknown.
+func unitProgram(unitPath string) string {
+	data, err := os.ReadFile(strings.TrimSpace(unitPath))
+	if err != nil {
+		return ""
+	}
+	text := string(data)
+	if idx := strings.Index(text, "<key>ProgramArguments</key>"); idx >= 0 {
+		rest := text[idx:]
+		start := strings.Index(rest, "<string>")
+		end := strings.Index(rest, "</string>")
+		if start >= 0 && end > start {
+			return html.UnescapeString(rest[start+len("<string>") : end])
+		}
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "ExecStart="); ok {
+			if fields := strings.Fields(after); len(fields) > 0 {
+				return strings.Trim(fields[0], `"`)
+			}
+		}
+	}
+	return ""
 }
 
 func UninstallService(socketPath string) error {
@@ -227,7 +296,9 @@ func ServiceStatus(ctx context.Context, socketPath string, details bool) error {
 	fmt.Printf("  Running: %s\n", yesNo(healthErr == nil))
 	fmt.Printf("  Socket: %s\n", socketPath)
 	fmt.Printf("  Unit file: %s\n", valueOrNA(strings.TrimSpace(manager.unitPath)))
-	fmt.Printf("  Executable: %s\n", valueOrNA(exePath))
+	servicePath := unitProgram(manager.unitPath)
+	fmt.Printf("  Service program: %s\n", valueOrNA(servicePath))
+	fmt.Printf("  Executable: %s (this binary)\n", valueOrNA(exePath))
 	fmt.Printf("  Executable exists: %s\n", yesNo(exeExists))
 	fmt.Printf("  Executable transient: %s\n", yesNo(isTransientExecutablePath(manager.exePath)))
 
@@ -265,6 +336,15 @@ func ServiceStatus(ctx context.Context, socketPath string, details bool) error {
 		fmt.Printf("  Integration version: %s\n", strings.TrimSpace(health.IntegrationVersion))
 		fmt.Printf("  Provider registry: %s (compatible: %s)\n", strings.TrimSpace(health.ProviderRegistry), yesNo(HealthProviderRegistryCompatible(health)))
 		fmt.Printf("  Overall compatibility: %s\n", yesNo(HealthCurrent(health)))
+		if !HealthCurrent(health) {
+			fmt.Println("")
+			if servicePath != "" && exePath != "" && filepath.Clean(servicePath) != filepath.Clean(exePath) {
+				fmt.Printf("  The service runs %s, not this binary.\n", servicePath)
+			}
+			fmt.Println("  If another openusage version keeps reinstalling the helper, find and quit it:")
+			fmt.Println("    ps -axo pid,lstart,command | grep '[o]penusage'")
+			fmt.Printf("  Then switch the helper to this binary: %s telemetry daemon install\n", valueOrNA(exePath))
+		}
 		if details {
 			fmt.Println("")
 			fmt.Println("Diagnostics")

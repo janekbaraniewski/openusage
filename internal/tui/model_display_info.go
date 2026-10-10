@@ -226,7 +226,11 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	}
 
 	quotaKey := ""
-	for _, key := range []string{"quota_pro", "quota", "quota_flash"} {
+	// muse.session / muse.weekly are Muse Code's subscription meters (same
+	// order as its widget gauge priority). Without them a quota-bearing
+	// Muse snapshot falls through to today_api_cost and mislabels the
+	// header "Credits".
+	for _, key := range []string{"quota_pro", "quota", "quota_flash", "muse.session", "muse.weekly"} {
 		if _, ok := snap.Metrics[key]; ok {
 			quotaKey = key
 			break
@@ -239,6 +243,14 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		if pct := core.MetricUsedPercent(quotaKey, m); pct >= 0 {
 			info.gaugePercent = pct
 			info.summary = fmt.Sprintf("%.0f%% usage used", pct)
+			// Muse windows are percent-only (the API exposes no absolute
+			// token limits) and the tile already bars both windows with
+			// resets, so a hero line would only repeat the session bar.
+			// Leave it empty: the tile falls through to the detail row.
+			switch quotaKey {
+			case "muse.session", "muse.weekly":
+				info.summary = ""
+			}
 		}
 		if m.Remaining != nil {
 			info.detail = fmt.Sprintf("%.0f%% usage left", *m.Remaining)
@@ -439,6 +451,13 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 	worstUsagePct := float64(100)
 	var usageKey string
 	for _, key := range sortedMetricKeys(snap.Metrics) {
+		// Ratio metrics (cache_hit_ratio, tool_success_rate, ...) carry a
+		// Limit of 100 so Percent() is defined, but they measure activity
+		// mix, not quota consumption. Picking them here rendered e.g. a 49%
+		// cache hit ratio as "49% used".
+		if core.IsRatioMetricKey(key) {
+			continue
+		}
 		m := snap.Metrics[key]
 		pct := m.Percent()
 		if pct >= 0 {
@@ -486,6 +505,27 @@ func computeDisplayInfoRaw(snap core.UsageSnapshot, widget core.DashboardWidget,
 		info.tagEmoji = "💰"
 		info.tagLabel = "Credits"
 		info.summary = fmt.Sprintf("~$%.2f total (API est.)", *m.Used)
+		return info
+	}
+
+	// Telemetry-driven providers without a quota or cumulative spend figure
+	// (e.g. an opencode Zen API-key account) still have windowed activity
+	// from the daemon read model. Summarize it as the hero line; the tile
+	// suppresses the separate window-activity line for this branch so the
+	// same figures are not printed twice.
+	if summary, ok := windowActivitySummary(snap, hideCosts); ok {
+		info.tagEmoji = "⚡"
+		info.tagLabel = "Usage"
+		info.reason = displayReasonWindowActivity
+		info.summary = summary
+		var detailParts []string
+		if tc, ok2 := snap.Metrics["tool_calls_today"]; ok2 && tc.Used != nil && *tc.Used > 0 {
+			detailParts = append(detailParts, pluralize(*tc.Used, "tool call", "tool calls"))
+		}
+		if sc, ok2 := snap.Metrics["sessions_today"]; ok2 && sc.Used != nil && *sc.Used > 0 {
+			detailParts = append(detailParts, pluralize(*sc.Used, "session", "sessions"))
+		}
+		info.detail = strings.Join(detailParts, " · ")
 		return info
 	}
 
@@ -618,6 +658,36 @@ func computeDetailedCreditsDisplayInfo(snap core.UsageSnapshot, info providerDis
 	info.tagLabel = "Credits"
 	info.summary = "Connected"
 	return info
+}
+
+// displayReasonWindowActivity marks display info whose hero line already is
+// the windowed activity summary (requests · cost · tokens).
+const displayReasonWindowActivity = "window_activity"
+
+// windowActivitySummary formats "N reqs · $X.XX · Y tok" from the daemon's
+// window_* metrics. ok is false when there is no request activity.
+func windowActivitySummary(snap core.UsageSnapshot, hideCosts bool) (string, bool) {
+	m, ok := snap.Metrics["window_requests"]
+	if !ok || m.Used == nil || *m.Used <= 0 {
+		return "", false
+	}
+	parts := []string{fmt.Sprintf("%.0f reqs", *m.Used)}
+	if !hideCosts {
+		if c, ok := snap.Metrics["window_cost"]; ok && c.Used != nil && *c.Used > 0.001 {
+			parts = append(parts, fmt.Sprintf("$%.2f", *c.Used))
+		}
+	}
+	if t, ok := snap.Metrics["window_tokens"]; ok && t.Used != nil && *t.Used > 0 {
+		parts = append(parts, shortCompact(*t.Used)+" tok")
+	}
+	return strings.Join(parts, " · "), true
+}
+
+func pluralize(n float64, singular, plural string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%.0f %s", n, plural)
 }
 
 func windowActivityLine(snap core.UsageSnapshot, tw core.TimeWindow) string {

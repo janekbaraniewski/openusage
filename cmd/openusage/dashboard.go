@@ -239,5 +239,6 @@ func mapDaemonState(s daemon.DaemonState) tui.DaemonStatusMsg {
 		Status:      tuiStatus,
 		Message:     s.Message,
 		InstallHint: s.InstallHint,
+		Warning:     s.Warning,
 	}
 }

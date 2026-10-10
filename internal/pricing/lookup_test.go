@@ -200,3 +200,15 @@ func TestFuzzyIndexFor_RebuildsOnTableChange(t *testing.T) {
 		t.Errorf("rebuilt index source len = %d, want 2", idxB.sourceLen)
 	}
 }
+
+func TestResolverGenerationBumpsOnTableStore(t *testing.T) {
+	r := &Resolver{}
+	if got := r.Generation(); got != 0 {
+		t.Fatalf("fresh resolver generation = %d, want 0", got)
+	}
+	r.storeLiteLLM(map[string]Price{}, time.Time{})
+	r.storeOpenRouter(map[string]Price{}, time.Time{})
+	if got := r.Generation(); got != 2 {
+		t.Fatalf("generation after two table stores = %d, want 2", got)
+	}
+}

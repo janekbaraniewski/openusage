@@ -64,8 +64,32 @@ func New() *Provider {
 					"Tile spend / model / activity metrics are populated from the OpenCode telemetry plugin; see Settings → 7 INTEG.",
 				},
 			},
-			Dashboard: providerbase.DefaultDashboard(
+			// OpenCode is a coding tool whose spend/model/client/tool data
+			// comes from the telemetry plugin, so it uses the coding-tool
+			// preset (client, tool, language and code-stats sections, with
+			// raw model_/client_/tool_/lang_ metrics folded into those
+			// sections instead of dumped as "Other Data").
+			Detail: core.CodingToolDetailWidget(true),
+			Dashboard: providerbase.CodingToolDashboard(
 				providerbase.WithColorRole(core.DashboardColorRoleBlue),
+				providerbase.WithSectionOrder(
+					core.DashboardSectionHeader,
+					core.DashboardSectionTopUsageProgress,
+					core.DashboardSectionModelBurn,
+					core.DashboardSectionProviderBurn,
+					core.DashboardSectionClientBurn,
+					core.DashboardSectionProjectBreakdown,
+					core.DashboardSectionToolUsage,
+					core.DashboardSectionMCPUsage,
+					core.DashboardSectionLanguageBurn,
+					core.DashboardSectionCodeStats,
+					core.DashboardSectionOtherData,
+				),
+				providerbase.WithHideMetricPrefixes("project_", "provider_", "window_"),
+				// 7d_tool_calls is projected over the selected window (not a
+				// fixed 7 days) and duplicates tool_calls_today; the window_*
+				// figures are already the tile's hero line.
+				providerbase.WithHideMetricKeys("7d_tool_calls"),
 				providerbase.WithGaugePriority("rolling_usage", "weekly_usage", "monthly_usage_pct", "console_balance", "monthly_limit"),
 				// OpenCode Go quota has three meaningful usage-window
 				// percentages (5h / 7d / ~30d monthly) — the default cap of 2
@@ -196,6 +220,18 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
+	// Quota meters (OpenCode Go 5h / weekly / monthly) and the Zen balance
+	// only come from the console. When they are missing, tell the user how
+	// to connect instead of rendering empty meters.
+	if _, hasQuota := snap.Metrics["rolling_usage"]; !hasQuota {
+		if _, hasBalance := snap.Metrics["console_balance"]; !hasBalance {
+			snap.SetAttribute(core.QuotaConnectHintAttribute, consoleConnectHint(acct, snap))
+		}
+	}
+	if plan := strings.TrimSpace(acct.Hint("opencode_plan", "")); plan != "" {
+		snap.SetAttribute("opencode_plan", plan)
+	}
+
 	shared.FinalizeStatus(&snap)
 	if snap.Status == core.StatusOK {
 		modelCount := snap.Attributes["available_models_count"]
@@ -221,6 +257,19 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 var errNoCookieConfigured = errors.New("opencode: no browser session configured")
+
+// consoleConnectHint is the one-line tile hint shown when no console data is
+// available. An expired/rejected session gets a reconnect hint instead.
+func consoleConnectHint(acct core.AccountConfig, snap core.UsageSnapshot) string {
+	const how = "log into opencode.ai, then Settings → 5 KEYS → opencode → c"
+	if _, rejected := snap.Raw["console_auth_status"]; rejected {
+		return "OpenCode console session expired: " + how
+	}
+	if strings.EqualFold(acct.Hint("opencode_plan", ""), "go") {
+		return "Connect OpenCode console for Go quota meters: " + how
+	}
+	return "Connect OpenCode console for quota/balance: " + how
+}
 
 // loadStoredSession reads a browser session directly from the credentials file
 // without refreshing from the browser. This avoids the destructive refresh in

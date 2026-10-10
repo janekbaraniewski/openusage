@@ -128,13 +128,36 @@ func (m *Model) buildTileBodyLines(
 	}
 
 	topUsageLines := m.buildTileGaugeLines(snap, widget, innerW)
+	if hint := strings.TrimSpace(snap.Attributes[core.QuotaConnectHintAttribute]); hint != "" && !hasRenderableGauge(snap, widget) {
+		// Meters need an extra credential: show how to connect instead of
+		// empty shimmer tracks that look like data is about to arrive.
+		// "<what>: <how>" splits onto two lines so the instruction is not
+		// truncated away on narrow tiles.
+		topUsageLines = nil
+		what, how, found := strings.Cut(hint, ": ")
+		if !found {
+			what, how = hint, ""
+		}
+		topUsageLines = append(topUsageLines, lipglossNewItalic(truncate("⚑ "+what)))
+		if how != "" {
+			topUsageLines = append(topUsageLines, dimStyle.Render(truncate("  "+how)))
+		}
+	}
 	if di.summary != "" {
-		topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(di.summary)))
+		summary := di.summary
+		if di.reason == displayReasonWindowActivity {
+			// The hero line is the windowed activity summary, which replaces
+			// the dim window-activity line below; keep its window label.
+			summary += " in " + m.timeWindow.Label()
+		}
+		topUsageLines = append(topUsageLines, tileHeroStyle.Render(truncate(summary)))
 	}
 	if di.detail != "" {
 		topUsageLines = append(topUsageLines, tileSummaryStyle.Render(truncate(di.detail)))
 	}
-	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" {
+	// For displayReasonWindowActivity the hero line above already is the
+	// window activity summary.
+	if wl := windowActivityLineWithHide(snap, m.timeWindow, hideCosts); wl != "" && di.reason != displayReasonWindowActivity {
 		topUsageLines = append(topUsageLines, dimStyle.Render(truncate(wl)))
 	}
 	if len(topUsageLines) > 0 {
@@ -266,6 +289,17 @@ func (m *Model) buildTileBodyLines(
 	}
 
 	return fullBody
+}
+
+// hasRenderableGauge reports whether any gauge-priority metric in snap has a
+// renderable percentage.
+func hasRenderableGauge(snap core.UsageSnapshot, widget core.DashboardWidget) bool {
+	for _, key := range widget.GaugePriority {
+		if met, ok := snap.Metrics[key]; ok && metricUsedPercent(key, met) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func lipglossNewItalic(msg string) string {

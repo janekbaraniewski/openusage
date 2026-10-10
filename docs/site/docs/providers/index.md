@@ -6,7 +6,7 @@ sidebar_label: Providers
 
 # Providers
 
-OpenUsage supports 36 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
+OpenUsage supports 37 providers spanning local coding agents and cloud API platforms. Most are auto-detected on first run; the rest need a single environment variable. Each tile on the dashboard maps to one provider page below.
 
 ## Coding agents
 
@@ -28,6 +28,10 @@ These providers read local files, OAuth credentials, or shell out to a CLI. No A
   <a href="./codex/">
     <strong>Codex CLI</strong>
     <span>Sessions, rate-limit windows, credit balance, plan</span>
+  </a>
+  <a href="./command-code/">
+    <strong>Command Code</strong>
+    <span>Credits, rolling 5-hour/weekly windows, plan, spend</span>
   </a>
   <a href="./gemini-cli/">
     <strong>Gemini CLI</strong>

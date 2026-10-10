@@ -25,6 +25,7 @@ type ViewRuntime struct {
 
 	stateMu    sync.RWMutex
 	state      DaemonState
+	warning    string
 	timeWindow core.TimeWindow
 }
 
@@ -86,12 +87,17 @@ func (r *ViewRuntime) EnsureClient(ctx context.Context) *Client {
 	ensureCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	client, err := EnsureRunning(ensureCtx, r.socketPath, r.verbose)
+	client, warning, err := EnsureRunning(ensureCtx, r.socketPath, r.verbose)
 	if err != nil {
+		r.setWarning("")
 		r.setState(ClassifyEnsureError(err))
 		return nil
 	}
-	r.setState(DaemonState{Status: DaemonStatusRunning})
+	if warning != "" && warning != r.Warning() {
+		log.Printf("telemetry daemon: %s", warning)
+	}
+	r.setWarning(warning)
+	r.setState(r.runningState())
 	r.SetClient(client)
 	return client
 }
@@ -103,6 +109,29 @@ func (r *ViewRuntime) setState(state DaemonState) {
 	r.stateMu.Lock()
 	r.state = state
 	r.stateMu.Unlock()
+}
+
+// Warning returns the degraded-mode warning from the last daemon ensure, or ""
+// when the daemon matches this build.
+func (r *ViewRuntime) Warning() string {
+	if r == nil {
+		return ""
+	}
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.warning
+}
+
+func (r *ViewRuntime) setWarning(w string) {
+	r.stateMu.Lock()
+	r.warning = w
+	r.stateMu.Unlock()
+}
+
+// runningState is the Running state, carrying the degraded-mode warning (if
+// any) so the TUI can surface it without blocking.
+func (r *ViewRuntime) runningState() DaemonState {
+	return DaemonState{Status: DaemonStatusRunning, Warning: r.Warning()}
 }
 
 func (r *ViewRuntime) State() DaemonState {
@@ -183,7 +212,7 @@ func (r *ViewRuntime) fetchReadModel(
 	cancel()
 
 	if err == nil {
-		r.setState(DaemonState{Status: DaemonStatusRunning})
+		r.setState(r.runningState())
 		return snaps, nil
 	}
 
