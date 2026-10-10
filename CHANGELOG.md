@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.26.0 (2026-10-10)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Other Changes
+* fix(claude_code): merge streamed multi-line messages instead of keeping the first line by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/392
+* feat(opencode): add rolling/weekly/monthly quota display via console scraping by @achappell in https://github.com/janekbaraniewski/openusage/pull/250
+* Add Command Code usage provider by @yourfriendaaron in https://github.com/janekbaraniewski/openusage/pull/395
+* test(telemetry): pin zero-write replay of unchanged claude_code history (#266) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/389
+* perf(claude_code): aggregate incrementally per session file (#266) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/390
+* feat(muse) - Add muse-code from Meta as provider by @tomck in https://github.com/janekbaraniewski/openusage/pull/359
+* fix(daemon): stop launchd upgrade ping-pong and keep dashboard usable on upgrade failure by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/408
+* fix(tui): stacked view can scroll back up after reaching the bottom by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/410
+* fix(opencode): tile loader, ratio-as-% used, and console-session quota meters by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/409
+* fix(codex): read live quota windows from app server by @svonidze in https://github.com/janekbaraniewski/openusage/pull/366
+* Support Kimi Code CLI sessions in the kimi_cli provider by @svonidze in https://github.com/janekbaraniewski/openusage/pull/374
+* Fix Kimi CLI tile rendering for windowed activity and subscription quota by @svonidze in https://github.com/janekbaraniewski/openusage/pull/393
+* Read Kimi Code subscription quota without changing CLI credentials by @svonidze in https://github.com/janekbaraniewski/openusage/pull/394
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.25.1...v0.26.0
+
 ## 0.25.1 (2026-10-05)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
