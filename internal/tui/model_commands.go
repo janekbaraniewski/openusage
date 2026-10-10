@@ -324,19 +324,24 @@ func snapshotsReady(snaps map[string]core.UsageSnapshot) bool {
 	return false
 }
 
-func (m Model) renderDashboard() string {
-	w, h := m.width, m.height
-
-	header := m.renderHeader(w)
+// dashboardContentHeight is the height left for the dashboard body once the
+// header and footer chrome are laid out.
+func dashboardContentHeight(h int, header, footer string) int {
 	headerH := strings.Count(header, "\n") + 1
-
-	footer := m.renderFooter(w)
 	footerH := strings.Count(footer, "\n") + 1
-
 	contentH := h - headerH - footerH
 	if contentH < 3 {
 		contentH = 3
 	}
+	return contentH
+}
+
+func (m Model) renderDashboard() string {
+	w, h := m.width, m.height
+
+	header := m.renderHeader(w)
+	footer := m.renderFooter(w)
+	contentH := dashboardContentHeight(h, header, footer)
 
 	var content string
 

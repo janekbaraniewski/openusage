@@ -316,6 +316,18 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		return snap, nil
 	}
 
+	// Fetch quota first: scanning a large local history can exhaust the
+	// poller's deadline before the account request even starts.
+	quota := core.NewUsageSnapshot("codex", acct.ID)
+	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &quota)
+	hasCLIWindows := hasCodexQuotaWindows(quota)
+	liveQuota := core.NewUsageSnapshot("codex", acct.ID)
+	var hasLiveData bool
+	var liveErr error
+	if !hasCLIWindows {
+		hasLiveData, liveErr = p.fetchLiveUsage(ctx, acct, configDir, &liveQuota)
+	}
+	hasLiveWindows := hasCodexQuotaWindows(liveQuota)
 	var hasLocalData bool
 
 	sessionsDir := filepath.Join(configDir, "sessions")
@@ -340,14 +352,44 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["session_breakdowns"] = "disabled"
 	}
 
-	hasLiveData, liveErr := p.fetchLiveUsage(ctx, acct, configDir, &snap)
-	if liveErr != nil {
-		snap.Raw["quota_api_error"] = liveErr.Error()
+	// A live window replaces session quotas; failures retain the session fallback.
+	sessionSource := snap.Raw["rate_limit_source"]
+	if hasCLIWindows || hasLiveWindows {
+		clearRateLimitMetrics(&snap)
 	}
-
-	hasCLIData, cliErr := p.fetchCLIRateLimits(ctx, acct, configDir, &snap)
+	for key, metric := range liveQuota.Metrics {
+		snap.Metrics[key] = metric
+	}
+	for key, reset := range liveQuota.Resets {
+		snap.Resets[key] = reset
+	}
+	for key, value := range liveQuota.Raw {
+		snap.Raw[key] = value
+	}
+	for key, metric := range quota.Metrics {
+		snap.Metrics[key] = metric
+	}
+	for key, reset := range quota.Resets {
+		snap.Resets[key] = reset
+	}
+	for key, value := range quota.Raw {
+		snap.Raw[key] = value
+	}
+	switch {
+	case hasCLIWindows:
+		snap.Raw["rate_limit_source"] = "cli_rpc"
+	case hasLiveWindows:
+		snap.Raw["rate_limit_source"] = "live"
+	case sessionSource != "":
+		snap.Raw["rate_limit_source"] = sessionSource
+	default:
+		snap.Raw["rate_limit_source"] = "cli_rpc_unavailable"
+	}
 	if cliErr != nil {
 		snap.Raw["cli_rate_limits_error"] = cliErr.Error()
+	}
+	if liveErr != nil {
+		snap.Raw["quota_api_error"] = liveErr.Error()
 	}
 
 	versionFile := filepath.Join(configDir, "version.json")
@@ -370,14 +412,14 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
-	hasData := hasLocalData || hasLiveData || hasCLIData
+	hasData := hasLocalData || hasCLIData || hasLiveData
 	if !hasData {
 		if errors.Is(liveErr, errLiveUsageAuth) {
 			snap.Status = core.StatusAuth
 			snap.Message = "Codex auth required — run `codex login`"
 		} else {
 			snap.Status = core.StatusUnknown
-			snap.Message = "No Codex usage data found"
+			snap.Message = "Quotas unavailable"
 		}
 		return snap, nil
 	}
@@ -387,15 +429,24 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	p.applyRateLimitStatus(&snap)
 
 	switch {
-	case (hasLiveData || hasCLIData) && hasLocalData:
+	case (hasCLIData || hasLiveData) && hasLocalData:
 		snap.Message = "Codex live usage + local session data"
-	case hasLiveData || hasCLIData:
+	case hasCLIData || hasLiveData:
 		snap.Message = "Codex live usage data"
 	default:
 		snap.Message = "Codex CLI session data"
 	}
 
 	return snap, nil
+}
+
+func hasCodexQuotaWindows(snap core.UsageSnapshot) bool {
+	for key, metric := range snap.Metrics {
+		if strings.HasPrefix(key, "rate_limit_") && metric.Used != nil && metric.Window != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) applyRateLimitStatus(snap *core.UsageSnapshot) {

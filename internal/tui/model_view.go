@@ -248,6 +248,14 @@ func (m Model) renderFooterStatusLine(w int) string {
 		}
 	}
 
+	if warning := m.daemonWarning(); warning != "" {
+		msg := "! " + warning
+		if w > 2 {
+			msg = truncateToWidth(msg, w-2)
+		}
+		return " " + yellowStyle.Render(msg)
+	}
+
 	if m.hasAppUpdateNotice() {
 		msg := "Update available: " + m.daemon.appUpdateCurrent + " -> " + m.daemon.appUpdateLatest
 		if action := m.appUpdateAction(); action != "" {
@@ -260,6 +268,16 @@ func (m Model) renderFooterStatusLine(w int) string {
 	}
 
 	return " " + helpStyle.Render("? help")
+}
+
+// daemonWarning is the degraded-mode notice from the background helper (for
+// example: it is running an older build and could not be upgraded). The
+// dashboard keeps working; this only explains why data may be incomplete.
+func (m Model) daemonWarning() string {
+	if m.daemon.status != DaemonRunning {
+		return ""
+	}
+	return m.daemon.warning
 }
 
 func (m Model) hasAppUpdateNotice() bool {

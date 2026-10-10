@@ -28,6 +28,18 @@ Set `OPENCODE_API_KEY` (preferred) or `ZEN_API_KEY` (alias). Both work; the firs
 
 OpenUsage also adopts API keys written to OpenCode's `auth.json` automatically. That file lives at `~/.local/share/opencode/auth.json` on Linux and macOS, at `$XDG_DATA_HOME/opencode/auth.json` when `XDG_DATA_HOME` is set, and at `%USERPROFILE%\.local\share\opencode\auth.json` on Windows (OpenCode uses the XDG-style location on Windows too). See the [paths reference](../reference/paths.md#tool-integration-paths).
 
+### Quota meters (OpenCode Go) and balance
+
+The OpenCode Go 5h / weekly / monthly quota windows and the Zen balance are only available from the opencode.ai web console. API keys (Zen or Go) can't read them. To get usage meters on the tile, OpenUsage needs your console session cookie (`auth` on `.opencode.ai`):
+
+1. Log into [opencode.ai](https://opencode.ai/auth) in your browser.
+2. **Firefox or Safari:** nothing else to do. Auto-detection imports the session silently (it retries at most every 10 minutes until it finds one) and stores it in `credentials.json`.
+3. **Chrome, Arc, Brave, Edge and other Chromium browsers:** their cookie stores are keychain-protected, so OpenUsage never reads them in the background. Open Settings → 5 KEYS, highlight `opencode`, and press `c` once. You may get one keychain prompt.
+
+Once a session is stored, each poll reads it from `credentials.json` and never re-reads the browser. The tile then shows a gauge for each quota window with `% used`, a reset countdown, and a pace projection, plus the console balance. Until then, the tile shows a one-line hint such as `Connect OpenCode console for Go quota meters`. If the session expires, the hint changes to `OpenCode console session expired`; log in again and press `c`.
+
+When the key comes from the `opencode-go` entry in OpenCode's `auth.json`, the account gets an `opencode_plan: go` hint, so the tile knows Go quota is expected.
+
 ### Manual configuration
 
 ```json
@@ -80,6 +92,12 @@ The OpenCode telemetry plugin streams events tagged with the upstream provider t
 
 If the upstream provider doesn't have an account configured in OpenUsage, the events sit in the telemetry store and surface as `telemetry_unmapped_providers` diagnostics — the OpenCode tile itself does **not** absorb them, because it's a different provider.
 
+### Tile layout
+
+- **Headline.** With OpenCode Go quota (console session connected), the top section shows 5h / weekly / monthly gauges with reset countdowns. Without a console session, it shows the connect hint and then the request and token activity for the selected time window, for example `11 reqs · 166.7k tok in Today`, followed by tool call and session counts.
+- **Sections.** OpenCode events tagged `opencode` / `opencode-go` populate Model Burn, Provider Burn, Clients, Project Breakdown, Tool Usage, MCP Usage, and Language, the same layout other coding-tool tiles use.
+- **Cache hit ratio.** `cache_hit_ratio` is cache reads divided by (input + cache reads + cache writes). It matches the `N% cached` figure in the Token Breakdown. It is a ratio, not a quota, so it never appears as the tile's `% used` headline.
+
 ### What's NOT tracked
 
 - **Spend on the OpenCode tile from polling.** The Zen API does not expose it. The tile shows model availability and (with cookie auth) console balance only.
@@ -109,6 +127,7 @@ To see spend on this tile, install the OpenCode telemetry plugin and run OpenUsa
 
 - **No models listed** — verify the API key is valid and not rate-limited.
 - **Empty spend tile** — install and configure the OpenCode telemetry plugin; see daemon docs.
+- **Tile shows "No ... data for this time range" with `Auth OK · N Zen models`**: the API key works but there are no OpenCode telemetry events in the selected window and no browser session for console quota. Widen the window (`w`), connect a browser session for Go quota, or check that the telemetry plugin is still emitting events. The OpenUsage loading banner only appears while the daemon has not resolved the account yet.
 
 ### Why does the OpenCode tile not show spend even with the plugin installed?
 

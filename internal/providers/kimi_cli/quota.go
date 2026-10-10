@@ -101,20 +101,20 @@ func readCredentials(path string) (kimiCredentials, error) {
 func fetchUsages(ctx context.Context, client *http.Client, baseURL, accessToken string) (*kimiUsagesResponse, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/usages", nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("kimi_cli: creating usages request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("kimi_cli: fetching usages: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode, fmt.Errorf("usages: HTTP %d", resp.StatusCode)
+		return nil, resp.StatusCode, fmt.Errorf("kimi_cli: usages: HTTP %d", resp.StatusCode)
 	}
 	var out kimiUsagesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, fmt.Errorf("kimi_cli: decoding usages: %w", err)
 	}
 	return &out, resp.StatusCode, nil
 }
