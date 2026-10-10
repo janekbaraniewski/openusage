@@ -605,9 +605,18 @@ func emptyTileSectionContent(sectionID core.DashboardStandardSection, widget cor
 	}
 }
 
+// tileShouldRenderLoading reports whether the tile should show the branded
+// "syncing" loader instead of its normal body. Only snapshots that have not
+// been resolved yet (the daemon's StatusUnknown placeholders, or a zero-value
+// status) qualify. A provider that has already reported a concrete status
+// (OK, NEAR_LIMIT, ...) but has no metrics in the current time window — e.g.
+// an API-key-only opencode account with no telemetry events today — must
+// render the normal body with its "No ... data for this time range" empty
+// states, otherwise the tile looks stuck loading forever.
 func (m Model) tileShouldRenderLoading(snap core.UsageSnapshot) bool {
 	switch snap.Status {
-	case core.StatusError, core.StatusAuth, core.StatusLimited:
+	case core.StatusUnknown, "":
+	default:
 		return false
 	}
 	if len(snap.Metrics) > 0 || len(snap.ModelUsage) > 0 || len(snap.DailySeries) > 0 || len(snap.Resets) > 0 {

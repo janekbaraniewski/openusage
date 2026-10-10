@@ -86,6 +86,10 @@ func AutoDetect() Result {
 	detectMacOSKeychainCredentials(&result)
 	detectCredentialFiles(&result)
 
+	// Phase 5: browser-session credentials for console-only data. Runs
+	// last so it can attach to an account created by any earlier phase.
+	detectOpenCodeConsoleSession(&result)
+
 	return result
 }
 
