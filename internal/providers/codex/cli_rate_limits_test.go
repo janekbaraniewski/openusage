@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +98,9 @@ func TestRPCMissingInvalidAndLegacyWindows(t *testing.T) {
 }
 
 func TestRPCProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell script as the fake codex binary")
+	}
 	for _, tc := range []struct {
 		name, script, wantErr string
 		timeout               time.Duration
