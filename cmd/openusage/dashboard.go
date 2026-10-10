@@ -172,12 +172,20 @@ func runDashboard(cfg config.Config) {
 		},
 	)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Quit through Bubble Tea on termination signals so it restores the
+	// terminal (raw mode, alt screen, mouse) before the process exits. SIGHUP
+	// is included because its default action kills the process without that
+	// restore. A second signal force-kills the program, which still runs
+	// Bubble Tea's terminal restore on the way out.
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
 		cancel()
 		program.Quit()
+		<-sigCh
+		program.Kill()
 	}()
 
 	if _, err := program.Run(); err != nil {

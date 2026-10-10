@@ -31,6 +31,10 @@ openusage hub-view <url> [flags]                # read-only TUI over a remote hu
 
 Runs the TUI dashboard. With no flags it auto-detects accounts, connects to the [daemon](../daemon/overview.md) over its Unix socket, and opens the dashboard. If the daemon is not yet installed, run `openusage telemetry daemon install` first.
 
+The dashboard needs an interactive terminal on both stdin and stdout. If either is redirected or piped (scripts, cron, CI, other tools shelling out to `openusage`), it exits with status 2 and a one-line error instead of opening `/dev/tty`. For non-interactive use, call `openusage export`, the [reports](#openusage-daily--weekly--monthly--session--blocks) (`daily`, `weekly`, ...), or [`openusage statusline`](#openusage-statusline).
+
+On `SIGINT`, `SIGTERM`, or `SIGHUP` the dashboard quits cleanly and restores the terminal. A second signal forces it to exit (the terminal is still restored).
+
 ### Flags
 
 The default command takes no flags beyond cobra's built-ins. Configuration lives in `~/.config/openusage/settings.json` — see [configuration reference](./configuration.md).
