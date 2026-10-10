@@ -29,7 +29,9 @@ Local-file provider for the OpenAI Codex CLI. Reads session logs, auth state, an
 
 ### Auto-detection
 
-OpenUsage registers the provider as soon as `~/.codex/` exists. Run the Codex CLI at least once to create it.
+OpenUsage registers the provider once Codex has written data under `~/.codex/`. Run the Codex CLI at least once to create it.
+
+Detection needs `~/.codex/sessions/` or `~/.codex/auth.json`; the `codex` binary is optional. The telemetry daemon runs under launchd or systemd with a minimal `PATH`, so OpenUsage also looks for `codex` in common per-user install directories (`~/.local/bin`, `~/.npm-global/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.bun/bin`, pnpm and Linuxbrew prefixes). Without the binary, quota comes from the live usage endpoint instead of `codex app-server`.
 
 ### Manual configuration
 
@@ -168,6 +170,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
 
 - **No quota windows** — authenticate with `codex login` and check that the installed CLI supports `codex app-server --stdio`. Local session windows remain available when live requests fail.
 - **No credit usage or forecast** — `~/.codex/auth.json` is missing or expired, or the CLI app-server quota request failed. Re-authenticate with the Codex CLI and wait for the next daemon poll.
+- **Codex listed by `openusage detect` but missing from the dashboard** (older versions): the daemon could not find the `codex` binary on its service `PATH`. Upgrade, or set `binary` on a manual `codex` account to the full path from `which codex`.
 - **Sessions missing** — confirm `sessions_dir` matches the path Codex writes to.
 
 ## Related

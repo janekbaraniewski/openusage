@@ -136,3 +136,47 @@ func TestDetectCodex_MalformedAuthJSONIsSafe(t *testing.T) {
 		t.Errorf("expected codex-cli account even with malformed auth.json")
 	}
 }
+
+// The telemetry daemon runs with a minimal launchd/systemd PATH that misses
+// npm/nvm install dirs. Codex data on disk must still register the account
+// (issue #379).
+func TestDetectCodex_RegistersAccountWithoutBinary(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex", "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setHome(t, home)
+	empty := t.TempDir()
+	t.Setenv("PATH", empty)
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", empty)
+
+	var result Result
+	detectCodex(&result)
+
+	if len(result.Accounts) != 1 {
+		t.Fatalf("accounts = %+v, want one codex account", result.Accounts)
+	}
+	acct := result.Accounts[0]
+	if acct.ID != "codex-cli" || acct.Provider != "codex" || acct.Binary != "" {
+		t.Fatalf("account = %+v", acct)
+	}
+	if got := acct.Hint("sessions_dir", ""); got != filepath.Join(home, ".codex", "sessions") {
+		t.Fatalf("sessions_dir = %q", got)
+	}
+	if len(result.Tools) != 0 {
+		t.Fatalf("tools = %+v, want none without a binary", result.Tools)
+	}
+}
+
+func TestDetectCodex_NoBinaryNoDataSkips(t *testing.T) {
+	setHome(t, t.TempDir())
+	empty := t.TempDir()
+	t.Setenv("PATH", empty)
+	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", empty)
+
+	var result Result
+	detectCodex(&result)
+	if len(result.Accounts) != 0 || len(result.Tools) != 0 {
+		t.Fatalf("result = %+v, want empty", result)
+	}
+}

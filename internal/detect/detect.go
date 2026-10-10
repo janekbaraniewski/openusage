@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,15 +169,85 @@ func candidateBinaryDirs() []string {
 	if !customSet {
 		home := homeDir()
 		if home != "" {
-			dirs = append(dirs,
-				filepath.Join(home, ".local", "bin"),
-				filepath.Join(home, "bin"),
-			)
+			dirs = append(dirs, userBinaryDirs(home)...)
 		}
 
-		dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+		dirs = append(dirs,
+			"/opt/homebrew/bin",
+			"/home/linuxbrew/.linuxbrew/bin",
+			"/usr/local/bin",
+			"/usr/bin",
+			"/bin",
+			"/snap/bin",
+		)
 	}
 	return lo.Uniq(dirs)
+}
+
+// userBinaryDirs lists per-user install locations used by the common
+// package managers for CLI tools (npm, nvm, volta, pnpm, bun, yarn, cargo).
+// The telemetry daemon runs under launchd/systemd with a minimal PATH, so
+// tools installed there are invisible to exec.LookPath in the daemon even
+// though they resolve fine from the user's shell.
+func userBinaryDirs(home string) []string {
+	dirs := []string{
+		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, "bin"),
+		filepath.Join(home, ".npm-global", "bin"),
+		filepath.Join(home, ".npm-packages", "bin"),
+		filepath.Join(home, ".volta", "bin"),
+		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".yarn", "bin"),
+		filepath.Join(home, ".local", "share", "pnpm"),
+		filepath.Join(home, "Library", "pnpm"),
+		filepath.Join(home, ".cargo", "bin"),
+		filepath.Join(home, ".local", "share", "fnm", "aliases", "default", "bin"),
+	}
+	if nvmDir := strings.TrimSpace(os.Getenv("NVM_DIR")); nvmDir != "" {
+		dirs = append(dirs, nvmNodeBinDirs(nvmDir)...)
+	}
+	dirs = append(dirs, nvmNodeBinDirs(filepath.Join(home, ".nvm"))...)
+	return dirs
+}
+
+// nvmNodeBinDirs returns <nvmDir>/versions/node/*/bin, newest version first.
+func nvmNodeBinDirs(nvmDir string) []string {
+	matches, err := filepath.Glob(filepath.Join(nvmDir, "versions", "node", "*", "bin"))
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return compareNodeVersionDirs(matches[i], matches[j]) > 0
+	})
+	return matches
+}
+
+// compareNodeVersionDirs compares two .../vX.Y.Z/bin paths by semantic
+// version. Unparseable components compare as zero.
+func compareNodeVersionDirs(a, b string) int {
+	va := parseNodeVersion(filepath.Base(filepath.Dir(a)))
+	vb := parseNodeVersion(filepath.Base(filepath.Dir(b)))
+	for i := range va {
+		if va[i] != vb[i] {
+			if va[i] > vb[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	return strings.Compare(a, b)
+}
+
+func parseNodeVersion(name string) [3]int {
+	var out [3]int
+	parts := strings.SplitN(strings.TrimPrefix(name, "v"), ".", 3)
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err == nil {
+			out[i] = n
+		}
+	}
+	return out
 }
 
 func isExecutableFile(path string) bool {
