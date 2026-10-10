@@ -1,0 +1,188 @@
+metric 5h_block_cache_read_tokens used=8000.00000000 limit=- remaining=- unit="tokens" window="current 5h block"
+metric 5h_block_cost used=0.07742400 limit=- remaining=- unit="USD" window="11:00 – 16:00"
+metric 5h_block_input used=2590.00000000 limit=- remaining=- unit="tokens" window="current 5h block"
+metric 5h_block_msgs used=7.00000000 limit=- remaining=- unit="messages" window="current 5h block"
+metric 5h_block_output used=439.00000000 limit=- remaining=- unit="tokens" window="current 5h block"
+metric 7d_api_cost used=0.08853900 limit=- remaining=- unit="USD" window="rolling 7 days"
+metric 7d_cache_create_1h_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_cache_create_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_cache_read_tokens used=8000.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_input_tokens used=4050.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_messages used=16.00000000 limit=- remaining=- unit="messages" window="rolling 7 days"
+metric 7d_output_tokens used=585.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_reasoning_tokens used=30.00000000 limit=- remaining=- unit="tokens" window="rolling 7 days"
+metric 7d_sessions used=4.00000000 limit=- remaining=- unit="sessions" window="rolling 7 days"
+metric 7d_tool_calls used=8.00000000 limit=- remaining=- unit="calls" window="rolling 7 days"
+metric 7d_web_fetch_requests used=1.00000000 limit=- remaining=- unit="requests" window="rolling 7 days"
+metric 7d_web_search_requests used=2.00000000 limit=- remaining=- unit="requests" window="rolling 7 days"
+metric ai_code_percentage used=100.00000000 limit=100.00000000 remaining=0.00000000 unit="%" window="all-time estimate"
+metric all_time_api_cost used=0.13043400 limit=- remaining=- unit="USD" window="all-time estimate"
+metric all_time_cache_create_1h_tokens used=300.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_cache_create_5m_tokens used=300.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_cache_create_tokens used=600.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_cache_read_tokens used=10000.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_input_tokens used=5450.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_output_tokens used=855.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_reasoning_tokens used=30.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric all_time_tool_calls used=10.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric all_time_web_fetch_requests used=1.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric all_time_web_search_requests used=2.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric burn_rate used=0.02322720 limit=- remaining=- unit="USD/h" window="current 5h block"
+metric cache_hit_ratio used=65.84362140 limit=100.00000000 remaining=34.15637860 unit="%" window="rolling 7 days"
+metric client_repo_a_cached_tokens used=10000.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_a_input_tokens used=4950.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_a_output_tokens used=805.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_a_reasoning_tokens used=30.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_a_sessions used=2.00000000 limit=- remaining=- unit="sessions" window="all-time"
+metric client_repo_a_total_tokens used=16385.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_b_input_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_b_output_tokens used=10.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_b_sessions used=1.00000000 limit=- remaining=- unit="sessions" window="all-time"
+metric client_repo_b_total_tokens used=110.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_e_input_tokens used=400.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_e_output_tokens used=40.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric client_repo_e_sessions used=1.00000000 limit=- remaining=- unit="sessions" window="all-time"
+metric client_repo_e_total_tokens used=440.00000000 limit=- remaining=- unit="tokens" window="all-time"
+metric composer_files_changed used=2.00000000 limit=- remaining=- unit="files" window="all-time estimate"
+metric composer_lines_added used=5.00000000 limit=- remaining=- unit="lines" window="all-time estimate"
+metric composer_lines_removed used=2.00000000 limit=- remaining=- unit="lines" window="all-time estimate"
+metric lang_go used=2.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric lang_markdown used=2.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric lang_python used=1.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric lang_typescript used=1.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric messages_today used=11.00000000 limit=- remaining=- unit="messages" window="since midnight"
+metric model_claude_haiku_4_5_cost_usd used=0.00032400 limit=- remaining=- unit="USD" window="all-time estimate"
+metric model_claude_haiku_4_5_input_tokens used=270.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_haiku_4_5_output_tokens used=27.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_cache_creation_1h_tokens used=200.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_cache_creation_5m_tokens used=300.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_cache_creation_tokens used=500.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_cached_tokens used=8000.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_cost_usd used=0.12112500 limit=- remaining=- unit="USD" window="all-time estimate"
+metric model_claude_opus_4_6_input_tokens used=3500.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_output_tokens used=630.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_opus_4_6_reasoning_tokens used=30.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_cache_creation_1h_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_cache_creation_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_cached_tokens used=2000.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_cost_usd used=0.00894000 limit=- remaining=- unit="USD" window="all-time estimate"
+metric model_claude_sonnet_4_5_input_tokens used=1670.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_output_tokens used=197.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_claude_sonnet_4_5_web_fetch_requests used=1.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric model_claude_sonnet_4_5_web_search_requests used=2.00000000 limit=- remaining=- unit="requests" window="all-time estimate"
+metric model_unknown_cost_usd used=0.00004500 limit=- remaining=- unit="USD" window="all-time estimate"
+metric model_unknown_input_tokens used=10.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric model_unknown_output_tokens used=1.00000000 limit=- remaining=- unit="tokens" window="all-time estimate"
+metric scored_commits used=2.00000000 limit=- remaining=- unit="commits" window="all-time estimate"
+metric sessions_today used=4.00000000 limit=- remaining=- unit="sessions" window="since midnight"
+metric today_api_cost used=0.08085900 limit=- remaining=- unit="USD" window="since midnight"
+metric today_cache_create_1h_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric today_cache_create_tokens used=100.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric today_cache_read_tokens used=8000.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric today_input_tokens used=3270.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric today_output_tokens used=507.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric today_reasoning_tokens used=30.00000000 limit=- remaining=- unit="tokens" window="since midnight"
+metric tool_bash used=3.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_calls_today used=7.00000000 limit=- remaining=- unit="calls" window="since midnight"
+metric tool_calls_total used=10.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_completed used=10.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_edit used=2.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_glob used=1.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_grep used=1.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_read used=2.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric tool_success_rate used=100.00000000 limit=- remaining=- unit="%" window="all-time estimate"
+metric tool_write used=1.00000000 limit=- remaining=- unit="calls" window="all-time estimate"
+metric total_prompts used=19.00000000 limit=- remaining=- unit="prompts" window="all-time estimate"
+raw agent_usage="main 16.9K tok, code-reviewer 77 tok"
+raw block_end="2026-03-15T16:00:00Z"
+raw block_models="claude_haiku_4_5, claude_opus_4_6, claude_sonnet_4_5"
+raw block_progress_pct="67"
+raw block_start="2026-03-15T11:00:00Z"
+raw block_time_remaining="1h40m0s"
+raw burn_rate="$0.02/hour"
+raw cache_usage="read 10.0K · create 600 (1h 300, 5m 300)"
+raw inference_geo_usage="us 2.4K tok, eu 22 tok"
+raw jsonl_files_found="5"
+raw jsonl_today_cache_create_tokens="100"
+raw jsonl_today_cache_read_tokens="8000"
+raw jsonl_today_date="2026-03-15"
+raw jsonl_today_input_tokens="3270"
+raw jsonl_today_messages="11"
+raw jsonl_today_models="claude_haiku_4_5, claude_opus_4_6, claude_sonnet_4_5"
+raw jsonl_today_output_tokens="507"
+raw jsonl_today_reasoning_tokens="30"
+raw jsonl_today_web_fetch_requests="0"
+raw jsonl_today_web_search_requests="0"
+raw jsonl_total_blocks="8"
+raw jsonl_total_entries="19"
+raw jsonl_unique_requests="19"
+raw language_usage="go 2, markdown 2, python 1, typescript 1"
+raw model_count="4"
+raw model_usage="claude-opus-4-6 $0.12 4.1K tok (93%), claude-sonnet-4-5 $0.01 1.9K tok (7%), claude-haiku-4-5 $0.00 297 tok (0%), unknown $0.00 11 tok (0%)"
+raw model_usage_window="all-time"
+raw project_count="3"
+raw project_usage="repo-a $0.12 16.4K tok, repo-e $0.01 440 tok, repo-b $0.00 110 tok"
+raw service_tier_usage="standard 2.4K tok, priority 22 tok"
+raw tool_count="6"
+raw tool_usage="bash 3, edit 2, read 2, glob 1, grep 1, write 1"
+reset billing_block=2026-03-15T16:00:00Z
+series cost 2026-03-05=0.04177500
+series cost 2026-03-08=0.00024000
+series cost 2026-03-11=0.00562500
+series cost 2026-03-13=0.00004500
+series cost 2026-03-14=0.00189000
+series cost 2026-03-15=0.08085900
+series messages 2026-03-05=2.00000000
+series messages 2026-03-08=2.00000000
+series messages 2026-03-11=1.00000000
+series messages 2026-03-13=1.00000000
+series messages 2026-03-14=2.00000000
+series messages 2026-03-15=11.00000000
+series tokens_claude_haiku_4_5 2026-03-05=0.00000000
+series tokens_claude_haiku_4_5 2026-03-08=220.00000000
+series tokens_claude_haiku_4_5 2026-03-11=0.00000000
+series tokens_claude_haiku_4_5 2026-03-13=0.00000000
+series tokens_claude_haiku_4_5 2026-03-14=0.00000000
+series tokens_claude_haiku_4_5 2026-03-15=77.00000000
+series tokens_claude_opus_4_6 2026-03-05=1200.00000000
+series tokens_claude_opus_4_6 2026-03-08=0.00000000
+series tokens_claude_opus_4_6 2026-03-11=275.00000000
+series tokens_claude_opus_4_6 2026-03-13=0.00000000
+series tokens_claude_opus_4_6 2026-03-14=0.00000000
+series tokens_claude_opus_4_6 2026-03-15=2655.00000000
+series tokens_claude_sonnet_4_5 2026-03-05=360.00000000
+series tokens_claude_sonnet_4_5 2026-03-08=0.00000000
+series tokens_claude_sonnet_4_5 2026-03-11=0.00000000
+series tokens_claude_sonnet_4_5 2026-03-13=0.00000000
+series tokens_claude_sonnet_4_5 2026-03-14=462.00000000
+series tokens_claude_sonnet_4_5 2026-03-15=1045.00000000
+series tokens_client_repo_a 2026-03-05=4060.00000000
+series tokens_client_repo_a 2026-03-08=220.00000000
+series tokens_client_repo_a 2026-03-11=0.00000000
+series tokens_client_repo_a 2026-03-13=0.00000000
+series tokens_client_repo_a 2026-03-14=440.00000000
+series tokens_client_repo_a 2026-03-15=11665.00000000
+series tokens_client_repo_b 2026-03-05=0.00000000
+series tokens_client_repo_b 2026-03-08=0.00000000
+series tokens_client_repo_b 2026-03-11=0.00000000
+series tokens_client_repo_b 2026-03-13=11.00000000
+series tokens_client_repo_b 2026-03-14=22.00000000
+series tokens_client_repo_b 2026-03-15=77.00000000
+series tokens_client_repo_e 2026-03-05=0.00000000
+series tokens_client_repo_e 2026-03-08=0.00000000
+series tokens_client_repo_e 2026-03-11=275.00000000
+series tokens_client_repo_e 2026-03-13=0.00000000
+series tokens_client_repo_e 2026-03-14=0.00000000
+series tokens_client_repo_e 2026-03-15=165.00000000
+series tokens_total 2026-03-05=1560.00000000
+series tokens_total 2026-03-08=220.00000000
+series tokens_total 2026-03-11=275.00000000
+series tokens_total 2026-03-13=11.00000000
+series tokens_total 2026-03-14=462.00000000
+series tokens_total 2026-03-15=3777.00000000
+series tokens_unknown 2026-03-05=0.00000000
+series tokens_unknown 2026-03-08=0.00000000
+series tokens_unknown 2026-03-11=0.00000000
+series tokens_unknown 2026-03-13=11.00000000
+series tokens_unknown 2026-03-14=0.00000000
+series tokens_unknown 2026-03-15=0.00000000
