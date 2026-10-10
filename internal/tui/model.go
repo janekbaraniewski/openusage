@@ -79,6 +79,9 @@ type DaemonStatusMsg struct {
 	Status      DaemonStatus
 	Message     string
 	InstallHint string
+	// Warning is a non-blocking notice shown while the helper is running in
+	// a degraded state (older build that could not be upgraded).
+	Warning string
 }
 
 type AppUpdateMsg struct {
@@ -101,6 +104,7 @@ type filterState struct {
 type daemonState struct {
 	status      DaemonStatus
 	message     string
+	warning     string
 	installing  bool
 	installDone bool // true after a successful install in this session
 
@@ -504,6 +508,59 @@ func (m Model) shouldUsePanelScroll() bool {
 		return false
 	}
 	return m.tileCols() == 1
+}
+
+// panelScrollMaxOffset returns the largest tileOffset that still moves the
+// single-column (stacked) viewport, given the current terminal size, the
+// selected tile and the rendered tile content. Anything beyond it is clamped
+// away by the renderer, so letting tileOffset grow past it makes the view
+// look stuck at the bottom while PgUp/wheel-up silently burn off the excess.
+// ok is false when panel scroll is inactive or the size is not yet known.
+func (m Model) panelScrollMaxOffset() (maxOffset int, ok bool) {
+	if !m.shouldUsePanelScroll() || m.width <= 0 || m.height <= 0 {
+		return 0, false
+	}
+	if len(m.filteredIDs()) == 0 {
+		return 0, true
+	}
+	contentH := dashboardContentHeight(m.height, m.renderHeader(m.width), m.renderFooter(m.width))
+	forcedCols := 0
+	if m.activeDashboardView() == dashboardViewStacked {
+		forcedCols = 1
+	}
+	layout := m.buildTilesLayout(m.width, contentH, forcedCols)
+	if layout.cols != 1 {
+		return 0, false
+	}
+	maxOffset = len(layout.contentLines) - contentH - layout.cursorRowOffset(m.cursor)
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return maxOffset, true
+}
+
+// clampPanelScroll bounds tileOffset to [0, panelScrollMaxOffset] while the
+// stacked/single-column panel scroll is active.
+func (m *Model) clampPanelScroll() {
+	m.scrollPanelBy(0)
+}
+
+// scrollPanelBy re-clamps tileOffset (a refresh or resize may have shrunk
+// the content since the last input), applies delta and clamps again. The
+// bound is computed once since neither the cursor nor the content changes.
+func (m *Model) scrollPanelBy(delta int) {
+	maxOffset, ok := m.panelScrollMaxOffset()
+	clampOffset := func() {
+		if m.tileOffset < 0 {
+			m.tileOffset = 0
+		}
+		if ok && m.tileOffset > maxOffset {
+			m.tileOffset = maxOffset
+		}
+	}
+	clampOffset()
+	m.tileOffset += delta
+	clampOffset()
 }
 
 func (m *Model) applyDashboardConfig(dashboardCfg config.DashboardConfig, accounts []core.AccountConfig) {

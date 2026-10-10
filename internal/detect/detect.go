@@ -44,6 +44,7 @@ func AutoDetect() Result {
 	detectCursor(&result)
 	detectClaudeCode(&result)
 	detectCodex(&result)
+	detectCommandCode(&result)
 	detectZAICodingHelper(&result)
 	detectOllama(&result)
 	detectAider(&result)
@@ -65,6 +66,7 @@ func AutoDetect() Result {
 	detectOpenClaw(&result)
 	detectPi(&result)
 	detectQwenCLI(&result)
+	detectMuseCode(&result)
 
 	// Phase 2: process env vars. Most authoritative; runs before any
 	// file-based credential adoption so a freshly-set env var always
@@ -83,6 +85,10 @@ func AutoDetect() Result {
 	// the secret value at fetch time.
 	detectMacOSKeychainCredentials(&result)
 	detectCredentialFiles(&result)
+
+	// Phase 5: browser-session credentials for console-only data. Runs
+	// last so it can attach to an account created by any earlier phase.
+	detectOpenCodeConsoleSession(&result)
 
 	return result
 }
@@ -464,6 +470,7 @@ var envKeyMapping = []envKeyMappingEntry{
 	{EnvVar: "GOOGLE_API_KEY", Provider: "gemini_api", AccountID: "gemini-google"},
 	{EnvVar: "OLLAMA_API_KEY", Provider: "ollama", AccountID: "ollama-cloud"},
 	{EnvVar: "ALIBABA_CLOUD_API_KEY", Provider: "alibaba_cloud", AccountID: "alibaba_cloud", AiderShortNames: []string{"alibaba", "qwen"}},
+	{EnvVar: "COMMAND_CODE_API_KEY", Provider: "command_code", AccountID: "command_code"},
 }
 
 // envKeyByVar indexes envKeyMapping by env-var name for O(1) lookup. Built

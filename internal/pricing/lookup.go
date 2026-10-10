@@ -46,6 +46,19 @@ type Resolver struct {
 	// so repeated cost estimation for the same model on the same Fetch is
 	// a single map probe instead of a fuzzy walk.
 	lookupCache map[lookupCacheKey]*Price
+
+	// generation increments every time an upstream table is stored (which
+	// also drops lookupCache), so callers memoising estimated costs can tell
+	// when prices may have changed.
+	generation uint64
+}
+
+// Generation reports how many times the resolver's upstream pricing tables
+// have been (re)loaded. Equal values mean Lookup results are unchanged.
+func (r *Resolver) Generation() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.generation
 }
 
 type lookupCacheKey struct {
@@ -278,6 +291,7 @@ func (r *Resolver) storeLiteLLM(t map[string]Price, mtime time.Time) {
 	r.liteLLMLoaded = true
 	r.liteLLMKeysCache = nil
 	r.lookupCache = nil
+	r.generation++
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime
@@ -293,6 +307,7 @@ func (r *Resolver) storeOpenRouter(t map[string]Price, mtime time.Time) {
 	r.openRouterDone = true
 	r.openRouterKeysCache = nil
 	r.lookupCache = nil
+	r.generation++
 	if !mtime.IsZero() {
 		for k, p := range t {
 			p.LastUpdated = mtime

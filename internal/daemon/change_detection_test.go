@@ -83,13 +83,18 @@ func TestChangeDetectorReturnsTrue_WhenFileModified(t *testing.T) {
 // TestChangeDetectorReturnsFalse_WhenNoFiles verifies that if data dirs don't exist,
 // HasChanged returns false (not an error).
 func TestChangeDetectorReturnsFalse_WhenNoFiles(t *testing.T) {
-	// Isolate HOME so providers whose default data dirs exist on the host
-	// (e.g. ~/.kimi-code/sessions for Kimi Code CLI) don't leak real paths
-	// into the test.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
+	// Isolate ambient credentials and data dirs: providers with global
+	// credentials (env keys, CLI auth files under HOME such as muse_code's)
+	// re-poll when credentialed, and providers whose default data dirs exist
+	// on the host (e.g. ~/.kimi-code/sessions for Kimi Code CLI) must not leak
+	// real paths into the test.
+	emptyHome := t.TempDir()
+	t.Setenv("HOME", emptyHome)
+	t.Setenv("USERPROFILE", emptyHome)
+	t.Setenv("XDG_DATA_HOME", emptyHome)
+	t.Setenv("XDG_CONFIG_HOME", emptyHome)
+	t.Setenv("META_API_KEY", "")
+	t.Setenv("MUSE_AUTH_PATH", "")
 	for _, provider := range providers.AllProviders() {
 		detector, ok := provider.(core.ChangeDetector)
 		if !ok {

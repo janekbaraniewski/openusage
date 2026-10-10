@@ -59,7 +59,11 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 			label = label[:maxLabelW-1] + "…"
 		}
 
+		isRatio := core.IsRatioMetricKey(key)
 		gauge := RenderUsageGauge(usedPct, gaugeW, m.warnThreshold, m.critThreshold)
+		if isRatio {
+			gauge = RenderRatioGauge(usedPct, gaugeW)
+		}
 
 		// Check for stacked gauge configuration
 		if sgCfg, ok := widget.StackedGaugeKeys[key]; ok && len(sgCfg.SegmentMetricKeys) > 0 {
@@ -75,7 +79,7 @@ func (m Model) buildTileGaugeLines(snap core.UsageSnapshot, widget core.Dashboar
 		// Append a dim projection annotation when the metric has a
 		// recognized window + a reset timestamp. Pace mirrors the detail
 		// view computation (current% / elapsed minutes / 100).
-		if annot := tileGaugeProjectionAnnotation(snap, key, met, usedPct, now); annot != "" {
+		if annot := tileGaugeProjectionAnnotation(snap, key, met, usedPct, now); annot != "" && !isRatio {
 			lines = append(lines, annotationIndent+dimStyle.Render(annot))
 		}
 
@@ -228,7 +232,14 @@ func tileGaugeProjectionAnnotation(snap core.UsageSnapshot, key string, met core
 	if !ok {
 		return ""
 	}
+	// Providers store the reset timestamp under either the bare metric key
+	// (claude_code: snap.Resets["usage_five_hour"]) or a "_reset"-suffixed
+	// key (copilot, opencode: snap.Resets["rolling_usage_reset"]) — both are
+	// established conventions in this codebase, so check both.
 	resetAt, hasReset := snap.Resets[key]
+	if !hasReset {
+		resetAt, hasReset = snap.Resets[key+"_reset"]
+	}
 	if !hasReset {
 		return ""
 	}
