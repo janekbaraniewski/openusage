@@ -25,6 +25,15 @@ type Provider struct {
 	jsonlCacheMu sync.Mutex
 	jsonlCache   map[string]*jsonlCacheEntry // keyed by file path
 
+	// convAgg memoises the cross-file merge (dedup, 5h block chain) and the
+	// reduced all-time totals for the last set of file entries. Guarded by
+	// jsonlCacheMu.
+	convAgg *conversationAggCache
+
+	// nowFn overrides the wall clock used for today/7d/5h-block windows.
+	// Tests set it to pin golden values; nil means time.Now.
+	nowFn func() time.Time
+
 	telemetryCacheMu             sync.Mutex
 	telemetryCache               map[string]*telemetryCacheEntry // keyed by file path
 	telemetryBaselineInitialized bool
@@ -35,7 +44,21 @@ type Provider struct {
 type jsonlCacheEntry struct {
 	modTime time.Time
 	size    int64
-	records []conversationRecord
+	records []conversationRecord // stably sorted by timestamp
+
+	// Precomputed per-record dedup keys: usageKeys[i] is "" when record i has
+	// no usage; toolKeys[i][j] is "" when content item j is not a tool_use.
+	usageKeys []string
+	toolKeys  [][]string
+
+	// This file's contribution to the all-time aggregates, excluding the
+	// records that lost cross-file dedup (lostUsage / lostTools, ascending).
+	// Rebuilt only when those sets or the pricing generation change.
+	allTime   *conversationAllTime
+	costs     []float64 // per-record estimated cost for dedup winners
+	lostUsage []int
+	lostTools []toolSlot
+	priceGen  uint64
 }
 
 // telemetryCacheEntry tracks the last parsed position for a single JSONL file.
@@ -267,6 +290,12 @@ func findPricing(model string) localPricing {
 // hardcoded-family fallback path.
 var priceLookup = func(ctx context.Context, model string, ctxLen int) (*pricing.Price, error) {
 	return pricing.DefaultResolver().Lookup(ctx, model, ctxLen)
+}
+
+// priceGeneration reports the pricing resolver's table generation. Cached
+// per-file cost aggregates are rebuilt when it changes.
+var priceGeneration = func() uint64 {
+	return pricing.DefaultResolver().Generation()
 }
 
 // priceLookupTimeout bounds the dynamic pricing query so a slow or hung
