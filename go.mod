@@ -2,6 +2,8 @@ module github.com/janekbaraniewski/openusage
 
 go 1.26.0
 
+toolchain go1.26.9
+
 require (
 	github.com/NimbleMarkets/ntcharts v0.5.1
 	github.com/browserutils/kooky v0.2.10
