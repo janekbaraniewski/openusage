@@ -137,6 +137,23 @@ Manually configured accounts and preferences (theme, widget layout) live in that
 file and have to be re-entered. Collected usage history does not — it lives in
 the telemetry database (see [paths](../reference/paths.md)).
 
+## "the dashboard needs an interactive terminal"
+
+```
+openusage: the dashboard needs an interactive terminal (stdin and stdout must be a TTY); ...
+```
+
+`openusage` with no subcommand starts the full-screen dashboard, which only works in a real terminal. It refuses to start (exit status 2) when stdin or stdout is redirected, piped, or missing, for example when a script, cron job, or another tool runs it.
+
+Fixes:
+
+- For machine-readable output use `openusage export` (JSON/CSV on stdout or to a file).
+- For text summaries use the [CLI reports](../guides/cli-reports.md): `openusage daily`, `weekly`, `monthly`, `session`, `blocks`.
+- For a one-line status use `openusage statusline`.
+- If you meant to open the dashboard, run it directly in a terminal without redirecting stdin or stdout. Redirecting only stderr (`openusage 2> debug.log`) is fine.
+
+If a terminal is left in a broken state (no echo, "staircase" output) after an older version was killed, run `reset` or `stty sane`.
+
 ## When to file an issue
 
 If none of the above helps, capture a debug log:
