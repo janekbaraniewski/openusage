@@ -109,6 +109,7 @@ To see spend on this tile, install the OpenCode telemetry plugin and run OpenUsa
 
 - **No models listed** — verify the API key is valid and not rate-limited.
 - **Empty spend tile** — install and configure the OpenCode telemetry plugin; see daemon docs.
+- **Tile shows "No ... data for this time range" with `Auth OK · N Zen models`**: the API key works but there are no OpenCode telemetry events in the selected window and no browser session for console quota. Widen the window (`w`), connect a browser session for Go quota, or check that the telemetry plugin is still emitting events. The OpenUsage loading banner only appears while the daemon has not resolved the account yet.
 
 ### Why does the OpenCode tile not show spend even with the plugin installed?
 
