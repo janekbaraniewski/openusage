@@ -452,6 +452,61 @@ func TestComputeDisplayInfo_UsageFiveHourBranch(t *testing.T) {
 	}
 }
 
+// Muse Code surfaces subscription quota as muse.session / muse.weekly while
+// still reporting local cost estimates. The quota meters must win the header
+// tag over today_api_cost — a subscription tile reads "Usage", not "Credits".
+func TestComputeDisplayInfo_MuseQuotaBranchBeatsTodayCost(t *testing.T) {
+	sessionUsed, sessionLimit := 18.0, 100.0
+	weeklyUsed, weeklyLimit := 89.0, 100.0
+	todayCost := 0.85
+	snap := core.UsageSnapshot{
+		ProviderID: "muse_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"muse.session":   {Used: &sessionUsed, Limit: &sessionLimit, Unit: "quota", Window: "session"},
+			"muse.weekly":    {Used: &weeklyUsed, Limit: &weeklyLimit, Unit: "quota", Window: "weekly"},
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "today"},
+			"total_cost_usd": {Used: &todayCost, Unit: "USD", Window: "all-time"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.gaugePercent != 18.0 {
+		t.Fatalf("gaugePercent = %v, want 18.0 (session leads)", got.gaugePercent)
+	}
+	if got.summary != "" {
+		t.Fatalf("summary = %q, want empty (bars already show both windows)", got.summary)
+	}
+}
+
+// Weekly-only quota stays hero-less too: the bar carries the percent.
+func TestComputeDisplayInfo_MuseWeeklyQuotaOmitsHeroSummary(t *testing.T) {
+	weeklyUsed, weeklyLimit := 32.0, 100.0
+	todayCost := 3.14
+	snap := core.UsageSnapshot{
+		ProviderID: "muse_code",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"muse.weekly":    {Used: &weeklyUsed, Limit: &weeklyLimit, Unit: "quota", Window: "weekly"},
+			"today_api_cost": {Used: &todayCost, Unit: "USD", Window: "today"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage", got.tagLabel)
+	}
+	if got.summary != "" {
+		t.Fatalf("summary = %q, want empty (bar carries the percent)", got.summary)
+	}
+}
+
 func TestComputeDisplayInfo_TodayApiCostBranchWithoutFiveHour(t *testing.T) {
 	todayCost := 55.57
 	snap := core.UsageSnapshot{
@@ -512,5 +567,45 @@ func TestComputeDisplayInfo_BillingBlockFallbackClassifiesAsUsage(t *testing.T) 
 	}
 	if !strings.Contains(got.detail, "$94.93 5h block") {
 		t.Fatalf("detail = %q, want '$94.93 5h block'", got.detail)
+	}
+}
+
+func TestComputeDisplayInfo_RollingUsageBranchClassifiesAsUsageNotCredits(t *testing.T) {
+	// opencode's console-derived quota metrics (rolling_usage etc.) previously
+	// weren't recognized by any branch, so an account with real quota data
+	// AND a console_balance/today_api_cost metric fell through to the
+	// cost-based Credits branch instead of showing Usage like claude_code.
+	rolling := 15.0
+	weekly := 3.0
+	monthly := 49.0
+	balance := 0.0
+	todayCost := 1.55
+	snap := core.UsageSnapshot{
+		ProviderID: "opencode",
+		Status:     core.StatusOK,
+		Metrics: map[string]core.Metric{
+			"rolling_usage":     {Used: &rolling, Unit: "percent", Window: "rolling-5h"},
+			"weekly_usage":      {Used: &weekly, Unit: "percent", Window: "7d"},
+			"monthly_usage_pct": {Used: &monthly, Unit: "percent", Window: "month"},
+			"console_balance":   {Remaining: &balance, Unit: "USD", Window: "current"},
+			"today_api_cost":    {Used: &todayCost, Unit: "USD", Window: "1d"},
+		},
+	}
+
+	got := computeDisplayInfo(snap, core.DefaultDashboardWidget(), false)
+	if got.tagLabel != "Usage" {
+		t.Fatalf("tagLabel = %q, want Usage (opencode's rolling_usage metric should win over today_api_cost)", got.tagLabel)
+	}
+	if got.tagEmoji != "⚡" {
+		t.Fatalf("tagEmoji = %q, want ⚡", got.tagEmoji)
+	}
+	if got.gaugePercent != 49.0 {
+		t.Fatalf("gaugePercent = %v, want 49.0 (highest of rolling/weekly/monthly)", got.gaugePercent)
+	}
+	if !strings.Contains(got.summary, "5h 15%") || !strings.Contains(got.summary, "7d 3%") || !strings.Contains(got.summary, "mo 49%") {
+		t.Fatalf("summary = %q, want 5h/7d/mo percentages", got.summary)
+	}
+	if got.reason != "rolling_usage" {
+		t.Fatalf("reason = %q, want rolling_usage", got.reason)
 	}
 }

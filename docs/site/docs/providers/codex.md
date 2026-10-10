@@ -52,17 +52,19 @@ Override `config_dir` and `sessions_dir` only if the CLI uses non-default paths.
 
 ## Data sources & how each metric is computed
 
-Codex has three data paths:
+Codex has three data paths, checked in this order:
 
-1. **Local files** — JSONL session transcripts and auth/config metadata under `~/.codex/`. Always available after a single Codex run.
-2. **Live ChatGPT usage endpoint** — an authenticated POST to ChatGPT's backend, only attempted when `~/.codex/auth.json` contains a non-empty access token. Provides plan, credits, and rate-limit windows.
-3. **Codex CLI app-server** — an authenticated local `codex app-server` JSON-RPC request to `account/rateLimits/read`. Provides the authoritative individual monthly credit limit and next reset when the live HTTP payload omits it.
+1. **Codex CLI app-server** — `codex app-server --stdio` reads `account/rateLimits/read` before the session scan. It supplies current-account quota windows, plan and credit data, including individual monthly credit limits when available.
+2. **Live ChatGPT usage endpoint** — an authenticated GET, attempted only when the app-server returns no usable quota window and `auth.json` contains an access token.
+3. **Local files** — JSONL session transcripts and auth/config metadata under `~/.codex/`. The latest usable session supplies token activity and fallback quota windows when neither live source supplies a usable window.
+
+A live quota window replaces session quota windows. If the app-server returns only a weekly window for the main pool, OpenUsage reports the missing 5h window instead of filling it from an older session. Other metered pools show only windows they actually report. Session quota fallback is labeled as session data and may be older than a live response.
 
 The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatgpt_base_url` → the value parsed from `~/.codex/config.toml` (`chatgpt_base_url`) → `https://chatgpt.com/backend-api`. The path is `/wham/usage` for `chatgpt.com/backend-api` and `/api/codex/usage` otherwise.
 
 ### Latest session
 
-- Source: the most recently modified `~/.codex/sessions/**/*.jsonl`. The provider parses the trailing turn's `Info.TotalTokenUsage` for tokens, plus `model` and `client` from the same payload.
+- Source: the newest usable `~/.codex/sessions/**/*.jsonl`, ordered by the rollout filename timestamp (mtime is a fallback for other names). The provider skips recent stub files without `token_count` events and parses the trailing turn's `Info.TotalTokenUsage` for tokens, plus `model` and `client` from the same payload.
 - Transform: tokens stored as `latest_session_tokens`, model/client stored under `Raw["latest_session_model"]` and `Raw["latest_session_client"]`.
 
 ### Daily / model / client breakdowns
@@ -96,12 +98,12 @@ price differently, so a total alone cannot be converted to spend.
 
 ### Rate-limit windows (`rate_limit_primary`, `rate_limit_secondary`)
 
-- Source: `rate_limit.primary` and `rate_limit.secondary` from the live usage endpoint. Each carries `used_percent`, `window_minutes`, `resets_at` (Unix seconds).
-- Transform: `Used = used_percent`, `Limit = 100`. `Resets[…]` is set from `resets_at`. `Window` is `<minutes>m`. Each window is also exposed via a direct alias for the dashboard widget: `plan_auto_percent_used` aliases `rate_limit_primary`, `plan_api_percent_used` aliases `rate_limit_secondary`. A separate `plan_percent_used` metric reflects the greater of the two.
+- Source: `primary`, `secondary`, and `rateLimitsByLimitId` from the app-server, then the HTTP usage response if the RPC has no valid windows, then the selected local session. Each window reports a used percentage, duration, and optional reset time.
+- Transform: `Used = used_percent`, `Remaining = 100 - Used`, `Limit = 100`. The main pool keeps `rate_limit_primary` and `rate_limit_secondary`; other pools use `rate_limit_<id>_<slot>`. Reset times populate `Resets[…]`. The compatibility aliases `plan_auto_percent_used`, `plan_api_percent_used`, and `plan_percent_used` remain available.
 
 ### Credit balance
 
-- Source: `credits.balance` (or `credits.has_credits` boolean) from the same live response.
+- Source: `credits.balance` (or `credits.has_credits` boolean) from the app-server, HTTP fallback, or local session.
 - Transform: stored as a metric `Remaining` in USD. `unlimited=true` is reflected as a special attribute.
 
 ### Individual credits and forecast
@@ -113,7 +115,7 @@ price differently, so a total alone cannot be converted to spend.
 
 ### Plan, version, account email
 
-- Source: `plan_type`, `email` from live response; CLI version from `~/.codex/version.json`; account ID from `auth.json` (`tokens.account_id` or top-level `account_id`).
+- Source: `plan_type` from the app-server, HTTP fallback, or local session; email from HTTP or auth metadata; CLI version from `~/.codex/version.json`; account ID from `auth.json` (`tokens.account_id` or top-level `account_id`).
 - Transform: each stored as a snapshot attribute.
 
 ### Patch stats
@@ -123,8 +125,8 @@ price differently, so a total alone cannot be converted to spend.
 
 ### Auth status
 
-- Source: combination of HTTP status code on the live call and the presence of `auth.json`.
-- Transform: `401`/`403` from the live endpoint sets `errLiveUsageAuth`; the provider then keeps the local-data-only path intact and surfaces the error as a diagnostic.
+- Source: HTTP status code when the fallback call is attempted.
+- Transform: `401`/`403` is recorded as a diagnostic. Without usable local or app-server data, the snapshot reports authentication required; otherwise the local-data path stays available.
 
 ### What's NOT tracked
 
@@ -146,7 +148,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
   - `GET https://chatgpt.com/backend-api/wham/usage` (default), or
   - `GET <base>/api/codex/usage` for non-ChatGPT bases.
   - Headers: `Authorization: Bearer <auth.json access_token>` and `ChatGPT-Account-Id: <account_id>` when available.
-- Optional local CLI quota endpoint: `codex -s read-only -a untrusted app-server`, using the standard JSON-RPC handshake followed by `account/rateLimits/read`.
+- Preferred local CLI quota endpoint: `codex app-server --stdio`, using the JSON-RPC handshake followed by `account/rateLimits/read`.
 
 ## Files read
 
@@ -164,7 +166,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
 
 ## Troubleshooting
 
-- **Tile is empty** — run `codex` once to populate `~/.codex/sessions/`.
+- **No quota windows** — authenticate with `codex login` and check that the installed CLI supports `codex app-server --stdio`. Local session windows remain available when live requests fail.
 - **No credit usage or forecast** — `~/.codex/auth.json` is missing or expired, or the CLI app-server quota request failed. Re-authenticate with the Codex CLI and wait for the next daemon poll.
 - **Sessions missing** — confirm `sessions_dir` matches the path Codex writes to.
 

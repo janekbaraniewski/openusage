@@ -123,6 +123,17 @@ func detectOpenCodeAuth(result *Result) {
 		return
 	}
 
+	// An "opencode-go" API key means the user subscribes to OpenCode Go,
+	// whose quota windows the provider can surface once a console session
+	// is connected. Record it so the tile can say so when quota is missing.
+	hasGoKey := false
+	if slot, ok := raw["opencode-go"]; ok {
+		var entry opencodeAuthEntry
+		if json.Unmarshal(slot, &entry) == nil && entry.Type == "api" && entry.Key != "" {
+			hasGoKey = true
+		}
+	}
+
 	matched := 0
 	skipped := 0
 	for opencodeKey, target := range opencodeAuthMapping {
@@ -153,6 +164,9 @@ func detectOpenCodeAuth(result *Result) {
 			Token:    entry.Key,
 		}
 		acct.SetHint("credential_source", "opencode_auth_json")
+		if target.Provider == "opencode" && hasGoKey {
+			acct.SetHint("opencode_plan", "go")
+		}
 
 		// addAccount de-dupes by ID, so if env-var detection already put
 		// something on the same slot, this is a no-op — env var wins.

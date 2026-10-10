@@ -1,112 +1,68 @@
 ---
 title: Kimi CLI
-description: Track local Kimi CLI sessions, per-model tokens, and cache usage in OpenUsage.
+description: Track local Kimi CLI and Kimi Code CLI sessions and token usage in OpenUsage.
 sidebar_label: Kimi CLI
-keywords: [kimi cli usage tracker, kimi cli quota tracking, kimi cli cost tracking, kimi cli token usage, track kimi cli spend locally]
+keywords: [kimi cli usage tracker, kimi code cli token usage, track kimi cli spend locally]
 ---
 
 # Kimi CLI
 
-Local-file provider for the [Kimi CLI](https://github.com/MoonshotAI/kimi-cli). Reads per-session `wire.jsonl` files under `~/.kimi/sessions/` and aggregates per-model token totals. No network calls and no authentication.
+The `kimi_cli` provider reads local session logs from [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code). It aggregates sessions and per-model input, output, cache-read, and cache-write tokens. This local-data integration makes no network calls. It is separate from the [Moonshot API provider](./moonshot.md).
 
-This is a different provider from the [Moonshot](./moonshot.md) API tile. Moonshot reports remote quota and balance via API key; Kimi CLI reports local session activity. Both can be configured at the same time and they will appear as separate tiles.
+## Detection and paths
 
-## At a glance
+OpenUsage detects the `kimi` binary, a config file, or a sessions directory in either location:
 
-- **Provider ID** — `kimi_cli`
-- **Detection** — `~/.kimi/sessions/` exists, `~/.kimi/config.json` exists, or a `kimi` binary on `PATH`
-- **Auth** — local file
-- **Type** — coding agent
-- **Tracks**:
-  - Total sessions, sessions today, sessions in the last 7 days
-  - Total input, output, cache-read, and cache-write tokens
-  - Per-model token totals with upstream provider hint (`moonshot`)
-  - Daily series for sessions and tokens
+| Client | Sessions | Config |
+| --- | --- | --- |
+| Kimi CLI | `~/.kimi/sessions/<group>/<uuid>/wire.jsonl` | `~/.kimi/config.json` |
+| Kimi Code CLI | `~/.kimi-code/sessions/<group>/<uuid>/agents/<agent>/wire.jsonl` | `~/.kimi-code/config.json` |
 
-## Setup
+When both session directories exist, `~/.kimi/sessions` takes priority. The default config is selected from the same client directory as the selected sessions. If only a config exists, it can still trigger detection.
 
-### Auto-detection
+## Manual configuration
 
-OpenUsage registers the provider when `~/.kimi/sessions/` exists, `~/.kimi/config.json` exists, or `kimi` is on `PATH`. Run a Kimi CLI session at least once to create `~/.kimi/sessions/<group>/<session>/wire.jsonl`.
+Use `provider_paths` for provider-specific overrides. JSON paths must be absolute; a literal `~` is not expanded.
 
-### Manual configuration
-
-```json
+~~~json
 {
   "accounts": [
     {
       "id": "kimi_cli",
       "provider": "kimi_cli",
-      "extra": {
-        "sessions_dir": "~/.kimi/sessions",
-        "config_path": "~/.kimi/config.json"
+      "provider_paths": {
+        "sessions_dir": "/home/you/.kimi-code/sessions",
+        "config_path": "/home/you/.kimi-code/config.json"
       }
     }
   ]
 }
-```
+~~~
 
-- `sessions_dir` — replaces the default search with an explicit sessions directory
-- `config_path` — points at the `config.json` that provides the default model name
+`sessions_dir` selects a sessions directory. `config_path` selects the model fallback config. Either override can be omitted; without `config_path`, OpenUsage looks beside the selected sessions directory.
 
-Both overrides are independent. Either can be omitted to keep its default.
+## Metrics
 
-## Data sources & how each metric is computed
+The provider walks the selected sessions directory for `wire.jsonl` files. Kimi CLI records contain `message.type = StatusUpdate` and snake_case `token_usage` fields. Kimi Code CLI records contain `type = usage.record`, camelCase `usage` fields, and an epoch-millisecond `time`. Only records with nonzero token usage count.
 
-The provider walks `sessions_dir` recursively and decodes every file named `wire.jsonl`. Each is JSON-lines; only records whose `message.type` is `StatusUpdate` and whose `message.payload.token_usage` is non-empty are counted.
+| Metric | Source fields |
+| --- | --- |
+| `total_input_tokens` | `input_other` or `inputOther` |
+| `total_output_tokens` | `output` |
+| `total_cache_read` | `input_cache_read` or `inputCacheRead` |
+| `total_cache_write` | `input_cache_creation` or `inputCacheCreation` |
 
-### Field mapping
+The model comes from the record, then the selected `config.json`, then `kimi-for-coding`. Session IDs include both group and UUID, even when Kimi Code stores agent logs deeper. Each record's timestamp is converted to UTC for daily series and for `sessions_today` and `sessions_7d`.
 
-Upstream `token_usage` fields → openusage metrics:
-
-| Upstream                  | openusage metric        |
-| ------------------------- | ----------------------- |
-| `input_other`             | `total_input_tokens`    |
-| `output`                  | `total_output_tokens`   |
-| `input_cache_read`        | `total_cache_read`      |
-| `input_cache_creation`    | `total_cache_write`     |
-
-The upstream provider hint on each per-model row is hard-coded to `moonshot`.
-
-### Model
-
-`message.payload.model` is used when present. When missing, the model name is read from `~/.kimi/config.json` (the `model` field). If that file is missing, unreadable, or does not declare a model, the fallback is the literal string `kimi-for-coding`.
-
-### Session ID
-
-The session ID is the basename of the parent directory of `wire.jsonl` (the session UUID directory). The group directory above it is not included in the ID, so two sessions across different groups with the same UUID would collide; in practice Kimi CLI uses UUIDs so this is not a concern.
-
-### Session counts
-
-- `total_sessions` — distinct session IDs observed
-- `sessions_today` — sessions with at least one StatusUpdate timestamped on the current UTC day
-- `sessions_7d` — sessions with at least one StatusUpdate in the last 7 days
-
-### Timestamps
-
-Each `wire.jsonl` record carries a float-seconds-since-epoch timestamp (with sub-second precision). The provider converts this to a UTC `time.Time` and uses it for the per-day buckets. Non-positive, NaN, or infinite timestamps are dropped.
-
-### Daily series
-
-`DailySeries["sessions"]` and `DailySeries["tokens"]` are populated by day.
-
-### What's NOT tracked
-
-- **Cost in USD.** Kimi CLI `wire.jsonl` does not carry pricing and the provider does not run a pricing lookup. To see USD spend against the underlying Moonshot account, configure the [Moonshot](./moonshot.md) API provider alongside this one.
-
-## Caveats
-
-- The Kimi CLI and Moonshot providers are intentionally separate. Configure both for full visibility: Moonshot gives you remote balance / quota; Kimi CLI gives you local activity.
-- Buffer size for scanning `wire.jsonl` is 1 MiB per line; very long tool-call payloads inside a single StatusUpdate frame may be skipped if they exceed that. Per-line decode failures are silently dropped.
-- The fallback model `kimi-for-coding` exists so that per-model rows always have a label. Seeing it on the tile means the installed CLI version is not emitting per-StatusUpdate model names and `~/.kimi/config.json` does not declare one either.
+The logs do not contain USD prices. Configure the Moonshot API provider separately for its API balance and quota.
 
 ## Troubleshooting
 
-- **Tile is empty** — run a Kimi CLI session so a `wire.jsonl` lands under `~/.kimi/sessions/<group>/<session>/`. Confirm with `openusage detect`.
-- **All tokens attributed to one model** — the CLI is not stamping per-record `model` and the fallback from `config.json` is being used. Set the model in `~/.kimi/config.json` or upgrade the CLI.
-- **Cost is missing despite paid usage** — expected. Add the Moonshot API tile by setting `MOONSHOT_API_KEY`; see the [Moonshot](./moonshot.md) page.
+- **No sessions:** run a CLI session and check `openusage detect`. If both clients are installed, set `sessions_dir` explicitly to select Kimi Code.
+- **Unexpected model name:** check the record's model and the matching client's `config.json`; `kimi-for-coding` is the fallback.
+- **Missing tokens:** malformed JSON lines are skipped. A single line larger than 1 MiB stops scanning that file.
 
 ## Related
 
-- [Moonshot](./moonshot.md) — sibling API-key provider for the underlying Moonshot platform
-- [Codex CLI](./codex.md) — sibling local-file coding-agent provider
+- [Moonshot API](./moonshot.md)
+- [Codex CLI](./codex.md)

@@ -89,6 +89,14 @@ func RenderUsageGauge(usedPercent float64, width int, warnThresh, critThresh flo
 	return renderGaugeWithLabel(usedPercent, width, color)
 }
 
+// RenderRatioGauge renders a percentage gauge for a ratio metric (cache hit
+// rate, success rate, share). Ratios are not quota consumption, so the bar
+// uses a fixed neutral color instead of the warn/crit usage thresholds — a
+// 90% cache hit ratio is good, not critical.
+func RenderRatioGauge(percent float64, width int) string {
+	return renderGaugeWithLabel(percent, width, colorSapphire)
+}
+
 // RenderUsageGaugeWithProjection renders a usage gauge with an optional dim
 // annotation line below it showing time-until-reset and/or projected time to
 // 100% based on the supplied pace.
@@ -167,13 +175,13 @@ func joinAnnotationParts(parts ...string) string {
 // the window string isn't recognized — in that case we render the plain gauge.
 func gaugeWindowDuration(window string) (time.Duration, bool) {
 	switch strings.ToLower(strings.TrimSpace(window)) {
-	case "5h":
+	case "5h", "rolling-5h":
 		return 5 * time.Hour, true
 	case "1d", "24h", "today":
 		return 24 * time.Hour, true
 	case "7d":
 		return 7 * 24 * time.Hour, true
-	case "30d":
+	case "30d", "month":
 		return 30 * 24 * time.Hour, true
 	}
 	return 0, false

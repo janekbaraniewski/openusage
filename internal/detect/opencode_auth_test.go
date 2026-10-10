@@ -158,6 +158,9 @@ func TestDetectOpenCodeAuth_AdoptsOpenCodeGoKey(t *testing.T) {
 	if got := found.Hint("credential_source", ""); got != "opencode_auth_json" {
 		t.Errorf("credential_source = %q, want opencode_auth_json", got)
 	}
+	if got := found.Hint("opencode_plan", ""); got != "go" {
+		t.Errorf("opencode_plan = %q, want go", got)
+	}
 }
 
 // TestDetectOpenCodeAuth_HonoursXDGDataHome verifies XDG_DATA_HOME wins over
