@@ -3,7 +3,7 @@ title: Providers
 description: What a provider is in OpenUsage, the three categories, and how each one shapes its own dashboard and detail widgets.
 ---
 
-A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 36 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
+A **provider** in OpenUsage is a single Go package that knows how to talk to one AI service and produce a normalized `UsageSnapshot`. There are 37 providers shipped in the binary, and each one declares both how it fetches data and how it should look in the TUI.
 
 ## The provider contract
 
@@ -86,7 +86,7 @@ For more detail on the snapshot model see [snapshots](snapshots.md).
 3. The daemon's pipeline calls `Fetch()` on a ticker as part of the collector loop.
 4. The latest snapshot is rendered through the provider's widget definitions.
 
-## The 36 providers at a glance
+## The 37 providers at a glance
 
 | Category | Providers |
 |---|---|
