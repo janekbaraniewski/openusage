@@ -176,17 +176,47 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 	if err := cmd.Start(); err != nil {
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: starting app-server: %w", err)
 	}
+	// waitProcess reaps the child at most once; rpcCtx bounds it because
+	// exec.CommandContext kills the process when the context is done.
+	waited := false
+	var waitErr error
+	waitProcess := func() error {
+		if !waited {
+			waited = true
+			waitErr = cmd.Wait()
+		}
+		return waitErr
+	}
 	defer func() {
-		if cmd.Process != nil {
+		if !waited && cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		_ = cmd.Wait()
+		_ = waitProcess()
 	}()
+
+	// writeRequest reports the process exit status when the child dies before
+	// it reads the request: the write then fails with EPIPE, which would
+	// otherwise mask the more useful exit error.
+	writeRequest := func(request string) error {
+		writeErr := writeCodexRPCRequest(stdin, request)
+		if writeErr == nil {
+			return nil
+		}
+		_ = stdin.Close()
+		exitErr := waitProcess()
+		if rpcCtx.Err() != nil {
+			return fmt.Errorf("codex: app-server request timed out: %w", rpcCtx.Err())
+		}
+		if exitErr != nil {
+			return fmt.Errorf("codex: app-server exited before request: %w", exitErr)
+		}
+		return writeErr
+	}
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4*1024), 512*1024)
 
-	if err := writeCodexRPCRequest(stdin, `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"openusage","version":"dev"}}}`); err != nil {
+	if err := writeRequest(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"openusage","version":"dev"}}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
 	if _, err := readCodexRPCResponse(scanner, 1); err != nil {
@@ -194,14 +224,14 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize timed out: %w", rpcCtx.Err())
 		}
 		if err == io.EOF {
-			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server exited before initialize: %v", cmd.Wait())
+			return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server exited before initialize: %w", waitProcess())
 		}
 		return codexCLIRateLimitsResult{}, fmt.Errorf("codex: app-server initialize failed: %w", err)
 	}
-	if err := writeCodexRPCRequest(stdin, `{"method":"initialized","params":{}}`); err != nil {
+	if err := writeRequest(`{"method":"initialized","params":{}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
-	if err := writeCodexRPCRequest(stdin, `{"id":2,"method":"account/rateLimits/read","params":{}}`); err != nil {
+	if err := writeRequest(`{"id":2,"method":"account/rateLimits/read","params":{}}`); err != nil {
 		return codexCLIRateLimitsResult{}, err
 	}
 	message, err := readCodexRPCResponse(scanner, 2)
