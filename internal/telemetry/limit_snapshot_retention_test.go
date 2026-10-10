@@ -99,9 +99,16 @@ func TestPruneRawEventPayloads_StillPrunesSupersededLimitSnapshots(t *testing.T)
 	defer store.Close()
 
 	ctx := context.Background()
+	// Pin the clock: ingested_at and the retention cutoff both come from
+	// store.now, and with retentionHours = 0 a coarse wall clock (Windows)
+	// can stamp a row with exactly the cutoff, which `ingested_at < cutoff`
+	// then keeps. Ingest an hour before the prune runs instead.
+	ingestAt := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return ingestAt }
 	ingestLimitSnapshot(t, store, "cursor", "cursor-ide", 5.0, time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
 	ingestLimitSnapshot(t, store, "cursor", "cursor-ide", 7.0, time.Date(2026, 8, 1, 11, 0, 0, 0, time.UTC))
 	ingestLimitSnapshot(t, store, "cursor", "cursor-ide", 9.0, time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	store.now = func() time.Time { return ingestAt.Add(time.Hour) }
 
 	pruned, err := store.PruneRawEventPayloads(ctx, 0, 1000)
 	if err != nil {
