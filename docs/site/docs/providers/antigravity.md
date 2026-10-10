@@ -84,6 +84,8 @@ openusage antigravity statusline
 
 The bridge prints a compact line such as `AGY · Gemini Pro · quota 94% · context 14%` while saving the structured payload for the dashboard and telemetry daemon.
 
+Quota windows whose reset time has already passed are hidden, because they have refilled since the snapshot was taken and their old fraction no longer describes the account. If every window in the latest snapshot has expired, the tile shows "Quota windows expired, waiting for fresh data" until Antigravity sends a new payload.
+
 ## What is not tracked
 
 - **Dollar spend.** The status-line contract exposes tokens, context, and quota fractions, not a reliable public price surface.
@@ -96,6 +98,7 @@ The bridge prints a compact line such as `AGY · Gemini Pro · quota 94% · cont
 - **No status data:** run `openusage integrations list --all`, install the integration, then start an Antigravity session.
 - **Existing status command:** back up or remove the custom `statusLine.command` yourself, then rerun the installer. OpenUsage refuses to overwrite it.
 - **Stale data:** the dashboard reflects the most recent status-line invocation. Start an active session to refresh it.
+- **Frozen tile after moving or reinstalling OpenUsage:** Antigravity disables a status-line command that keeps failing, so if the absolute OpenUsage binary path in `statusLine.command` no longer exists (for example after uninstalling a Homebrew copy), the tile stops updating. `openusage integrations list` reports the integration as `outdated` with "OpenUsage binary not found"; run `openusage integrations upgrade antigravity` to re-register the current binary.
 
 ## Related
 

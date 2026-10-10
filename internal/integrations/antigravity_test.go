@@ -2,6 +2,7 @@ package integrations
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,6 +58,21 @@ func TestPatchAntigravityConfigRefusesCustomCommand(t *testing.T) {
 	}
 }
 
+func TestAntigravityCommandBinaryRoundTrip(t *testing.T) {
+	for _, bin := range []string{"/tmp/open usage", `/tmp/a$b/openusage`, `/tmp/q"x\y/openusage`} {
+		command := antigravityStatuslineCommand(bin)
+		if got := antigravityCommandBinary(command); got != bin {
+			t.Errorf("antigravityCommandBinary(%q) = %q, want %q", command, got, bin)
+		}
+		if got := antigravityCommandBinary(command + " --state-file /tmp/x.json"); got != bin {
+			t.Errorf("with flags: got %q, want %q", got, bin)
+		}
+	}
+	if got := antigravityCommandBinary("openusage antigravity statusline"); got != "openusage" {
+		t.Errorf("bare command: got %q, want openusage", got)
+	}
+}
+
 func TestAntigravityInstallLifecycle(t *testing.T) {
 	root := t.TempDir()
 	dirs := Dirs{
@@ -76,9 +92,23 @@ func TestAntigravityInstallLifecycle(t *testing.T) {
 	if result.ConfigFile != filepath.Join(root, ".gemini", "antigravity-cli", "settings.json") {
 		t.Fatalf("config file = %q", result.ConfigFile)
 	}
+	if err := os.MkdirAll(filepath.Dir(dirs.OpenusageBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dirs.OpenusageBin, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	status := def.Detector(dirs)
 	if status.State != "ready" || !status.Installed || !status.Configured {
 		t.Fatalf("installed status = %+v, want ready", status)
+	}
+	// A binary that moved away leaves Antigravity calling a dead path.
+	if err := os.Remove(dirs.OpenusageBin); err != nil {
+		t.Fatal(err)
+	}
+	status = def.Detector(dirs)
+	if status.State != "outdated" || !status.NeedsUpgrade {
+		t.Fatalf("missing-binary status = %+v, want outdated", status)
 	}
 	if err := Uninstall(def, dirs); err != nil {
 		t.Fatalf("Uninstall() error = %v", err)
