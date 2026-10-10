@@ -150,3 +150,47 @@ func TestEnsureRunning_DegradesInsteadOfFighting(t *testing.T) {
 		}
 	})
 }
+
+func TestVerifyInstalledDaemon(t *testing.T) {
+	origVersion := version.Version
+	t.Cleanup(func() { version.Version = origVersion })
+	version.Version = "v0.26.0"
+	ctx := context.Background()
+
+	stale := fakeHealthDaemon(t, HealthResponse{Status: "ok", DaemonVersion: "0.24.4", APIVersion: APIVersion, ProviderRegistry: "old"})
+	err := verifyInstalledDaemon(ctx, NewClient(stale), 2*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "0.24.4") || !strings.Contains(err.Error(), "another openusage process") {
+		t.Fatalf("stale daemon: err = %v, want reinstall-conflict error", err)
+	}
+
+	current := fakeHealthDaemon(t, HealthResponse{Status: "ok", DaemonVersion: "v0.26.0", APIVersion: APIVersion, ProviderRegistry: ProviderRegistryHash()})
+	if err := verifyInstalledDaemon(ctx, NewClient(current), 2*time.Second); err != nil {
+		t.Fatalf("current daemon: err = %v", err)
+	}
+
+	if err := verifyInstalledDaemon(ctx, NewClient(filepath.Join(t.TempDir(), "none.sock")), 2*time.Second); err != nil {
+		t.Fatalf("unreachable daemon should defer to startup diagnostics, got %v", err)
+	}
+}
+
+func TestUnitProgram(t *testing.T) {
+	dir := t.TempDir()
+	plist := filepath.Join(dir, "a.plist")
+	_ = os.WriteFile(plist, []byte(launchdPlistForTest("/opt/homebrew/bin/openusage")), 0o644)
+	if got := unitProgram(plist); got != "/opt/homebrew/bin/openusage" {
+		t.Fatalf("plist: unitProgram = %q", got)
+	}
+	unit := filepath.Join(dir, "a.service")
+	_ = os.WriteFile(unit, []byte("[Service]\nExecStart=/usr/local/bin/openusage telemetry daemon run\n"), 0o644)
+	if got := unitProgram(unit); got != "/usr/local/bin/openusage" {
+		t.Fatalf("systemd: unitProgram = %q", got)
+	}
+	if got := unitProgram(filepath.Join(dir, "missing")); got != "" {
+		t.Fatalf("missing: unitProgram = %q", got)
+	}
+}
+
+func launchdPlistForTest(exe string) string {
+	return `<plist version="1.0"><dict><key>Label</key><string>x</string>
+<key>ProgramArguments</key><array><string>` + exe + `</string><string>telemetry</string></array></dict></plist>`
+}

@@ -82,7 +82,7 @@ openusage telemetry daemon install        # or ./bin/openusage telemetry daemon 
 openusage telemetry daemon status         # "Overall compatibility: yes"
 ```
 
-`openusage telemetry daemon status` shows both sides. `Executable` is the binary you ran and `Daemon version` is what the service is running. `Provider registry ... (compatible: no)` means the helper was built with a different set of providers.
+`openusage telemetry daemon status` shows both sides. `Service program` is the binary the installed plist or unit launches, `Executable (this binary)` is the binary you just ran, and `Daemon version` is what is actually answering on the socket. If `Service program` changes back after you install, another OpenUsage process reinstalled the service. `openusage telemetry daemon install` now checks the helper's version after installing and reports this case instead of claiming success. `Provider registry ... (compatible: no)` means the helper was built with a different set of providers.
 
 ## Socket errors (`EACCES`, `ECONNREFUSED`)
 
