@@ -2,6 +2,12 @@ package core
 
 import "strings"
 
+// QuotaConnectHintAttribute is a snapshot attribute a provider sets when its
+// quota/usage meters are unavailable until the user connects an extra
+// credential (e.g. a console browser session). The TUI renders it as a
+// one-line hint in place of the meters.
+const QuotaConnectHintAttribute = "quota_connect_hint"
+
 // ratioMetricSuffixes identify percentage metrics that describe a *ratio* of
 // observed activity (cache hit rate, tool success rate, token shares) rather
 // than consumption of a quota or limit. They are valid gauges when a provider

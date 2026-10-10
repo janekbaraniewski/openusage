@@ -124,3 +124,49 @@ func TestRenderTile_OpencodeZenTelemetry(t *testing.T) {
 		t.Errorf("window activity rendered %d times, want 1", n)
 	}
 }
+
+func TestRenderTile_OpencodeNoConsoleShowsConnectHint(t *testing.T) {
+	snap := opencodeZenTelemetrySnapshot()
+	snap.Attributes[core.QuotaConnectHintAttribute] = "Connect OpenCode console for Go quota meters: log into opencode.ai, then Settings → 5 KEYS → opencode → c"
+	m := Model{timeWindow: core.TimeWindow1d}
+	out := m.renderTile(snap, false, false, 70, 0, 0)
+	t.Log("\n" + out)
+	for _, want := range []string{"Connect OpenCode console for Go quota meters", "Settings → 5 KEYS → opencode → c", "11 reqs · 166.7k tok in Today"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tile missing %q", want)
+		}
+	}
+}
+
+func TestRenderTile_OpencodeGoQuotaGauges(t *testing.T) {
+	snap := opencodeZenTelemetrySnapshot()
+	now := time.Now()
+	snap.Timestamp = now
+	pct := func(v float64, window string) core.Metric {
+		return core.Metric{Used: float64Ptr(v), Limit: float64Ptr(100), Unit: "percent", Window: window}
+	}
+	snap.Metrics["rolling_usage"] = pct(12, "rolling-5h")
+	snap.Metrics["weekly_usage"] = pct(34, "7d")
+	snap.Metrics["monthly_usage_pct"] = pct(49, "month")
+	snap.Resets = map[string]time.Time{
+		"rolling_usage_reset":     now.Add(2*time.Hour + 10*time.Minute),
+		"weekly_usage_reset":      now.Add(3 * 24 * time.Hour),
+		"monthly_usage_pct_reset": now.Add(12 * 24 * time.Hour),
+	}
+	// Even with a stale hint attribute, real gauges win.
+	snap.Attributes[core.QuotaConnectHintAttribute] = "Connect OpenCode console for Go quota meters: x"
+
+	m := Model{timeWindow: core.TimeWindow1d}
+	out := m.renderTile(snap, false, false, 70, 0, 0)
+	t.Log("\n" + out)
+	for _, want := range []string{"Usage 5h", "Weekly", "Monthly", "12.0%", "34.0%", "49.0%", "resets"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tile missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Connect OpenCode console", "Cache Hit"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("tile unexpectedly contains %q", unwanted)
+		}
+	}
+}

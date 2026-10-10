@@ -220,6 +220,18 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		}
 	}
 
+	// Quota meters (OpenCode Go 5h / weekly / monthly) and the Zen balance
+	// only come from the console. When they are missing, tell the user how
+	// to connect instead of rendering empty meters.
+	if _, hasQuota := snap.Metrics["rolling_usage"]; !hasQuota {
+		if _, hasBalance := snap.Metrics["console_balance"]; !hasBalance {
+			snap.SetAttribute(core.QuotaConnectHintAttribute, consoleConnectHint(acct, snap))
+		}
+	}
+	if plan := strings.TrimSpace(acct.Hint("opencode_plan", "")); plan != "" {
+		snap.SetAttribute("opencode_plan", plan)
+	}
+
 	shared.FinalizeStatus(&snap)
 	if snap.Status == core.StatusOK {
 		modelCount := snap.Attributes["available_models_count"]
@@ -245,6 +257,19 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 }
 
 var errNoCookieConfigured = errors.New("opencode: no browser session configured")
+
+// consoleConnectHint is the one-line tile hint shown when no console data is
+// available. An expired/rejected session gets a reconnect hint instead.
+func consoleConnectHint(acct core.AccountConfig, snap core.UsageSnapshot) string {
+	const how = "log into opencode.ai, then Settings → 5 KEYS → opencode → c"
+	if _, rejected := snap.Raw["console_auth_status"]; rejected {
+		return "OpenCode console session expired: " + how
+	}
+	if strings.EqualFold(acct.Hint("opencode_plan", ""), "go") {
+		return "Connect OpenCode console for Go quota meters: " + how
+	}
+	return "Connect OpenCode console for quota/balance: " + how
+}
 
 // loadStoredSession reads a browser session directly from the credentials file
 // without refreshing from the browser. This avoids the destructive refresh in
