@@ -61,6 +61,7 @@ const sidebars: SidebarsConfig = {
             'providers/kilocode',
             'providers/kimi-cli',
             'providers/kiro',
+            'providers/muse_code',
             'providers/mux',
             'providers/openclaw',
             'providers/pi',

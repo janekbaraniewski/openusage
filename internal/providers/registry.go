@@ -28,6 +28,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/kiro"
 	"github.com/janekbaraniewski/openusage/internal/providers/mistral"
 	"github.com/janekbaraniewski/openusage/internal/providers/moonshot"
+	"github.com/janekbaraniewski/openusage/internal/providers/muse_code"
 	"github.com/janekbaraniewski/openusage/internal/providers/mux"
 	"github.com/janekbaraniewski/openusage/internal/providers/ollama"
 	"github.com/janekbaraniewski/openusage/internal/providers/openai"
@@ -83,6 +84,7 @@ func AllProviders() []core.UsageProvider {
 		openclaw.New(),
 		pi.New(),
 		qwen_cli.New(),
+		muse_code.New(),
 	}
 }
 
