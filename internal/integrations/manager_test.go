@@ -20,7 +20,11 @@ func TestManagerInstallAndListStatuses(t *testing.T) {
 		Home:         root,
 		ConfigRoot:   filepath.Join(root, ".config"),
 		HooksDir:     filepath.Join(root, ".config", "openusage", "hooks"),
-		OpenusageBin: "/tmp/openusage-bin",
+		OpenusageBin: filepath.Join(root, "openusage-bin"),
+	}
+	// Antigravity reports a missing binary as outdated.
+	if err := os.WriteFile(dirs.OpenusageBin, nil, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	m := Manager{dirs: dirs}
 

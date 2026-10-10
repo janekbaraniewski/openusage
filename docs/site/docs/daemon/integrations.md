@@ -191,6 +191,8 @@ openusage integrations install antigravity
 
 The installer preserves the built-in Antigravity status line with `stack_with_default: true` and refuses to overwrite an unrelated custom status-line command.
 
+**Outdated detection.** Because the status-line command points at an absolute OpenUsage binary path, the integration is reported as `outdated` (needs upgrade) when that path no longer exists. `openusage integrations upgrade antigravity` rewrites the command with the current binary.
+
 The plugin uses `OPENUSAGE_BIN` and `OPENUSAGE_TELEMETRY_SOCKET` if set; otherwise it falls back to the embedded defaults captured at install time.
 
 ---

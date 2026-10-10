@@ -120,7 +120,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### Tool / language / file usage
 
-- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`).
+- Source: `content[].tool_use` and the tool's input map (e.g. `file_path`, `path`, `command`). Claude Code streams one assistant message as several JSONL lines that share a `message.id` / `requestId`, one content block per line, so a message's tool calls usually sit on its later lines. OpenUsage merges those lines into one turn: content blocks are unioned (a `tool_use` counts once per `tool_use` id), and token counts take the per-field maximum because every line repeats the message's usage, with the final output count on the last line.
 - Transform:
   - Tool counts by tool name (`Edit`, `Read`, `Bash`, etc.) → `Metrics["tool_*"]`.
   - File extensions inferred from path candidates → language histogram.

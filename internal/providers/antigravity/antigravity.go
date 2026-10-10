@@ -205,6 +205,10 @@ func projectSnapshot(snap *core.UsageSnapshot, payload statusLinePayload) {
 	}
 
 	projectCurrentUsageMetrics(snap, payload.ContextWindow.CurrentUsage)
+	if len(payload.Quota) == 0 && payload.expiredQuotaWindows > 0 {
+		snap.Message = "Quota windows expired, waiting for fresh data"
+		snap.SetDiagnostic("quota", "All quota windows in the last status-line snapshot are past their reset time; run agy to refresh")
+	}
 	if snap.Message == "" {
 		if modelName != "" {
 			snap.Message = fmt.Sprintf("Antigravity CLI (%s)", modelName)

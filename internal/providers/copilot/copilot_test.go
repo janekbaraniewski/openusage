@@ -11,6 +11,30 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func TestGHHostnameFromBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{"empty", "", ""},
+		{"github.com", "https://github.com", ""},
+		{"api.github.com", "https://api.github.com", ""},
+		{"ghe cloud", "https://my-company.ghe.com", "my-company.ghe.com"},
+		{"ghe cloud no scheme", "my-company.ghe.com", "my-company.ghe.com"},
+		{"ghe server with path", "https://github.example.com/api/v3", "github.example.com"},
+		{"ghe server with port", "https://github.example.com:8443", "github.example.com"},
+		{"trailing slash", "https://github.example.com/", "github.example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ghHostnameFromBaseURL(tt.baseURL); got != tt.want {
+				t.Errorf("ghHostnameFromBaseURL(%q) = %q, want %q", tt.baseURL, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSimpleYAML(t *testing.T) {
 	input := `id: abc-123
 cwd: /home/user/project
