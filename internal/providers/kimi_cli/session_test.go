@@ -221,3 +221,48 @@ func TestReadKimiWireFile_MissingFile(t *testing.T) {
 		t.Errorf("missing file entries = %v, want nil", entries)
 	}
 }
+
+func TestReadKimiWireFile_KimiCodeUsageRecord(t *testing.T) {
+	// Kimi Code CLI nests wire logs at
+	// <root>/<group>/<uuid>/agents/<agent>/wire.jsonl and emits camelCase
+	// usage.record frames with an epoch-milliseconds timestamp.
+	root := t.TempDir()
+	dir := filepath.Join(root, "wd_project_abc", "session-uuid-456", "agents", "main")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "wire.jsonl")
+	lines := "" +
+		`{"type":"metadata","version":1}` + "\n" +
+		`{"type":"usage.record","agentId":"main","model":"kimi-code/k3","usage":{"inputOther":52290,"output":376,"inputCacheRead":11264,"inputCacheCreation":0},"usageScope":"turn","time":1789752352149}` + "\n" +
+		// Zero-usage record — must be ignored.
+		`{"type":"usage.record","agentId":"main","model":"kimi-code/k3","usage":{"inputOther":0,"output":0,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1789752353000}` + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	entries, err := readKimiWireFileWithModel(path, defaultModel)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.SessionID != "wd_project_abc/session-uuid-456" {
+		t.Errorf("SessionID = %q, want wd_project_abc/session-uuid-456 (agents dir must be climbed)", e.SessionID)
+	}
+	if e.Provider != "moonshot" {
+		t.Errorf("Provider = %q, want moonshot", e.Provider)
+	}
+	if e.Model != "kimi-code/k3" {
+		t.Errorf("Model = %q, want kimi-code/k3", e.Model)
+	}
+	if e.Input != 52290 || e.Output != 376 || e.CacheRead != 11264 || e.CacheWrite != 0 {
+		t.Errorf("tokens = (%d,%d,%d,%d), want (52290,376,11264,0)", e.Input, e.Output, e.CacheRead, e.CacheWrite)
+	}
+	wantTS := time.UnixMilli(1789752352149).UTC()
+	if !e.Timestamp.Equal(wantTS) {
+		t.Errorf("Timestamp = %v, want %v", e.Timestamp, wantTS)
+	}
+}
