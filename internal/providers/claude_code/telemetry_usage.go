@@ -142,146 +142,14 @@ func parseTelemetryConversationFileFrom(path string, byteOffset int64) ([]shared
 		return nil, byteOffset, err
 	}
 
-	seenUsage := make(map[string]bool)
-	seenTools := make(map[string]bool)
-	var out []shared.TelemetryEvent
+	var records []conversationRecord
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 	lineNumber := 0 // approximate — we don't know exact line from offset
-
 	for scanner.Scan() {
 		lineNumber++
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var entry jsonlEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Type != "assistant" || entry.Message == nil {
-			continue
-		}
-		ts, ok := parseJSONLTimestamp(entry.Timestamp)
-		if !ok {
-			continue
-		}
-		record := conversationRecord{
-			lineNumber: lineNumber,
-			timestamp:  ts,
-			model:      entry.Message.Model,
-			usage:      entry.Message.Usage,
-			requestID:  entry.RequestID,
-			messageID:  entry.Message.ID,
-			sessionID:  entry.SessionID,
-			cwd:        entry.CWD,
-			sourcePath: path,
-			content:    entry.Message.Content,
-		}
-		if record.model == "" {
-			record.model = "unknown"
-		}
-		if record.usage == nil {
-			continue
-		}
-
-		usageKey := conversationUsageDedupKey(record)
-		if usageKey != "" && seenUsage[usageKey] {
-			continue
-		}
-		if usageKey != "" {
-			seenUsage[usageKey] = true
-		}
-
-		model := strings.TrimSpace(record.model)
-		if model == "" {
-			model = "unknown"
-		}
-		usage := record.usage
-		totalTokens := conversationTotalTokens(usage)
-		cost := estimateCost(model, usage)
-
-		turnID := core.FirstNonEmpty(record.requestID, record.messageID)
-		if turnID == "" {
-			turnID = fmt.Sprintf("%s:%d", strings.TrimSpace(record.sessionID), record.lineNumber)
-		}
-		messageID := strings.TrimSpace(record.messageID)
-		if messageID == "" {
-			messageID = turnID
-		}
-
-		out = append(out, shared.TelemetryEvent{
-			SchemaVersion: "claude_jsonl_v1",
-			Channel:       shared.TelemetryChannelJSONL,
-			OccurredAt:    ts,
-			AccountID:     "claude-code",
-			WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
-			SessionID:     strings.TrimSpace(record.sessionID),
-			TurnID:        turnID,
-			MessageID:     messageID,
-			ProviderID:    "anthropic",
-			AgentName:     "claude_code",
-			EventType:     shared.TelemetryEventTypeMessageUsage,
-			ModelRaw:      model,
-			TokenUsage: core.TokenUsage{
-				InputTokens:      core.Int64Ptr(int64(usage.InputTokens)),
-				OutputTokens:     core.Int64Ptr(int64(usage.OutputTokens)),
-				ReasoningTokens:  core.Int64Ptr(int64(usage.ReasoningTokens)),
-				CacheReadTokens:  core.Int64Ptr(int64(usage.CacheReadInputTokens)),
-				CacheWriteTokens: core.Int64Ptr(int64(usage.CacheCreationInputTokens)),
-				TotalTokens:      core.Int64Ptr(totalTokens),
-				CostUSD:          core.Float64Ptr(cost),
-			},
-			Status: shared.TelemetryStatusOK,
-			Payload: map[string]any{
-				"file": path,
-			},
-		})
-
-		for idx, part := range record.content {
-			if part.Type != "tool_use" {
-				continue
-			}
-			toolKey := conversationToolDedupKey(record, idx, part)
-			if toolKey != "" && seenTools[toolKey] {
-				continue
-			}
-			if toolKey != "" {
-				seenTools[toolKey] = true
-			}
-			toolName := strings.ToLower(strings.TrimSpace(part.Name))
-			if toolName == "" {
-				toolName = "unknown"
-			}
-			toolFilePath := ""
-			if paths := shared.ExtractFilePathsFromPayload(part.Input); len(paths) > 0 {
-				toolFilePath = paths[0]
-			}
-			out = append(out, shared.TelemetryEvent{
-				SchemaVersion: "claude_jsonl_v1",
-				Channel:       shared.TelemetryChannelJSONL,
-				OccurredAt:    ts,
-				AccountID:     "claude-code",
-				WorkspaceID:   shared.SanitizeWorkspace(record.cwd),
-				SessionID:     strings.TrimSpace(record.sessionID),
-				TurnID:        turnID,
-				MessageID:     messageID,
-				ToolCallID:    strings.TrimSpace(part.ID),
-				ProviderID:    "anthropic",
-				AgentName:     "claude_code",
-				EventType:     shared.TelemetryEventTypeToolUsage,
-				ModelRaw:      model,
-				TokenUsage: core.TokenUsage{
-					Requests: core.Int64Ptr(1),
-				},
-				ToolName: toolName,
-				Status:   shared.TelemetryStatusOK,
-				Payload: map[string]any{
-					"source_file": path,
-					"file":        toolFilePath,
-				},
-			})
+		if rec, ok := conversationRecordFromLine(scanner.Bytes(), lineNumber, path, ""); ok {
+			records = append(records, rec)
 		}
 	}
 
@@ -290,16 +158,26 @@ func parseTelemetryConversationFileFrom(path string, byteOffset int64) ([]shared
 	if finalPos <= byteOffset {
 		finalPos = byteOffset
 	}
-	return out, finalPos, nil
+	// Merge streamed lines the same way the full parse does, so the
+	// append-only path neither keeps a message's partial first-line usage nor
+	// drops tool_use blocks written on its later lines.
+	return telemetryEventsFromRecords(path, mergeStreamingDuplicates(records), false), finalPos, nil
 }
 
 // ParseTelemetryConversationFile parses a Claude Code conversation JSONL file
 // and emits message/tool telemetry events.
 func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error) {
+	return telemetryEventsFromRecords(path, parseConversationRecords(path), true), nil
+}
+
+// telemetryEventsFromRecords emits one message_usage event per request and
+// one tool_usage event per tool_use block. withLine records the source line in
+// the payload; the append-only parser passes false because it only knows line
+// numbers relative to its starting offset.
+func telemetryEventsFromRecords(path string, records []conversationRecord, withLine bool) []shared.TelemetryEvent {
 	seenUsage := make(map[string]bool)
 	seenTools := make(map[string]bool)
 	var out []shared.TelemetryEvent
-	records := parseConversationRecords(path)
 	for _, record := range records {
 		if record.usage == nil {
 			continue
@@ -332,6 +210,10 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 			messageID = turnID
 		}
 
+		messagePayload := map[string]any{"file": path}
+		if withLine {
+			messagePayload["line"] = record.lineNumber
+		}
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: "claude_jsonl_v1",
 			Channel:       shared.TelemetryChannelJSONL,
@@ -354,11 +236,8 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				TotalTokens:      core.Int64Ptr(totalTokens),
 				CostUSD:          core.Float64Ptr(cost),
 			},
-			Status: shared.TelemetryStatusOK,
-			Payload: map[string]any{
-				"file": path,
-				"line": record.lineNumber,
-			},
+			Status:  shared.TelemetryStatusOK,
+			Payload: messagePayload,
 		})
 
 		for idx, part := range record.content {
@@ -384,6 +263,10 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				toolFilePath = paths[0]
 			}
 
+			toolPayload := map[string]any{"source_file": path, "file": toolFilePath}
+			if withLine {
+				toolPayload["line"] = record.lineNumber
+			}
 			out = append(out, shared.TelemetryEvent{
 				SchemaVersion: "claude_jsonl_v1",
 				Channel:       shared.TelemetryChannelJSONL,
@@ -403,15 +286,11 @@ func ParseTelemetryConversationFile(path string) ([]shared.TelemetryEvent, error
 				},
 				ToolName: toolName,
 				Status:   shared.TelemetryStatusOK,
-				Payload: map[string]any{
-					"source_file": path,
-					"line":        record.lineNumber,
-					"file":        toolFilePath,
-				},
+				Payload:  toolPayload,
 			})
 		}
 	}
-	return out, nil
+	return out
 }
 
 // ParseTelemetryHookPayload parses Claude Code hook stdin payloads.
