@@ -87,14 +87,19 @@ func detectColumns(ctx context.Context, db *sql.DB) (threadColumns, error) {
 	}, nil
 }
 
-// openReadOnly opens threads.db using SQLite's read-only, immutable URI so we
-// never compete for the lock with the live Zed process.
+// openReadOnly opens threads.db read-only with a busy timeout. It
+// deliberately does not use immutable=1: Zed writes to this file while we
+// read it, and immutable tells SQLite the file never changes, so it skips
+// locking and ignores the WAL. A read that lands on a page mid-write then
+// fails with "database disk image is malformed", and rows still in the WAL
+// are invisible. A plain read-only connection reads a consistent snapshot
+// and the busy timeout absorbs the writer's short exclusive window.
 func openReadOnly(dbPath string) (*sql.DB, error) {
 	if dbPath == "" {
 		return nil, fmt.Errorf("zed: empty db path")
 	}
 	encoded := (&url.URL{Path: dbPath}).EscapedPath()
-	dsn := fmt.Sprintf("file:%s?mode=ro&immutable=1", encoded)
+	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", encoded)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("zed: opening threads db: %w", err)

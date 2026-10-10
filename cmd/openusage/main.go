@@ -28,6 +28,10 @@ func main() {
 			// the dashboard. Subcommands load their own config, and the ones that
 			// do not need it (version, help, daemon install/uninstall) keep
 			// working — including the ones you reach for to dig yourself out.
+			if err := requireDashboardTerminal(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
 			cfg, err := config.Load()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
