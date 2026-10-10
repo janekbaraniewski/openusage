@@ -125,6 +125,56 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 		return padToSize(strings.Join(empty, "\n"), w, h)
 	}
 
+	layout := m.buildTilesLayout(w, h, forcedCols)
+	contentLines := layout.contentLines
+	totalLines := len(contentLines)
+
+	if totalLines <= h {
+		return padToSize(strings.Join(contentLines, "\n"), w, h)
+	}
+
+	rowScrollOffset := 0
+	if layout.cols == 1 {
+		rowScrollOffset = m.tileOffset
+	}
+	scrollLine := layout.cursorRowOffset(m.cursor) + rowScrollOffset
+	if scrollLine > totalLines-h {
+		scrollLine = totalLines - h
+	}
+	if scrollLine < 0 {
+		scrollLine = 0
+	}
+
+	endLine := scrollLine + h
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	visible := contentLines[scrollLine:endLine]
+
+	if scrollLine > 0 {
+		visible[0] = dimStyle.Render("  ▲ more above")
+	}
+	if bar := renderVerticalScrollBarLine(w, scrollLine, h, totalLines); bar != "" && len(visible) > 0 {
+		visible[len(visible)-1] = bar
+	} else if endLine < totalLines {
+		visible[len(visible)-1] = dimStyle.Render("  ▼ more below")
+	}
+
+	return padToSize(strings.Join(visible, "\n"), w, h)
+}
+
+// tilesLayout is the fully composed tile grid before it is windowed into
+// the visible viewport. It is shared by the renderer and by the scroll
+// input handlers so both agree on how far the stacked view can scroll.
+type tilesLayout struct {
+	cols         int
+	rowHeights   []int
+	contentLines []string
+}
+
+func (m Model) buildTilesLayout(w, h, forcedCols int) tilesLayout {
+	ids := m.filteredIDs()
 	cols, tileW, tileMaxHeight := m.tileGrid(w, h, len(ids))
 	if forcedCols == 1 {
 		cols = 1
@@ -191,61 +241,41 @@ func (m Model) renderTilesWithColumns(w, h, forcedCols int) string {
 	}
 	content := strings.Join(joinedLines, "\n")
 
-	contentLines := strings.Split(content, "\n")
-	totalLines := len(contentLines)
-
-	if totalLines <= h {
-		return padToSize(content, w, h)
+	return tilesLayout{
+		cols:         cols,
+		rowHeights:   rowHeights,
+		contentLines: strings.Split(content, "\n"),
 	}
+}
 
-	totalRows := len(rowHeights)
-	rowOffsets := make([]int, totalRows)
+// cursorRowOffset returns the first content line of the row holding cursor.
+func (l tilesLayout) cursorRowOffset(cursor int) int {
+	offsets := l.rowOffsets()
+	if len(offsets) == 0 || l.cols <= 0 {
+		return 0
+	}
+	row := cursor / l.cols
+	if row >= len(offsets) {
+		row = len(offsets) - 1
+	}
+	if row < 0 {
+		row = 0
+	}
+	return offsets[row]
+}
+
+// rowOffsets returns the first content line of each tile row.
+func (l tilesLayout) rowOffsets() []int {
+	offsets := make([]int, len(l.rowHeights))
 	acc := 0
-	for idx, cnt := range rowHeights {
-		rowOffsets[idx] = acc
+	for idx, cnt := range l.rowHeights {
+		offsets[idx] = acc
 		acc += cnt
-		if idx < totalRows-1 {
+		if idx < len(l.rowHeights)-1 {
 			acc += tileGapV
 		}
 	}
-
-	cursorRow := m.cursor / cols
-	if cursorRow >= totalRows {
-		cursorRow = totalRows - 1
-	}
-	if cursorRow < 0 {
-		cursorRow = 0
-	}
-
-	rowScrollOffset := 0
-	if cols == 1 {
-		rowScrollOffset = m.tileOffset
-	}
-	scrollLine := rowOffsets[cursorRow] + rowScrollOffset
-	if scrollLine > totalLines-h {
-		scrollLine = totalLines - h
-	}
-	if scrollLine < 0 {
-		scrollLine = 0
-	}
-
-	endLine := scrollLine + h
-	if endLine > totalLines {
-		endLine = totalLines
-	}
-
-	visible := contentLines[scrollLine:endLine]
-
-	if scrollLine > 0 {
-		visible[0] = dimStyle.Render("  ▲ more above")
-	}
-	if bar := renderVerticalScrollBarLine(w, scrollLine, h, totalLines); bar != "" && len(visible) > 0 {
-		visible[len(visible)-1] = bar
-	} else if endLine < totalLines {
-		visible[len(visible)-1] = dimStyle.Render("  ▼ more below")
-	}
-
-	return padToSize(strings.Join(visible, "\n"), w, h)
+	return offsets
 }
 
 func (m Model) renderTilesTabs(w, h int) string {
