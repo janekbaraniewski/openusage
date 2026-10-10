@@ -47,6 +47,7 @@ const sidebars: SidebarsConfig = {
             'providers/cursor',
             'providers/copilot',
             'providers/codex',
+            'providers/command-code',
             'providers/gemini-cli',
             'providers/antigravity',
             'providers/opencode',
