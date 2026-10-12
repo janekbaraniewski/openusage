@@ -12,12 +12,14 @@
 package xiaomi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,6 +39,7 @@ const (
 	accountDomain      = "account.xiaomi.com"
 	passTokenCookie    = "passToken"
 	serviceTokenCookie = "api-platform_serviceToken"
+	postTokenCookie    = "api-platform_ph"
 	userIDCookie       = "userId"
 
 	// cookieEnvVar holds a full Cookie header copied from the console, for
@@ -159,6 +162,16 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["console_usage_error"] = err.Error()
 	} else {
 		applyUsage(&snap, usage, currency)
+	}
+
+	// Per-model and per-day figures are also secondary.
+	if rows, err := fetchUsageDetail(ctx, client, time.Now().UTC()); err != nil {
+		if isAuthError(err) {
+			return failedSnapshot(snap, err, "usage detail")
+		}
+		snap.Raw["console_usage_detail_error"] = err.Error()
+	} else {
+		applyUsageDetail(&snap, rows, currency, time.Now().UTC())
 	}
 
 	// Token Plan routes answer with a non-zero code for pay-as-you-go
@@ -401,9 +414,33 @@ func newConsoleClient(cookieHeader string) *consoleClient {
 // get fetches one console route and decodes the `data` member of its
 // {code, message, data} envelope into out.
 func (c *consoleClient) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+// post sends a JSON body. The console rejects a POST unless the request also
+// carries the value of its api-platform_ph cookie as a query parameter.
+func (c *consoleClient) post(ctx context.Context, path string, body, out any) error {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
+	}
+	token := strings.Trim(cookieValue(c.cookieHeader, postTokenCookie), `"`)
+	return c.do(ctx, http.MethodPost, path+"?"+url.Values{postTokenCookie: {token}}.Encode(), payload, out)
+}
+
+func (c *consoleClient) do(ctx context.Context, method, target string, payload []byte, out any) error {
+	// Errors name the route only; the query string can carry a session token.
+	path, _, _ := strings.Cut(target, "?")
+	var reqBody io.Reader
+	if payload != nil {
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+target, reqBody)
+	if err != nil {
+		return err
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Cookie", c.cookieHeader)
@@ -413,7 +450,11 @@ func (c *consoleClient) get(ctx context.Context, path string, out any) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("xiaomi console: %w", err)
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return fmt.Errorf("xiaomi console: %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -477,4 +518,15 @@ func shorten(s string) string {
 		return s[:120] + "…"
 	}
 	return s
+}
+
+// cookieValue returns one cookie's value from a Cookie header.
+func cookieValue(header, name string) string {
+	for _, pair := range strings.Split(header, ";") {
+		key, value, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if ok && key == name {
+			return value
+		}
+	}
+	return ""
 }

@@ -61,6 +61,7 @@ type fakeXiaomi struct {
 	consoleCookie  string
 	accountCookie  string
 	mints          int
+	postToken      string
 	acceptLogin    bool
 	rejectSessions map[string]bool
 }
@@ -87,6 +88,7 @@ func serveConsole(t *testing.T, routes map[string]string, status int) *fakeXiaom
 			fake.mints++
 			w.Header().Add("Set-Cookie", fmt.Sprintf(`api-platform_serviceToken="tok%d"; Path=/; HttpOnly`, fake.mints))
 			w.Header().Add("Set-Cookie", "userId=42; Path=/")
+			w.Header().Add("Set-Cookie", fmt.Sprintf(`api-platform_ph="ph%d"; Path=/`, fake.mints))
 			http.Redirect(w, r, "/balance", http.StatusFound)
 			return
 		}
@@ -97,6 +99,9 @@ func serveConsole(t *testing.T, routes map[string]string, status int) *fakeXiaom
 			return
 		}
 		fake.consoleCookie = cookie
+		if r.Method == http.MethodPost {
+			fake.postToken = r.URL.Query().Get(postTokenCookie)
+		}
 		body, ok := routes[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)
@@ -153,7 +158,7 @@ func TestFetchSuccessWithTokenPlan(t *testing.T) {
 	if want := "passToken=pass123; userId=42"; fake.accountCookie != want {
 		t.Errorf("account Cookie header = %q, want %q", fake.accountCookie, want)
 	}
-	if want := `api-platform_serviceToken="tok1"; userId=42`; fake.consoleCookie != want {
+	if want := `api-platform_serviceToken="tok1"; userId=42; api-platform_ph="ph1"`; fake.consoleCookie != want {
 		t.Errorf("console Cookie header = %q, want %q", fake.consoleCookie, want)
 	}
 	if m := metricValue(t, snap, "total_balance"); m.Remaining == nil || *m.Remaining != 12.5 || m.Unit != "USD" {
@@ -310,5 +315,51 @@ func TestFetchUsageFailureKeepsBalance(t *testing.T) {
 	metricValue(t, snap, "total_balance")
 	if snap.Raw["console_usage_error"] == "" {
 		t.Error("usage failure not recorded in Raw")
+	}
+}
+
+func TestFetchProjectsUsageDetail(t *testing.T) {
+	stubSession(t, "pass123", "42")
+	today := time.Now().UTC().Format(dayLayout)
+	old := time.Now().UTC().AddDate(0, 0, -45).Format(dayLayout)
+	detail := fmt.Sprintf(`{"code":0,"data":[
+		{"date":"%[1]s","model":"mimo-v2.6-pro","consumedAmount":"1.50","totalToken":1100,"inputHitToken":700,"inputMissToken":300,"outputToken":100,"requestCount":4},
+		{"date":"%[1]s","model":"mimo-v2.6-flash","consumedAmount":"0.25","totalToken":200,"inputHitToken":0,"inputMissToken":150,"outputToken":50,"requestCount":1},
+		{"date":"%[2]s","model":"mimo-v2.6-pro","consumedAmount":"9.00","totalToken":9000,"inputHitToken":0,"inputMissToken":8000,"outputToken":1000,"requestCount":9}
+	]}`, today, old)
+	fake := serveConsole(t, map[string]string{
+		"/balance":           balanceBody,
+		"/usage":             usageBody,
+		"/usage/detail/list": detail,
+	}, http.StatusOK)
+
+	snap := fetch(t)
+
+	if snap.Status != core.StatusOK {
+		t.Fatalf("status = %v (%s), want OK", snap.Status, snap.Message)
+	}
+	if fake.postToken != "ph1" {
+		t.Errorf("POST carried api-platform_ph=%q, want ph1", fake.postToken)
+	}
+	if m := metricValue(t, snap, "model_mimo_v2_6_pro_cache_read_tokens"); *m.Used != 700 {
+		t.Errorf("pro cache read = %v, want 700 (rows older than the window excluded)", *m.Used)
+	}
+	if m := metricValue(t, snap, "model_mimo_v2_6_pro_input_tokens"); *m.Used != 300 {
+		t.Errorf("pro input = %v, want 300", *m.Used)
+	}
+	if m := metricValue(t, snap, "model_mimo_v2_6_flash_cost_usd"); *m.Used != 0.25 {
+		t.Errorf("flash cost = %v, want 0.25", *m.Used)
+	}
+	if m := metricValue(t, snap, "30d_api_cost"); *m.Used != 1.75 {
+		t.Errorf("30d cost = %v, want 1.75", *m.Used)
+	}
+	if m := metricValue(t, snap, "today_api_cost"); *m.Used != 1.75 {
+		t.Errorf("today cost = %v, want 1.75", *m.Used)
+	}
+	if len(snap.ModelUsage) != 2 {
+		t.Errorf("model usage records = %d, want 2", len(snap.ModelUsage))
+	}
+	if got := snap.DailySeries["cost"]; len(got) != 1 || got[0].Date != today || got[0].Value != 1.75 {
+		t.Errorf("daily cost series = %+v", got)
 	}
 }

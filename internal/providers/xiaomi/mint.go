@@ -26,7 +26,7 @@ const (
 
 // mintedCookieNames are the console cookies /sts issues, in the order they
 // are sent back.
-var mintedCookieNames = []string{serviceTokenCookie, userIDCookie, "api-platform_slh", "api-platform_ph"}
+var mintedCookieNames = []string{serviceTokenCookie, userIDCookie, "api-platform_slh", postTokenCookie}
 
 // isAccountHost reports whether a host may receive the Xiaomi account
 // cookies. It is a variable so tests can point the chain at a local server.
