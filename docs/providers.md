@@ -68,6 +68,19 @@ Tracks credits, activity, and generation stats via an OpenRouter-compatible API.
 
 Tracks local server models, per-model usage, and optional cloud billing.
 
+### dsh
+
+**Detection:** `~/.dsh/sessions` directory (`$DSH_HOME/sessions` when `DSH_HOME` is set)
+
+Reads dsh (DeepSeek Harness) session logs (`session.v4.jsonl.zstd`) and tracks sessions, messages, tool calls, and per-model tokens. No cost is reported: the logs record tokens only.
+
+Each model response and tool call is also stored as a telemetry event, attributed to the service that hosted the request:
+
+- Requests sent to the DeepSeek platform (`deepseek-official` route) are stored under the `deepseek` provider, so they fill the DeepSeek tile's model, client, project, and tool sections.
+- Requests through any other route (Command Code, Z.AI, the Codex backend, …) stay on the dsh tile with the host recorded as the upstream provider. A DeepSeek model served by another host counts as that host's usage.
+
+To also show the DeepSeek-hosted usage on the dsh tile, link it in `settings.json`: `"telemetry": {"provider_links": {"deepseek": "dsh"}}`.
+
 ## API platforms
 
 ### OpenRouter

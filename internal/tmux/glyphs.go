@@ -179,6 +179,7 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"codebuff":      "[buff]",
 		"mux":           "[mux]",
 		"pi":            "[pi]",
+		"dsh":           "[dsh]",
 	},
 	GlyphTierUnicode: {
 		"*":             "✨", // sparkles
@@ -219,6 +220,7 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"codebuff":      "\U0001F9AC", // bison (buff)
 		"mux":           "⇄",          // multiplexer
 		"pi":            "π",
+		"dsh":           "\U0001F40B", // whale (DeepSeek Harness)
 	},
 	GlyphTierNerdfont: {
 		"*":             "", // nf-fa-rocket
@@ -295,6 +297,7 @@ var providerBrandColors = map[string]string{
 	"groq":          "#F55036",
 	"mistral":       "#FA520F", // Mistral orange
 	"deepseek":      "#4D6BFE",
+	"dsh":           "#4D6BFE", // DeepSeek blue
 	"xai":           "#9CA3AF",
 	"xiaomi":        "#FF6900",
 	"perplexity":    "#20B8CD",

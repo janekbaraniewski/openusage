@@ -18,6 +18,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/providers/deepseek"
 	"github.com/janekbaraniewski/openusage/internal/providers/droid"
+	"github.com/janekbaraniewski/openusage/internal/providers/dsh"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_api"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/goose"
@@ -87,6 +88,7 @@ func AllProviders() []core.UsageProvider {
 		pi.New(),
 		qwen_cli.New(),
 		muse_code.New(),
+		dsh.New(),
 	}
 }
 
