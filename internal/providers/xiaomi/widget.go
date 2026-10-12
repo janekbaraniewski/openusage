@@ -7,19 +7,18 @@ import (
 
 func dashboardWidget() core.DashboardWidget {
 	cfg := providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRolePeach))
-	// Token Plan quota is the only capped figure; the wallet balance leads
-	// for pay-as-you-go accounts, which have no plan.
-	cfg.GaugePriority = []string{"plan_tokens", "available_balance"}
-	cfg.GaugeMaxLines = 1
+	// The wallet gauge fills with lifetime spend against everything paid in;
+	// the Token Plan gauge appears for accounts that have a plan.
+	cfg.GaugePriority = []string{"available_balance", "plan_tokens"}
+	cfg.GaugeMaxLines = 2
 
 	cfg.CompactRows = []core.DashboardCompactRow{
 		{Label: "Balance", Keys: []string{"available_balance", "cash_balance", "gift_balance"}, MaxSegments: 3},
-		{Label: "Spend", Keys: []string{"month_spend", "total_spend"}, MaxSegments: 2},
 		{Label: "Tokens", Keys: []string{"total_tokens", "input_tokens", "output_tokens", "cache_tokens"}, MaxSegments: 4},
 	}
 
 	cfg.MetricLabelOverrides = map[string]string{
-		"available_balance": "Balance",
+		"available_balance": "Wallet Spent",
 		"cash_balance":      "Cash",
 		"gift_balance":      "Gift",
 		"month_spend":       "This Month",
