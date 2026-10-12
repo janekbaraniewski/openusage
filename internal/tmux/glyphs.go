@@ -159,6 +159,7 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"mistral":       "[mistral]",
 		"deepseek":      "[deepseek]",
 		"xai":           "[xai]",
+		"xiaomi":        "[mimo]",
 		"perplexity":    "[pplx]",
 		"alibaba_cloud": "[qwen]",
 		"zai":           "[zai]",
@@ -198,6 +199,7 @@ var providerIcons = map[GlyphTier]map[string]string{
 		"mistral":       "\U0001F32C",
 		"deepseek":      "\U0001F50D",
 		"xai":           "✖",
+		"xiaomi":        "🍊",
 		"perplexity":    "❔",
 		"alibaba_cloud": "云",
 		"zai":           "✦",
@@ -294,6 +296,7 @@ var providerBrandColors = map[string]string{
 	"mistral":       "#FA520F", // Mistral orange
 	"deepseek":      "#4D6BFE",
 	"xai":           "#9CA3AF",
+	"xiaomi":        "#FF6900",
 	"perplexity":    "#20B8CD",
 	"zai":           "#5B8DEF",
 	"moonshot":      "#6B7CFF",

@@ -117,6 +117,16 @@
       }
     },
     {
+      "id": "xiaomi",
+      "provider": "xiaomi",
+      "auth": "browser_session",
+      "browser_cookie": {
+        "domain": ".xiaomimimo.com",
+        "cookie_name": "api-platform_serviceToken",
+        "source_browser": "firefox"
+      }
+    },
+    {
       "id": "moonshot-cn",
       "provider": "moonshot",
       "api_key_env": "MOONSHOT_API_KEY",

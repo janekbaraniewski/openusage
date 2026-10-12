@@ -137,9 +137,12 @@ pair, never sent off-machine. macOS will prompt for Keychain access the
 first time openusage reads Chrome's cookie store; that's the OS-level
 consent gate.
 
+On Linux, Firefox installed as a Flatpak (`org.mozilla.firefox`) is read alongside the native `~/.mozilla` profiles.
+
 **Cookie auth currently shipping** (full implementation):
 - Perplexity → `console.perplexity.ai` — tier, balance, spend, analytics
 - OpenCode → `opencode.ai/_server` — balance, monthly limit, subscription
+- Xiaomi MiMo → `platform.xiaomimimo.com/api/v1` — wallet balance, spend, token totals, Token Plan quota
 
 **Cookie auth in progress** (HAR captured, RPC client needed):
 - Google AI Studio → `aistudio.google.com` — per-project quotas (needs
@@ -185,6 +188,12 @@ expect. Env-var detection runs first; if both are present the env var wins.
 **Detection:** browser-session cookie from `console.perplexity.ai` (Settings → 5 KEYS → perplexity → Enter).
 
 Browser-session-auth-only — Perplexity's API key is chat-only. Tile surfaces tier (0–5), available balance, lifetime spend, auto-reload settings, payment method, and 30-day analytics (api_requests, input/output/reasoning tokens, search queries) from the console RPCs at `/rest/pplx-api/v2/groups/<org_id>/...`.
+
+### Xiaomi MiMo
+
+**Detection:** browser-session cookie from `platform.xiaomimimo.com` (Settings → 5 KEYS → xiaomi → Enter), or a console `Cookie` header in `XIAOMI_MIMO_COOKIE`.
+
+Browser-session-auth-only — MiMo API keys (`sk-`, `tp-`, `ttp-`) cannot read balance or usage. The provider sends the console's `api-platform_serviceToken` and `userId` cookies to `/balance`, `/usage`, `/tokenPlan/detail` and `/tokenPlan/usage`. Tile surfaces wallet balance (cash and gift), month and lifetime spend, token totals, and the monthly Token Plan quota for accounts that have a plan. The currency follows the account region (USD or CNY). When the console session expires the tile shows AUTH until you log in at the console again.
 
 ### OpenCode (Zen + Console)
 

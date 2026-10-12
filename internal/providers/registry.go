@@ -41,6 +41,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/roocode"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
+	"github.com/janekbaraniewski/openusage/internal/providers/xiaomi"
 	"github.com/janekbaraniewski/openusage/internal/providers/zai"
 	"github.com/janekbaraniewski/openusage/internal/providers/zed"
 )
@@ -53,6 +54,7 @@ func AllProviders() []core.UsageProvider {
 		alibaba_cloud.New(),
 		openrouter.New(),
 		perplexity.New(),
+		xiaomi.New(),
 		groq.New(),
 		mistral.New(),
 		moonshot.New(),
