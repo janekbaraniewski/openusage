@@ -72,6 +72,7 @@ func TestCollect_MissingDir(t *testing.T) {
 }
 
 func TestCollect_EmitsMessageAndToolEvents(t *testing.T) {
+	stubPrice(t, "deepseek")
 	setHome(t, t.TempDir())
 	root := t.TempDir()
 	writeFixtureSessions(t, root)
@@ -95,8 +96,9 @@ func TestCollect_EmitsMessageAndToolEvents(t *testing.T) {
 		if ev.OccurredAt.IsZero() {
 			t.Errorf("%s: OccurredAt is zero", ev.MessageID+ev.ToolCallID)
 		}
-		if ev.CostUSD != nil {
-			t.Errorf("%s: CostUSD = %v, want none", ev.MessageID+ev.ToolCallID, *ev.CostUSD)
+		// Only requests hosted by DeepSeek itself are priced.
+		if priced := ev.CostUSD != nil; priced != (ev.ProviderID == deepseekProviderID && ev.EventType == shared.TelemetryEventTypeMessageUsage) {
+			t.Errorf("%s: CostUSD set = %v for provider %q", ev.MessageID+ev.ToolCallID, priced, ev.ProviderID)
 		}
 		if ev.Payload["client"] != "dsh" {
 			t.Errorf("%s: payload client = %v", ev.MessageID+ev.ToolCallID, ev.Payload["client"])

@@ -141,6 +141,10 @@ type toolEntry struct {
 	IsError  bool
 	// File is the target of a file tool, kept for language attribution.
 	File string
+	// LinesAdded and LinesRemoved count the lines an edit or write tool put
+	// in and took out. Only the counts are kept, never the text.
+	LinesAdded   int
+	LinesRemoved int
 }
 
 // readSessionFile decompresses and parses one session log. It returns nil
@@ -326,6 +330,10 @@ func (p *sessionParser) consume(line []byte) {
 				File:     toolTargetFile(data.Arguments),
 			},
 		}
+		if call := p.pending[callID]; true {
+			call.entry.LinesAdded, call.entry.LinesRemoved = toolLineChanges(name, data.Arguments)
+			p.pending[callID] = call
+		}
 
 	case eventToolResult:
 		var data toolResultData
@@ -439,6 +447,58 @@ func toolTargetFile(arguments json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(args.FilePath)
+}
+
+// decodeToolArguments returns a tool call's argument object. Arguments are
+// logged as a JSON-encoded string; an inline object is accepted too.
+func decodeToolArguments(arguments json.RawMessage) []byte {
+	raw := bytes.TrimSpace(arguments)
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] == '"' {
+		var encoded string
+		if json.Unmarshal(raw, &encoded) != nil {
+			return nil
+		}
+		raw = []byte(strings.TrimSpace(encoded))
+	}
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil
+	}
+	return raw
+}
+
+// toolLineChanges counts the lines an edit replaces (old_string out,
+// new_string in) or a write puts down (content in).
+func toolLineChanges(name string, arguments json.RawMessage) (added, removed int) {
+	raw := decodeToolArguments(arguments)
+	if raw == nil {
+		return 0, 0
+	}
+	var args struct {
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+		Content   string `json:"content"`
+	}
+	if json.Unmarshal(raw, &args) != nil {
+		return 0, 0
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "edit":
+		return countLines(args.NewString), countLines(args.OldString)
+	case "write":
+		return countLines(args.Content), 0
+	}
+	return 0, 0
+}
+
+func countLines(text string) int {
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return 0
+	}
+	return strings.Count(text, "\n") + 1
 }
 
 func nonNegative(p *int64) int64 {

@@ -104,6 +104,7 @@ func sessionTelemetryEvents(path string, session *sessionData, accountID string)
 				CacheWriteTokens: core.Int64Ptr(msg.CacheWrite),
 				TotalTokens:      core.Int64Ptr(msg.Total),
 				Requests:         core.Int64Ptr(1),
+				CostUSD:          estimateCost(msg),
 			},
 			Status:  shared.TelemetryStatusOK,
 			Payload: telemetryPayload(path, msg.Upstream),
@@ -118,6 +119,14 @@ func sessionTelemetryEvents(path string, session *sessionData, accountID string)
 		status := shared.TelemetryStatusOK
 		if tool.IsError {
 			status = shared.TelemetryStatusError
+		} else {
+			// A failed edit changed nothing.
+			if tool.LinesAdded > 0 {
+				payload["lines_added"] = tool.LinesAdded
+			}
+			if tool.LinesRemoved > 0 {
+				payload["lines_removed"] = tool.LinesRemoved
+			}
 		}
 		out = append(out, shared.TelemetryEvent{
 			SchemaVersion: telemetrySchemaVersion,
