@@ -2,10 +2,12 @@ package xiaomi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -20,33 +22,81 @@ const (
 	loginBody      = `{"code":401,"loginUrl":"https://account.xiaomi.com/pass/serviceLogin"}`
 )
 
-// stubSession replaces the browser-session seams so Fetch never touches a
-// real cookie store. An empty token means "no session configured".
-func stubSession(t *testing.T, token, userID string) {
+// stubSession replaces the browser seams so Fetch never touches a real
+// cookie store, and clears minted sessions left by other tests. An empty
+// passToken means "no Xiaomi account session in the browser".
+func stubSession(t *testing.T, passToken, userID string) {
 	t.Helper()
-	origLoad, origUser := loadSession, readUserID
-	t.Cleanup(func() { loadSession, readUserID = origLoad, origUser })
+	origLoad, origRead := loadSession, readAccountCookie
+	t.Cleanup(func() { loadSession, readAccountCookie = origLoad, origRead })
 	loadSession = func(context.Context, core.AccountConfig) (config.BrowserSession, bool, error) {
-		if token == "" {
+		if passToken == "" {
 			return config.BrowserSession{}, false, nil
 		}
 		return config.BrowserSession{
-			Domain:        cookieDomain,
-			CookieName:    serviceTokenCookie,
-			Value:         token,
+			Domain:        accountDomain,
+			CookieName:    passTokenCookie,
+			Value:         passToken,
 			SourceBrowser: "firefox",
 		}, true, nil
 	}
-	readUserID = func(context.Context, string) string { return userID }
+	readAccountCookie = func(_ context.Context, name, _ string) string {
+		if name == userIDCookie {
+			return userID
+		}
+		return ""
+	}
+	mintState.Lock()
+	mintState.sessions = map[string]string{}
+	mintState.failedAt = map[string]time.Time{}
+	mintState.Unlock()
 }
 
-// serveConsole starts a fake console that answers each route with the given
-// body and records the Cookie header it received.
-func serveConsole(t *testing.T, routes map[string]string, status int) *string {
+// fakeXiaomi is a console plus an account sign-in host. The console answers
+// each route with the given body once a request carries a Cookie header, and
+// 401 with a login URL otherwise. The account host accepts the sign-in when
+// acceptLogin is set and redirects to the console's /sts, which issues the
+// service token.
+type fakeXiaomi struct {
+	consoleCookie  string
+	accountCookie  string
+	mints          int
+	acceptLogin    bool
+	rejectSessions map[string]bool
+}
+
+func serveConsole(t *testing.T, routes map[string]string, status int) *fakeXiaomi {
 	t.Helper()
-	var gotCookie string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotCookie = r.Header.Get("Cookie")
+	fake := &fakeXiaomi{acceptLogin: true, rejectSessions: map[string]bool{}}
+
+	var consoleURL string
+	account := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fake.accountCookie = r.Header.Get("Cookie")
+		if !fake.acceptLogin {
+			w.WriteHeader(http.StatusOK) // the interactive login page
+			return
+		}
+		http.Redirect(w, r, consoleURL+"/sts?sign=abc", http.StatusFound)
+	}))
+	t.Cleanup(account.Close)
+	accountURL := strings.Replace(account.URL, "127.0.0.1", "localhost", 1)
+
+	console := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie := r.Header.Get("Cookie")
+		if r.URL.Path == "/sts" {
+			fake.mints++
+			w.Header().Add("Set-Cookie", fmt.Sprintf(`api-platform_serviceToken="tok%d"; Path=/; HttpOnly`, fake.mints))
+			w.Header().Add("Set-Cookie", "userId=42; Path=/")
+			http.Redirect(w, r, "/balance", http.StatusFound)
+			return
+		}
+		if cookie == "" || fake.rejectSessions[cookie] {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = fmt.Fprintf(w, `{"code":401,"loginUrl":"%s/pass/serviceLogin?sid=api-platform"}`, accountURL)
+			return
+		}
+		fake.consoleCookie = cookie
 		body, ok := routes[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)
@@ -56,10 +106,16 @@ func serveConsole(t *testing.T, routes map[string]string, status int) *string {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
-	t.Cleanup(srv.Close)
-	t.Setenv(baseURLEnvVar, srv.URL)
+	t.Cleanup(console.Close)
+	consoleURL = console.URL
+
+	origHost := isAccountHost
+	t.Cleanup(func() { isAccountHost = origHost })
+	isAccountHost = func(host string) bool { return host == "localhost" }
+
+	t.Setenv(baseURLEnvVar, console.URL)
 	t.Setenv(cookieEnvVar, "")
-	return &gotCookie
+	return fake
 }
 
 func fetch(t *testing.T) core.UsageSnapshot {
@@ -81,8 +137,8 @@ func metricValue(t *testing.T, snap core.UsageSnapshot, key string) core.Metric 
 }
 
 func TestFetchSuccessWithTokenPlan(t *testing.T) {
-	stubSession(t, "tok123", "42")
-	gotCookie := serveConsole(t, map[string]string{
+	stubSession(t, "pass123", "42")
+	fake := serveConsole(t, map[string]string{
 		"/balance":          balanceBody,
 		"/usage":            usageBody,
 		"/tokenPlan/detail": planDetailBody,
@@ -94,8 +150,11 @@ func TestFetchSuccessWithTokenPlan(t *testing.T) {
 	if snap.Status != core.StatusOK {
 		t.Fatalf("status = %v (%s), want OK", snap.Status, snap.Message)
 	}
-	if want := "api-platform_serviceToken=tok123; userId=42"; *gotCookie != want {
-		t.Errorf("Cookie header = %q, want %q", *gotCookie, want)
+	if want := "passToken=pass123; userId=42"; fake.accountCookie != want {
+		t.Errorf("account Cookie header = %q, want %q", fake.accountCookie, want)
+	}
+	if want := `api-platform_serviceToken="tok1"; userId=42`; fake.consoleCookie != want {
+		t.Errorf("console Cookie header = %q, want %q", fake.consoleCookie, want)
 	}
 	if m := metricValue(t, snap, "available_balance"); m.Remaining == nil || *m.Remaining != 12.5 || m.Unit != "USD" {
 		t.Errorf("available_balance = %+v", m)
@@ -122,7 +181,7 @@ func TestFetchSuccessWithTokenPlan(t *testing.T) {
 }
 
 func TestFetchPayAsYouGoHasNoPlan(t *testing.T) {
-	stubSession(t, "tok123", "42")
+	stubSession(t, "pass123", "42")
 	serveConsole(t, map[string]string{
 		"/balance":          balanceBody,
 		"/usage":            usageBody,
@@ -142,7 +201,7 @@ func TestFetchPayAsYouGoHasNoPlan(t *testing.T) {
 
 func TestFetchUsesPastedCookieHeader(t *testing.T) {
 	stubSession(t, "", "")
-	gotCookie := serveConsole(t, map[string]string{"/balance": balanceBody, "/usage": usageBody}, http.StatusOK)
+	fake := serveConsole(t, map[string]string{"/balance": balanceBody, "/usage": usageBody}, http.StatusOK)
 	t.Setenv(cookieEnvVar, "Cookie: api-platform_serviceToken=pasted; userId=7")
 
 	snap := fetch(t)
@@ -150,8 +209,11 @@ func TestFetchUsesPastedCookieHeader(t *testing.T) {
 	if snap.Status != core.StatusOK {
 		t.Fatalf("status = %v (%s), want OK", snap.Status, snap.Message)
 	}
-	if want := "api-platform_serviceToken=pasted; userId=7"; *gotCookie != want {
-		t.Errorf("Cookie header = %q, want %q", *gotCookie, want)
+	if want := "api-platform_serviceToken=pasted; userId=7"; fake.consoleCookie != want {
+		t.Errorf("Cookie header = %q, want %q", fake.consoleCookie, want)
+	}
+	if fake.mints != 0 {
+		t.Errorf("minted %d sessions with a pasted cookie, want 0", fake.mints)
 	}
 }
 
@@ -166,26 +228,67 @@ func TestFetchNoSession(t *testing.T) {
 	}
 }
 
-func TestFetchExpiredSession(t *testing.T) {
-	for name, status := range map[string]int{"login envelope": http.StatusOK, "http 401": http.StatusUnauthorized} {
-		t.Run(name, func(t *testing.T) {
-			stubSession(t, "stale", "42")
-			serveConsole(t, map[string]string{"/balance": loginBody}, status)
+func TestFetchReusesMintedSession(t *testing.T) {
+	stubSession(t, "pass123", "42")
+	fake := serveConsole(t, map[string]string{"/balance": balanceBody, "/usage": usageBody}, http.StatusOK)
 
-			snap := fetch(t)
+	fetch(t)
+	fetch(t)
 
-			if snap.Status != core.StatusAuth {
-				t.Fatalf("status = %v (%s), want AUTH", snap.Status, snap.Message)
-			}
-			if !strings.Contains(snap.Message, "log in again") {
-				t.Errorf("message = %q", snap.Message)
-			}
-		})
+	if fake.mints != 1 {
+		t.Errorf("minted %d sessions over two polls, want 1", fake.mints)
+	}
+}
+
+func TestFetchRemintsExpiredConsoleSession(t *testing.T) {
+	stubSession(t, "pass123", "42")
+	fake := serveConsole(t, map[string]string{"/balance": balanceBody, "/usage": usageBody}, http.StatusOK)
+
+	fetch(t)
+	fake.rejectSessions[fake.consoleCookie] = true
+	snap := fetch(t)
+
+	if snap.Status != core.StatusOK {
+		t.Fatalf("status = %v (%s), want OK", snap.Status, snap.Message)
+	}
+	if fake.mints != 2 {
+		t.Errorf("minted %d sessions, want 2", fake.mints)
+	}
+}
+
+func TestFetchAccountSessionRejected(t *testing.T) {
+	stubSession(t, "stale", "42")
+	fake := serveConsole(t, map[string]string{"/balance": balanceBody}, http.StatusOK)
+	fake.acceptLogin = false
+
+	snap := fetch(t)
+	if snap.Status != core.StatusAuth {
+		t.Fatalf("status = %v (%s), want AUTH", snap.Status, snap.Message)
+	}
+	if !strings.Contains(snap.Message, "sign in again") {
+		t.Errorf("message = %q", snap.Message)
+	}
+
+	// A failed sign-in is not retried on the next poll.
+	fake.accountCookie = ""
+	fetch(t)
+	if fake.accountCookie != "" {
+		t.Error("sign-in retried inside the retry interval")
+	}
+}
+
+func TestMintRejectsForeignRedirect(t *testing.T) {
+	stubSession(t, "pass123", "42")
+	serveConsole(t, nil, http.StatusOK)
+	isAccountHost = func(string) bool { return false }
+
+	if _, err := mintConsoleSession(context.Background(), "passToken=pass123"); err == nil {
+		t.Fatal("mint followed a login URL on a host that is neither Xiaomi's nor the console's")
 	}
 }
 
 func TestFetchRateLimited(t *testing.T) {
-	stubSession(t, "tok123", "42")
+	stubSession(t, "pass123", "42")
 	serveConsole(t, map[string]string{"/balance": `{}`}, http.StatusTooManyRequests)
 
 	snap := fetch(t)
@@ -196,7 +299,7 @@ func TestFetchRateLimited(t *testing.T) {
 }
 
 func TestFetchUsageFailureKeepsBalance(t *testing.T) {
-	stubSession(t, "tok123", "42")
+	stubSession(t, "pass123", "42")
 	serveConsole(t, map[string]string{"/balance": balanceBody}, http.StatusOK)
 
 	snap := fetch(t)

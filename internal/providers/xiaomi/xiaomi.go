@@ -3,10 +3,12 @@
 // MiMo's inference API (api.xiaomimimo.com) exposes no balance or usage
 // endpoint for API keys. Wallet, spend and Token Plan quota live behind the
 // web console API (platform.xiaomimimo.com/api/v1), which authenticates with
-// the Xiaomi account session cookies the console sets after sign-in. The
-// provider therefore uses browser-session auth: it reads the console's
-// service-token cookie (plus the companion userId cookie) from the user's
-// browser, or takes a pasted Cookie header from XIAOMI_MIMO_COOKIE.
+// a service token the console sets after Xiaomi account sign-in. That token is
+// a session cookie, which browsers never write to their cookie store, so the
+// provider reads the persistent Xiaomi account cookies (passToken, userId)
+// from the user's browser and mints a console session from them through the
+// console's own sign-in redirect chain (see mint.go). A Cookie header pasted
+// into XIAOMI_MIMO_COOKIE bypasses the browser entirely.
 package xiaomi
 
 import (
@@ -32,7 +34,8 @@ const (
 	consoleBaseURL = "https://platform.xiaomimimo.com/api/v1"
 	consoleOrigin  = "https://platform.xiaomimimo.com"
 
-	cookieDomain       = ".xiaomimimo.com"
+	accountDomain      = "account.xiaomi.com"
+	passTokenCookie    = "passToken"
 	serviceTokenCookie = "api-platform_serviceToken"
 	userIDCookie       = "userId"
 
@@ -45,14 +48,14 @@ const (
 	monthTotalTokenItem = "month_total_token"
 )
 
-// loadSession and readUserID are package-level seams so tests can drive Fetch
-// without a real browser cookie store.
+// loadSession and readAccountCookie are package-level seams so tests can
+// drive Fetch without a real browser cookie store.
 var (
 	loadSession = func(ctx context.Context, acct core.AccountConfig) (config.BrowserSession, bool, error) {
 		return shared.LoadOrRefreshBrowserSession(ctx, acct, nil)
 	}
-	readUserID = func(ctx context.Context, browser string) string {
-		cookie, err := browsercookies.New().ReadCookie(ctx, cookieDomain, userIDCookie, browser)
+	readAccountCookie = func(ctx context.Context, name, browser string) string {
+		cookie, err := browsercookies.New().ReadCookie(ctx, accountDomain, name, browser)
 		if err != nil {
 			return ""
 		}
@@ -76,14 +79,14 @@ func New() *Provider {
 			Auth: core.ProviderAuthSpec{
 				Type:                core.ProviderAuthTypeBrowserSession,
 				DefaultAccountID:    "xiaomi",
-				BrowserCookieDomain: cookieDomain,
-				BrowserCookieName:   serviceTokenCookie,
+				BrowserCookieDomain: accountDomain,
+				BrowserCookieName:   passTokenCookie,
 				BrowserConsoleURL:   "https://platform.xiaomimimo.com/console/balance",
 			},
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{
 					"Log into https://platform.xiaomimimo.com/console/balance in your browser.",
-					"In openusage: Settings → 5 KEYS → xiaomi → press Enter to import the session cookie.",
+					"In openusage: Settings → 5 KEYS → xiaomi → press Enter to import the Xiaomi account cookie.",
 					"Or set XIAOMI_MIMO_COOKIE to the Cookie header of a console request.",
 				},
 			},
@@ -101,22 +104,37 @@ func New() *Provider {
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
 	snap := core.NewUsageSnapshot(p.ID(), acct.ID)
 
-	cookieHeader, source, err := resolveCookieHeader(ctx, acct)
+	sess, err := resolveSession(ctx, acct)
 	if err != nil {
 		return snap, fmt.Errorf("xiaomi: load session: %w", err)
 	}
-	if cookieHeader == "" {
+	if sess.cookieHeader == "" {
 		snap.Status = core.StatusAuth
-		snap.Message = "console session not configured — Settings → 5 KEYS → xiaomi → Enter, or set " + cookieEnvVar
+		snap.Message = sess.problem
 		return snap, nil
 	}
 	snap.SetAttribute("auth_scope", "console_session")
-	snap.SetAttribute("console_session_source", source)
+	snap.SetAttribute("console_session_source", sess.source)
 
-	client := newConsoleClient(cookieHeader)
+	client := newConsoleClient(sess.cookieHeader)
 
 	var balance balanceData
-	if err := client.get(ctx, "/balance", &balance); err != nil {
+	err = client.get(ctx, "/balance", &balance)
+	if isAuthError(err) && sess.minted {
+		// The cached console session expired; mint a new one and retry once.
+		forgetMintedSession(acct.ID)
+		if sess, err = resolveSession(ctx, acct); err != nil {
+			return snap, fmt.Errorf("xiaomi: load session: %w", err)
+		}
+		if sess.cookieHeader == "" {
+			snap.Status = core.StatusAuth
+			snap.Message = sess.problem
+			return snap, nil
+		}
+		client = newConsoleClient(sess.cookieHeader)
+		err = client.get(ctx, "/balance", &balance)
+	}
+	if err != nil {
 		return failedSnapshot(snap, err, "balance")
 	}
 	currency := normalizeCurrency(balance.Currency)
@@ -163,31 +181,56 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	return snap, nil
 }
 
-// resolveCookieHeader returns the Cookie header to send and where it came
-// from. A pasted header in the environment wins; otherwise the header is
-// assembled from the browser session cookies.
-func resolveCookieHeader(ctx context.Context, acct core.AccountConfig) (string, string, error) {
+const (
+	problemNotConfigured = "Xiaomi account session not found — sign in at platform.xiaomimimo.com in your browser, or set " + cookieEnvVar
+	problemMintFailed    = "could not open a console session — sign in again at platform.xiaomimimo.com"
+)
+
+// consoleSession is the Cookie header to send to the console and where it
+// came from. An empty header carries the reason in problem.
+type consoleSession struct {
+	cookieHeader string
+	source       string
+	minted       bool
+	problem      string
+}
+
+// resolveSession returns the console session to use. A pasted header in the
+// environment wins; otherwise a session minted from the browser's Xiaomi
+// account cookies is reused until the console rejects it.
+func resolveSession(ctx context.Context, acct core.AccountConfig) (consoleSession, error) {
 	if pasted := normalizeCookieHeader(os.Getenv(cookieEnvVar)); pasted != "" {
-		return pasted, "env", nil
+		return consoleSession{cookieHeader: pasted, source: "env"}, nil
+	}
+	if header, ok := cachedMintedSession(acct.ID); ok {
+		return consoleSession{cookieHeader: header, source: "account_sso", minted: true}, nil
 	}
 
-	session, ok, err := loadSession(ctx, acct)
+	account, ok, err := loadSession(ctx, acct)
 	if err != nil {
-		return "", "", err
+		return consoleSession{}, err
 	}
-	if !ok || strings.TrimSpace(session.Value) == "" {
-		return "", "", nil
+	if !ok || strings.TrimSpace(account.Value) == "" {
+		return consoleSession{problem: problemNotConfigured}, nil
+	}
+	if !mintAllowed(acct.ID) {
+		return consoleSession{problem: problemMintFailed}, nil
 	}
 
-	header := serviceTokenCookie + "=" + session.Value
-	userID := strings.TrimSpace(acct.Hint("xiaomi_user_id", ""))
-	if userID == "" {
-		userID = strings.TrimSpace(readUserID(ctx, session.SourceBrowser))
+	accountCookies := passTokenCookie + "=" + account.Value
+	for _, name := range []string{userIDCookie, "cUserId", "deviceId"} {
+		if value := strings.TrimSpace(readAccountCookie(ctx, name, account.SourceBrowser)); value != "" {
+			accountCookies += "; " + name + "=" + value
+		}
 	}
-	if userID != "" {
-		header += "; " + userIDCookie + "=" + userID
+
+	header, err := mintConsoleSession(ctx, accountCookies)
+	if err != nil {
+		recordMintFailure(acct.ID)
+		return consoleSession{problem: problemMintFailed}, nil
 	}
-	return header, core.FirstNonEmpty(session.SourceBrowser, "browser"), nil
+	storeMintedSession(acct.ID, header)
+	return consoleSession{cookieHeader: header, source: "account_sso", minted: true}, nil
 }
 
 // normalizeCookieHeader accepts a raw header value or a full "Cookie: …"
@@ -205,7 +248,7 @@ func failedSnapshot(snap core.UsageSnapshot, err error, endpoint string) (core.U
 	switch {
 	case isAuthError(err):
 		snap.Status = core.StatusAuth
-		snap.Message = "session expired — log in again at platform.xiaomimimo.com"
+		snap.Message = "session expired — sign in again at platform.xiaomimimo.com"
 		return snap, nil
 	case errors.As(err, &limited):
 		snap.Status = core.StatusLimited
@@ -344,14 +387,17 @@ type consoleClient struct {
 	cookieHeader string
 }
 
-func newConsoleClient(cookieHeader string) *consoleClient {
-	base := consoleBaseURL
+func consoleBase() string {
 	if override := strings.TrimSpace(os.Getenv(baseURLEnvVar)); override != "" {
-		base = strings.TrimRight(override, "/")
+		return strings.TrimRight(override, "/")
 	}
+	return consoleBaseURL
+}
+
+func newConsoleClient(cookieHeader string) *consoleClient {
 	return &consoleClient{
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
-		baseURL:      base,
+		baseURL:      consoleBase(),
 		cookieHeader: cookieHeader,
 	}
 }

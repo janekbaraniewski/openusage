@@ -121,8 +121,8 @@
       "provider": "xiaomi",
       "auth": "browser_session",
       "browser_cookie": {
-        "domain": ".xiaomimimo.com",
-        "cookie_name": "api-platform_serviceToken",
+        "domain": "account.xiaomi.com",
+        "cookie_name": "passToken",
         "source_browser": "firefox"
       }
     },

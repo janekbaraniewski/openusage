@@ -191,9 +191,9 @@ Browser-session-auth-only — Perplexity's API key is chat-only. Tile surfaces t
 
 ### Xiaomi MiMo
 
-**Detection:** browser-session cookie from `platform.xiaomimimo.com` (Settings → 5 KEYS → xiaomi → Enter), or a console `Cookie` header in `XIAOMI_MIMO_COOKIE`.
+**Detection:** Xiaomi account cookie from `account.xiaomi.com` (Settings → 5 KEYS → xiaomi → Enter), or a console `Cookie` header in `XIAOMI_MIMO_COOKIE`.
 
-Browser-session-auth-only — MiMo API keys (`sk-`, `tp-`, `ttp-`) cannot read balance or usage. The provider sends the console's `api-platform_serviceToken` and `userId` cookies to `/balance`, `/usage`, `/tokenPlan/detail` and `/tokenPlan/usage`. Tile surfaces wallet balance (cash and gift), month and lifetime spend, token totals, and the monthly Token Plan quota for accounts that have a plan. The currency follows the account region (USD or CNY). When the console session expires the tile shows AUTH until you log in at the console again.
+Browser-session-auth-only — MiMo API keys (`sk-`, `tp-`, `ttp-`) cannot read balance or usage. The console's service token is a session cookie that browsers never write to disk, so the provider reads the persistent Xiaomi account cookies (`passToken`, `userId`) and mints a console session through the console's own sign-in redirect (`serviceLogin` → `/sts`). The account cookies are sent only to Xiaomi account hosts; the minted session is held in memory and renewed when the console rejects it. Tile surfaces wallet balance (cash and gift), month and lifetime spend, token totals, and the monthly Token Plan quota for accounts that have a plan. The currency follows the account region (USD or CNY). When the account session expires the tile shows AUTH until you sign in to Xiaomi in the browser again.
 
 ### OpenCode (Zen + Console)
 
