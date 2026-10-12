@@ -92,8 +92,8 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 			CreditMetrics: map[string]core.BalanceSemantics{
-				"total_spend":       core.BalanceCumulative,
-				"available_balance": core.BalancePoint,
+				"total_spend":   core.BalanceCumulative,
+				"total_balance": core.BalancePoint,
 			},
 		}),
 	}
@@ -140,7 +140,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	currency := normalizeCurrency(balance.Currency)
 	snap.SetAttribute("currency", currency)
 	if balance.Balance.set {
-		snap.Metrics["available_balance"] = walletMetric(balance.Balance.value, 0, currency)
+		snap.Metrics["total_balance"] = core.Metric{Remaining: core.Float64Ptr(balance.Balance.value), Unit: currency, Window: "current"}
 	}
 	if balance.CashBalance.set {
 		snap.Metrics["cash_balance"] = core.Metric{Remaining: core.Float64Ptr(balance.CashBalance.value), Unit: currency, Window: "current"}
@@ -159,9 +159,6 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 		snap.Raw["console_usage_error"] = err.Error()
 	} else {
 		applyUsage(&snap, usage, currency)
-		if balance.Balance.set && usage.CostUsage.TotalCost.set {
-			snap.Metrics["available_balance"] = walletMetric(balance.Balance.value, usage.CostUsage.TotalCost.value, currency)
-		}
 	}
 
 	// Token Plan routes answer with a non-zero code for pay-as-you-go
@@ -257,19 +254,6 @@ func failedSnapshot(snap core.UsageSnapshot, err error, endpoint string) (core.U
 	return snap, fmt.Errorf("xiaomi: %s: %w", endpoint, err)
 }
 
-// walletMetric expresses the prepaid wallet as spend against everything ever
-// paid in: lifetime spend plus what is left. The console reports no deposit
-// total, and a gauge needs a limit to fill against.
-func walletMetric(remaining, spent float64, currency string) core.Metric {
-	return core.Metric{
-		Limit:     core.Float64Ptr(remaining + spent),
-		Used:      core.Float64Ptr(spent),
-		Remaining: core.Float64Ptr(remaining),
-		Unit:      currency,
-		Window:    "current",
-	}
-}
-
 func applyUsage(snap *core.UsageSnapshot, usage usageData, currency string) {
 	if usage.CostUsage.TotalCost.set {
 		snap.Metrics["total_spend"] = core.Metric{Used: core.Float64Ptr(usage.CostUsage.TotalCost.value), Unit: currency, Window: "all-time"}
@@ -319,7 +303,7 @@ func applyPlanUsage(snap *core.UsageSnapshot, usage planUsageData) {
 }
 
 func statusMessage(snap core.UsageSnapshot, currency string) string {
-	if m, ok := snap.Metrics["available_balance"]; ok && m.Remaining != nil {
+	if m, ok := snap.Metrics["total_balance"]; ok && m.Remaining != nil {
 		return fmt.Sprintf("Balance: %.2f %s", *m.Remaining, currency)
 	}
 	return "OK"

@@ -156,7 +156,7 @@ func TestFetchSuccessWithTokenPlan(t *testing.T) {
 	if want := `api-platform_serviceToken="tok1"; userId=42`; fake.consoleCookie != want {
 		t.Errorf("console Cookie header = %q, want %q", fake.consoleCookie, want)
 	}
-	if m := metricValue(t, snap, "available_balance"); m.Remaining == nil || *m.Remaining != 12.5 || m.Unit != "USD" {
+	if m := metricValue(t, snap, "total_balance"); m.Remaining == nil || *m.Remaining != 12.5 || m.Unit != "USD" {
 		t.Errorf("available_balance = %+v", m)
 	}
 	if m := metricValue(t, snap, "gift_balance"); m.Remaining == nil || *m.Remaining != 2.5 {
@@ -196,7 +196,7 @@ func TestFetchPayAsYouGoHasNoPlan(t *testing.T) {
 	if _, ok := snap.Metrics["plan_tokens"]; ok {
 		t.Error("plan_tokens set for an account without a Token Plan")
 	}
-	metricValue(t, snap, "available_balance")
+	metricValue(t, snap, "total_balance")
 }
 
 func TestFetchUsesPastedCookieHeader(t *testing.T) {
@@ -307,7 +307,7 @@ func TestFetchUsageFailureKeepsBalance(t *testing.T) {
 	if snap.Status != core.StatusOK {
 		t.Fatalf("status = %v (%s), want OK", snap.Status, snap.Message)
 	}
-	metricValue(t, snap, "available_balance")
+	metricValue(t, snap, "total_balance")
 	if snap.Raw["console_usage_error"] == "" {
 		t.Error("usage failure not recorded in Raw")
 	}
