@@ -72,7 +72,7 @@ Tracks local server models, per-model usage, and optional cloud billing.
 
 **Detection:** `~/.dsh/sessions` directory (`$DSH_HOME/sessions` when `DSH_HOME` is set)
 
-Reads dsh (DeepSeek Harness) session logs (`session.v4.jsonl.zstd`) and tracks sessions, messages, tool calls, and per-model tokens. No cost is reported: the logs record tokens only.
+Reads dsh (DeepSeek Harness) session logs (`session.v4.jsonl.zstd`) and tracks sessions, messages, tool calls, edit line counts, and per-model tokens. The logs record tokens only, so cost is an estimate at the published per-token rate and covers only requests sent straight to the DeepSeek platform; hosts that bill by subscription or credits stay unpriced.
 
 Each model response and tool call is also stored as a telemetry event, attributed to the service that hosted the request:
 

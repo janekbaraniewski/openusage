@@ -12,7 +12,7 @@ import (
 // flatpakFirefoxGlobs are the cookie databases of Firefox installed as a
 // Flatpak, relative to the user's home directory. kooky's finders only look
 // in the native ~/.mozilla location, so on distributions where browsers ship
-// as Flatpaks (Fedora Atomic, Bazzite, Silverblue) they find nothing.
+// as Flatpaks (Fedora Atomic, Silverblue) they find nothing.
 var flatpakFirefoxGlobs = []string{
 	".var/app/org.mozilla.firefox/.mozilla/firefox/*/cookies.sqlite",
 	".var/app/org.mozilla.firefox/config/mozilla/firefox/*/cookies.sqlite",
