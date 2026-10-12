@@ -38,6 +38,10 @@ type ModelBreakdownEntry struct {
 	CacheRead  float64
 	CacheWrite float64
 	Reasoning  float64
+	// Unsplit is token volume a provider reports only as one total per
+	// model, with no input/output split. It is set only when the model has
+	// no split figures.
+	Unsplit    float64
 	Requests   float64
 	Requests1d float64
 	Series     []TimePoint
@@ -48,7 +52,7 @@ type ModelBreakdownEntry struct {
 // 90% by Anthropic and represent repeated reads of the same cached bytes across
 // turns — counting them linearly inflates "usage" by orders of magnitude.
 func (e ModelBreakdownEntry) TotalTokens() float64 {
-	return e.Input + e.Output + e.CacheWrite + e.Reasoning
+	return e.Input + e.Output + e.CacheWrite + e.Reasoning + e.Unsplit
 }
 
 type ProviderBreakdownEntry struct {
