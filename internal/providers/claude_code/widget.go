@@ -17,6 +17,7 @@ func dashboardWidget() core.DashboardWidget {
 			core.DashboardCompactRow{Label: "Usage", Keys: []string{"usage_five_hour", "usage_seven_day", "usage_seven_day_sonnet", "usage_seven_day_opus"}, MaxSegments: 4},
 			core.DashboardCompactRow{Label: "Activity", Keys: []string{"messages_today", "sessions_today", "tool_calls_today", "7d_tool_calls"}, MaxSegments: 4},
 			core.DashboardCompactRow{Label: "Tokens", Keys: []string{"today_input_tokens", "today_output_tokens", "7d_input_tokens", "7d_output_tokens"}, MaxSegments: 4},
+			core.DashboardCompactRow{Label: "Routine Cloud", Keys: []string{"client_claude_code_routine_cloud_total_tokens"}, MaxSegments: 1},
 			core.DashboardCompactRow{Label: "Lines", Keys: []string{"composer_lines_added", "composer_lines_removed", "composer_files_changed", "scored_commits", "total_prompts"}, MaxSegments: 5},
 		),
 		providerbase.WithHideMetricPrefixes(

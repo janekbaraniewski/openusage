@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
+	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 	"github.com/janekbaraniewski/openusage/internal/detect"
 	"github.com/janekbaraniewski/openusage/internal/integrations"
@@ -171,6 +172,17 @@ func newTelemetryHookCommand() *cobra.Command {
 	return cmd
 }
 
+func configuredClaudeCodeAccount(cfg config.Config) string {
+	for _, accounts := range [][]core.AccountConfig{cfg.Accounts, cfg.AutoDetectedAccounts} {
+		for _, account := range accounts {
+			if strings.EqualFold(strings.TrimSpace(account.Provider), "claude_code") && strings.TrimSpace(account.ID) != "" {
+				return strings.TrimSpace(account.ID)
+			}
+		}
+	}
+	return ""
+}
+
 func newTelemetryDaemonCommand() *cobra.Command {
 	var (
 		socketPath      string
@@ -183,6 +195,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 	)
 
 	runDaemon := func(_ *cobra.Command, _ []string) error {
+		daemon.LoadServiceEnv()
 		cfgFile, loadErr := config.Load()
 		if loadErr != nil {
 			log.Printf("warning: failed to load config, using defaults: %v", loadErr)
@@ -222,20 +235,23 @@ func newTelemetryDaemonCommand() *cobra.Command {
 		}
 
 		return daemon.RunServer(daemon.Config{
-			DBPath:          strings.TrimSpace(dbPath),
-			SpoolDir:        strings.TrimSpace(spoolDir),
-			SocketPath:      strings.TrimSpace(socketPath),
-			CollectInterval: resolvedCollect,
-			PollInterval:    resolvedPoll,
-			Verbose:         verbose,
-			Export:          cfgFile.Export,
+			DBPath:            strings.TrimSpace(dbPath),
+			SpoolDir:          strings.TrimSpace(spoolDir),
+			SocketPath:        strings.TrimSpace(socketPath),
+			CollectInterval:   resolvedCollect,
+			PollInterval:      resolvedPoll,
+			Verbose:           verbose,
+			Export:            cfgFile.Export,
+			RoutineListenAddr: strings.TrimSpace(os.Getenv("OPENUSAGE_ROUTINE_LISTEN_ADDR")),
+			RoutineToken:      os.Getenv("OPENUSAGE_ROUTINE_TOKEN"),
+			RoutineAccountID:  configuredClaudeCodeAccount(cfgFile),
 		})
 	}
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the telemetry daemon server",
-		Long:  "Start the telemetry daemon. Use subcommands to install, uninstall, or check status.",
+		Long:  "Start the telemetry daemon. Use subcommands to install, uninstall, or check status. Optional Claude Code Routine reports are accepted only when OPENUSAGE_ROUTINE_LISTEN_ADDR and OPENUSAGE_ROUTINE_TOKEN are set.",
 		Example: strings.Join([]string{
 			"  openusage telemetry daemon",
 			"  openusage telemetry daemon run",
