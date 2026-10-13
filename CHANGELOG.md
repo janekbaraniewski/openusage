@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.26.2 (2026-10-13)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump the go-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/425
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/427
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/429
+* deps(docs): bump posthog-js from 1.435.6 to 1.438.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/426
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.1...v0.26.2
+
 ## 0.26.1 (2026-10-10)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
