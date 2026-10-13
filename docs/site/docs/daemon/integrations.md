@@ -228,3 +228,40 @@ Practical setup for someone whose AI is routed entirely through OpenCode:
 - Optionally remap with `telemetry.provider_links` if the default (`google → gemini_api`, `github-copilot → copilot`) does not match your account layout.
 
 If you skip the env vars, the events still land in the SQLite store (and show up under `telemetry_unmapped_providers` diagnostics) but no tile renders them.
+# Claude Code Routine Cloud reports
+
+Cloud Routines run outside the local Claude Code transcript files. OpenUsage can accept a per-run JSON usage report and store it in telemetry under a separate `claude_code_routine_cloud` source. Model usage remains part of the Claude Code analytics; the dashboard also shows a separate **Routine Cloud** token total.
+
+The report receiver is **off by default**. To enable it, start the daemon with:
+
+```sh
+export OPENUSAGE_ROUTINE_LISTEN_ADDR=127.0.0.1:9191
+export OPENUSAGE_ROUTINE_TOKEN="$(openssl rand -hex 32)"
+openusage telemetry daemon install
+```
+
+Configure the service environment and restart/reinstall the daemon after changing either variable. Keep the listener bound to localhost or a private interface. If the Routine runs outside your network, put a private HTTPS tunnel/reverse proxy in front of it, require HTTPS there, and restrict access to the receiver. Do not expose the daemon's Unix socket or an unauthenticated listener to the internet. The report token is independent of the Routine trigger token.
+
+The account must have an OpenUsage `claude_code` account configured. The receiver accepts only `POST /v1/routines/claude-code/report` with `Authorization: Bearer <OPENUSAGE_ROUTINE_TOKEN>` and a JSON body like:
+
+```json
+{
+  "routine_id": "routine_abc",
+  "run_id": "run_2026-10-13T12:00:00Z",
+  "occurred_at": "2026-10-13T12:00:00Z",
+  "models": [
+    {"model": "claude-sonnet-4-5", "input_tokens": 12000, "output_tokens": 900, "cache_read_tokens": 4000, "cache_creation_tokens": 300}
+  ]
+}
+```
+
+Each model entry is ingested once per routine/run/model; retries are deduplicated. Supply the token counts from a trustworthy source available to your Routine/reporting workflow. The receiver validates and records the submitted values; it cannot inspect Anthropic's cloud runtime or independently verify them. To test connectivity, send a report with `curl` through your private HTTPS endpoint and confirm the **Routine Cloud** row updates.
+
+Example POST (use your actual HTTPS tunnel URL and keep the bearer secret out of logs):
+
+```sh
+curl --fail-with-body -X POST "https://<private-tunnel-host>/v1/routines/claude-code/report" \
+  -H "Authorization: Bearer $OPENUSAGE_ROUTINE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data @routine-report.json
+```

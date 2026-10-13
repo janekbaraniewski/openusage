@@ -14,13 +14,16 @@ const APIVersion = "v1"
 var errDaemonUnavailable = errors.New("telemetry daemon unavailable")
 
 type Config struct {
-	DBPath          string
-	SpoolDir        string
-	SocketPath      string
-	CollectInterval time.Duration
-	PollInterval    time.Duration
-	Verbose         bool
-	Export          config.ExportConfig
+	DBPath            string
+	SpoolDir          string
+	SocketPath        string
+	CollectInterval   time.Duration
+	PollInterval      time.Duration
+	Verbose           bool
+	Export            config.ExportConfig
+	RoutineListenAddr string
+	RoutineToken      string
+	RoutineAccountID  string
 }
 
 type ReadModelAccount struct {
