@@ -11,6 +11,8 @@ func TestCurrentServiceEnvSnapshot_IncludesKnownConfiguredVars(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-openai")
 	t.Setenv("ZEN_API_KEY", "sk-zen")
 	t.Setenv("OPENUSAGE_HUB_TOKEN", "hub-secret")
+	t.Setenv("OPENUSAGE_ROUTINE_LISTEN_ADDR", "127.0.0.1:9191")
+	t.Setenv("OPENUSAGE_ROUTINE_TOKEN", "routine-secret")
 	t.Setenv("UNRELATED_ENV", "ignore-me")
 
 	env := currentServiceEnvSnapshot()
@@ -23,6 +25,9 @@ func TestCurrentServiceEnvSnapshot_IncludesKnownConfiguredVars(t *testing.T) {
 	}
 	if env["OPENUSAGE_HUB_TOKEN"] != "hub-secret" {
 		t.Fatalf("OPENUSAGE_HUB_TOKEN = %q, want hub-secret", env["OPENUSAGE_HUB_TOKEN"])
+	}
+	if env["OPENUSAGE_ROUTINE_LISTEN_ADDR"] != "127.0.0.1:9191" || env["OPENUSAGE_ROUTINE_TOKEN"] != "routine-secret" {
+		t.Fatalf("Routine receiver environment not captured: %#v", env)
 	}
 	if _, ok := env["UNRELATED_ENV"]; ok {
 		t.Fatal("unexpected unrelated env var in snapshot")
