@@ -159,7 +159,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 ## Features
 
 - **Cross-provider tracking** — compare coding agents, API platforms, and local runtimes in one local dashboard
-- **37 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, Antigravity CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
+- **39 providers** — coding agents and CLIs (Claude Code, Codex, Cursor, Copilot, Gemini CLI, Antigravity CLI, OpenCode, Amp, Goose, Roo Code, Kilo Code, Kiro, Zed, and more), API platforms (OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, Moonshot, Perplexity, xAI, Z.AI, and more), and local runtimes (Ollama)
 - **Zero config** — auto-detects your AI tools and API keys, just run it
 - **Live dashboard** — see spend, quotas, rate limits, tokens, burn rate, and per-model usage at a glance
 - **tmux integration** — show the active tool's usage in your tmux status bar, with provider icons, presets, and active-tool detection
@@ -173,7 +173,7 @@ If the question is whether this is the right fit versus a simpler local limits t
 
 ## Supported providers
 
-37 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
+39 provider integrations covering coding agents, CLIs, IDE tools, API platforms, and local runtimes. See [docs/providers.md](docs/providers.md) for all providers with detailed descriptions and screenshots.
 
 ### Claude Code
 
@@ -220,6 +220,7 @@ Tracks credits, activity, generation stats, and per-model breakdown across multi
 | **DeepSeek** | `DEEPSEEK_API_KEY` | Rate limits, account balance |
 | **Moonshot (Kimi)** | `MOONSHOT_API_KEY` | Balance breakdown (cash + voucher), org limits, tier; supports api.moonshot.ai (default) and api.moonshot.cn |
 | **Perplexity** | Browser session at console.perplexity.ai | Tier, balance, lifetime spend, auto-reload, 30d usage analytics |
+| **Xiaomi MiMo** | Browser session at platform.xiaomimimo.com | Wallet balance, month and lifetime spend, token totals, Token Plan quota |
 | **OpenCode (Zen + Console)** | `OPENCODE_API_KEY` / `ZEN_API_KEY` + browser session at opencode.ai | Zen models (API key) + balance, monthly limit/usage, subscription, payment method (cookie) |
 | **xAI (Grok)** | `XAI_API_KEY` | Rate limits, API key info |
 | **Z.AI Coding Plan** | `ZAI_API_KEY` / `ZHIPUAI_API_KEY` | Coding plan quotas, model/tool usage, daily trends |

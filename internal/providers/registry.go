@@ -18,6 +18,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/cursor"
 	"github.com/janekbaraniewski/openusage/internal/providers/deepseek"
 	"github.com/janekbaraniewski/openusage/internal/providers/droid"
+	"github.com/janekbaraniewski/openusage/internal/providers/dsh"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_api"
 	"github.com/janekbaraniewski/openusage/internal/providers/gemini_cli"
 	"github.com/janekbaraniewski/openusage/internal/providers/goose"
@@ -41,6 +42,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/roocode"
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 	"github.com/janekbaraniewski/openusage/internal/providers/xai"
+	"github.com/janekbaraniewski/openusage/internal/providers/xiaomi"
 	"github.com/janekbaraniewski/openusage/internal/providers/zai"
 	"github.com/janekbaraniewski/openusage/internal/providers/zed"
 )
@@ -53,6 +55,7 @@ func AllProviders() []core.UsageProvider {
 		alibaba_cloud.New(),
 		openrouter.New(),
 		perplexity.New(),
+		xiaomi.New(),
 		groq.New(),
 		mistral.New(),
 		moonshot.New(),
@@ -85,6 +88,7 @@ func AllProviders() []core.UsageProvider {
 		pi.New(),
 		qwen_cli.New(),
 		muse_code.New(),
+		dsh.New(),
 	}
 }
 

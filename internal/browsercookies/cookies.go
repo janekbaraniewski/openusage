@@ -229,7 +229,7 @@ func (r *kookyReader) ReadCookie(ctx context.Context, domain, name, browser stri
 	// Enumerate stores by metadata only — this step DOES NOT decrypt
 	// anything, so it never triggers a keychain prompt. We then pick which
 	// stores to actually read from.
-	all := kooky.FindAllCookieStores(ctx)
+	all := findAllCookieStores(ctx)
 	defer func() {
 		for _, s := range all {
 			if s != nil {
@@ -290,7 +290,7 @@ func IsKeychainProtected(browser string) bool {
 }
 
 func (r *kookyReader) AvailableBrowsers(ctx context.Context) ([]string, error) {
-	stores := kooky.FindAllCookieStores(ctx)
+	stores := findAllCookieStores(ctx)
 	seen := map[string]bool{}
 	out := make([]string, 0, 4)
 	for _, s := range stores {
