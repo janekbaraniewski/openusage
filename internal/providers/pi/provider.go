@@ -165,6 +165,8 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 		cacheRead  int64
 		cacheWrite int64
 		requests   int64
+		cost       float64
+		hasCost    bool
 	}
 
 	perModel := make(map[string]*modelTotals)
@@ -177,6 +179,8 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 		totalOutput     int64
 		totalCacheRead  int64
 		totalCacheWrite int64
+		totalCost       float64
+		hasAnyCost      bool
 	)
 
 	today := now.UTC().Format("2006-01-02")
@@ -185,6 +189,7 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 	tokensByDay := make(map[string]float64)
 	sessionsByDay := make(map[string]float64)
 	sessionsSeenPerDay := make(map[string]map[string]struct{})
+	costByDay := make(map[string]float64)
 
 	for _, e := range entries {
 		bucket, ok := perModel[e.Model]
@@ -197,6 +202,12 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 		bucket.cacheRead += e.CacheRead
 		bucket.cacheWrite += e.CacheWrite
 		bucket.requests++
+		if e.HasCost {
+			bucket.cost += e.CostUSD
+			bucket.hasCost = true
+			totalCost += e.CostUSD
+			hasAnyCost = true
+		}
 		if perProvider[e.Model] == "" && e.Provider != "" {
 			perProvider[e.Model] = e.Provider
 		}
@@ -216,6 +227,9 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 		if !e.Timestamp.IsZero() {
 			day := e.Timestamp.UTC().Format("2006-01-02")
 			tokensByDay[day] += float64(e.Input + e.Output)
+			if e.HasCost {
+				costByDay[day] += e.CostUSD
+			}
 			seen, ok := sessionsSeenPerDay[day]
 			if !ok {
 				seen = make(map[string]struct{})
@@ -246,12 +260,18 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 	setUsedMetric(snap, "total_output_tokens", float64(totalOutput), "tokens", allTimeWindow)
 	setUsedMetric(snap, "total_cache_read", float64(totalCacheRead), "tokens", allTimeWindow)
 	setUsedMetric(snap, "total_cache_write", float64(totalCacheWrite), "tokens", allTimeWindow)
+	if hasAnyCost {
+		setUsedMetric(snap, "total_cost_usd", totalCost, "USD", allTimeWindow)
+	}
 
 	if len(sessionsByDay) > 0 {
 		snap.DailySeries["sessions"] = core.SortedTimePoints(sessionsByDay)
 	}
 	if len(tokensByDay) > 0 {
 		snap.DailySeries["tokens"] = core.SortedTimePoints(tokensByDay)
+	}
+	if len(costByDay) > 0 {
+		snap.DailySeries["cost"] = core.SortedTimePoints(costByDay)
 	}
 
 	for model, bucket := range perModel {
@@ -264,6 +284,9 @@ func populateSnapshot(snap *core.UsageSnapshot, entries []piModelEntry, now time
 			CachedTokens: core.Float64Ptr(float64(bucket.cacheRead)),
 			TotalTokens:  core.Float64Ptr(float64(bucket.input + bucket.output + bucket.cacheRead + bucket.cacheWrite)),
 			Requests:     core.Float64Ptr(float64(bucket.requests)),
+		}
+		if bucket.hasCost {
+			rec.CostUSD = core.Float64Ptr(bucket.cost)
 		}
 		if hint := perProvider[model]; hint != "" {
 			rec.SetDimension("upstream_provider", hint)
