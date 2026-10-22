@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.26.2 (2026-10-22)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump the go-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/425
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/427
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/429
+* deps(docs): bump posthog-js from 1.435.6 to 1.438.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/426
+* deps(deps): bump github.com/klauspost/compress from 1.20.1 to 1.20.3 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/430
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/431
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/432
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/433
+* deps(docs): bump follow-redirects from 1.16.0 to 1.16.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/436
+* deps(docs): bump launch-editor from 2.14.1 to 2.14.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/437
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.1...v0.26.2
+
 ## 0.26.1 (2026-10-10)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
