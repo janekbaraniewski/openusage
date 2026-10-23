@@ -68,6 +68,19 @@ Tracks credits, activity, and generation stats via an OpenRouter-compatible API.
 
 Tracks local server models, per-model usage, and optional cloud billing.
 
+### dsh
+
+**Detection:** `~/.dsh/sessions` directory (`$DSH_HOME/sessions` when `DSH_HOME` is set)
+
+Reads dsh (DeepSeek Harness) session logs (`session.v4.jsonl.zstd`) and tracks sessions, messages, tool calls, edit line counts, and per-model tokens. The logs record tokens only, so cost is an estimate at the published per-token rate and covers only requests sent straight to the DeepSeek platform; hosts that bill by subscription or credits stay unpriced.
+
+Each model response and tool call is also stored as a telemetry event, attributed to the service that hosted the request:
+
+- Requests sent to the DeepSeek platform (`deepseek-official` route) are stored under the `deepseek` provider, so they fill the DeepSeek tile's model, client, project, and tool sections.
+- Requests through any other route (Command Code, Z.AI, the Codex backend, …) stay on the dsh tile with the host recorded as the upstream provider. A DeepSeek model served by another host counts as that host's usage.
+
+To also show the DeepSeek-hosted usage on the dsh tile, link it in `settings.json`: `"telemetry": {"provider_links": {"deepseek": "dsh"}}`.
+
 ## API platforms
 
 ### OpenRouter
@@ -137,9 +150,12 @@ pair, never sent off-machine. macOS will prompt for Keychain access the
 first time openusage reads Chrome's cookie store; that's the OS-level
 consent gate.
 
+On Linux, Firefox installed as a Flatpak (`org.mozilla.firefox`) is read alongside the native `~/.mozilla` profiles.
+
 **Cookie auth currently shipping** (full implementation):
 - Perplexity → `console.perplexity.ai` — tier, balance, spend, analytics
 - OpenCode → `opencode.ai/_server` — balance, monthly limit, subscription
+- Xiaomi MiMo → `platform.xiaomimimo.com/api/v1` — wallet balance, spend, token totals, Token Plan quota
 
 **Cookie auth in progress** (HAR captured, RPC client needed):
 - Google AI Studio → `aistudio.google.com` — per-project quotas (needs
@@ -185,6 +201,12 @@ expect. Env-var detection runs first; if both are present the env var wins.
 **Detection:** browser-session cookie from `console.perplexity.ai` (Settings → 5 KEYS → perplexity → Enter).
 
 Browser-session-auth-only — Perplexity's API key is chat-only. Tile surfaces tier (0–5), available balance, lifetime spend, auto-reload settings, payment method, and 30-day analytics (api_requests, input/output/reasoning tokens, search queries) from the console RPCs at `/rest/pplx-api/v2/groups/<org_id>/...`.
+
+### Xiaomi MiMo
+
+**Detection:** Xiaomi account cookie from `account.xiaomi.com` (Settings → 5 KEYS → xiaomi → Enter), or a console `Cookie` header in `XIAOMI_MIMO_COOKIE`.
+
+Browser-session-auth-only — MiMo API keys (`sk-`, `tp-`, `ttp-`) cannot read balance or usage. The console's service token is a session cookie that browsers never write to disk, so the provider reads the persistent Xiaomi account cookies (`passToken`, `userId`) and mints a console session through the console's own sign-in redirect (`serviceLogin` → `/sts`). The account cookies are sent only to Xiaomi account hosts; the minted session is held in memory and renewed when the console rejects it. Tile surfaces wallet balance (cash and gift), month and lifetime spend, token totals, and the monthly Token Plan quota for accounts that have a plan. Per-model tokens, cost and requests for the last 30 days, and daily cost, request and token series, come from the console's usage statistics (`/usage/detail/list`). The currency follows the account region (USD or CNY). When the account session expires the tile shows AUTH until you sign in to Xiaomi in the browser again.
 
 ### OpenCode (Zen + Console)
 

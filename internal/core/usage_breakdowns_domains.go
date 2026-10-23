@@ -138,12 +138,17 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 		cacheRead  float64
 		cacheWrite float64
 		reasoning  float64
+		unsplit    float64
 		requests   float64
 		requests1d float64
 		series     []TimePoint
 	}
 	byModel := make(map[string]*agg)
 	usedKeys := make(map[string]bool)
+	// Totals reported without an input/output split, by model, with the
+	// metric key each came from.
+	unsplitTotals := make(map[string]float64)
+	unsplitKeys := make(map[string]string)
 
 	ensure := func(name string) *agg {
 		if _, ok := byModel[name]; !ok {
@@ -194,6 +199,10 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 			recordRequests1d(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_requests_today"), *metric.Used, key)
 		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_requests"):
 			recordRequests(strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_requests"), *metric.Used, key)
+		case strings.HasPrefix(key, "model_") && strings.HasSuffix(key, "_total_tokens"):
+			name := strings.TrimSuffix(strings.TrimPrefix(key, "model_"), "_total_tokens")
+			unsplitTotals[name] += *metric.Used
+			unsplitKeys[name] = key
 		default:
 			rawModel, kind, ok := parseModelMetricKey(key)
 			if !ok {
@@ -236,9 +245,22 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 		}
 	}
 
+	// A bare total stands in only for a model with no split token figures;
+	// alongside a split it would count the same tokens twice.
+	for name, total := range unsplitTotals {
+		if total <= 0 {
+			continue
+		}
+		if entry, ok := byModel[name]; ok && entry.input+entry.output+entry.cacheRead+entry.cacheWrite+entry.reasoning > 0 {
+			continue
+		}
+		ensure(name).unsplit = total
+		usedKeys[unsplitKeys[name]] = true
+	}
+
 	out := make([]ModelBreakdownEntry, 0, len(byModel))
 	for name, entry := range byModel {
-		if entry.cost <= 0 && entry.input <= 0 && entry.output <= 0 && entry.cacheRead <= 0 && entry.cacheWrite <= 0 && entry.reasoning <= 0 && entry.requests <= 0 && len(entry.series) == 0 {
+		if entry.cost <= 0 && entry.input <= 0 && entry.output <= 0 && entry.cacheRead <= 0 && entry.cacheWrite <= 0 && entry.reasoning <= 0 && entry.unsplit <= 0 && entry.requests <= 0 && len(entry.series) == 0 {
 			continue
 		}
 		out = append(out, ModelBreakdownEntry{
@@ -249,6 +271,7 @@ func ExtractModelBreakdown(s UsageSnapshot) ([]ModelBreakdownEntry, map[string]b
 			CacheRead:  entry.cacheRead,
 			CacheWrite: entry.cacheWrite,
 			Reasoning:  entry.reasoning,
+			Unsplit:    entry.unsplit,
 			Requests:   entry.requests,
 			Requests1d: entry.requests1d,
 			Series:     entry.series,
