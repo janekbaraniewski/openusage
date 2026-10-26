@@ -9,15 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@lobehub/icons-static-svg": "^1.95.1",
-    "posthog-js": "^1.438.12",
+    "@lobehub/icons-static-svg": "^1.98.0",
+    "posthog-js": "^1.438.19",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.2",
-    "puppeteer": "^25.14.0",
+    "puppeteer": "^25.16.0",
     "serve-handler": "^6.1.7",
-    "vite": "^8.3.4"
+    "vite": "^8.3.5"
   }
 }
