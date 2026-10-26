@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.26.2 (2026-10-26)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(deps): bump the go-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/425
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/427
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/429
+* deps(docs): bump posthog-js from 1.435.6 to 1.438.7 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/426
+* deps(deps): bump github.com/klauspost/compress from 1.20.1 to 1.20.3 in the go-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/430
+* deps(docs): bump the docs-minor-and-patch group in /docs/site with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/431
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/432
+* ci(actions): bump the actions-minor-and-patch group with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/433
+* deps(docs): bump follow-redirects from 1.16.0 to 1.16.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/436
+* deps(docs): bump launch-editor from 2.14.1 to 2.14.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/437
+* deps(website): bump the website-minor-and-patch group in /website with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/438
+* deps(docs): bump posthog-js from 1.438.12 to 1.438.19 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/439
+* deps(website): bump dompurify from 3.4.16 to 3.4.17 in /website by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/441
+* deps(docs): bump undici from 7.30.0 to 7.30.1 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/442
+* deps(docs): bump dompurify from 3.4.16 to 3.4.17 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/444
+* deps(docs): bump fast-uri from 3.1.8 to 3.1.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/443
+* ci(actions): bump the actions-minor-and-patch group with 4 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/440
+* deps(docs): bump body-parser from 1.20.6 to 1.20.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/445
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.1...v0.26.2
+
 ## 0.26.1 (2026-10-10)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
