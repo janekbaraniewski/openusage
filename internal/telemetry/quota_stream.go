@@ -23,9 +23,23 @@ func (i *QuotaSnapshotIngestor) Ingest(ctx context.Context, snaps map[string]cor
 		return nil
 	}
 	reqs := BuildLimitSnapshotRequests(snaps)
+	pending := make([]IngestRequest, 0, len(reqs))
 	for _, req := range reqs {
-		if _, err := i.store.Ingest(ctx, req); err != nil {
-			return fmt.Errorf("ingest limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, err)
+		// An unchanged snapshot only needs its timestamp moved forward;
+		// rewriting the full payload (100+ KB for local agents) every poll
+		// is pure write amplification.
+		touched, err := i.store.touchIdenticalLimitSnapshot(ctx, req)
+		if err != nil {
+			return fmt.Errorf("compare limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, err)
+		}
+		if !touched {
+			pending = append(pending, req)
+		}
+	}
+	for idx, outcome := range i.store.IngestBatch(ctx, pending) {
+		if outcome.Err != nil {
+			req := pending[idx]
+			return fmt.Errorf("ingest limit snapshot (%s/%s): %w", req.ProviderID, req.AccountID, outcome.Err)
 		}
 	}
 	return nil

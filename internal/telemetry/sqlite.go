@@ -124,6 +124,17 @@ func WALCheckpoint(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
+// WALCheckpointPassive copies as many WAL frames into the database as it can
+// without waiting on readers or writers, and never truncates the WAL file.
+// It is the cheap routine checkpoint; the file is reused in place.
+func WALCheckpointPassive(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE);`)
+	return err
+}
+
 // WALSizeBytes returns the current size of the WAL file for the given DB path.
 // Returns 0 if the file does not exist.
 func WALSizeBytes(dbPath string) int64 {
@@ -144,6 +155,12 @@ const (
 	// walSizeEmergencyThreshold is the WAL size at which an immediate
 	// TRUNCATE checkpoint is forced on startup before any queries run.
 	walSizeEmergencyThreshold = 512 * 1024 * 1024 // 512 MB
+
+	// walTruncateThreshold is the WAL size above which the periodic
+	// checkpoint uses TRUNCATE instead of PASSIVE. Below it the WAL file is
+	// left in place for reuse; truncating a small WAL every minute only
+	// costs a blocking checkpoint and a file regrow.
+	walTruncateThreshold = 64 * 1024 * 1024 // 64 MB, matches journal_size_limit
 )
 
 // RunWALCheckpointLoop periodically checkpoints the WAL file to prevent
@@ -191,7 +208,11 @@ func RunWALCheckpointLoop(ctx context.Context, db *sql.DB, dbPath string, logFn 
 					fmt.Sprintf("WAL is %d MB, checkpointing", walSize/(1024*1024)))
 			}
 			ckCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := WALCheckpoint(ckCtx, db); err != nil {
+			checkpoint := WALCheckpointPassive
+			if walSize > walTruncateThreshold {
+				checkpoint = WALCheckpoint
+			}
+			if err := checkpoint(ckCtx, db); err != nil {
 				logFn("wal_checkpoint", "error", fmt.Sprintf("error=%v", err))
 			}
 			cancel()

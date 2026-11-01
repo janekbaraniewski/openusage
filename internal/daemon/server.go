@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -111,6 +112,7 @@ func RunServer(cfg Config) error {
 }
 
 func startService(ctx context.Context, cfg Config) (*Service, error) {
+	memLimit := applyDaemonMemoryLimit()
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		defaultDBPath, err := telemetry.DefaultDBPath()
 		if err != nil {
@@ -181,7 +183,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 
 	svc.infof(
 		"daemon_start",
-		"socket=%s db=%s spool=%s collect_interval=%s poll_interval=%s collectors=%d providers=%d",
+		"socket=%s db=%s spool=%s collect_interval=%s poll_interval=%s collectors=%d providers=%d mem_limit_mb=%d",
 		svc.cfg.SocketPath,
 		svc.cfg.DBPath,
 		svc.cfg.SpoolDir,
@@ -189,6 +191,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.PollInterval,
 		len(telemetrySources),
 		len(svc.providerByID),
+		memLimit>>20,
 	)
 
 	if err := svc.startSocketServer(ctx); err != nil {
@@ -230,13 +233,6 @@ func (s *Service) Close() error {
 
 // --- Ingest helpers ---
 
-func (s *Service) ingestRequest(ctx context.Context, req telemetry.IngestRequest) (telemetry.IngestResult, error) {
-	if s == nil || s.store == nil {
-		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
-	}
-	return s.store.Ingest(ctx, req)
-}
-
 func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string]core.UsageSnapshot) error {
 	if s == nil || s.quotaIngest == nil {
 		return fmt.Errorf("quota ingestor unavailable")
@@ -263,6 +259,10 @@ func (s *Service) recordBalanceObservations(ctx context.Context, snapshots map[s
 		spec := provider.Spec()
 		var obs []telemetry.BalanceObservation
 		for key, met := range snap.Metrics {
+			_, declared := spec.CreditMetrics[key]
+			if !telemetry.ShouldRecordBalanceMetric(key, met.Unit, declared) {
+				continue
+			}
 			sem, ok := spec.InferBalanceSemantics(key, met.Window)
 			if !ok || sem == core.BalanceLimit {
 				continue
@@ -297,22 +297,49 @@ func (s *Service) recordBalanceObservations(ctx context.Context, snapshots map[s
 
 func (s *Service) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {
 	var tally ingestTally
+	if len(reqs) == 0 {
+		return tally, nil
+	}
+	if s == nil || s.store == nil {
+		tally.processed = len(reqs)
+		tally.failed = len(reqs)
+		return tally, reqs
+	}
+	// Local-file sources re-read their whole history on every restart. Drop
+	// events that retention would delete straight away and whose day is
+	// already in the daily rollup, instead of inserting and re-pruning them.
+	if horizon, err := s.store.LocalIngestHorizon(ctx, s.retentionDays()); err == nil {
+		var dropped int
+		reqs, dropped = telemetry.DropExpiredLocalEvents(reqs, horizon)
+		tally.processed += dropped
+		tally.deduped += dropped
+	}
+
 	var retries []telemetry.IngestRequest
-	for _, req := range reqs {
+	for i, outcome := range s.store.IngestBatch(ctx, reqs) {
 		tally.processed++
-		result, err := s.ingestRequest(ctx, req)
-		if err != nil {
+		if outcome.Err != nil {
 			tally.failed++
-			retries = append(retries, req)
+			retries = append(retries, reqs[i])
 			continue
 		}
-		if result.Deduped {
+		if outcome.Result.Deduped {
 			tally.deduped++
 		} else {
 			tally.ingested++
 		}
 	}
 	return tally, retries
+}
+
+// retentionDays is the configured hot window, defaulting to 30 days when the
+// config is unreadable or unset (matching pruneOldData).
+func (s *Service) retentionDays() int {
+	cfg, err := config.Load()
+	if err != nil || cfg.Data.RetentionDays <= 0 {
+		return 30
+	}
+	return cfg.Data.RetentionDays
 }
 
 func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.IngestRequest, limit int) (telemetry.FlushResult, int, []string) {
