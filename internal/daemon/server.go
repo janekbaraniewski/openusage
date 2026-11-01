@@ -153,6 +153,11 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	telemetrySources := telemetrySourcesBySystem()
+	for _, source := range telemetrySources {
+		if stateful, ok := source.(shared.TelemetryStatefulSource); ok {
+			stateful.SetTelemetryStateStore(store)
+		}
+	}
 	svc := &Service{
 		cfg:              cfg,
 		ctx:              ctx,

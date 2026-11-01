@@ -181,6 +181,7 @@ This provider requires CGO because it reads SQLite directly. Pre-built binaries 
 :::
 
 - The telemetry daemon re-reads the tracking and state DBs only when one of them (or its `-wal` file) changes size or modification time. The state DB can grow to several GB, so an idle Cursor costs the daemon almost nothing.
+- While you use Cursor, the daemon reads only the state DB rows written since its last collect. It keeps a high-water mark per DB path (the last rowids it read), stored in the daemon's telemetry database so it survives restarts. It falls back to one full read when the file is replaced or shrinks, when the mark no longer matches, and once every 24 hours. OpenUsage opens Cursor's databases read-only and never writes to them.
 - Composer cost is billable usage and counts against the plan limit.
 - AI code scoring caches aggregate data; very recent activity may take a few minutes to appear.
 - Team aggregation only kicks in when a team plan is detected on the account.

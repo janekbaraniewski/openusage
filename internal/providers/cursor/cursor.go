@@ -35,7 +35,7 @@ type scoredCommitsAggregate struct {
 // helpers as an explicit parameter.
 const cursorAPIBase = "https://api2.cursor.sh"
 
-// Provider holds three independent caches, each guarded by its own mutex:
+// Provider holds independent caches, each guarded by its own mutex:
 //
 //   - mu (RWMutex): guards accountCache, the per-account state holding the
 //     latest billing cycle, model aggregations, effective plan limit, and
@@ -44,8 +44,11 @@ const cursorAPIBase = "https://api2.cursor.sh"
 //     incremental reads of Cursor's ai-code-tracking SQLite DB.
 //   - stateCacheMu (Mutex): guards composer/bubble/scored-commits caches —
 //     incremental reads of Cursor's state.vscdb SQLite DB.
+//   - collectFPMu (Mutex): guards collectFP, the telemetry Collect skip cache.
+//   - stateMarkMu (Mutex): guards the telemetry Collect high-water marks for
+//     state.vscdb and the store that persists them.
 //
-// All three are independent; never hold more than one at a time.
+// All of them are independent; never hold more than one at a time.
 type Provider struct {
 	providerbase.Base
 	mu           sync.RWMutex
@@ -70,6 +73,14 @@ type Provider struct {
 	// successful collect (see sqliteFileFingerprint).
 	collectFPMu sync.Mutex
 	collectFP   map[string]string
+
+	// Telemetry Collect high-water marks for state.vscdb, keyed by DB path
+	// (see state_incremental.go). stateStore, when set by the daemon,
+	// persists them across restarts.
+	stateMarkMu    sync.Mutex
+	stateMarks     map[string]*stateDBMark
+	stateMarkDirty map[string]bool
+	stateStore     shared.TelemetryStateStore
 }
 
 type cachedAccountState struct {

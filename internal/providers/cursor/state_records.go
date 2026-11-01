@@ -74,7 +74,7 @@ func loadComposerSessionKeys(ctx context.Context, db *sql.DB) ([]string, error) 
 
 // loadComposerSessionRecordsByKeys loads composer session records for the given keys only.
 // This performs the expensive json_extract query but scoped to a specific key set.
-func loadComposerSessionRecordsByKeys(ctx context.Context, db *sql.DB, keys []string) ([]cursorComposerSessionRecord, error) {
+func loadComposerSessionRecordsByKeys(ctx context.Context, db sqlQueryer, keys []string) ([]cursorComposerSessionRecord, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
@@ -114,7 +114,14 @@ func loadComposerSessionRecordsByKeys(ctx context.Context, db *sql.DB, keys []st
 	return scanComposerSessionRows(rows)
 }
 
-func loadComposerSessionRecords(ctx context.Context, db *sql.DB) ([]cursorComposerSessionRecord, error) {
+func loadComposerSessionRecords(ctx context.Context, db sqlQueryer) ([]cursorComposerSessionRecord, error) {
+	return loadComposerSessionRecordsAfter(ctx, db, 0)
+}
+
+// loadComposerSessionRecordsAfter loads composerData records stored at a rowid
+// above afterRowID. afterRowID <= 0 loads all of them.
+func loadComposerSessionRecordsAfter(ctx context.Context, db sqlQueryer, afterRowID int64) ([]cursorComposerSessionRecord, error) {
+	rowFilter, args := rowIDFilter(afterRowID)
 	rows, err := db.QueryContext(ctx, `
 		SELECT key,
 		       json_extract(value, '$.usageData'),
@@ -136,7 +143,7 @@ func loadComposerSessionRecords(ctx context.Context, db *sql.DB) ([]cursorCompos
 		FROM cursorDiskKV
 		WHERE key LIKE 'composerData:%'
 		  AND json_extract(value, '$.usageData') IS NOT NULL
-		  AND json_extract(value, '$.usageData') != '{}'`)
+		  AND json_extract(value, '$.usageData') != '{}'`+rowFilter, args...)
 	if err != nil {
 		return nil, fmt.Errorf("cursor: querying composerData: %w", err)
 	}
@@ -277,7 +284,14 @@ func loadBubbleRecordsByKeys(ctx context.Context, db *sql.DB, keys []string) ([]
 	return scanBubbleRows(rows)
 }
 
-func loadBubbleRecords(ctx context.Context, db *sql.DB) ([]cursorBubbleRecord, error) {
+func loadBubbleRecords(ctx context.Context, db sqlQueryer) ([]cursorBubbleRecord, error) {
+	return loadBubbleRecordsAfter(ctx, db, 0)
+}
+
+// loadBubbleRecordsAfter loads type=2 bubbleId records stored at a rowid above
+// afterRowID. afterRowID <= 0 loads all of them.
+func loadBubbleRecordsAfter(ctx context.Context, db sqlQueryer, afterRowID int64) ([]cursorBubbleRecord, error) {
+	rowFilter, args := rowIDFilter(afterRowID)
 	rows, err := db.QueryContext(ctx, `
 		SELECT key,
 		       json_extract(value, '$.toolFormerData.name'),
@@ -288,7 +302,7 @@ func loadBubbleRecords(ctx context.Context, db *sql.DB) ([]cursorBubbleRecord, e
 		       json_extract(value, '$.model')
 		FROM cursorDiskKV
 		WHERE key LIKE 'bubbleId:%'
-		  AND json_extract(value, '$.type') = 2`)
+		  AND json_extract(value, '$.type') = 2`+rowFilter, args...)
 	if err != nil {
 		return nil, fmt.Errorf("cursor: querying bubbleId records: %w", err)
 	}
@@ -331,6 +345,23 @@ func scanBubbleRows(rows *sql.Rows) ([]cursorBubbleRecord, error) {
 		return nil, fmt.Errorf("cursor: iterate bubbleId rows: %w", err)
 	}
 	return records, nil
+}
+
+// sqlQueryer is satisfied by *sql.DB and *sql.Tx, so the loaders can run
+// inside a single read transaction (one consistent snapshot).
+type sqlQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// rowIDFilter returns an extra WHERE clause restricting a cursorDiskKV query to
+// rows past afterRowID. The rowid range lets SQLite seek straight to the new
+// rows instead of running json_extract over the whole table.
+func rowIDFilter(afterRowID int64) (string, []any) {
+	if afterRowID <= 0 {
+		return "", nil
+	}
+	return "\n\t\t  AND rowid > ?", []any{afterRowID}
 }
 
 func composerSessionTimestampMap(records []cursorComposerSessionRecord) map[string]time.Time {
