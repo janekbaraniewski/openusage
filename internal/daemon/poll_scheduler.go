@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,7 +94,8 @@ func (ps *PollScheduler) ShouldPoll(accountID string, hasLocalDetector bool) boo
 }
 
 // RecordOutcome applies failure backoff and provider-requested delays from a
-// freshly fetched snapshot. Limited and Error outcomes back off exponentially;
+// freshly fetched snapshot. Error and throttled (429) outcomes back off
+// exponentially (see isFailedFetch);
 // any other status clears the failure streak. snap.NextPollNotBefore, when
 // set, extends the hold-off (capped at maxNotBeforeHorizon).
 func (ps *PollScheduler) RecordOutcome(accountID string, snap core.UsageSnapshot) {
@@ -108,11 +110,10 @@ func (ps *PollScheduler) RecordOutcome(accountID string, snap core.UsageSnapshot
 
 	now := ps.now()
 	state.notBefore = time.Time{}
-	switch snap.Status {
-	case core.StatusLimited, core.StatusError:
+	if isFailedFetch(snap) {
 		state.consecutiveFailures++
 		state.notBefore = now.Add(ps.failureBackoffLocked(state.consecutiveFailures))
-	default:
+	} else {
 		state.consecutiveFailures = 0
 	}
 
@@ -124,6 +125,26 @@ func (ps *PollScheduler) RecordOutcome(accountID string, snap core.UsageSnapshot
 		if requested.After(state.notBefore) {
 			state.notBefore = requested
 		}
+	}
+}
+
+// isFailedFetch reports whether a snapshot is a failed or throttled request
+// that warrants exponential backoff. StatusLimited alone is not enough:
+// several providers (codex, cursor, copilot) also report it when a quota is
+// exhausted, and backing off then would delay showing the quota reset by up
+// to maxFailureBackoff. A limited snapshot counts only when it came from a
+// throttled request: a Retry-After header or a "rate limited" message, which
+// every 429 path sets.
+func isFailedFetch(snap core.UsageSnapshot) bool {
+	switch snap.Status {
+	case core.StatusError:
+		return true
+	case core.StatusLimited:
+		return !snap.NextPollNotBefore.IsZero() ||
+			snap.Raw["retry_after"] != "" ||
+			strings.Contains(strings.ToLower(snap.Message), "rate limited")
+	default:
+		return false
 	}
 }
 

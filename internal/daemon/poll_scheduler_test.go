@@ -208,7 +208,7 @@ func TestPollScheduler_ExponentialBackoffOnLimitedAndError(t *testing.T) {
 			status = core.StatusError
 		}
 		ps.RecordPoll("acct1", false)
-		ps.RecordOutcome("acct1", core.UsageSnapshot{Status: status})
+		ps.RecordOutcome("acct1", core.UsageSnapshot{Status: status, Message: "rate limited (HTTP 429)"})
 
 		*now = now.Add(wait - time.Second)
 		if ps.ShouldPoll("acct1", false) {
@@ -226,5 +226,43 @@ func TestPollScheduler_ExponentialBackoffOnLimitedAndError(t *testing.T) {
 	*now = now.Add(30 * time.Second)
 	if !ps.ShouldPoll("acct1", false) {
 		t.Fatal("did not return to base interval after recovery")
+	}
+}
+
+func TestPollScheduler_QuotaExhaustedDoesNotBackOff(t *testing.T) {
+	ps, now := newTestScheduler(30 * time.Second)
+	ps.ShouldPoll("acct1", false)
+
+	// A provider at 100% of its quota reports StatusLimited without any
+	// throttling signal. Polling must continue at the base interval so the
+	// quota reset shows up promptly.
+	for i := 0; i < 4; i++ {
+		ps.RecordPoll("acct1", true)
+		ps.RecordOutcome("acct1", core.UsageSnapshot{Status: core.StatusLimited, Message: "5h limit reached"})
+		*now = now.Add(30 * time.Second)
+		if !ps.ShouldPoll("acct1", false) {
+			t.Fatalf("poll %d: quota-exhausted snapshot triggered failure backoff", i+1)
+		}
+	}
+}
+
+func TestIsFailedFetch(t *testing.T) {
+	cases := []struct {
+		name string
+		snap core.UsageSnapshot
+		want bool
+	}{
+		{"error", core.UsageSnapshot{Status: core.StatusError}, true},
+		{"429 message", core.UsageSnapshot{Status: core.StatusLimited, Message: "Rate limited (HTTP 429)"}, true},
+		{"retry-after raw", core.UsageSnapshot{Status: core.StatusLimited, Raw: map[string]string{"retry_after": "30"}}, true},
+		{"retry-after parsed", core.UsageSnapshot{Status: core.StatusLimited, NextPollNotBefore: time.Now().Add(time.Minute)}, true},
+		{"quota exhausted", core.UsageSnapshot{Status: core.StatusLimited}, false},
+		{"near limit", core.UsageSnapshot{Status: core.StatusNearLimit}, false},
+		{"ok", core.UsageSnapshot{Status: core.StatusOK}, false},
+	}
+	for _, tc := range cases {
+		if got := isFailedFetch(tc.snap); got != tc.want {
+			t.Errorf("%s: isFailedFetch = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

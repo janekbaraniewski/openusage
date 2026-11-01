@@ -70,7 +70,7 @@ The daemon slows down when there is nothing to do and when providers push back:
 
 - **Collect loop.** Local collectors run every `--collect-interval` (30s by default). After three cycles in a row that ingest no new events, the interval doubles on each further idle cycle, up to 5 minutes. Re-emitted history that the store deduplicates does not count as activity. The first cycle that ingests something resets the interval.
 - **Unchanged snapshots.** A provider whose snapshot has not changed is polled less often: up to 4x the poll interval for HTTP providers and up to 16x for providers with cheap local change detection.
-- **Rate limits and errors.** When a poll ends in `limited` (HTTP 429) or `error` (including HTTP 5xx), the account backs off exponentially: 2x, 4x, 8x the poll interval and so on, up to 30 minutes. A successful poll resets it.
+- **Rate limits and errors.** When a poll is rate limited (HTTP 429) or ends in `error` (including HTTP 5xx), the account backs off exponentially: 2x, 4x, 8x the poll interval and so on, up to 30 minutes. A successful poll resets it. A `limited` status that only means a quota is used up (for example a Codex 5h window at 100%) does not back off, so the reset shows up on the next regular poll.
 - **Retry-After.** When a provider returns a `Retry-After` header (seconds or HTTP date) on a 429 or 5xx, the account is not polled again before that time, up to 2 hours.
 
 ## Endpoints
