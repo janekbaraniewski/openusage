@@ -416,20 +416,21 @@ or contacting the daemon, so the segment refreshes at most every 15 seconds.
 Editing `settings.json` invalidates the cache on the next tick, and `--json`
 or `--no-cache` always render live.
 
-If the snapshot read is degraded (for example the telemetry daemon is briefly
-unreachable), the renderer reuses the **last good** status instead of flashing
-a blank or zeroed segment. This is an intentional anti-flicker measure; the
-cached value is used for at most a few minutes before live (possibly empty)
-state shows through.
+If the snapshot read fails or is degraded (for example the daemon read runs
+past the 800ms budget, the daemon is still computing its first result, or it is
+briefly unreachable), the renderer prints the **last good** status, however old
+it is, instead of a bare provider icon or a zeroed segment. A failed or degraded
+render never replaces the cached status. If there is no cached status yet, the
+segment stays empty until the first successful render.
 
 ## Troubleshooting
 
-### `openusage tmux` prints `?`
+### The `openusage tmux` segment is empty or does not update
 
-The renderer ran into an error and gracefully emitted a placeholder so tmux would not block. Look at `tmux show-environment -g` or run `openusage tmux doctor` to inspect the cause. Likely culprits:
+The renderer hit an error or a degraded read and had no earlier good status to show, so it printed an empty line rather than block tmux. Run `openusage tmux doctor` to inspect the cause; the error is also written to stderr when you run `openusage tmux` by hand. Likely culprits:
 
 - Daemon is configured but not running, and the snapshot fetch timed out within the 800ms budget. Either start it (`openusage telemetry daemon install`) or pass `--source direct` to bypass it.
-- The daemon just started and is still computing its first result. The render keeps the last good status (or `?` if there is none yet) and the next refresh is served from the daemon's cache. The renderer never runs account auto-detection itself; the daemon resolves and caches accounts (see [daemon account resolution](../daemon/overview.md#account-resolution)).
+- The daemon just started and is still computing its first result. The render keeps the last good status (or an empty segment if there is none yet) and the next refresh is served from the daemon's cache. The renderer never runs account auto-detection itself; the daemon resolves and caches accounts (see [daemon account resolution](../daemon/overview.md#account-resolution)).
 - No provider is detected. See below.
 
 ### "active provider: none detected" in `doctor`

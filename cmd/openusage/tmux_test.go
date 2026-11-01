@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,6 +75,80 @@ func TestLastStatusRoundTrip(t *testing.T) {
 	writeLastStatus("", "   ")
 	if _, ok := readLastStatus(""); ok {
 		t.Fatal("blank status should not count as a cache hit")
+	}
+}
+
+// ageLastStatus backdates the cache file far past any TTL.
+func ageLastStatus(t *testing.T, key string) {
+	t.Helper()
+	old := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(lastStatusPath(key), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmitTmuxStatus_DegradedServesOldCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const good = "🤖 5h 15% $6.79/today"
+	writeLastStatus("", good)
+	ageLastStatus(t, "")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "✨", true, nil)
+	if got := buf.String(); got != good+"\n" {
+		t.Fatalf("degraded render with old cache: got %q, want last good status", got)
+	}
+	if last, _ := readLastStatus(""); last != good {
+		t.Fatalf("degraded render overwrote the cache: %q", last)
+	}
+}
+
+func TestEmitTmuxStatus_DegradedWithoutCacheIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "✨", true, nil)
+	if got := buf.String(); got != "\n" {
+		t.Fatalf("degraded render without cache: got %q, want empty line", got)
+	}
+	if _, ok := readLastStatus(""); ok {
+		t.Fatal("degraded render must not be written to the cache")
+	}
+}
+
+func TestEmitTmuxStatus_ErrorWithoutCacheIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "", false, errors.New("daemon read timed out"))
+	if got := buf.String(); got != "\n" {
+		t.Fatalf("failed render without cache: got %q, want empty line", got)
+	}
+}
+
+func TestEmitTmuxStatus_ErrorServesOldCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writeLastStatus("", "good")
+	ageLastStatus(t, "")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "", false, errors.New("boom"))
+	if got := buf.String(); got != "good\n" {
+		t.Fatalf("failed render with old cache: got %q", got)
+	}
+}
+
+func TestEmitTmuxStatus_CleanRenderUpdatesCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writeLastStatus("", "old")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "new", false, nil)
+	if got := buf.String(); got != "new\n" {
+		t.Fatalf("clean render: got %q", got)
+	}
+	if last, _ := readLastStatus(""); last != "new" {
+		t.Fatalf("clean render did not refresh the cache: %q", last)
 	}
 }
 

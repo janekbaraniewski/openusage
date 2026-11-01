@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -235,7 +236,8 @@ no per-range fallback; for those, use ` + "`openusage tmux font patch`" + `.`,
 
 // runTmuxRender is the default `openusage tmux` entry point. It applies the
 // max-runtime budget so a slow daemon can never freeze tmux: on timeout we
-// emit a `?` placeholder and exit 0 so the status bar keeps ticking.
+// reuse the last good status (or an empty line) and exit 0 so the status bar
+// keeps ticking.
 //
 // tmux re-runs this every status-interval (often 5s), so the common path is a
 // short-circuit: when the last good render for the same flags is younger than
@@ -264,45 +266,38 @@ func runTmuxRender(c *cobra.Command, f *tmuxFlags) error {
 	defer cancel()
 
 	rendered, bctx, detected, err := buildAndRender(ctx, opts)
-	if err != nil {
-		// Never block tmux. Prefer the last good status (so a transient daemon
-		// hiccup does not blank the bar); fall back to "?" only if there is no
-		// recent cache.
-		if last, ok := readLastStatus(cacheKey); ok {
-			fmt.Fprintln(os.Stdout, last)
-			return nil
-		}
-		fmt.Fprintf(os.Stderr, "tmux: %v\n", err)
-		fmt.Fprintln(os.Stdout, "?")
-		return nil
-	}
-
-	if opts.jsonOut {
+	if err == nil && opts.jsonOut {
 		payload := tmux.BuildJSON(bctx, rendered, detected)
 		return tmux.WriteJSON(os.Stdout, payload)
 	}
-
-	// Anti-flicker: when the snapshot read was degraded (e.g. the daemon read
-	// timed out and there was no time to fall back), reuse the last good
-	// status instead of flashing a blank/zeroed segment. Only successful
-	// renders update the cache.
-	if bctx.Degraded {
-		if last, ok := readLastStatus(cacheKey); ok {
-			fmt.Fprintln(os.Stdout, last)
-			return nil
-		}
-	} else if strings.TrimSpace(rendered) != "" {
-		writeLastStatus(cacheKey, rendered)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tmux: %v\n", err)
 	}
-
-	fmt.Fprintln(os.Stdout, rendered)
+	emitTmuxStatus(os.Stdout, cacheKey, rendered, bctx.Degraded, err)
 	return nil
 }
 
-// lastStatusTTL caps how stale a cached status may be before it is treated as
-// missing. Long enough to ride out daemon restarts, short enough that a truly
-// idle machine eventually shows live (possibly empty) state.
-const lastStatusTTL = 10 * time.Minute
+// emitTmuxStatus writes the status line for one tmux tick and maintains the
+// last-good cache. Never block or blank tmux on a bad read:
+//
+//   - A clean render is printed and becomes the new last-good status.
+//   - A failed or degraded render (daemon timeout, pending first compute,
+//     read error) has no snapshot, so it would render as a bare provider
+//     glyph. Print the last good status instead, however old it is, and
+//     never write the degraded output to the cache.
+//   - With no cache at all, print an empty line rather than a bare icon or
+//     a "?" placeholder.
+func emitTmuxStatus(w io.Writer, cacheKey, rendered string, degraded bool, renderErr error) {
+	if renderErr != nil || degraded {
+		last, _ := readLastStatus(cacheKey)
+		fmt.Fprintln(w, last)
+		return
+	}
+	if strings.TrimSpace(rendered) != "" {
+		writeLastStatus(cacheKey, rendered)
+	}
+	fmt.Fprintln(w, rendered)
+}
 
 // tmuxFreshTTL is how long a successful render is reused verbatim without
 // loading config or contacting the daemon. tmux typically re-runs the command
@@ -340,10 +335,11 @@ func lastStatusPath(key string) string {
 	return filepath.Join(home, ".cache", "openusage", name)
 }
 
-// readLastStatus returns the last good rendered status if it exists and is
-// within lastStatusTTL.
+// readLastStatus returns the last good rendered status regardless of age. It
+// backs degraded and failed renders, where an old status beats a bare glyph;
+// only the fresh-cache short-circuit applies a TTL.
 func readLastStatus(key string) (string, bool) {
-	return readStatusWithin(key, lastStatusTTL, time.Now())
+	return readStatusWithin(key, 0, time.Now())
 }
 
 // readFreshStatus returns the cached status when it is younger than
@@ -373,8 +369,10 @@ func readStatusWithin(key string, ttl time.Duration, now time.Time) (string, boo
 	if err != nil {
 		return "", false
 	}
-	if age := now.Sub(info.ModTime()); age < 0 || age > ttl {
-		return "", false
+	if ttl > 0 {
+		if age := now.Sub(info.ModTime()); age < 0 || age > ttl {
+			return "", false
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
