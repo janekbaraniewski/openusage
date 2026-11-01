@@ -190,7 +190,7 @@ Activity Monitor or a power monitor lists `openusage` among the top energy users
 
 ### Check versions
 
-Earlier releases re-scanned the full Cursor state DB on every collect cycle, re-read the whole OpenCode database on every cycle while OpenCode was running, re-parsed every Claude Code log on every statusline and tmux render, and could leave orphaned `codex app-server` processes behind. Upgrade (see [Upgrade](../getting-started/upgrade.md)), then restart the daemon so the new binary is loaded:
+Earlier releases re-scanned the full Cursor state DB on every collect cycle, re-read the whole OpenCode database on every cycle while OpenCode was running, re-parsed every Claude Code log on every statusline and tmux render, re-read a whole Claude Code session log (and re-totalled all of them) whenever it grew, re-scanned every Ollama server log on each poll, and could leave orphaned `codex app-server` processes behind. Upgrade (see [Upgrade](../getting-started/upgrade.md)), then restart the daemon so the new binary is loaded:
 
 ```bash
 openusage telemetry daemon install

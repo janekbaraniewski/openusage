@@ -390,7 +390,8 @@ func TestReadConversationJSONL_IncrementalMatchesFresh(t *testing.T) {
 
 // TestReadConversationJSONL_ReusesAggregates checks the incremental paths:
 // an unchanged poll reuses the whole merge, and a poll where one file grew
-// rebuilds only that file's all-time partial.
+// past the frontier extends the merge instead of rebuilding it, dropping only
+// that file's all-time partial.
 func TestReadConversationJSONL_ReusesAggregates(t *testing.T) {
 	primary, alt := writeGoldenHistory(t, t.TempDir())
 	p := newGoldenProvider()
@@ -405,17 +406,23 @@ func TestReadConversationJSONL_ReusesAggregates(t *testing.T) {
 		partials[path] = e.allTime
 	}
 
+	before := *first
 	fetchConversationDump(t, p, primary, alt)
-	if p.convAgg != first {
+	if p.convAgg.extended != before.extended || p.convAgg.rebuilt != before.rebuilt || p.convAgg.total != before.total {
 		t.Fatal("unchanged poll recomputed the cross-file merge")
 	}
 
 	live := filepath.Join(alt, "repo-a", "sess-e.jsonl")
 	appendFixtureLines(t, live, fxLine{ts: goldenNow.Add(-time.Minute), sess: "sess-e", req: "e3", msg: "m-e3", cwd: "/work/repo-e",
 		model: "claude-opus-4-6", in: 1, out: 1})
-	fetchConversationDump(t, p, primary, alt)
-	if p.convAgg == first {
-		t.Fatal("poll after an append reused the stale merge")
+	extended, rebuilt := first.extended, first.rebuilt
+	got := fetchConversationDump(t, p, primary, alt)
+	if p.convAgg.extended != extended+1 || p.convAgg.rebuilt != rebuilt {
+		t.Fatalf("append after the frontier: extended %d->%d, rebuilt %d->%d; want one extend, no rebuild",
+			extended, p.convAgg.extended, rebuilt, p.convAgg.rebuilt)
+	}
+	if want := fetchConversationDump(t, newGoldenProvider(), primary, alt); got != want {
+		t.Fatalf("extended merge diverged from fresh\n%s", lineDiff(want, got))
 	}
 	for path, e := range p.jsonlCache {
 		rebuilt := e.allTime != partials[path]

@@ -192,13 +192,23 @@ func ProbeRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSn
 }
 
 // AnyPathModifiedAfter returns true if any of the given paths has an mtime
-// after since. Paths that don't exist or can't be stat'd are silently skipped.
+// after since. For a directory, files anywhere below it count too: appending
+// to a nested session log does not move the directory's own mtime (see
+// treeModifiedAfter for how this stays cheap). Paths that don't exist or
+// can't be stat'd are silently skipped.
 func AnyPathModifiedAfter(paths []string, since time.Time) bool {
 	for _, path := range paths {
 		if path == "" {
 			continue
 		}
-		if info, err := os.Stat(path); err == nil && info.ModTime().After(since) {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(since) {
+			return true
+		}
+		if info.IsDir() && treeModifiedAfter(path, since) {
 			return true
 		}
 	}

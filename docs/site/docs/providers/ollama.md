@@ -68,6 +68,8 @@ Ollama has three independent data sources. The provider runs them in parallel an
 
 The Ollama server emits a Gin-style HTTP access log line per request. The provider tails `~/.ollama/logs/server*.log` (matching the rotated siblings as well) on every platform. Override with the `logs_dir` hint, or via `config_dir` (the provider then looks under `<config_dir>/logs/`).
 
+Rotated logs (`server-1.log`, ...) are parsed once and cached; `server.log` is read only from where the previous poll stopped, and is read again from the start after a rotation or truncation. An append to `server.log` also triggers a refresh on its own.
+
 For each parsed line the provider extracts timestamp, HTTP status, latency, and path. Lines whose path is in the inference set are counted:
 
 - `/api/chat`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` → chat

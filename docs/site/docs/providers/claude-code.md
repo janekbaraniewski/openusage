@@ -164,7 +164,8 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-â€¦` â
 
 ### How fresh is the data?
 
-- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache. Each file's all-time totals are cached too, so a poll where only the live session grew recomputes that one file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Polling: every 30 s by default. Each JSONL file is read incrementally: a poll decodes only the lines appended since the previous poll, and a line still being written is picked up once it is complete. A file that shrank or was replaced is read again from the start. When the new lines are newer than everything already counted (the normal case for a live session), the all-time totals are updated with just those lines instead of being recomputed across every file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Change detection: the dashboard re-polls when any session file under `~/.claude/projects` changes, including appends to files in nested project folders.
 - Hook (when integration is installed): real-time per turn.
 
 ## Files read

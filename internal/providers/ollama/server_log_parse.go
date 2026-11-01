@@ -1,38 +1,10 @@
 package ollama
 
 import (
-	"bufio"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 )
-
-func parseLogFile(path string, onEvent func(ginLogEvent)) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	const maxLogLine = 1024 * 1024
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxLogLine)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		event, ok := parseGINLogLine(line)
-		if !ok {
-			continue
-		}
-		onEvent(event)
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
-}
 
 func parseGINLogLine(line string) (ginLogEvent, bool) {
 	line = strings.TrimSpace(line)

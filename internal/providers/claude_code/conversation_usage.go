@@ -15,18 +15,19 @@ import (
 
 // readConversationJSONL aggregates usage across every conversation JSONL file.
 //
-// Work is split so a poll where only the live session file grew does not
-// re-aggregate the whole history:
+// Work is split so a poll where only the live session files grew touches
+// little more than the appended lines:
 //
-//  1. Per file (cached on mtime+size): parsed records sorted by timestamp and
-//     their precomputed dedup keys.
-//  2. Per poll, only when some file changed: a k-way merge of the per-file
-//     record streams in global timestamp order. It applies first-wins dedup
-//     across files (recording which records lose) and walks the 5h billing
-//     block chain. This visits each record once but only does map probes.
-//  3. Per file, only when its records or lost set changed: the file's
-//     contribution to the all-time aggregates. The per-file partials are then
-//     reduced into the all-time totals.
+//  1. Per file (conversationFile): only lines appended since the last poll
+//     are decoded and merged into the file's records, which stay sorted by
+//     timestamp with their dedup keys precomputed.
+//  2. Cross-file, when every new record sorts after everything already
+//     merged (the normal case for live sessions): the dedup sets, 5h block
+//     chain and all-time totals are extended with just those records.
+//  3. Cross-file, otherwise: a k-way merge of the per-file record streams in
+//     global timestamp order applies first-wins dedup across files and walks
+//     the 5h billing block chain. Per-file all-time partials are recomputed
+//     only where the set of dedup losers changed, then reduced into totals.
 //  4. Every poll: the today / 7d / current-block windows, scanning only
 //     records newer than the widest window.
 func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, snap *core.UsageSnapshot) error {
@@ -58,11 +59,17 @@ func (p *Provider) readConversationJSONL(projectsDir, altProjectsDir string, sna
 	p.jsonlCacheMu.Lock()
 	defer p.jsonlCacheMu.Unlock()
 
+	if p.convAgg == nil {
+		p.convAgg = &conversationAggCache{files: make(map[string]*conversationFile)}
+	}
+	files := make([]*conversationFile, len(jsonlFiles))
 	entries := make([]*jsonlCacheEntry, len(jsonlFiles))
 	for i, fpath := range jsonlFiles {
-		entries[i] = p.cachedConversationEntry(fpath, fileInfos[fpath])
+		files[i] = p.convAgg.updateFile(fpath, fileInfos[fpath])
+		entries[i] = files[i].entry
 	}
-	agg := p.conversationAggregate(entries)
+	p.syncJSONLCache(jsonlFiles, entries)
+	agg := p.conversationAggregate(jsonlFiles, files)
 
 	inCurrentBlock := false
 	if !agg.blockEnd.IsZero() && now.Before(agg.blockEnd) && (now.Equal(agg.blockStart) || now.After(agg.blockStart)) {
@@ -170,41 +177,113 @@ type toolSlot struct {
 	rec, item int
 }
 
-// conversationAggCache is the merge result for one ordered list of file
-// entries. An entry is replaced (new pointer) whenever its file changes, so
-// an identical pointer list means nothing needs recomputing.
+// conversationAggCache holds the incremental parse state of every file and
+// the cross-file merge built from it. Guarded by jsonlCacheMu.
 type conversationAggCache struct {
-	entries  []*jsonlCacheEntry
+	files map[string]*conversationFile
+
+	// The merge below is valid for exactly these paths (sorted) and pricing
+	// generation; built is false until the first merge.
+	built    bool
+	paths    []string
 	priceGen uint64
 
 	total         *conversationAllTime
 	seenUsageKeys map[string]bool
+	seenToolKeys  map[string]bool
 	blockStarts   []time.Time
 	blockStart    time.Time
 	blockEnd      time.Time
+
+	// frontier is the position (timestamp, then path) of the last record the
+	// merge visited. Records sorting after it can be merged on top of the
+	// existing result without revisiting older ones.
+	frontierTS   time.Time
+	frontierPath string
+
+	// extended / rebuilt count how often each merge path ran (for tests).
+	extended, rebuilt int
 }
 
-// conversationAggregate returns the cross-file merge and the reduced all-time
-// totals for entries (in path order), reusing the previous result when no
-// entry changed. Caller must hold jsonlCacheMu.
-func (p *Provider) conversationAggregate(entries []*jsonlCacheEntry) *conversationAggCache {
-	gen := priceGeneration()
-	if c := p.convAgg; c != nil && c.priceGen == gen && slices.Equal(c.entries, entries) {
-		return c
+// updateFile returns the file's state after reading what was appended to it.
+func (c *conversationAggCache) updateFile(path string, info os.FileInfo) *conversationFile {
+	f := c.files[path]
+	if f == nil {
+		f = &conversationFile{}
+		c.files[path] = f
 	}
+	f.update(path, info)
+	return f
+}
 
-	agg := &conversationAggCache{
-		entries:       entries,
-		priceGen:      gen,
-		seenUsageKeys: make(map[string]bool),
-		blockStarts:   []time.Time{},
+// syncJSONLCache mirrors the live entries into p.jsonlCache and drops state
+// for files that disappeared.
+func (p *Provider) syncJSONLCache(paths []string, entries []*jsonlCacheEntry) {
+	live := make(map[string]*jsonlCacheEntry, len(paths))
+	for i, path := range paths {
+		live[path] = entries[i]
 	}
+	for path := range p.convAgg.files {
+		if _, ok := live[path]; !ok {
+			delete(p.convAgg.files, path)
+		}
+	}
+	p.jsonlCache = live
+}
+
+// conversationAggregate returns the cross-file merge and the all-time totals
+// for files (in path order). It reuses the previous result when nothing
+// changed, extends it when only records sorting after the frontier were
+// added, and otherwise rebuilds it. Caller must hold jsonlCacheMu.
+func (p *Provider) conversationAggregate(paths []string, files []*conversationFile) *conversationAggCache {
+	c := p.convAgg
+	gen := priceGeneration()
+	changed := false
+	for _, f := range files {
+		if f.change.kind != fileUnchanged {
+			changed = true
+			break
+		}
+	}
+	defer func() {
+		for _, f := range files {
+			f.change = fileChange{}
+		}
+	}()
+	if c.built && c.priceGen == gen {
+		if !changed && slices.Equal(c.paths, paths) {
+			return c
+		}
+		if c.extend(paths, files) {
+			c.extended++
+			return c
+		}
+	}
+	c.rebuild(paths, files, gen)
+	c.rebuilt++
+	return c
+}
+
+// rebuild recomputes the merge from every file's records.
+func (c *conversationAggCache) rebuild(paths []string, files []*conversationFile, gen uint64) {
+	entries := make([]*jsonlCacheEntry, len(files))
+	for i, f := range files {
+		entries[i] = f.entry
+	}
+	c.built = true
+	c.paths = slices.Clone(paths)
+	c.priceGen = gen
+	c.seenUsageKeys = make(map[string]bool)
+	c.seenToolKeys = make(map[string]bool)
+	c.blockStarts = []time.Time{}
+	c.blockStart, c.blockEnd = time.Time{}, time.Time{}
+	c.frontierTS, c.frontierPath = time.Time{}, ""
+
 	lostUsage := make([][]int, len(entries))
 	lostTools := make([][]toolSlot, len(entries))
-	seenToolKeys := make(map[string]bool)
 
 	// Global timestamp order; ties broken by file path order, then in-file
-	// order. The first occurrence of a dedup key wins, as before.
+	// order. The first occurrence of a dedup key wins.
 	h := make(conversationMergeHeap, 0, len(entries))
 	for i, e := range entries {
 		if len(e.records) > 0 {
@@ -213,52 +292,198 @@ func (p *Provider) conversationAggregate(entries []*jsonlCacheEntry) *conversati
 	}
 	heap.Init(&h)
 	for len(h) > 0 {
-		c := &h[0]
-		e := entries[c.file]
-		i := c.pos
+		cur := &h[0]
+		e := entries[cur.file]
+		i := cur.pos
 		for idx, key := range e.toolKeys[i] {
 			if key == "" {
 				continue
 			}
-			if seenToolKeys[key] {
-				lostTools[c.file] = append(lostTools[c.file], toolSlot{rec: i, item: idx})
+			if c.seenToolKeys[key] {
+				lostTools[cur.file] = append(lostTools[cur.file], toolSlot{rec: i, item: idx})
 				continue
 			}
-			seenToolKeys[key] = true
+			c.seenToolKeys[key] = true
 		}
 		if key := e.usageKeys[i]; key != "" {
-			if agg.seenUsageKeys[key] {
-				lostUsage[c.file] = append(lostUsage[c.file], i)
+			if c.seenUsageKeys[key] {
+				lostUsage[cur.file] = append(lostUsage[cur.file], i)
 			} else {
-				agg.seenUsageKeys[key] = true
-				ts := e.records[i].timestamp
-				if agg.blockEnd.IsZero() || ts.After(agg.blockEnd) {
-					agg.blockStart = floorToHour(ts)
-					agg.blockEnd = agg.blockStart.Add(billingBlockDuration)
-					agg.blockStarts = append(agg.blockStarts, agg.blockStart)
-				}
+				c.seenUsageKeys[key] = true
+				c.advanceBlock(e.records[i].timestamp)
 			}
 		}
-		c.pos++
-		if c.pos < len(e.records) {
+		c.frontierTS, c.frontierPath = e.records[i].timestamp, paths[cur.file]
+		cur.pos++
+		if cur.pos < len(e.records) {
 			heap.Fix(&h, 0)
 		} else {
 			heap.Pop(&h)
 		}
 	}
 
-	agg.total = newConversationAllTime()
+	c.total = newConversationAllTime()
 	for i, e := range entries {
 		if e.allTime == nil || e.priceGen != gen ||
 			!slices.Equal(e.lostUsage, lostUsage[i]) || !slices.Equal(e.lostTools, lostTools[i]) {
 			e.buildAllTime(lostUsage[i], lostTools[i], gen)
 		}
-		agg.total.merge(e.allTime)
+		c.total.merge(e.allTime)
 	}
-	agg.total.finalizeSessions()
+	c.total.finalizeSessions()
+}
 
-	p.convAgg = agg
-	return agg
+// advanceBlock walks the 5h billing block chain past a dedup-winning record.
+func (c *conversationAggCache) advanceBlock(ts time.Time) {
+	if c.blockEnd.IsZero() || ts.After(c.blockEnd) {
+		c.blockStart = floorToHour(ts)
+		c.blockEnd = c.blockStart.Add(billingBlockDuration)
+		c.blockStarts = append(c.blockStarts, c.blockStart)
+	}
+}
+
+// afterFrontier reports whether a record at (ts, path) sorts after every
+// record the merge has visited. Within the frontier's own file, appended
+// records also sort after older ones with an equal timestamp.
+func (c *conversationAggCache) afterFrontier(ts time.Time, path string) bool {
+	if ts.Equal(c.frontierTS) {
+		return path >= c.frontierPath
+	}
+	return ts.After(c.frontierTS)
+}
+
+// extend merges this poll's changes into the existing result when that gives
+// the same answer as a rebuild: no file vanished or was re-sorted, every new
+// record sorts after the frontier, and streamed lines merged into records
+// already counted only added tool calls no other record has. It returns false,
+// having changed nothing, when a rebuild is needed.
+func (c *conversationAggCache) extend(paths []string, files []*conversationFile) bool {
+	present := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		present[path] = true
+	}
+	for _, path := range c.paths {
+		if !present[path] {
+			return false
+		}
+	}
+
+	type modRec struct {
+		file, rec int
+		newTools  []int // content indexes of tool_use items added this poll
+	}
+	var mods []modRec
+	newTools := make(map[string]bool)
+	for fi, f := range files {
+		ch := f.change
+		switch ch.kind {
+		case fileUnchanged:
+			continue
+		case fileRebuilt:
+			return false
+		}
+		e := f.entry
+		for i := ch.oldLen; i < len(e.records); i++ {
+			if !c.afterFrontier(e.records[i].timestamp, paths[fi]) {
+				return false
+			}
+		}
+		for i, old := range ch.modified {
+			m := modRec{file: fi, rec: i}
+			for idx := len(old.content); idx < len(e.records[i].content); idx++ {
+				key := e.toolKeys[i][idx]
+				if key == "" {
+					continue
+				}
+				if c.seenToolKeys[key] || newTools[key] {
+					return false
+				}
+				newTools[key] = true
+				m.newTools = append(m.newTools, idx)
+			}
+			mods = append(mods, m)
+		}
+	}
+
+	entries := make([]*jsonlCacheEntry, len(files))
+	for i, f := range files {
+		entries[i] = f.entry
+		if f.change.kind != fileUnchanged {
+			// The per-file partial no longer matches; a later rebuild
+			// recomputes it.
+			f.entry.allTime = nil
+			f.entry.costs = append(f.entry.costs, make([]float64, len(f.entry.records)-len(f.entry.costs))...)
+		}
+	}
+
+	// Streamed lines merged into records already counted: swap the old
+	// contribution for the new one. Tool items added this way are new keys,
+	// so they win dedup.
+	for _, m := range mods {
+		e := entries[m.file]
+		rec := e.records[m.rec]
+		for _, idx := range m.newTools {
+			c.seenToolKeys[e.toolKeys[m.rec][idx]] = true
+			c.total.addTool(rec.content[idx])
+		}
+		if e.usageKeys[m.rec] == "" {
+			continue
+		}
+		if _, lost := slices.BinarySearch(e.lostUsage, m.rec); lost {
+			continue
+		}
+		old := files[m.file].change.modified[m.rec]
+		cost := estimateCost(rec.model, rec.usage)
+		c.total.subUsage(old, e.costs[m.rec])
+		c.total.addUsage(rec, cost)
+		e.costs[m.rec] = cost
+	}
+
+	// New records, in the global order rebuild would visit them in.
+	h := make(conversationMergeHeap, 0)
+	for fi, f := range files {
+		if f.change.kind != fileUnchanged && f.change.oldLen < len(f.entry.records) {
+			h = append(h, conversationCursor{entries: entries, file: fi, pos: f.change.oldLen})
+		}
+	}
+	heap.Init(&h)
+	for len(h) > 0 {
+		cur := &h[0]
+		e := entries[cur.file]
+		i := cur.pos
+		rec := e.records[i]
+		for idx, key := range e.toolKeys[i] {
+			if key == "" {
+				continue
+			}
+			if c.seenToolKeys[key] {
+				e.lostTools = append(e.lostTools, toolSlot{rec: i, item: idx})
+				continue
+			}
+			c.seenToolKeys[key] = true
+			c.total.addTool(rec.content[idx])
+		}
+		if key := e.usageKeys[i]; key != "" {
+			if c.seenUsageKeys[key] {
+				e.lostUsage = append(e.lostUsage, i)
+			} else {
+				c.seenUsageKeys[key] = true
+				c.advanceBlock(rec.timestamp)
+				e.costs[i] = estimateCost(rec.model, rec.usage)
+				c.total.addUsage(rec, e.costs[i])
+			}
+		}
+		c.frontierTS, c.frontierPath = rec.timestamp, paths[cur.file]
+		cur.pos++
+		if cur.pos < len(e.records) {
+			heap.Fix(&h, 0)
+		} else {
+			heap.Pop(&h)
+		}
+	}
+	c.total.finalizeSessions()
+	c.paths = slices.Clone(paths)
+	return true
 }
 
 type conversationCursor struct {
@@ -404,19 +629,55 @@ func (a *conversationAllTime) addTool(item jsonlContent) {
 
 // addUsage records one deduplicated usage record.
 func (a *conversationAllTime) addUsage(u conversationRecord, cost float64) {
+	a.applyUsage(u, cost, 1)
+}
+
+// subUsage removes the numeric contribution addUsage made for u, so a record
+// that absorbed more streamed lines can be re-added. Set memberships
+// (sessions) are left alone: the re-added record has the same session,
+// project and agent.
+func (a *conversationAllTime) subUsage(u conversationRecord, cost float64) {
+	a.applyUsage(u, cost, -1)
+}
+
+func (a *conversationAllTime) applyUsage(u conversationRecord, cost float64, sign int) {
 	modelID := sanitizeModelName(u.model)
 	projectID := conversationProjectLabel(u.cwd, u.sourcePath)
 	clientID := projectID
 	agentID := normalizeConversationAgent(u)
 
-	if u.sessionID != "" {
+	// Every field below is linear in the usage, so scaling the inputs by
+	// sign adds or removes the record's contribution.
+	s := float64(sign)
+	cost *= s
+	us := *u.usage
+	us.InputTokens *= sign
+	us.OutputTokens *= sign
+	us.CacheReadInputTokens *= sign
+	us.CacheCreationInputTokens *= sign
+	us.ReasoningTokens *= sign
+	if us.CacheCreation != nil {
+		cc := *us.CacheCreation
+		cc.Ephemeral5mInputTokens *= sign
+		cc.Ephemeral1hInputTokens *= sign
+		us.CacheCreation = &cc
+	}
+	if us.ServerToolUse != nil {
+		st := *us.ServerToolUse
+		st.WebSearchRequests *= sign
+		st.WebFetchRequests *= sign
+		us.ServerToolUse = &st
+	}
+	u.usage = &us
+
+	if u.sessionID != "" && sign > 0 {
 		ensureSessionSet(a.clientSessions, clientID)[u.sessionID] = true
 		ensureSessionSet(a.projectSessions, projectID)[u.sessionID] = true
 		ensureSessionSet(a.agentSessions, agentID)[u.sessionID] = true
 	}
 
 	a.costUSD += cost
-	a.entries++
+	a.entries += sign
 	modelTotalsEntry := ensureTotals(a.modelTotals, modelID)
 	modelTotalsEntry.input += float64(u.usage.InputTokens)
 	modelTotalsEntry.output += float64(u.usage.OutputTokens)
@@ -461,7 +722,7 @@ func (a *conversationAllTime) addUsage(u conversationRecord, cost float64) {
 
 	day := u.timestamp.Format("2006-01-02")
 	a.dailyTokenTotals[day] += u.usage.InputTokens + u.usage.OutputTokens
-	a.dailyMessages[day]++
+	a.dailyMessages[day] += sign
 	a.dailyCost[day] += cost
 	if a.dailyModelTokens[day] == nil {
 		a.dailyModelTokens[day] = make(map[string]int)
@@ -761,54 +1022,4 @@ func (w *conversationWindows) addEntry(e *jsonlCacheEntry, from time.Time) {
 			w.blockModels[modelID] = true
 		}
 	}
-}
-
-// cachedConversationEntry returns the cached entry for a file if its mtime and
-// size match, otherwise re-parses the file and replaces the entry. Caller
-// must hold jsonlCacheMu.
-func (p *Provider) cachedConversationEntry(path string, info os.FileInfo) *jsonlCacheEntry {
-	if info == nil {
-		return newConversationEntry(parseConversationRecords(path))
-	}
-	if p.jsonlCache == nil {
-		p.jsonlCache = make(map[string]*jsonlCacheEntry)
-	}
-	if entry, ok := p.jsonlCache[path]; ok {
-		if entry.modTime.Equal(info.ModTime()) && entry.size == info.Size() {
-			return entry
-		}
-	}
-	entry := newConversationEntry(parseConversationRecords(path))
-	entry.modTime = info.ModTime()
-	entry.size = info.Size()
-	p.jsonlCache[path] = entry
-	return entry
-}
-
-// newConversationEntry sorts a file's records by timestamp and precomputes
-// their dedup keys.
-func newConversationEntry(records []conversationRecord) *jsonlCacheEntry {
-	sort.SliceStable(records, func(i, j int) bool {
-		return records[i].timestamp.Before(records[j].timestamp)
-	})
-	e := &jsonlCacheEntry{
-		records:   records,
-		usageKeys: make([]string, len(records)),
-		toolKeys:  make([][]string, len(records)),
-	}
-	for i, rec := range records {
-		if rec.usage != nil {
-			e.usageKeys[i] = conversationUsageDedupKey(rec)
-		}
-		for idx, item := range rec.content {
-			if item.Type != "tool_use" {
-				continue
-			}
-			if e.toolKeys[i] == nil {
-				e.toolKeys[i] = make([]string, len(rec.content))
-			}
-			e.toolKeys[i][idx] = conversationToolDedupKey(rec, idx, item)
-		}
-	}
-	return e
 }

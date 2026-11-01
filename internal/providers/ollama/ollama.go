@@ -29,6 +29,8 @@ var settingsResetRe = regexp.MustCompile(`(?is)(Session usage|Weekly usage).*?da
 type Provider struct {
 	providerbase.Base
 	clock core.Clock
+
+	serverLogs serverLogCache
 }
 
 func New() *Provider {
@@ -81,10 +83,13 @@ func (p *Provider) now() time.Time {
 
 // HasChanged reports whether Ollama's local data files have been modified since the given time.
 func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, error) {
-	return shared.AnyPathModifiedAfter([]string{
+	// The server logs are listed as files, not their directory: appending to
+	// server.log moves the file's mtime but not the directory's.
+	paths := append([]string{
 		resolveDesktopDBPath(acct),
 		resolveServerConfigPath(acct),
-	}, since), nil
+	}, resolveServerLogFiles(acct)...)
+	return shared.AnyPathModifiedAfter(paths, since), nil
 }
 
 func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.UsageSnapshot, error) {
@@ -212,11 +217,12 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 		dailyRequests: make(map[string]float64),
 	}
 
-	for _, file := range logFiles {
-		if err := parseLogFile(file, func(event ginLogEvent) {
-			if !isInferencePath(event.Path) {
-				return
-			}
+	events, err := p.serverLogs.events(logFiles)
+	if err != nil {
+		return false, fmt.Errorf("ollama: parsing server logs: %w", err)
+	}
+	for _, event := range events {
+		{
 
 			dateKey := event.Timestamp.Format("2006-01-02")
 			metrics.dailyRequests[dateKey]++
@@ -276,8 +282,6 @@ func (p *Provider) fetchServerLogs(acct core.AccountConfig, snap *core.UsageSnap
 					metrics.generateRequestsToday++
 				}
 			}
-		}); err != nil {
-			return false, fmt.Errorf("ollama: parsing log %s: %w", file, err)
 		}
 	}
 
