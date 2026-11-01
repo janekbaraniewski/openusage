@@ -43,6 +43,16 @@ const (
 
 type Provider struct {
 	providerbase.Base
+
+	// apiCache keeps OAuth access tokens and loadCodeAssist results in
+	// memory between polls so a Fetch does not refresh the token or reload
+	// account metadata every time.
+	apiCache *apiCache
+
+	// Test hooks; empty values mean the production endpoints / wall clock.
+	tokenEndpoint      string
+	codeAssistEndpoint string
+	clock              func() time.Time
 }
 
 func New() *Provider {
@@ -65,6 +75,7 @@ func New() *Provider {
 			},
 			Dashboard: dashboardWidget(),
 		}),
+		apiCache: newAPICache(),
 	}
 }
 
