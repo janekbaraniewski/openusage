@@ -38,6 +38,14 @@ type Provider struct {
 	telemetryBaselineInitialized bool
 	creditHistoryMu              sync.Mutex
 	creditHistory                map[string][]creditUsageObservation
+	// sessionFileCache holds parsed session-file aggregates per sessions
+	// dir, keyed by file path, so polls parse only appended bytes.
+	sessionFileCacheMu sync.Mutex
+	sessionFileCache   map[string]map[string]*sessionFileCacheEntry
+	// latestTokenCache remembers the last token_count of recently checked
+	// session files, keyed by path, valid while size and mtime match.
+	latestTokenCacheMu sync.Mutex
+	latestTokenCache   map[string]latestTokenCacheEntry
 }
 
 type telemetryCacheEntry struct {
@@ -273,7 +281,7 @@ func (p *Provider) HasChanged(acct core.AccountConfig, since time.Time) (bool, e
 		return true, nil
 	}
 	sessionsDir := acct.Hint("sessions_dir", filepath.Join(configDir, "sessions"))
-	sessionFiles, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	sessionFiles, err := collectSessionFileInfos(sessionsDir)
 	if err != nil {
 		return false, fmt.Errorf("collect codex session files: %w", err)
 	}

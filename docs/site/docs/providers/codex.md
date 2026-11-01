@@ -58,7 +58,7 @@ Codex has three data paths, checked in this order:
 
 1. **Codex CLI app-server** — `codex app-server --stdio` reads `account/rateLimits/read` before the session scan. It supplies current-account quota windows, plan and credit data, including individual monthly credit limits when available.
 2. **Live ChatGPT usage endpoint** — an authenticated GET, attempted only when the app-server returns no usable quota window and `auth.json` contains an access token.
-3. **Local files** — JSONL session transcripts and auth/config metadata under `~/.codex/`. The latest usable session supplies token activity and fallback quota windows when neither live source supplies a usable window.
+3. **Local files** — JSONL session transcripts (plain `.jsonl` or zstd-compressed `.jsonl.zst`) and auth/config metadata under `~/.codex/`. The latest usable session supplies token activity and fallback quota windows when neither live source supplies a usable window.
 
 A live quota window replaces session quota windows. If the app-server returns only a weekly window for the main pool, OpenUsage reports the missing 5h window instead of filling it from an older session. Other metered pools show only windows they actually report. Session quota fallback is labeled as session data and may be older than a live response.
 
@@ -66,12 +66,20 @@ The base URL for the live endpoint is, in order: `acct.BaseURL` → `extra.chatg
 
 ### Latest session
 
-- Source: the newest usable `~/.codex/sessions/**/*.jsonl`, ordered by the rollout filename timestamp (mtime is a fallback for other names). The provider skips recent stub files without `token_count` events and parses the trailing turn's `Info.TotalTokenUsage` for tokens, plus `model` and `client` from the same payload.
+- Source: the newest usable `~/.codex/sessions/**/*.jsonl` or `*.jsonl.zst`, ordered by the rollout filename timestamp (mtime is a fallback for other names). The last `token_count` of each checked file is cached until the file's size or mtime changes. The provider skips recent stub files without `token_count` events and parses the trailing turn's `Info.TotalTokenUsage` for tokens, plus `model` and `client` from the same payload.
 - Transform: tokens stored as `latest_session_tokens`, model/client stored under `Raw["latest_session_model"]` and `Raw["latest_session_client"]`.
 
 ### Daily / model / client breakdowns
 
-- Source: the same JSONL files, scanned per poll (with mtime + size caching to skip unchanged files).
+- Source: the same session files, read incrementally. Each file's aggregate is cached with the byte offset it was parsed up to:
+  - Files whose size and mtime are unchanged are skipped.
+  - A plain `.jsonl` that grew is parsed only from the cached offset. An incomplete last line (still being written) is left for the next poll.
+  - A file that shrank, was replaced, or was rewritten in place is parsed again in full.
+  - Compressed `.jsonl.zst` rollouts can't be resumed at an offset, so a changed one is decoded again in full. Finished rollouts don't change, so each is decoded once.
+  - If a rollout exists as both `.jsonl` and `.jsonl.zst` (while Codex compresses it), only the plain file is read, so the session isn't counted twice.
+  - Lines the breakdown never uses (compacted history, chat messages, reasoning) are skipped by a byte-prefix check without JSON decoding.
+
+  The first poll after startup parses the full history. Later polls cost milliseconds, even with gigabytes of history. Cost is re-computed from the cached per-turn usage when the pricing tables reload.
 - Transform: each turn becomes a usage record. Records are aggregated by model, by client, and by day. Outputs:
   - `sessions_today` — distinct sessions with at least one turn whose timestamp falls in today (local time).
   - Per-model rows with input/output/cached token totals.
@@ -154,7 +162,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
 
 ## Files read
 
-- `~/.codex/sessions/**/*.jsonl` — session transcripts
+- `~/.codex/sessions/**/*.jsonl` and `*.jsonl.zst` — session transcripts (plain or zstd-compressed)
 - `~/.codex/auth.json` — auth token (`tokens.access_token`, `tokens.account_id`)
 - `~/.codex/config.toml` — CLI configuration (`chatgpt_base_url` if set)
 - `~/.codex/version.json` — installed version

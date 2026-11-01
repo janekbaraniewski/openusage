@@ -39,7 +39,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	baselineRecentWindow := codexBaselineRecentWindow(opts)
 	baselineCutoff := time.Now().Add(-baselineRecentWindow)
 
-	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	fileInfos, err := collectSessionFileInfos(sessionsDir)
 	if err != nil {
 		return nil, fmt.Errorf("collect codex telemetry files: %w", err)
 	}
@@ -61,6 +61,7 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		compressed := isCompressedSessionFile(path)
 		if entry, ok := p.telemetryCache[path]; ok {
 			// Codex session logs are append-only. Some filesystem activity can
 			// update mtime without adding bytes, which must not trigger a full
@@ -73,12 +74,14 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 			// before the parser reaches EOF. In that race byteOffset can be ahead
 			// of the cached size. When a later stat catches up exactly, there are
 			// no unread bytes; falling through would replay the whole session.
-			if info.Size() == entry.byteOffset {
+			if !compressed && info.Size() == entry.byteOffset {
 				entry.modTime = info.ModTime()
 				entry.size = info.Size()
 				continue
 			}
-			if info.Size() > entry.byteOffset && entry.byteOffset >= 0 {
+			// A changed compressed rollout has no resumable byte offset; it
+			// is re-parsed in full below and the store dedups the replay.
+			if !compressed && info.Size() > entry.byteOffset && entry.byteOffset >= 0 {
 				nextState := entry.state
 				resumeOffset := entry.byteOffset
 				resumeLineNumber := entry.lineNumber
@@ -113,9 +116,12 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 				}
 			}
 		} else if baselineInitialFiles && (baselineRecentWindow == 0 || info.ModTime().Before(baselineCutoff)) {
-			resumeOffset, err := baselineTelemetryResumeOffset(path, info.Size())
-			if err != nil {
-				continue
+			resumeOffset := info.Size()
+			if !compressed {
+				var err error
+				if resumeOffset, err = baselineTelemetryResumeOffset(path, info.Size()); err != nil {
+					continue
+				}
 			}
 			p.telemetryCache[path] = &telemetryCacheEntry{
 				modTime:    info.ModTime(),
@@ -135,9 +141,15 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 				events[i].AccountID = accountID
 			}
 		}
+		cachedSize := max(info.Size(), nextOffset)
+		if compressed {
+			// nextOffset counts decoded bytes; only the on-disk size can
+			// tell whether the compressed file changed.
+			cachedSize = info.Size()
+		}
 		pendingCache[path] = &telemetryCacheEntry{
 			modTime:    info.ModTime(),
-			size:       max(info.Size(), nextOffset),
+			size:       cachedSize,
 			byteOffset: nextOffset,
 			lineNumber: nextLineNumber,
 			state:      state,

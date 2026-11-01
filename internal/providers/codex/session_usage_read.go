@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
-	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 func (p *Provider) readLatestSession(sessionsDir string, snap *core.UsageSnapshot) error {
-	latestFile, lastPayload, err := findLatestUsableSession(sessionsDir)
+	latestFile, lastPayload, err := findLatestUsableSessionWith(sessionsDir, p.cachedLastTokenCount)
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func findLatestSessionFile(sessionsDir string) (string, error) {
 // their dead rate limits. mtime stays as tiebreak and fallback for
 // unparseable names.
 func sortedSessionFilesNewestFirst(sessionsDir string) ([]string, error) {
-	fileInfos, err := shared.CollectFilesWithStat([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	fileInfos, err := collectSessionFileInfos(sessionsDir)
 	if err != nil {
 		return nil, fmt.Errorf("collect codex latest session files: %w", err)
 	}
@@ -169,6 +168,10 @@ const maxSessionFallbackFiles = 20
 // (session_meta only) — using it blindly drops rate limits and session
 // meters, so dead files are skipped in favor of the freshest live one.
 func findLatestUsableSession(sessionsDir string) (string, *eventPayload, error) {
+	return findLatestUsableSessionWith(sessionsDir, findLastTokenCount)
+}
+
+func findLatestUsableSessionWith(sessionsDir string, lastTokenCount func(string) (*eventPayload, error)) (string, *eventPayload, error) {
 	files, err := sortedSessionFilesNewestFirst(sessionsDir)
 	if err != nil {
 		return "", nil, err
@@ -179,7 +182,7 @@ func findLatestUsableSession(sessionsDir string) (string, *eventPayload, error) 
 	}
 	var lastErr error
 	for _, path := range files[:limit] {
-		payload, err := findLastTokenCount(path)
+		payload, err := lastTokenCount(path)
 		if err != nil {
 			lastErr = err
 			continue
@@ -196,12 +199,12 @@ func findLatestUsableSession(sessionsDir string) (string, *eventPayload, error) 
 }
 
 // sessionFileTime parses the session start time from a rollout basename:
-// rollout-2026-09-15T23-59-18-<uuid>.jsonl. Only relative order matters, so
+// rollout-2026-09-15T23-59-18-<uuid>.jsonl (or .jsonl.zst). Only relative order matters, so
 // the absent zone is irrelevant — every file in a sessions dir shares the
 // writer's convention. Reports false for anything else (legacy flat files,
 // foreign drops), leaving those to mtime order.
 func sessionFileTime(path string) (time.Time, bool) {
-	base := filepath.Base(path)
+	base := strings.TrimSuffix(filepath.Base(path), ".zst")
 	if !strings.HasPrefix(base, "rollout-") || !strings.HasSuffix(base, ".jsonl") {
 		return time.Time{}, false
 	}
@@ -220,6 +223,19 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
+	}
+	if isCompressedSessionFile(path) {
+		// No random access into a compressed rollout: decode it once (the
+		// result is cached per size+mtime by cachedLastTokenCount).
+		var lastPayload *eventPayload
+		_, _, err := walkSessionLines(path, 0, -1, 0, keepTokenCountLine, func(record sessionLine) error {
+			if record.EventPayload != nil && record.EventPayload.Type == "token_count" {
+				payload := *record.EventPayload
+				lastPayload = &payload
+			}
+			return nil
+		})
+		return lastPayload, err
 	}
 	size := info.Size()
 	for tailBytes := int64(512 * 1024); ; tailBytes *= 2 {
@@ -246,7 +262,7 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 		}
 
 		var lastPayload *eventPayload
-		_, _, err := walkSessionFileFrom(path, tailOffset, 0, func(record sessionLine) error {
+		_, _, err := walkSessionLines(path, tailOffset, -1, 0, keepTokenCountLine, func(record sessionLine) error {
 			if record.EventPayload == nil || record.EventPayload.Type != "token_count" {
 				return nil
 			}
@@ -266,10 +282,49 @@ func findLastTokenCount(path string) (*eventPayload, error) {
 	}
 }
 
+// keepTokenCountLine limits decoding to token_count events.
+func keepTokenCountLine(recordType, payloadType []byte) bool {
+	return string(recordType) == "event_msg" && (payloadType == nil || string(payloadType) == "token_count")
+}
+
+type latestTokenCacheEntry struct {
+	info    os.FileInfo
+	size    int64
+	modTime time.Time
+	payload *eventPayload
+}
+
+// cachedLastTokenCount is findLastTokenCount memoised per path while the
+// file's identity, size and mtime are unchanged. Only the files examined by
+// the latest lookup are kept.
+func (p *Provider) cachedLastTokenCount(path string) (*eventPayload, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	p.latestTokenCacheMu.Lock()
+	cached, ok := p.latestTokenCache[path]
+	p.latestTokenCacheMu.Unlock()
+	if ok && os.SameFile(cached.info, info) && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		return cached.payload, nil
+	}
+	payload, err := findLastTokenCount(path)
+	if err != nil {
+		return nil, err
+	}
+	p.latestTokenCacheMu.Lock()
+	if p.latestTokenCache == nil || len(p.latestTokenCache) >= 4*maxSessionFallbackFiles {
+		p.latestTokenCache = make(map[string]latestTokenCacheEntry)
+	}
+	p.latestTokenCache[path] = latestTokenCacheEntry{info: info, size: info.Size(), modTime: info.ModTime(), payload: payload}
+	p.latestTokenCacheMu.Unlock()
+	return payload, nil
+}
+
 func (p *Provider) readDailySessionCounts(sessionsDir string, snap *core.UsageSnapshot) error {
 	dayCounts := make(map[string]int)
 
-	files, err := shared.CollectFilesByExt([]string{sessionsDir}, map[string]bool{".jsonl": true})
+	files, err := collectSessionFiles(sessionsDir)
 	if err != nil {
 		return fmt.Errorf("collect codex daily session files: %w", err)
 	}
