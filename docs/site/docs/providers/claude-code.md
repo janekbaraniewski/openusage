@@ -151,6 +151,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - Source (macOS): the Claude **desktop app's** session cookies, decrypted from the macOS keychain, are used to call the usage API above.
 - Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
 - Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
+- Rate: a successful response is reused for 3 minutes, so the usage API is called at most once per 3 minutes however often the provider is polled. On HTTP 429 or 5xx the provider keeps the auth method that worked, serves the cached response, and backs off from 1 minute, doubling each time up to 30 minutes, or longer if `Retry-After` asks for it (also capped at 30 minutes). The desktop app's keychain key is looked up once per process, and each `security` lookup times out after 5 seconds.
 
 ### Auth status
 

@@ -72,7 +72,7 @@ Request headers:
 ### Auth status
 
 - Source: HTTP status code of the probe.
-- Transform: `401`/`403` → `auth`; `429` → `limited`; otherwise `ok`. The 400 that the empty-body probe triggers still carries valid rate-limit headers, so the tile reads `ok`.
+- Transform: `401`/`403` → `auth`; `429` → `limited`; `5xx` → `error`; otherwise `ok`. The daemon backs off on `limited` and `error` and honours `Retry-After` (see [adaptive polling](../daemon/overview.md#adaptive-polling-and-backoff)). The 400 that the empty-body probe triggers still carries valid rate-limit headers, so the tile reads `ok`.
 
 ### What's NOT tracked
 

@@ -95,7 +95,7 @@ The included monthly credit pool is derived from the subscription's `planId` (Go
 ## Troubleshooting
 
 - **Tile says "AUTH_REQUIRED"** — run `cmd login`, or export `COMMAND_CODE_API_KEY`. Confirm the CLI sees the key with `cmd status`.
-- **"rate limited (HTTP 429)"** — the billing API throttled the poll; data refreshes on the next cycle.
+- **"rate limited (HTTP 429)"** — the billing API throttled the poll; the daemon backs off and retries later (see [adaptive polling](../daemon/overview.md#adaptive-polling-and-backoff)).
 - **Windows missing** — the plan exposes no rolling windows (for example a pure pay-as-you-go Provider account); only the credit balance is shown.
 - **Spend shows only the billing period** — today's summary is fetched separately; if that call fails the diagnostic `today_summary_error` is recorded and the billing-period figures remain.
 

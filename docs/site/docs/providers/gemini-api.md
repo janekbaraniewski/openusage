@@ -72,7 +72,7 @@ OpenUsage sends one `GET https://generativelanguage.googleapis.com/v1beta/models
 ### Auth status
 
 - Source: HTTP status code.
-- Transform: `400`/`401`/`403` → `auth` (Gemini returns 400 for invalid keys); `429` → `limited` (and `Raw["retry_delay"]` is filled from the `retryDelay` metadata in the JSON error body); otherwise `ok`.
+- Transform: `400`/`401`/`403` → `auth` (Gemini returns 400 for invalid keys); `429` → `limited` (and `Raw["retry_delay"]` is filled from the `retryDelay` metadata in the JSON error body); `5xx` → `error`; otherwise `ok`. The daemon backs off on `limited` and `error` and honours `Retry-After` (see [adaptive polling](../daemon/overview.md#adaptive-polling-and-backoff)).
 
 ### What's NOT tracked
 
