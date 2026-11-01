@@ -48,7 +48,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 	}
 	started := time.Now()
 
-	accounts, modelNorm, err := LoadAccountsAndNorm()
+	accounts, modelNorm, err := s.cachedAccountsAndNorm(ctx)
 	if err != nil {
 		if s.shouldLog("poll_config_warning", 20*time.Second) {
 			s.warnf("poll_config_warning", "error=%v", err)

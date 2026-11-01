@@ -232,7 +232,10 @@ func (s *incrementalUsageState) applyChanges(ctx context.Context, db *sql.DB, fi
 		return nil, false, nil
 	}
 	var minSeq, maxSeq int64
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MIN(seq), 0), COALESCE(MAX(seq), 0) FROM usage_event_changes`).Scan(&minSeq, &maxSeq); err != nil {
+	// Two scalar subqueries, not MIN(seq), MAX(seq) in one SELECT: SQLite
+	// only applies its single-seek min/max optimization when the aggregate is
+	// alone in its query; combined, it scans the whole seq index.
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE((SELECT MIN(seq) FROM usage_event_changes), 0), COALESCE((SELECT MAX(seq) FROM usage_event_changes), 0)`).Scan(&minSeq, &maxSeq); err != nil {
 		return nil, false, fmt.Errorf("probe incremental usage changes: %w", err)
 	}
 	if minSeq > 0 && s.changeSeq < minSeq-1 {

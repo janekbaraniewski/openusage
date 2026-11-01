@@ -416,6 +416,7 @@ state shows through.
 The renderer ran into an error and gracefully emitted a placeholder so tmux would not block. Look at `tmux show-environment -g` or run `openusage tmux doctor` to inspect the cause. Likely culprits:
 
 - Daemon is configured but not running, and the snapshot fetch timed out within the 800ms budget. Either start it (`openusage telemetry daemon install`) or pass `--source direct` to bypass it.
+- The daemon just started and is still computing its first result. The render keeps the last good status (or `?` if there is none yet) and the next refresh is served from the daemon's cache. The renderer never runs account auto-detection itself; the daemon resolves and caches accounts (see [daemon account resolution](../daemon/overview.md#account-resolution)).
 - No provider is detected. See below.
 
 ### "active provider: none detected" in `doctor`

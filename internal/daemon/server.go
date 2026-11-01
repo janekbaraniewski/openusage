@@ -52,6 +52,10 @@ type Service struct {
 	// state that needs to be reproducible in tests. Defaults to
 	// core.SystemClock{}; tests can override via WithClock.
 	clock core.Clock
+
+	// accounts caches the resolved account set; use accountsCache().
+	accountsOnce sync.Once
+	accounts     *accountsCache
 }
 
 func (s *Service) markDataIngested() {
@@ -200,6 +204,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 			svc.infof(key, "%s", msg)
 		}
 	})
+	svc.accountsCache().warm(ctx)
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)

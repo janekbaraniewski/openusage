@@ -136,10 +136,15 @@ func (r *runner) collect(ctx context.Context, src Source) ([]core.UsageSnapshot,
 		return snaps, SourceDaemon, err
 
 	case SourceAuto:
-		if r.dmn.available(ctx) {
-			snaps, err := r.dmn.collect(ctx)
-			if err == nil {
-				return snaps, SourceDaemon, nil
+		// One round trip: no separate /healthz probe. A daemon that is not
+		// running fails at connect time and we go straight to direct mode.
+		if snaps, err := r.dmn.collect(ctx); err == nil {
+			return snaps, SourceDaemon, nil
+		} else if !errors.Is(err, errDaemonUnreachable) {
+			// The daemon is up but still computing: it answers from cache on
+			// the next render, so a direct collect would only burn CPU.
+			if errors.Is(err, errDaemonPending) {
+				return nil, SourceDaemon, err
 			}
 			// The daemon read consumed the caller's whole budget (tmux renders
 			// get 800ms). A direct collect now would parse every provider's

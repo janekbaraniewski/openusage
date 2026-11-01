@@ -1,11 +1,11 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,10 +113,19 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.Accounts) == 0 {
-		configReq, configErr := BuildReadModelRequestFromConfig()
+		// Clients without their own account list (TUI, tmux, statusline)
+		// get the daemon's cached account set; resolving accounts here would
+		// run auto-detection (about a second) on every request.
+		configReq, _, configErr := s.cachedReadModelRequest(r.Context())
 		if configErr != nil || len(configReq.Accounts) == 0 {
 			writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: map[string]core.UsageSnapshot{}})
 			return
+		}
+		if req.TimeWindow != "" {
+			configReq.TimeWindow = req.TimeWindow
+		}
+		if len(req.ProviderLinks) > 0 {
+			configReq.ProviderLinks = req.ProviderLinks
 		}
 		req = configReq
 	}
@@ -136,18 +145,23 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	computeVersion := s.dataVersion.Load()
-	computeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	snapshots, err := s.computeReadModel(computeCtx, req)
-	cancel()
-	if err == nil && len(snapshots) > 0 {
-		s.rmCache.set(cacheKey, snapshots, computeVersion)
-		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
-		return
+	// Cache miss: compute in the background (detached from this request so
+	// a short client deadline never throws the work away) and wait only as
+	// long as the client's budget allows. Whoever asks next is served from
+	// cache.
+	s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
+	if done := s.rmCache.refreshDone(cacheKey); done != nil {
+		timer := time.NewTimer(readModelBudget(r))
+		select {
+		case <-done:
+		case <-timer.C:
+		case <-r.Context().Done():
+		}
+		timer.Stop()
 	}
-
-	if err != nil && s.shouldLog("read_model_cache_miss_compute_error", 8*time.Second) {
-		s.warnf("read_model_cache_miss_compute_error", "error=%v", err)
+	if cached, _, _, ok := s.rmCache.get(cacheKey); ok {
+		writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: cached})
+		return
 	}
 
 	// Re-arm the data-ingested flag so the periodic refresh loop tries
@@ -155,9 +169,8 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 	// a single failed compute can leave the read-model cache permanently
 	// empty until the next ingest event.
 	s.markDataIngested()
-	s.refreshReadModelCacheAsync(s.serviceContext(r.Context()), cacheKey, req, 60*time.Second)
-	snapshots = ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
-	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots})
+	snapshots := ReadModelTemplatesFromRequest(req, s.disabledAccounts())
+	writeJSON(w, http.StatusOK, ReadModelResponse{Snapshots: snapshots, Pending: true})
 	durationMs := time.Since(started).Milliseconds()
 	if durationMs >= 1200 && s.shouldLog("read_model_slow", 30*time.Second) {
 		s.infof(
@@ -169,6 +182,27 @@ func (s *Service) handleReadModel(w http.ResponseWriter, r *http.Request) {
 			len(req.ProviderLinks),
 		)
 	}
+}
+
+// readModelBudgetHeader carries how long the client will wait for a
+// read-model answer, in milliseconds. tmux renders have about 800ms.
+const readModelBudgetHeader = "X-Openusage-Budget-Ms"
+
+// maxReadModelBudget caps how long a cache miss holds the request open.
+const maxReadModelBudget = 5 * time.Second
+
+// readModelBudget returns how long a cache miss may wait for the compute.
+// Clients that send no budget get the previous fixed 5s.
+func readModelBudget(r *http.Request) time.Duration {
+	raw := strings.TrimSpace(r.Header.Get(readModelBudgetHeader))
+	if raw == "" {
+		return maxReadModelBudget
+	}
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms < 0 {
+		return maxReadModelBudget
+	}
+	return min(time.Duration(ms)*time.Millisecond, maxReadModelBudget)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -11,27 +12,29 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/daemon"
 )
 
-// daemonHealthTimeout caps the probe used to decide whether the daemon is
-// reachable. Kept short so `--source auto` falls back to direct mode quickly
-// when the daemon is not running.
-const daemonHealthTimeout = 1500 * time.Millisecond
-
 // daemonReadModelTimeout caps the read-model request. The daemon usually
 // serves from cache, so this should be plenty even on slow machines.
 const daemonReadModelTimeout = 5 * time.Second
 
+// errDaemonUnreachable marks a failure to connect to the daemon socket at
+// all (not running), as opposed to a daemon that answered badly or slowly.
+var errDaemonUnreachable = errors.New("telemetry daemon unreachable")
+
+// errDaemonPending marks a daemon that is up but still computing its first
+// read model for this request. Auto mode must not fall back to a direct
+// collect for this: the daemon answers from cache on the next render.
+var errDaemonPending = errors.New("telemetry daemon is still computing usage data")
+
 // daemonClient is the minimum daemon surface the export package uses. It is
 // satisfied by *daemon.Client; tests substitute a stub.
 type daemonClient interface {
-	HealthInfo(ctx context.Context) (daemon.HealthResponse, error)
-	ReadModel(ctx context.Context, request daemon.ReadModelRequest) (map[string]core.UsageSnapshot, error)
+	FetchReadModel(ctx context.Context, request daemon.ReadModelRequest) (daemon.ReadModelResponse, error)
 }
 
 // daemonCollector pulls the current read-model from a running daemon.
 type daemonCollector struct {
-	socketPath  string
-	newClient   func(socketPath string) daemonClient
-	buildReqCfg func() (daemon.ReadModelRequest, error)
+	socketPath string
+	newClient  func(socketPath string) daemonClient
 }
 
 func newDaemonCollector(socketPath string) *daemonCollector {
@@ -40,27 +43,15 @@ func newDaemonCollector(socketPath string) *daemonCollector {
 		newClient: func(path string) daemonClient {
 			return daemon.NewClient(path)
 		},
-		buildReqCfg: daemon.BuildReadModelRequestFromConfig,
 	}
 }
 
-// available reports whether the daemon is reachable at the configured socket.
-// Used by SourceAuto to decide between daemon and direct collection.
-func (c *daemonCollector) available(ctx context.Context) bool {
-	if c == nil || c.socketPath == "" {
-		return false
-	}
-	client := c.newClient(c.socketPath)
-	probeCtx, cancel := context.WithTimeout(ctx, daemonHealthTimeout)
-	defer cancel()
-	_, err := client.HealthInfo(probeCtx)
-	return err == nil
-}
-
-// collect connects to the daemon and returns the current read-model
-// snapshots. Returns an actionable error if the daemon is unreachable; callers
-// in `--source auto` mode should treat the error as a signal to fall back to
-// direct mode, while `--source daemon` should surface it to the user.
+// collect asks the daemon for the current read-model snapshots in a single
+// round trip. The request carries no accounts: the daemon resolves and caches
+// them itself, so the client never runs account auto-detection (about a
+// second) and never does a separate /healthz probe. A daemon that is not
+// running fails at connect time with errDaemonUnreachable, which callers in
+// `--source auto` treat as the signal to use direct mode.
 func (c *daemonCollector) collect(ctx context.Context) ([]core.UsageSnapshot, error) {
 	if c == nil || c.socketPath == "" {
 		return nil, errors.New("export: telemetry daemon socket path is not configured")
@@ -68,32 +59,32 @@ func (c *daemonCollector) collect(ctx context.Context) ([]core.UsageSnapshot, er
 
 	client := c.newClient(c.socketPath)
 
-	probeCtx, cancel := context.WithTimeout(ctx, daemonHealthTimeout)
-	_, healthErr := client.HealthInfo(probeCtx)
-	cancel()
-	if healthErr != nil {
-		return nil, fmt.Errorf(
-			"export: telemetry daemon unreachable at %s: %w (start it with 'openusage telemetry daemon install' or rerun with --source direct)",
-			c.socketPath, healthErr,
-		)
-	}
-
-	req, reqErr := c.buildReqCfg()
-	if reqErr != nil {
-		return nil, fmt.Errorf("export: building read-model request: %w", reqErr)
-	}
-
 	readCtx, readCancel := context.WithTimeout(ctx, daemonReadModelTimeout)
 	defer readCancel()
-	snapMap, err := client.ReadModel(readCtx, req)
+	resp, err := client.FetchReadModel(readCtx, daemon.ReadModelRequest{})
 	if err != nil {
+		if isDialError(err) {
+			return nil, fmt.Errorf(
+				"export: %w at %s: %v (start it with 'openusage telemetry daemon install' or rerun with --source direct)",
+				errDaemonUnreachable, c.socketPath, err,
+			)
+		}
 		return nil, fmt.Errorf("export: reading snapshots from daemon: %w", err)
 	}
+	if resp.Pending && !daemon.SnapshotsHaveUsableData(resp.Snapshots) {
+		return nil, fmt.Errorf("export: %w; retry shortly", errDaemonPending)
+	}
 
-	out := make([]core.UsageSnapshot, 0, len(snapMap))
-	for _, snap := range snapMap {
+	out := make([]core.UsageSnapshot, 0, len(resp.Snapshots))
+	for _, snap := range resp.Snapshots {
 		out = append(out, snap)
 	}
 	sortSnapshots(out)
 	return out, nil
+}
+
+// isDialError reports whether err came from failing to connect to the socket.
+func isDialError(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
