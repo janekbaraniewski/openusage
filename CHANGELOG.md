@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.26.3 (2026-11-01)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(docs): bump follow-redirects from 1.16.1 to 1.16.2 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/462
+* deps(docs): bump qs from 6.15.2 to 6.15.4 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/461
+* deps(docs): bump postcss-selector-parser in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/460
+* deps(docs): bump joi from 17.13.8 to 17.13.9 in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/463
+### Other Changes
+* fix(pi): read usage.cost.total from Pi session logs by @devonjones in https://github.com/janekbaraniewski/openusage/pull/435
+* fix(telemetry): only recover the store when this process is the sole opener by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/449
+* refactor(opencode): hoist console RPC regexes to package-level vars by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/447
+* perf(providers): cache OpenRouter generations and Gemini CLI OAuth/loadCodeAssist by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/459
+* fix: cut idle CPU of daemon, statusline and tmux renders by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/450
+* perf: power and efficiency overhaul (#451–#467) by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/467
+* test(tmux): isolate USERPROFILE so Windows tests don't share the cache by @janekbaraniewski in https://github.com/janekbaraniewski/openusage/pull/468
+
+## New Contributors
+* @devonjones made their first contribution in https://github.com/janekbaraniewski/openusage/pull/435
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.2...v0.26.3
+
 ## 0.26.2 (2026-10-26)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
