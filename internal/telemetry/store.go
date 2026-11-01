@@ -27,9 +27,14 @@ import (
 var telemetryLog = core.NewLogger("telemetry")
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db   *sql.DB
+	now  func() time.Time
+	lock *dbOpenLock
 }
+
+// integrityCheck is the corruption probe OpenStore runs. Tests replace it to
+// simulate a corrupt database without having to craft corrupt pages.
+var integrityCheck = quickIntegrityCheck
 
 // openAndConfigureDB opens a SQLite database at the given path and applies
 // connection pragmas. Caller is responsible for closing on error.
@@ -51,6 +56,24 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("telemetry: creating DB dir: %w", err)
 	}
 
+	// The recovery steps below (removing -shm, quarantining a corrupt DB,
+	// pruning old backups) are only safe when no other process has the
+	// database open: removing -shm under a live process breaks its WAL
+	// index, and a quarantine would rename the live DB out from under it
+	// (#423). The open lock tells us whether we are the sole opener and
+	// keeps others out until recovery is done.
+	lock, err := acquireDBOpenLock(path)
+	if err != nil {
+		return nil, err
+	}
+	sole := lock.soleOpener()
+	ok := false
+	defer func() {
+		if !ok {
+			lock.release()
+		}
+	}()
+
 	// Remove the shared-memory file before opening the database.
 	// After an unclean shutdown (SIGKILL, OOM, crash), the -shm file
 	// retains stale WAL frame indexes and lock counters from the dead
@@ -58,9 +81,10 @@ func OpenStore(path string) (*Store, error) {
 	// it can misread WAL frames, causing duplicate page references and
 	// B-tree corruption. Removing the -shm forces SQLite to rebuild the
 	// WAL index from the checksummed WAL file, which is crash-safe.
-	// If another process holds the DB open, the file is still
-	// referenced via its inode and that process is unaffected.
-	_ = os.Remove(path + "-shm")
+	// Only the sole opener may do this; with other openers the -shm is live.
+	if sole {
+		_ = os.Remove(path + "-shm")
+	}
 
 	db, err := openAndConfigureDB(path)
 	if err != nil {
@@ -70,8 +94,13 @@ func OpenStore(path string) (*Store, error) {
 	// Quick integrity check before proceeding. If the database is corrupt
 	// (e.g. from a previous unclean shutdown that the -shm removal didn't
 	// fully recover), back it up and start fresh rather than serving bad data.
-	if corrupt, detail := quickIntegrityCheck(db); corrupt {
+	// Another process holding the DB open may be mid-write, so a non-sole
+	// opener reports the problem instead of quarantining a possibly live DB.
+	if corrupt, detail := integrityCheck(db); corrupt {
 		_ = db.Close()
+		if !sole {
+			return nil, fmt.Errorf("telemetry: database reported corrupt (%s) while another process has it open; not quarantining", detail)
+		}
 		backupPath := path + ".corrupt." + time.Now().Format("20060102T150405")
 		log.Printf("telemetry: database corrupt (%s), backing up to %s and starting fresh", detail, backupPath)
 		if err := os.Rename(path, backupPath); err != nil {
@@ -90,13 +119,24 @@ func OpenStore(path string) (*Store, error) {
 	// corrupt by definition and never read again, so they only waste disk (they
 	// have grown to multiple GB in the field). Keep the most recent one for
 	// forensics and delete the rest.
-	pruneCorruptBackups(path, 1)
+	// Only the sole opener prunes, so a short-lived process never deletes
+	// the backups a concurrent recovery depends on.
+	if sole {
+		pruneCorruptBackups(path, 1)
+	}
+
+	if err := lock.finishOpen(); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	store := NewStore(db)
 	if err := store.Init(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
+	store.lock = lock
+	ok = true
 	return store, nil
 }
 
@@ -164,7 +204,12 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	return s.db.Close()
+	err := s.db.Close()
+	// Release the open lock only after the DB is closed, so a later opener
+	// that sees itself as sole never races our connection.
+	s.lock.release()
+	s.lock = nil
+	return err
 }
 
 // DB returns the underlying database handle for operations that need direct
