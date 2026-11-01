@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,13 +20,15 @@ import (
 
 func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapshot, creds oauthCreds, acct core.AccountConfig) error {
 	client := p.Client()
-	accessToken, err := refreshAccessToken(ctx, creds.RefreshToken, client)
+	cacheKey := apiCacheKey(acct.ID, creds.RefreshToken)
+
+	accessToken, tokenSource, err := p.resolveAccessToken(ctx, creds, cacheKey, client, false)
 	if err != nil {
 		snap.Status = core.StatusAuth
 		snap.Message = "OAuth token refresh failed — run `gemini` to re-authenticate"
 		return fmt.Errorf("token refresh: %w", err)
 	}
-	snap.Raw["oauth_status"] = "valid (refreshed)"
+	snap.Raw["oauth_status"] = tokenSource.status()
 
 	projectID := ""
 	if v := os.Getenv("GOOGLE_CLOUD_PROJECT"); v != "" {
@@ -36,10 +39,26 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	if projectID == "" {
 		projectID = acct.Hint("project_id", "")
 	}
+	loadKey := cacheKey + "\x00" + projectID
 
-	loadResp, err := loadCodeAssistDetails(ctx, accessToken, projectID, client)
-	if err != nil {
-		return fmt.Errorf("loadCodeAssist: %w", err)
+	loadResp, cachedLoad := p.apiCache.loadCodeAssist(loadKey, p.now())
+	if !cachedLoad {
+		loadResp, err = loadCodeAssistDetailsWithEndpoint(ctx, accessToken, projectID, p.codeAssistBaseURL(), client)
+		if isCodeAssistUnauthorized(err) && tokenSource != tokenSourceRefreshed {
+			// The reused token was revoked or rotated early: refresh once and retry.
+			accessToken, tokenSource, err = p.resolveAccessToken(ctx, creds, cacheKey, client, true)
+			if err != nil {
+				snap.Status = core.StatusAuth
+				snap.Message = "OAuth token refresh failed — run `gemini` to re-authenticate"
+				return fmt.Errorf("token refresh: %w", err)
+			}
+			snap.Raw["oauth_status"] = tokenSource.status()
+			loadResp, err = loadCodeAssistDetailsWithEndpoint(ctx, accessToken, projectID, p.codeAssistBaseURL(), client)
+		}
+		if err != nil {
+			return fmt.Errorf("loadCodeAssist: %w", err)
+		}
+		p.apiCache.storeLoadCodeAssist(loadKey, loadResp, p.now())
 	}
 	if loadResp != nil {
 		applyLoadCodeAssistMetadata(snap, loadResp)
@@ -53,7 +72,17 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	}
 	snap.Raw["project_id"] = projectID
 
-	quota, method, err := retrieveUserQuota(ctx, accessToken, projectID, client)
+	quota, method, err := retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, p.codeAssistBaseURL(), client)
+	if isCodeAssistUnauthorized(err) && tokenSource != tokenSourceRefreshed {
+		accessToken, tokenSource, err = p.resolveAccessToken(ctx, creds, cacheKey, client, true)
+		if err != nil {
+			snap.Status = core.StatusAuth
+			snap.Message = "OAuth token refresh failed — run `gemini` to re-authenticate"
+			return fmt.Errorf("token refresh: %w", err)
+		}
+		quota, method, err = retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, p.codeAssistBaseURL(), client)
+	}
+	snap.Raw["oauth_status"] = tokenSource.status()
 	if err != nil {
 		return fmt.Errorf("retrieveUserQuota: %w", err)
 	}
@@ -74,11 +103,66 @@ func (p *Provider) fetchUsageFromAPI(ctx context.Context, snap *core.UsageSnapsh
 	return nil
 }
 
-func refreshAccessToken(ctx context.Context, refreshToken string, client *http.Client) (string, error) {
-	return refreshAccessTokenWithEndpoint(ctx, refreshToken, tokenEndpoint, client)
+type accessTokenSource int
+
+const (
+	tokenSourceCredsFile accessTokenSource = iota
+	tokenSourceCached
+	tokenSourceRefreshed
+)
+
+func (s accessTokenSource) status() string {
+	switch s {
+	case tokenSourceCredsFile:
+		return "valid"
+	case tokenSourceCached:
+		return "valid (cached)"
+	default:
+		return "valid (refreshed)"
+	}
+}
+
+// resolveAccessToken returns an access token for the Code Assist API without
+// hitting the OAuth endpoint when it can avoid it: a token this provider
+// refreshed earlier (memory only) or the token in oauth_creds.json is reused
+// until it is within accessTokenRefreshSkew of expiry, and only then is a new
+// one requested. forceRefresh skips both reuse paths (used after a 401).
+func (p *Provider) resolveAccessToken(ctx context.Context, creds oauthCreds, cacheKey string, client *http.Client, forceRefresh bool) (string, accessTokenSource, error) {
+	now := p.now()
+	if forceRefresh {
+		p.apiCache.dropToken(cacheKey)
+	} else {
+		// A token we refreshed ourselves wins: it exists only because the
+		// file token was stale or rejected, so prefer it while it is fresh.
+		if token, ok := p.apiCache.token(cacheKey, now); ok {
+			return token, tokenSourceCached, nil
+		}
+		if creds.AccessToken != "" && creds.ExpiryDate > 0 && tokenUsable(time.UnixMilli(creds.ExpiryDate), now) {
+			return creds.AccessToken, tokenSourceCredsFile, nil
+		}
+	}
+
+	resp, err := requestAccessToken(ctx, creds.RefreshToken, p.tokenURL(), client)
+	if err != nil {
+		return "", tokenSourceRefreshed, err
+	}
+	lifetime := time.Duration(resp.ExpiresIn) * time.Second
+	if lifetime <= 0 {
+		lifetime = defaultAccessTokenLifetime
+	}
+	p.apiCache.storeToken(cacheKey, resp.AccessToken, now.Add(lifetime))
+	return resp.AccessToken, tokenSourceRefreshed, nil
 }
 
 func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint string, client *http.Client) (string, error) {
+	resp, err := requestAccessToken(ctx, refreshToken, endpoint, client)
+	if err != nil {
+		return "", err
+	}
+	return resp.AccessToken, nil
+}
+
+func requestAccessToken(ctx context.Context, refreshToken, endpoint string, client *http.Client) (tokenRefreshResponse, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -91,34 +175,80 @@ func refreshAccessTokenWithEndpoint(ctx context.Context, refreshToken, endpoint 
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(data.Encode()))
 	if err != nil {
-		return "", err
+		return tokenRefreshResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return tokenRefreshResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token refresh HTTP %d: %s", resp.StatusCode, string(body))
+		// Only surface the OAuth error code, never the raw body, so nothing
+		// token-shaped can end up in logs or snapshot Raw fields.
+		return tokenRefreshResponse{}, fmt.Errorf("token refresh HTTP %d%s", resp.StatusCode, oauthErrorSuffix(body))
 	}
 
 	var tokenResp tokenRefreshResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", fmt.Errorf("parse token response: %w", err)
+		return tokenRefreshResponse{}, fmt.Errorf("parse token response: %w", err)
 	}
 	if tokenResp.AccessToken == "" {
-		return "", fmt.Errorf("empty access_token in refresh response")
+		return tokenRefreshResponse{}, fmt.Errorf("empty access_token in refresh response")
 	}
 
-	return tokenResp.AccessToken, nil
+	return tokenResp, nil
 }
 
-func loadCodeAssistDetails(ctx context.Context, accessToken, existingProjectID string, client *http.Client) (*loadCodeAssistResponse, error) {
-	return loadCodeAssistDetailsWithEndpoint(ctx, accessToken, existingProjectID, codeAssistEndpoint, client)
+func oauthErrorSuffix(body []byte) string {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil || payload.Error == "" {
+		return ""
+	}
+	return ": " + truncate(payload.Error, 64)
+}
+
+func (p *Provider) tokenURL() string {
+	if p.tokenEndpoint != "" {
+		return p.tokenEndpoint
+	}
+	return tokenEndpoint
+}
+
+func (p *Provider) codeAssistBaseURL() string {
+	if p.codeAssistEndpoint != "" {
+		return p.codeAssistEndpoint
+	}
+	return codeAssistEndpoint
+}
+
+func (p *Provider) now() time.Time {
+	if p.clock != nil {
+		return p.clock()
+	}
+	return time.Now()
+}
+
+// codeAssistHTTPError is returned for non-200 Code Assist responses so callers
+// can react to auth failures.
+type codeAssistHTTPError struct {
+	method string
+	status int
+	body   string
+}
+
+func (e *codeAssistHTTPError) Error() string {
+	return fmt.Sprintf("%s HTTP %d: %s", e.method, e.status, e.body)
+}
+
+func isCodeAssistUnauthorized(err error) bool {
+	var httpErr *codeAssistHTTPError
+	return errors.As(err, &httpErr) && httpErr.status == http.StatusUnauthorized
 }
 
 func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existingProjectID, baseURL string, client *http.Client) (*loadCodeAssistResponse, error) {
@@ -143,10 +273,6 @@ func loadCodeAssistDetailsWithEndpoint(ctx context.Context, accessToken, existin
 	}
 
 	return &resp, nil
-}
-
-func retrieveUserQuota(ctx context.Context, accessToken, projectID string, client *http.Client) (*retrieveUserQuotaResponse, string, error) {
-	return retrieveUserQuotaWithEndpoint(ctx, accessToken, projectID, codeAssistEndpoint, client)
 }
 
 func retrieveUserQuotaWithEndpoint(ctx context.Context, accessToken, projectID, baseURL string, client *http.Client) (*retrieveUserQuotaResponse, string, error) {
@@ -193,7 +319,7 @@ func codeAssistPostWithEndpoint(ctx context.Context, accessToken, method string,
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s HTTP %d: %s", method, resp.StatusCode, truncate(string(respBody), 200))
+		return nil, &codeAssistHTTPError{method: method, status: resp.StatusCode, body: truncate(string(respBody), 200)}
 	}
 
 	return respBody, nil

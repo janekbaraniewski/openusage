@@ -203,6 +203,9 @@ type endpointStats struct {
 type Provider struct {
 	providerbase.Base
 	clock core.Clock
+	// genCache remembers immutable generation details and the last-seen
+	// generation window per account so polls avoid re-fetching them.
+	genCache *generationCache
 }
 
 func New() *Provider {
@@ -227,7 +230,8 @@ func New() *Provider {
 				"credit_balance": core.BalanceCumulative,
 			},
 		}),
-		clock: core.SystemClock{},
+		clock:    core.SystemClock{},
+		genCache: newGenerationCache(),
 	}
 }
 
