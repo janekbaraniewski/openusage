@@ -51,7 +51,49 @@ const (
 	rpcUsageMonthID = "15702f3a12ff8bff357f8c2aa154a17e65b746d5f6b96adc9002c86ee0c15205"
 )
 
-var workspaceRedirectRE = regexp.MustCompile(`/workspace/([^/?#]+)`)
+// Fixed-pattern regexes are compiled once at package init rather than on
+// every call.
+var (
+	workspaceRedirectRE = regexp.MustCompile(`/workspace/([^/?#]+)`)
+	workspaceIDRE       = regexp.MustCompile(`wrk_[A-Za-z0-9]+`)
+
+	// Fallback text extraction for subscription usage.
+	rollingUsagePctRE = regexp.MustCompile(`rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`)
+	rollingResetSecRE = regexp.MustCompile(`rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)`)
+	weeklyUsagePctRE  = regexp.MustCompile(`weeklyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`)
+	weeklyResetSecRE  = regexp.MustCompile(`weeklyUsage[^}]*?resetInSec\s*:\s*([0-9]+)`)
+
+	// Go usage page (embedded Seroval script) extraction.
+	serovalScriptRE = regexp.MustCompile(`self\.\$R=self\.\$R\|\|\[\].*`)
+	billingObjRE    = regexp.MustCompile(`billing\.get\["[^"]*"\].*?\$R\[\d+\]=\{([^}]+)\}`)
+	rollingBlockRE  = regexp.MustCompile(`rollingUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	weeklyBlockRE   = regexp.MustCompile(`weeklyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+	monthlyBlockRE  = regexp.MustCompile(`monthlyUsage:\$R\[\d+\]=\{([^}]+)\}`)
+
+	// Seroval object field extraction.
+	customerIDFieldRE        = stringFieldRE("customerID")
+	paymentMethodTypeFieldRE = stringFieldRE("paymentMethodType")
+	subscriptionPlanFieldRE  = stringFieldRE("subscriptionPlan")
+	balanceFieldRE           = floatFieldRE("balance")
+	reloadAmountFieldRE      = floatFieldRE("reloadAmount")
+	reloadTriggerFieldRE     = floatFieldRE("reloadTrigger")
+	usagePercentFieldRE      = floatFieldRE("usagePercent")
+	resetInSecFieldRE        = floatFieldRE("resetInSec")
+	monthlyLimitFieldRE      = nullableFloatFieldRE("monthlyLimit")
+	monthlyUsageFieldRE      = nullableFloatFieldRE("monthlyUsage")
+)
+
+func stringFieldRE(key string) *regexp.Regexp {
+	return regexp.MustCompile(key + `:"([^"]*)"`)
+}
+
+func floatFieldRE(key string) *regexp.Regexp {
+	return regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+}
+
+func nullableFloatFieldRE(key string) *regexp.Regexp {
+	return regexp.MustCompile(key + `:(null|-?[0-9]+(?:\.[0-9]+)?)`)
+}
 
 // ConsoleClient is a minimal SolidStart RPC client for the OpenCode console.
 // Cookie-authed; never writes mutations.
@@ -302,8 +344,7 @@ func collectWorkspaceIDsFromJSON(v any) []string {
 
 // parseWorkspaceIDsFromBody uses regex to find workspace IDs in raw text.
 func parseWorkspaceIDsFromBody(body string) []string {
-	re := regexp.MustCompile(`wrk_[A-Za-z0-9]+`)
-	matches := re.FindAllString(body, -1)
+	matches := workspaceIDRE.FindAllString(body, -1)
 	seen := make(map[string]bool, len(matches))
 	unique := matches[:0]
 	for _, m := range matches {
@@ -420,16 +461,16 @@ func parseSubscriptionUsage(body []byte) (SubscriptionUsage, error) {
 func parseSubscriptionUsageFallback(text string) (SubscriptionUsage, error) {
 	result := SubscriptionUsage{}
 
-	if pct := extractDoubleFromText(text, `rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`); pct != nil {
+	if pct := extractDoubleFromText(text, rollingUsagePctRE); pct != nil {
 		result.RollingUsagePct = *pct
 	}
-	if sec := extractIntFromText(text, `rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)`); sec != nil {
+	if sec := extractIntFromText(text, rollingResetSecRE); sec != nil {
 		result.RollingResetSec = *sec
 	}
-	if pct := extractDoubleFromText(text, `weeklyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)`); pct != nil {
+	if pct := extractDoubleFromText(text, weeklyUsagePctRE); pct != nil {
 		result.WeeklyUsagePct = *pct
 	}
-	if sec := extractIntFromText(text, `weeklyUsage[^}]*?resetInSec\s*:\s*([0-9]+)`); sec != nil {
+	if sec := extractIntFromText(text, weeklyResetSecRE); sec != nil {
 		result.WeeklyResetSec = *sec
 	}
 
@@ -450,8 +491,7 @@ func floatFieldFromMap(m map[string]any, key string) float64 {
 	return 0
 }
 
-func extractDoubleFromText(text, pattern string) *float64 {
-	re := regexp.MustCompile(pattern)
+func extractDoubleFromText(text string, re *regexp.Regexp) *float64 {
 	matches := re.FindStringSubmatch(text)
 	if len(matches) < 2 {
 		return nil
@@ -462,8 +502,7 @@ func extractDoubleFromText(text, pattern string) *float64 {
 	return nil
 }
 
-func extractIntFromText(text, pattern string) *int {
-	re := regexp.MustCompile(pattern)
+func extractIntFromText(text string, re *regexp.Regexp) *int {
 	matches := re.FindStringSubmatch(text)
 	if len(matches) < 2 {
 		return nil
@@ -552,8 +591,7 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo, error) {
 	billing := BillingInfo{}
 
 	// Extract the main Seroval script blob
-	scriptRE := regexp.MustCompile(`self\.\$R=self\.\$R\|\|\[\].*`)
-	scriptMatch := scriptRE.FindString(html)
+	scriptMatch := serovalScriptRE.FindString(html)
 	if scriptMatch == "" {
 		return subscription, billing, errors.New("console: go usage page missing embedded usage data")
 	}
@@ -561,7 +599,6 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo, error) {
 	// Extract billing data by finding the billing.get assignment followed by
 	// the billing fields object. The pattern is:
 	// billing.get["wrk_..."]}=$R[N]=$R[M]($R[O]={...billing fields...})
-	billingObjRE := regexp.MustCompile(`billing\.get\["[^"]*"\].*?\$R\[\d+\]=\{([^}]+)\}`)
 	billingMatches := billingObjRE.FindStringSubmatch(scriptMatch)
 	if len(billingMatches) <= 1 {
 		return subscription, billing, errors.New("console: go usage page missing billing data")
@@ -575,38 +612,35 @@ func parseGoUsagePageHTML(html string) (SubscriptionUsage, BillingInfo, error) {
 	// Extract subscription usage. The pattern is:
 	// rollingUsage:$R[N]={status:"ok",resetInSec:N,usagePercent:N},...
 	// Note: field order varies; use independent extractions.
-	rollingBlockRE := regexp.MustCompile(`rollingUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := rollingBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+		if v, ok := extractFloatFieldOK(block, usagePercentFieldRE); ok {
 			subscription.RollingUsagePct = v
 			subscription.RollingUsageOK = true
 		}
-		if v := extractFloatField(block, "resetInSec"); v > 0 {
+		if v := extractFloatField(block, resetInSecFieldRE); v > 0 {
 			subscription.RollingResetSec = int(v)
 		}
 	}
 
-	weeklyBlockRE := regexp.MustCompile(`weeklyUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := weeklyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+		if v, ok := extractFloatFieldOK(block, usagePercentFieldRE); ok {
 			subscription.WeeklyUsagePct = v
 			subscription.WeeklyUsageOK = true
 		}
-		if v := extractFloatField(block, "resetInSec"); v > 0 {
+		if v := extractFloatField(block, resetInSecFieldRE); v > 0 {
 			subscription.WeeklyResetSec = int(v)
 		}
 	}
 
-	monthlyBlockRE := regexp.MustCompile(`monthlyUsage:\$R\[\d+\]=\{([^}]+)\}`)
 	if matches := monthlyBlockRE.FindStringSubmatch(scriptMatch); len(matches) > 1 {
 		block := matches[1]
-		if v, ok := extractFloatFieldOK(block, "usagePercent"); ok {
+		if v, ok := extractFloatFieldOK(block, usagePercentFieldRE); ok {
 			subscription.MonthlyUsagePct = v
 			subscription.MonthlyUsageOK = true
 		}
-		if v := extractFloatField(block, "resetInSec"); v > 0 {
+		if v := extractFloatField(block, resetInSecFieldRE); v > 0 {
 			subscription.MonthlyResetSec = int(v)
 		}
 	}
@@ -637,24 +671,24 @@ func hasRecognizedBillingField(fields string) bool {
 // like: customerID:"cus_xxx",balance:0,reloadAmount:20,...
 func parseBillingFields(fields string) BillingInfo {
 	b := BillingInfo{}
-	b.CustomerID = extractStringField(fields, "customerID")
-	b.PaymentMethodType = extractStringField(fields, "paymentMethodType")
-	b.SubscriptionPlan = extractStringField(fields, "subscriptionPlan")
+	b.CustomerID = extractStringField(fields, customerIDFieldRE)
+	b.PaymentMethodType = extractStringField(fields, paymentMethodTypeFieldRE)
+	b.SubscriptionPlan = extractStringField(fields, subscriptionPlanFieldRE)
 
-	if v := extractFloatField(fields, "balance"); v != 0 {
+	if v := extractFloatField(fields, balanceFieldRE); v != 0 {
 		b.Balance = v
 	}
-	if v := extractFloatField(fields, "reloadAmount"); v != 0 {
+	if v := extractFloatField(fields, reloadAmountFieldRE); v != 0 {
 		b.ReloadAmount = v
 	}
-	if v := extractFloatField(fields, "reloadTrigger"); v != 0 {
+	if v := extractFloatField(fields, reloadTriggerFieldRE); v != 0 {
 		b.ReloadTrigger = v
 	}
 
-	if v := extractNullableFloat(fields, "monthlyLimit"); v != nil {
+	if v := extractNullableFloat(fields, monthlyLimitFieldRE); v != nil {
 		b.MonthlyLimit = v
 	}
-	if v := extractNullableFloat(fields, "monthlyUsage"); v != nil {
+	if v := extractNullableFloat(fields, monthlyUsageFieldRE); v != nil {
 		b.MonthlyUsage = *v
 	}
 
@@ -667,8 +701,7 @@ func parseBillingFields(fields string) BillingInfo {
 
 // extractStringField pulls a string value from a Seroval object fragment.
 // Handles: field:"value" and field:null
-func extractStringField(fields, key string) string {
-	re := regexp.MustCompile(key + `:"([^"]*)"`)
+func extractStringField(fields string, re *regexp.Regexp) string {
 	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
 		return matches[1]
 	}
@@ -678,8 +711,7 @@ func extractStringField(fields, key string) string {
 // extractFloatFieldOK pulls a numeric value from a Seroval object fragment,
 // reporting via ok whether the field was present at all — distinguishing
 // "field:0" (found, value 0) from "field absent" (not found).
-func extractFloatFieldOK(fields, key string) (float64, bool) {
-	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+func extractFloatFieldOK(fields string, re *regexp.Regexp) (float64, bool) {
 	matches := re.FindStringSubmatch(fields)
 	if len(matches) < 2 {
 		return 0, false
@@ -690,8 +722,7 @@ func extractFloatFieldOK(fields, key string) (float64, bool) {
 
 // extractFloatField pulls a numeric value from a Seroval object fragment.
 // Handles: field:123, field:0, field:1.5
-func extractFloatField(fields, key string) float64 {
-	re := regexp.MustCompile(key + `:(-?[0-9]+(?:\.[0-9]+)?)`)
+func extractFloatField(fields string, re *regexp.Regexp) float64 {
 	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
 		f, _ := strconv.ParseFloat(matches[1], 64)
 		return f
@@ -701,8 +732,7 @@ func extractFloatField(fields, key string) float64 {
 
 // extractNullableFloat pulls a nullable numeric value from a Seroval fragment.
 // Returns nil for null, pointer to value otherwise.
-func extractNullableFloat(fields, key string) *float64 {
-	re := regexp.MustCompile(key + `:(null|-?[0-9]+(?:\.[0-9]+)?)`)
+func extractNullableFloat(fields string, re *regexp.Regexp) *float64 {
 	if matches := re.FindStringSubmatch(fields); len(matches) > 1 {
 		if matches[1] == "null" {
 			return nil
