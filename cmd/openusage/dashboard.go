@@ -128,7 +128,7 @@ func runDashboard(cfg config.Config) {
 		return nil
 	})
 
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
+	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(tuiMaxFPS))
 	dispatcher.bind(program)
 
 	go func() {
@@ -250,3 +250,8 @@ func mapDaemonState(s daemon.DaemonState) tui.DaemonStatusMsg {
 		Warning:     s.Warning,
 	}
 }
+
+// tuiMaxFPS caps how often Bubble Tea flushes frames. 15 FPS is smooth enough
+// for the spinner and scroll, and halves the renderer's idle wake-ups
+// compared to 30.
+const tuiMaxFPS = 15

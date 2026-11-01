@@ -190,7 +190,7 @@ func runHub(cfg config.Config, allowPublic bool) {
 		timeWindow,
 	)
 
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(tuiMaxFPS))
 	dispatcher := &snapshotDispatcher{}
 	dispatcher.bind(program)
 

@@ -11,8 +11,14 @@ type analyticsRenderCacheEntry struct {
 	content string
 }
 
+// invalidateAnalyticsCache resets the shared analytics cache entry in place.
+// See invalidateDetailCache for why the entry lives behind a pointer.
 func (m *Model) invalidateAnalyticsCache() {
-	m.analyticsCache = analyticsRenderCacheEntry{}
+	if m.analyticsCache == nil {
+		m.analyticsCache = &analyticsRenderCacheEntry{}
+		return
+	}
+	*m.analyticsCache = analyticsRenderCacheEntry{}
 }
 
 func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
@@ -21,8 +27,14 @@ func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
 		strconv.Itoa(m.analyticsSortBy),
 		m.analyticsFilter.text,
 		string(m.timeWindow),
+		strconv.Itoa(ActiveThemeIndex()),
+		// Charts fall back to today's date when snapshots carry no
+		// timestamp, so an entry cannot outlive the day.
+		m.viewNow().UTC().Format("2006-01-02"),
+		// Visible providers and their order (settings toggles/reorders).
+		strings.Join(m.sortedIDs, ","),
 	}, "|")
-	if m.analyticsCache.key == key {
+	if m.analyticsCache != nil && m.analyticsCache.key == key {
 		return m.analyticsCache.content, m.analyticsCache.hasData
 	}
 
@@ -38,10 +50,12 @@ func (m *Model) cachedAnalyticsPageContent(w int) (string, bool) {
 		content = m.renderAnalyticsPageContent(data, summary, w)
 	}
 
-	m.analyticsCache = analyticsRenderCacheEntry{
-		key:     key,
-		hasData: hasData,
-		content: content,
+	if m.analyticsCache != nil {
+		*m.analyticsCache = analyticsRenderCacheEntry{
+			key:     key,
+			hasData: hasData,
+			content: content,
+		}
 	}
 	return content, hasData
 }

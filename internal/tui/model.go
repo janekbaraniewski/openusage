@@ -22,6 +22,14 @@ const (
 
 	idleAfterInteraction = 5 * time.Second  // fast→normal→slow after no user input
 	idleAfterData        = 15 * time.Second // slow→paused after no data change
+
+	// loadingFastFor bounds the fast loading tick. A splash or refresh that
+	// outlasts it (daemon down, slow first collect) drops to tickNormal so a
+	// waiting dashboard does not render ~7 frames a second indefinitely.
+	loadingFastFor = 3 * time.Second
+	// refreshTimeout clears a refresh whose result never arrived, so a lost
+	// response cannot leave the spinner (and its tick) running forever.
+	refreshTimeout = 60 * time.Second
 )
 
 func tickCmd() tea.Cmd {
@@ -201,8 +209,10 @@ type Model struct {
 	tileOffset            int // vertical scroll offset for selected dashboard tile row
 	expandedModelMixTiles map[string]bool
 	tileBodyCache         map[string][]string
-	analyticsCache        analyticsRenderCacheEntry
-	detailCache           detailRenderCacheEntry
+	// analyticsCache and detailCache are pointers, like the tileBodyCache
+	// map, so writes from value-receiver render paths outlive the frame.
+	analyticsCache *analyticsRenderCacheEntry
+	detailCache    *detailRenderCacheEntry
 
 	warnThreshold float64
 	critThreshold float64
@@ -223,6 +233,7 @@ type Model struct {
 	hasData    bool
 
 	tickRunning     bool      // true while the tick chain is active
+	loadingSince    time.Time // start of the current splash/refresh; zero when not loading
 	lastInteraction time.Time // last user keypress/mouse event
 	lastDataUpdate  time.Time // last SnapshotsMsg with new data
 	// referenceTime is the wall-clock View() will use for "X ago" labels.
@@ -274,8 +285,8 @@ func NewModel(
 		expandedModelMixTiles: make(map[string]bool),
 		tileBodyCache:         make(map[string][]string),
 		analyticsModelExpand:  make(map[string]bool),
-		analyticsCache:        analyticsRenderCacheEntry{},
-		detailCache:           detailRenderCacheEntry{},
+		analyticsCache:        &analyticsRenderCacheEntry{},
+		detailCache:           &detailRenderCacheEntry{},
 		daemon:                daemonState{status: DaemonConnecting},
 		timeWindow:            timeWindow,
 		tickRunning:           true, // Init() starts the first tick chain
@@ -410,12 +421,16 @@ func (m Model) Init() tea.Cmd { return tickCmd() }
 // nextTickInterval determines the appropriate tick interval based on activity.
 // Returns 0 when the tick chain should stop (fully idle).
 func (m Model) nextTickInterval() time.Duration {
-	// Loading state: fast tick for spinner/shimmer animations.
+	now := time.Now()
+
+	// Loading state: fast tick for spinner/shimmer animations, easing off
+	// once loading has gone on for a while.
 	if !m.hasData || m.refreshing {
+		if !m.loadingSince.IsZero() && now.Sub(m.loadingSince) >= loadingFastFor {
+			return tickNormal
+		}
 		return tickFast
 	}
-
-	now := time.Now()
 
 	// Recent user interaction: normal animation speed.
 	if !m.lastInteraction.IsZero() && now.Sub(m.lastInteraction) < idleAfterInteraction {

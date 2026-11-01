@@ -28,11 +28,12 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.renderHelpOverlay(m.width, m.height)
 	}
-	view := m.renderDashboard()
+	// The settings modal replaces the whole frame; rendering the dashboard
+	// underneath only to discard it cost a full dashboard render per frame.
 	if m.settings.show {
 		return m.renderSettingsModalOverlay()
 	}
-	return view
+	return m.renderDashboard()
 }
 
 func (m Model) renderDashboardContent(w, contentH int) string {

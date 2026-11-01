@@ -19,25 +19,45 @@ func Conversations(mode claude_code.CostMode, offline bool) ([]report.Event, err
 	return aggregate(claude_code.AggregateOptions{Mode: mode, Offline: offline})
 }
 
-// RecentLookback bounds how far back Recent reads. It covers "today" (local
-// midnight is always within 24h) and the active 5h billing block plus the
-// chain of blocks before it in all but round-the-clock usage.
-const RecentLookback = 24 * time.Hour
+// BlockLookback is how far back the active 5h billing block needs history.
+// A block's start depends on the events before it (a new block opens 5h after
+// the previous block's start or after a 5h idle gap), so two block lengths
+// recover the previous block's phase in all but round-the-clock usage.
+const BlockLookback = 10 * time.Hour
 
-// Recent is Conversations restricted to log files modified within
-// RecentLookback of now, plus any file whose path contains sessionID (the
-// active session's transcript and subagent logs). It is meant for the
-// per-render callers (statusline, tmux) that only show today, the active
-// block, the current session and its context window, and which previously
-// re-parsed the entire history on every render.
-func Recent(mode claude_code.CostMode, offline bool, now time.Time, sessionID string) ([]report.Event, error) {
+// BlockSince is the earliest log mtime needed to compute the active block.
+func BlockSince(now time.Time) time.Time {
 	if now.IsZero() {
 		now = time.Now()
 	}
+	return now.Add(-BlockLookback)
+}
+
+// TodaySince is the earliest log mtime needed for "today" totals and the
+// active block: whichever of local midnight and BlockSince is earlier. Every
+// event since midnight lives in a file modified since midnight, so today's
+// totals are exact.
+func TodaySince(now time.Time) time.Time {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if block := BlockSince(now); block.Before(midnight) {
+		return block
+	}
+	return midnight
+}
+
+// Recent is Conversations restricted to log files modified at or after
+// since, plus any file whose path contains sessionID (the active session's
+// transcript and subagent logs). It is meant for the per-render callers
+// (statusline, tmux), which previously re-parsed the entire history on every
+// render. Pick since with TodaySince or BlockSince to match what is shown.
+func Recent(mode claude_code.CostMode, offline bool, since time.Time, sessionID string) ([]report.Event, error) {
 	opts := claude_code.AggregateOptions{
 		Mode:          mode,
 		Offline:       offline,
-		ModifiedSince: now.Add(-RecentLookback),
+		ModifiedSince: since,
 	}
 	if sid := strings.TrimSpace(sessionID); sid != "" {
 		opts.KeepPath = func(p string) bool { return strings.Contains(p, sid) }

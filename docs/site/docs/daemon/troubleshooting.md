@@ -86,6 +86,10 @@ rm ~/.local/state/openusage/telemetry.sock
 
 The daemon recreates it on startup.
 
+### "telemetry daemon already running"
+
+Only one daemon can run per socket. On startup the daemon takes an exclusive lock on `telemetry.sock.lock` next to the socket, before it probes or replaces the socket. A second daemon started at the same moment exits with `telemetry daemon already running` instead of replacing the first one's socket. The lock is released when the process exits, even after a crash, so a leftover `telemetry.sock.lock` file is harmless. Don't delete it while a daemon is running.
+
 ## Inspecting logs
 
 ### macOS

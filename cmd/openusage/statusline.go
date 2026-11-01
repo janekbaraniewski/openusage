@@ -346,8 +346,9 @@ func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) er
 	var events []report.Event
 	if statuslineNeedsLogs(opts) {
 		// Claude Code re-runs the statusline on every message, so only read
-		// recently-touched logs (plus this session's) instead of the full history.
-		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, time.Now(), in.SessionID); err == nil {
+		// logs touched today or within the block lookback (plus this
+		// session's) instead of the full history.
+		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, ccevents.TodaySince(time.Now()), in.SessionID); err == nil {
 			events = evs
 		}
 	}

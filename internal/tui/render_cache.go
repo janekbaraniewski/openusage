@@ -16,8 +16,16 @@ func (m *Model) invalidateTileBodyCache() {
 	m.tileBodyCache = make(map[string][]string)
 }
 
+// invalidateDetailCache resets the shared detail cache entry in place. The
+// cache sits behind a pointer because View() and the render helpers use value
+// receivers: a cache stored by value would be written to a throwaway copy and
+// never hit.
 func (m *Model) invalidateDetailCache() {
-	m.detailCache = detailRenderCacheEntry{}
+	if m.detailCache == nil {
+		m.detailCache = &detailRenderCacheEntry{}
+		return
+	}
+	*m.detailCache = detailRenderCacheEntry{}
 }
 
 func (m *Model) invalidateRenderCaches() {
@@ -28,7 +36,12 @@ func (m *Model) invalidateRenderCaches() {
 
 func (m *Model) cachedDetailContent(id string, snap core.UsageSnapshot, w int, activeTab int) string {
 	hideCosts := m.resolveHideCosts(snap)
+	now := m.viewNow()
 	key := strings.Join([]string{
+		// The detail panel prints second-resolution "X ago" labels and
+		// reset countdowns, so an entry is valid for one wall-clock second.
+		strconv.FormatInt(now.Unix(), 10),
+		strconv.Itoa(ActiveThemeIndex()),
 		id,
 		snap.ProviderID,
 		strconv.Itoa(w),
@@ -46,14 +59,13 @@ func (m *Model) cachedDetailContent(id string, snap core.UsageSnapshot, w int, a
 		strconv.FormatFloat(m.critThreshold, 'f', 4, 64),
 		strconv.FormatBool(hideCosts),
 	}, "|")
-	if m.detailCache.key == key {
+	if m.detailCache != nil && m.detailCache.key == key {
 		return m.detailCache.content
 	}
 
-	content := RenderDetailContent(snap, m.viewNow(), w, m.warnThreshold, m.critThreshold, activeTab, m.timeWindow, hideCosts)
-	m.detailCache = detailRenderCacheEntry{
-		key:     key,
-		content: content,
+	content := RenderDetailContent(snap, now, w, m.warnThreshold, m.critThreshold, activeTab, m.timeWindow, hideCosts)
+	if m.detailCache != nil {
+		*m.detailCache = detailRenderCacheEntry{key: key, content: content}
 	}
 	return content
 }

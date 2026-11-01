@@ -370,12 +370,25 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(s.cfg.SocketPath), 0o755); err != nil {
 		return fmt.Errorf("create telemetry daemon socket dir: %w", err)
 	}
+	// Hold the instance lock across probe, stale-socket removal and bind.
+	// Without it two daemons starting together could both pass the probe,
+	// and the second one's remove+bind would orphan the first one's socket,
+	// leaving it running but unreachable.
+	releaseLock, err := acquireInstanceLock(InstanceLockPath(s.cfg.SocketPath))
+	if err != nil {
+		if errors.Is(err, errInstanceLocked) {
+			return fmt.Errorf("telemetry daemon already running on socket %s: %w", s.cfg.SocketPath, err)
+		}
+		return err
+	}
 	if err := EnsureSocketPathAvailable(s.cfg.SocketPath); err != nil {
+		releaseLock()
 		return err
 	}
 
 	listener, err := net.Listen("unix", s.cfg.SocketPath)
 	if err != nil {
+		releaseLock()
 		return fmt.Errorf("listen telemetry daemon socket: %w", err)
 	}
 	_ = os.Chmod(s.cfg.SocketPath, 0o660)
@@ -402,6 +415,7 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 		_ = server.Shutdown(shutdownCtx)
 		_ = listener.Close()
 		_ = os.Remove(s.cfg.SocketPath)
+		releaseLock()
 	}()
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -410,6 +424,13 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// InstanceLockPath is the flock file that makes the daemon a single instance
+// per socket. It sits next to the socket and outlives it on purpose: only the
+// flock matters, never the file's existence.
+func InstanceLockPath(socketPath string) string {
+	return strings.TrimSpace(socketPath) + ".lock"
 }
 
 func EnsureSocketPathAvailable(socketPath string) error {
