@@ -34,10 +34,16 @@ type piMessageBody struct {
 }
 
 type piUsage struct {
-	Input      *int64 `json:"input,omitempty"`
-	Output     *int64 `json:"output,omitempty"`
-	CacheRead  *int64 `json:"cacheRead,omitempty"`
-	CacheWrite *int64 `json:"cacheWrite,omitempty"`
+	Input      *int64  `json:"input,omitempty"`
+	Output     *int64  `json:"output,omitempty"`
+	CacheRead  *int64  `json:"cacheRead,omitempty"`
+	CacheWrite *int64  `json:"cacheWrite,omitempty"`
+	Cost       *piCost `json:"cost,omitempty"`
+}
+
+// piCost is the USD breakdown Pi computes from its model price table.
+type piCost struct {
+	Total float64 `json:"total,omitempty"`
 }
 
 type piSessionMeta struct {
@@ -56,6 +62,8 @@ type piModelEntry struct {
 	Output         int64
 	CacheRead      int64
 	CacheWrite     int64
+	CostUSD        float64
+	HasCost        bool
 	Timestamp      time.Time
 }
 
@@ -128,6 +136,10 @@ func readPiSessionFile(path string) ([]piModelEntry, piSessionMeta, error) {
 		}
 		if entry.Input == 0 && entry.Output == 0 && entry.CacheRead == 0 && entry.CacheWrite == 0 {
 			continue
+		}
+		if c := line.Message.Usage.Cost; c != nil && c.Total > 0 {
+			entry.CostUSD = c.Total
+			entry.HasCost = true
 		}
 
 		if line.Timestamp != "" {

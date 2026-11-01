@@ -59,7 +59,7 @@ func TestProvider_Fetch_HappyPath(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	session1 := `{"type":"session","id":"pi_ses_001","timestamp":"2026-01-02T10:00:00.000Z","cwd":"/home/jane/work/project-x"}
-{"type":"message","timestamp":"2026-01-02T10:00:01.000Z","message":{"role":"assistant","model":"claude-3-5-sonnet","provider":"anthropic","usage":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50}}}
+{"type":"message","timestamp":"2026-01-02T10:00:01.000Z","message":{"role":"assistant","model":"claude-3-5-sonnet","provider":"anthropic","usage":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50,"cost":{"input":0.125,"output":0.125,"cacheRead":0,"cacheWrite":0,"total":0.25}}}}
 {"type":"message","timestamp":"2026-01-02T10:00:02.000Z","message":{"role":"assistant","model":"gpt-4o","provider":"openai","usage":{"input":800,"output":400}}}
 {"type":"message","timestamp":"2026-01-02T10:00:03.000Z","message":{"role":"user","model":"x"}}
 malformed-line
@@ -69,7 +69,7 @@ malformed-line
 	}
 
 	session2 := `{"type":"session","id":"pi_ses_002","timestamp":"2026-01-02T11:00:00.000Z","cwd":"/home/jane/work/project-x"}
-{"type":"message","timestamp":"2026-01-02T11:00:01.000Z","message":{"role":"assistant","model":"claude-3-5-sonnet","provider":"anthropic","usage":{"input":2000,"output":1000}}}
+{"type":"message","timestamp":"2026-01-02T11:00:01.000Z","message":{"role":"assistant","model":"claude-3-5-sonnet","provider":"anthropic","usage":{"input":2000,"output":1000,"cost":{"total":0.5}}}}
 `
 	if err := os.WriteFile(filepath.Join(wsDir, "session-002.jsonl"), []byte(session2), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -119,6 +119,8 @@ malformed-line
 	expect("total_tokens", 5700)
 	expect("total_cache_read", 100)
 	expect("total_cache_write", 50)
+	// Pi's own usage.cost.total: claude 0.25 + 0.5; gpt has no cost block.
+	expect("total_cost_usd", 0.75)
 
 	if len(snap.ModelUsage) != 2 {
 		t.Fatalf("len(ModelUsage) = %d, want 2", len(snap.ModelUsage))
@@ -140,6 +142,12 @@ malformed-line
 	if claude.Requests == nil || *claude.Requests != 2 {
 		t.Errorf("claude requests = %v, want 2", claude.Requests)
 	}
+	if claude.CostUSD == nil || *claude.CostUSD != 0.75 {
+		t.Errorf("claude cost = %v, want 0.75", claude.CostUSD)
+	}
+	if gpt := byModel["gpt-4o"]; gpt.CostUSD != nil {
+		t.Errorf("gpt-4o cost = %v, want nil (no cost block)", *gpt.CostUSD)
+	}
 	if claude.RawSource != "jsonl" {
 		t.Errorf("claude raw_source = %q, want jsonl", claude.RawSource)
 	}
@@ -149,6 +157,9 @@ malformed-line
 	}
 	if _, ok := snap.DailySeries["tokens"]; !ok {
 		t.Error("missing tokens DailySeries")
+	}
+	if _, ok := snap.DailySeries["cost"]; !ok {
+		t.Error("missing cost DailySeries")
 	}
 }
 
