@@ -49,7 +49,7 @@ func New() *Provider {
 			Setup: core.ProviderSetupSpec{
 				Quickstart: []string{"Set DEEPSEEK_API_KEY to a valid DeepSeek API key."},
 			},
-			Dashboard: providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleSky)),
+			Dashboard: dashboardWidget(),
 			CreditMetrics: map[string]core.BalanceSemantics{
 				"total_balance": core.BalancePoint,
 			},
@@ -126,4 +126,17 @@ func (p *Provider) fetchBalance(ctx context.Context, url, apiKey string, snap *c
 
 func (p *Provider) fetchRateLimits(ctx context.Context, url, apiKey string, snap *core.UsageSnapshot) error {
 	return shared.ProbeRateLimits(ctx, url, apiKey, snap, p.Client())
+}
+
+// dashboardWidget is the default balance tile plus the client, language and
+// code sections. The DeepSeek API reports none of those, but coding agents
+// that call DeepSeek directly attribute their usage events to this provider.
+func dashboardWidget() core.DashboardWidget {
+	cfg := providerbase.DefaultDashboard(providerbase.WithColorRole(core.DashboardColorRoleSky))
+	cfg.ShowClientComposition = true
+	cfg.ShowLanguageComposition = true
+	cfg.ShowCodeStatsComposition = true
+	cfg.CodeStatsMetrics = shared.DefaultCodeStatsConfig()
+	cfg.HideMetricPrefixes = append(cfg.HideMetricPrefixes, shared.CodingToolHidePrefixes()...)
+	return cfg
 }

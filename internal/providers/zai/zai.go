@@ -304,6 +304,7 @@ func (p *Provider) fetchModelUsage(ctx context.Context, monitorBase, apiKey stri
 		return nil
 	}
 	projectModelUsageSamples(samples, snap)
+	projectUsageTimeline(res.Envelope.Data, snap)
 	state.hasUsageData = true
 	snap.Raw["model_usage_api"] = "ok"
 	return nil

@@ -16,16 +16,18 @@ type modelMixEntry struct {
 	cacheRead  float64
 	cacheWrite float64
 	reasoning  float64
+	unsplit    float64
 	requests   float64
 	requests1d float64
 	series     []core.TimePoint
 }
 
-// totalTokens returns billable volume: input + output + cache writes + reasoning.
+// totalTokens returns billable volume: input + output + cache writes + reasoning,
+// or the provider's single per-model total when it reports no split.
 // Cache reads are excluded — they're discounted 90% by Anthropic and dominated
 // by repeated re-reads of the same cached bytes across conversation turns.
 func (m modelMixEntry) totalTokens() float64 {
-	return m.input + m.output + m.cacheWrite + m.reasoning
+	return m.input + m.output + m.cacheWrite + m.reasoning + m.unsplit
 }
 
 type providerMixEntry struct {
@@ -415,6 +417,7 @@ func collectProviderModelMix(snap core.UsageSnapshot) ([]modelMixEntry, map[stri
 			cacheRead:  entry.CacheRead,
 			cacheWrite: entry.CacheWrite,
 			reasoning:  entry.Reasoning,
+			unsplit:    entry.Unsplit,
 			requests:   entry.Requests,
 			requests1d: entry.Requests1d,
 			series:     entry.Series,

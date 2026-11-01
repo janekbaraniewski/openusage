@@ -389,6 +389,7 @@ func (p *Provider) fetchSummaries(ctx context.Context, baseURL, apiKey, orgID st
 	}
 	snap.Metrics["today_spend"] = core.Metric{Used: core.Float64Ptr(today.TotalCost), Unit: "USD", Window: "today"}
 	snap.Metrics["requests_today"] = core.Metric{Used: core.Float64Ptr(today.TotalCount), Unit: "requests", Window: "today"}
+	p.applyDailySeries(ctx, baseURL, apiKey, orgID, snap, period, today)
 	return nil
 }
 

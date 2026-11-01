@@ -72,17 +72,33 @@ func BuildLimitSnapshotRequests(snaps map[string]core.UsageSnapshot) []IngestReq
 			Status:              statusFromSnapshot(snap.Status),
 			Payload: map[string]any{
 				"snapshot": map[string]any{
-					"provider_id": providerID,
-					"account_id":  effectiveAccountID,
-					"status":      string(snap.Status),
-					"message":     snap.Message,
-					"metrics":     serializeMetrics(snap.Metrics),
-					"resets":      serializeResets(snap.Resets),
-					"attributes":  cloneStringMap(snap.Attributes),
-					"diagnostics": cloneStringMap(snap.Diagnostics),
+					"provider_id":  providerID,
+					"account_id":   effectiveAccountID,
+					"status":       string(snap.Status),
+					"message":      snap.Message,
+					"metrics":      serializeMetrics(snap.Metrics),
+					"resets":       serializeResets(snap.Resets),
+					"attributes":   cloneStringMap(snap.Attributes),
+					"diagnostics":  cloneStringMap(snap.Diagnostics),
+					"daily_series": providerDailySeries(snap.DailySeries),
 				},
 			},
 		})
+	}
+	return out
+}
+
+// providerDailySeriesKeys are the daily series a provider reports from its own
+// API. Series derived from usage events are rebuilt from those events on
+// read, so only these are stored with the snapshot.
+var providerDailySeriesKeys = []string{"cost", "requests", "tokens"}
+
+func providerDailySeries(series map[string][]core.TimePoint) map[string][]core.TimePoint {
+	out := make(map[string][]core.TimePoint)
+	for _, key := range providerDailySeriesKeys {
+		if points := series[key]; len(points) > 0 {
+			out[key] = append([]core.TimePoint(nil), points...)
+		}
 	}
 	return out
 }

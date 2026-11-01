@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -803,5 +804,69 @@ func TestStorePruneOrphanRawEvents_RemovesOnlyUnreferencedRows(t *testing.T) {
 	}
 	if rawCount != 1 {
 		t.Fatalf("raw rows after second prune = %d, want 1", rawCount)
+	}
+}
+
+func TestStoreIngest_DedupAddsMissingPayloadKeys(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewStore(db)
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	req := IngestRequest{
+		SourceSystem:        SourceSystem("dsh"),
+		SourceChannel:       SourceChannelJSONL,
+		SourceSchemaVersion: "v1",
+		OccurredAt:          time.Date(2026, time.October, 1, 12, 0, 0, 0, time.UTC),
+		ProviderID:          "dsh",
+		AccountID:           "dsh",
+		SessionID:           "sess-1",
+		ToolCallID:          "call-1",
+		EventType:           EventTypeToolUsage,
+		ToolName:            "edit",
+		Payload:             map[string]any{"client": "dsh", "file": "main.go"},
+	}
+	first, err := store.Ingest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	// The same event again, now with line counts and a conflicting file.
+	req.Payload = map[string]any{"client": "dsh", "file": "other.go", "lines_added": 3}
+	second, err := store.Ingest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second Ingest: %v", err)
+	}
+	if !second.Deduped || second.RawEventID != first.RawEventID {
+		t.Fatalf("second ingest = %+v, want a duplicate of %s", second, first.RawEventID)
+	}
+
+	var stored string
+	if err := db.QueryRow(`SELECT source_payload FROM usage_raw_events WHERE raw_event_id = ?`, first.RawEventID).Scan(&stored); err != nil {
+		t.Fatalf("load payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stored), &payload); err != nil {
+		t.Fatalf("decode payload %q: %v", stored, err)
+	}
+	if payload["lines_added"] != float64(3) {
+		t.Errorf("lines_added = %v, want 3 (missing key added)", payload["lines_added"])
+	}
+	if payload["file"] != "main.go" {
+		t.Errorf("file = %v, want main.go (stored value kept)", payload["file"])
+	}
+
+	var updates int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM usage_event_changes WHERE event_id = ? AND operation = 'update'`, first.EventID).Scan(&updates); err != nil {
+		t.Fatalf("count changes: %v", err)
+	}
+	if updates != 1 {
+		t.Errorf("update changes = %d, want 1 so the usage view recomputes", updates)
 	}
 }

@@ -25,6 +25,7 @@ type storedLimitSnapshot struct {
 	Resets      map[string]string            `json:"resets"`
 	Attributes  map[string]string            `json:"attributes"`
 	Diagnostics map[string]string            `json:"diagnostics"`
+	DailySeries map[string][]core.TimePoint  `json:"daily_series"`
 }
 
 // isEmpty reports whether the envelope carried no snapshot data at all, which
@@ -338,6 +339,7 @@ func decodeStoredLimitSnapshot(providerID, accountID, payload, occurredAt string
 		Resets:      make(map[string]time.Time, len(envelope.Snapshot.Resets)),
 		Attributes:  maps.Clone(envelope.Snapshot.Attributes),
 		Diagnostics: maps.Clone(envelope.Snapshot.Diagnostics),
+		DailySeries: providerDailySeries(envelope.Snapshot.DailySeries),
 	}
 
 	for key, metric := range envelope.Snapshot.Metrics {
@@ -383,6 +385,12 @@ func mergeLimitSnapshotRoot(base core.UsageSnapshot, root core.UsageSnapshot) co
 	merged.Resets = maps.Clone(root.Resets)
 	merged.Attributes = maps.Clone(root.Attributes)
 	merged.Diagnostics = maps.Clone(root.Diagnostics)
+	for key, points := range root.DailySeries {
+		if merged.DailySeries == nil {
+			merged.DailySeries = make(map[string][]core.TimePoint)
+		}
+		merged.DailySeries[key] = append([]core.TimePoint(nil), points...)
+	}
 	if merged.Raw == nil {
 		merged.Raw = map[string]string{}
 	}

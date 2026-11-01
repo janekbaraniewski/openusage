@@ -16,6 +16,7 @@ func TestItemizedCoverage(t *testing.T) {
 	wantTelemetry := map[string]bool{
 		"claude_code": true, "codex": true, "gemini_cli": true, "antigravity": true,
 		"copilot": true, "cursor": true, "ollama": true, "opencode": true,
+		"dsh": true,
 	}
 	wantItemized := map[string]bool{
 		"amp": true, "codebuff": true, "openclaw": true, "roocode": true,
