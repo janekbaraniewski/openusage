@@ -15,6 +15,16 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/config"
 )
 
+// isolateHome points the home directory at a fresh temp dir. os.UserHomeDir
+// reads USERPROFILE on Windows, so HOME alone does not isolate tests there.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	t.Setenv("HOME", d)
+	t.Setenv("USERPROFILE", d)
+	return d
+}
+
 func TestAssembleTemplate(t *testing.T) {
 	// Pieces render in canonical palette order regardless of selection order,
 	// and the result is a valid template.
@@ -56,7 +66,7 @@ func TestValidateTemplate(t *testing.T) {
 }
 
 func TestLastStatusRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 
 	if _, ok := readLastStatus(""); ok {
 		t.Fatal("expected no cached status in a fresh HOME")
@@ -88,7 +98,7 @@ func ageLastStatus(t *testing.T, key string) {
 }
 
 func TestEmitTmuxStatus_DegradedServesOldCache(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 	const good = "🤖 5h 15% $6.79/today"
 	writeLastStatus("", good)
 	ageLastStatus(t, "")
@@ -104,7 +114,7 @@ func TestEmitTmuxStatus_DegradedServesOldCache(t *testing.T) {
 }
 
 func TestEmitTmuxStatus_DegradedWithoutCacheIsEmpty(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 
 	var buf bytes.Buffer
 	emitTmuxStatus(&buf, "", "✨", true, nil)
@@ -117,7 +127,7 @@ func TestEmitTmuxStatus_DegradedWithoutCacheIsEmpty(t *testing.T) {
 }
 
 func TestEmitTmuxStatus_ErrorWithoutCacheIsEmpty(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 
 	var buf bytes.Buffer
 	emitTmuxStatus(&buf, "", "", false, errors.New("daemon read timed out"))
@@ -127,7 +137,7 @@ func TestEmitTmuxStatus_ErrorWithoutCacheIsEmpty(t *testing.T) {
 }
 
 func TestEmitTmuxStatus_ErrorServesOldCache(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 	writeLastStatus("", "good")
 	ageLastStatus(t, "")
 
@@ -139,7 +149,7 @@ func TestEmitTmuxStatus_ErrorServesOldCache(t *testing.T) {
 }
 
 func TestEmitTmuxStatus_CleanRenderUpdatesCache(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateHome(t)
 	writeLastStatus("", "old")
 
 	var buf bytes.Buffer
@@ -172,8 +182,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestRunTmuxRender_FreshCacheShortCircuits(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 	t.Setenv("TMUX", "/tmp/tmux-test,1,0")
 	// Point the daemon socket somewhere that does not exist, so if the
 	// short-circuit failed the render could only produce "?" or a fallback.
@@ -195,8 +204,7 @@ func TestRunTmuxRender_FreshCacheShortCircuits(t *testing.T) {
 }
 
 func TestReadFreshStatus(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	isolateHome(t)
 
 	writeLastStatus("", "fresh")
 	now := time.Now()

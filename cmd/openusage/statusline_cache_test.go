@@ -41,8 +41,7 @@ func runStatuslineOnce(t *testing.T, opts statuslineOptions, stdin string) strin
 
 func setupStatuslineCacheTest(t *testing.T) (transcript string, calls *int) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 	transcript = filepath.Join(home, "session.jsonl")
 	if err := os.WriteFile(transcript, []byte(`{"type":"user"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
