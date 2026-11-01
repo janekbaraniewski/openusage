@@ -37,6 +37,7 @@ type Provider struct {
 	providerbase.Base
 	telemetryCacheMu        sync.Mutex
 	telemetryDBFingerprints map[string]string
+	telemetryDBWatermarks   map[string]opencodeSQLiteWatermark
 }
 
 func New() *Provider {

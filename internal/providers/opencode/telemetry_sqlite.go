@@ -3,8 +3,9 @@ package opencode
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"os"
+	"net/url"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -13,45 +14,79 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
+// sqliteQuerier is satisfied by *sql.DB and *sql.Tx. The collector runs every
+// query of one cycle inside a single read transaction so they all see the
+// same snapshot of a database OpenCode may be writing to.
+type sqliteQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// messageScope restricts a collection pass to a set of message IDs. A nil
+// scope means a full read. Every event the collector builds depends only on
+// rows of one message (its parts, its message row, its session), so running
+// the full-read logic restricted to a set of messages yields exactly the
+// events a full read would yield for those messages.
+type messageScope struct {
+	idsJSON string
+}
+
+func newMessageScope(ids []string) (*messageScope, error) {
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return nil, fmt.Errorf("encode opencode sqlite message scope: %w", err)
+	}
+	return &messageScope{idsJSON: string(raw)}, nil
+}
+
+// filter returns an AND clause restricting column to the scope, plus its
+// argument. json_each keeps it to one bound parameter regardless of size and
+// lets SQLite drive the lookup through the column's index.
+func (s *messageScope) filter(column string) (string, []any) {
+	if s == nil {
+		return "", nil
+	}
+	return " AND " + column + " IN (SELECT value FROM json_each(?))", []any{s.idsJSON}
+}
+
+// openOpenCodeSQLiteReadOnly opens opencode.db read-only. It deliberately
+// does not use immutable=1: OpenCode writes to the database (WAL mode) while
+// we read it, and immutable would skip locking and ignore the WAL.
+func openOpenCodeSQLiteReadOnly(dbPath string) (*sql.DB, error) {
+	encoded := (&url.URL{Path: dbPath}).EscapedPath()
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", encoded))
+	if err != nil {
+		return nil, fmt.Errorf("open opencode sqlite db: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
+}
+
 // CollectTelemetryFromSQLite parses OpenCode SQLite data (message + part tables).
 func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.TelemetryEvent, error) {
-	if strings.TrimSpace(dbPath) == "" {
-		return nil, nil
-	}
-	if _, err := os.Stat(dbPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("stat opencode sqlite db: %w", err)
-	}
+	res, err := collectTelemetryFromSQLiteSince(ctx, dbPath, nil)
+	return res.Events, err
+}
 
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
-	hasMessageTable, err := sqliteTableExists(ctx, db, "message")
-	if err != nil {
-		return nil, err
-	}
-	if !hasMessageTable {
-		return nil, nil
-	}
-
+// collectSQLiteEvents runs the collection logic against q, either over the
+// whole database (scope == nil) or restricted to the scoped messages.
+func collectSQLiteEvents(
+	ctx context.Context,
+	q sqliteQuerier,
+	dbPath string,
+	hasPartTable bool,
+	scope *messageScope,
+) ([]shared.TelemetryEvent, error) {
 	partSummaryByMessage := make(map[string]partSummary)
-	hasPartTable, err := sqliteTableExists(ctx, db, "part")
-	if err != nil {
-		return nil, err
-	}
 	if hasPartTable {
-		partSummaryByMessage, err = collectPartSummary(ctx, db)
+		var err error
+		partSummaryByMessage, err = collectPartSummary(ctx, q, scope)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	out, seenMessages, err := collectSQLiteMessageEvents(ctx, db, dbPath, partSummaryByMessage, hasPartTable)
+	out, seenMessages, err := collectSQLiteMessageEvents(ctx, q, dbPath, partSummaryByMessage, hasPartTable, scope)
 	if err != nil {
 		return out, err
 	}
@@ -59,25 +94,26 @@ func CollectTelemetryFromSQLite(ctx context.Context, dbPath string) ([]shared.Te
 		return out, nil
 	}
 
-	return collectSQLiteToolEvents(ctx, db, dbPath, partSummaryByMessage, seenMessages, out)
+	return collectSQLiteToolEvents(ctx, q, dbPath, partSummaryByMessage, seenMessages, out, scope)
 }
 
 func collectSQLiteMessageEvents(
 	ctx context.Context,
-	db *sql.DB,
+	q sqliteQuerier,
 	dbPath string,
 	partSummaryByMessage map[string]partSummary,
 	hasPartTable bool,
+	scope *messageScope,
 ) ([]shared.TelemetryEvent, map[string]bool, error) {
 	var out []shared.TelemetryEvent
 	seenMessages := map[string]bool{}
 
 	if hasPartTable {
-		if err := appendSQLiteStepFinishEvents(ctx, db, dbPath, partSummaryByMessage, &out, seenMessages); err != nil {
+		if err := appendSQLiteStepFinishEvents(ctx, q, dbPath, partSummaryByMessage, &out, seenMessages, scope); err != nil {
 			return out, seenMessages, err
 		}
 	}
-	if err := appendSQLiteMessageTableEvents(ctx, db, dbPath, partSummaryByMessage, &out, seenMessages); err != nil {
+	if err := appendSQLiteMessageTableEvents(ctx, q, dbPath, partSummaryByMessage, &out, seenMessages, scope); err != nil {
 		return out, seenMessages, err
 	}
 
@@ -86,20 +122,22 @@ func collectSQLiteMessageEvents(
 
 func appendSQLiteStepFinishEvents(
 	ctx context.Context,
-	db *sql.DB,
+	q sqliteQuerier,
 	dbPath string,
 	partSummaryByMessage map[string]partSummary,
 	out *[]shared.TelemetryEvent,
 	seenMessages map[string]bool,
+	scope *messageScope,
 ) error {
-	rows, err := db.QueryContext(ctx, `
+	scopeSQL, scopeArgs := scope.filter("p.message_id")
+	rows, err := q.QueryContext(ctx, `
 		SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data, COALESCE(m.data, '{}'), COALESCE(s.directory, '')
 		FROM part p
 		LEFT JOIN message m ON m.id = p.message_id
 		LEFT JOIN session s ON s.id = p.session_id
-		WHERE COALESCE(json_extract(p.data, '$.type'), '') = 'step-finish'
+		WHERE COALESCE(json_extract(p.data, '$.type'), '') = 'step-finish'`+scopeSQL+`
 		ORDER BY p.time_updated ASC
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return fmt.Errorf("query opencode sqlite step-finish rows: %w", err)
 	}
@@ -230,18 +268,21 @@ func buildSQLiteStepFinishEvent(
 
 func appendSQLiteMessageTableEvents(
 	ctx context.Context,
-	db *sql.DB,
+	q sqliteQuerier,
 	dbPath string,
 	partSummaryByMessage map[string]partSummary,
 	out *[]shared.TelemetryEvent,
 	seenMessages map[string]bool,
+	scope *messageScope,
 ) error {
-	rows, err := db.QueryContext(ctx, `
+	scopeSQL, scopeArgs := scope.filter("m.id")
+	rows, err := q.QueryContext(ctx, `
 		SELECT m.id, m.session_id, m.time_created, m.time_updated, m.data, COALESCE(s.directory, '')
 		FROM message m
 		LEFT JOIN session s ON s.id = m.session_id
+		WHERE 1 = 1`+scopeSQL+`
 		ORDER BY m.time_updated ASC
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return fmt.Errorf("query opencode sqlite message rows: %w", err)
 	}
@@ -397,23 +438,25 @@ func sqliteMessagePayload(
 
 func collectSQLiteToolEvents(
 	ctx context.Context,
-	db *sql.DB,
+	q sqliteQuerier,
 	dbPath string,
 	partSummaryByMessage map[string]partSummary,
 	seenMessages map[string]bool,
 	out []shared.TelemetryEvent,
+	scope *messageScope,
 ) ([]shared.TelemetryEvent, error) {
 	_ = partSummaryByMessage
 	_ = seenMessages
 
-	rows, err := db.QueryContext(ctx, `
+	scopeSQL, scopeArgs := scope.filter("p.message_id")
+	rows, err := q.QueryContext(ctx, `
 		SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data, COALESCE(m.data, '{}'), COALESCE(s.directory, '')
 		FROM part p
 		LEFT JOIN message m ON m.id = p.message_id
 		LEFT JOIN session s ON s.id = p.session_id
-		WHERE COALESCE(json_extract(p.data, '$.type'), '') = 'tool'
+		WHERE COALESCE(json_extract(p.data, '$.type'), '') = 'tool'`+scopeSQL+`
 		ORDER BY p.time_updated ASC
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return out, fmt.Errorf("query opencode sqlite tool rows: %w", err)
 	}
@@ -573,12 +616,14 @@ func contextSummaryFromPartSummary(summary partSummary) map[string]any {
 	}
 }
 
-func collectPartSummary(ctx context.Context, db *sql.DB) (map[string]partSummary, error) {
-	rows, err := db.QueryContext(ctx, `
+func collectPartSummary(ctx context.Context, q sqliteQuerier, scope *messageScope) (map[string]partSummary, error) {
+	scopeSQL, scopeArgs := scope.filter("message_id")
+	rows, err := q.QueryContext(ctx, `
 		SELECT message_id, COALESCE(NULLIF(TRIM(json_extract(data, '$.type')), ''), 'unknown') AS part_type, COUNT(*)
 		FROM part
+		WHERE 1 = 1`+scopeSQL+`
 		GROUP BY message_id, part_type
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -616,9 +661,9 @@ func collectPartSummary(ctx context.Context, db *sql.DB) (map[string]partSummary
 	return out, nil
 }
 
-func sqliteTableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+func sqliteTableExists(ctx context.Context, q sqliteQuerier, table string) (bool, error) {
 	var exists int
-	err := db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`, strings.TrimSpace(table)).Scan(&exists)
+	err := q.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`, strings.TrimSpace(table)).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

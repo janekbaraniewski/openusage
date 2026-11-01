@@ -156,11 +156,20 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 		}
 		p.telemetryCacheMu.Unlock()
 		if fingerprint == "" || fingerprint != cachedFingerprint {
-			events, err := CollectTelemetryFromSQLite(ctx, dbPath)
+			// While OpenCode runs, its WAL changes every cycle, so the
+			// fingerprint alone does not stop re-reading the whole DB. Read
+			// only the messages changed since the last watermark; the
+			// watermark is dropped (full read) when the file is replaced.
+			dbInfo, statErr := os.Stat(dbPath)
+			if statErr != nil {
+				dbInfo = nil
+			}
+			res, err := collectTelemetryFromSQLiteSince(ctx, dbPath, p.sqliteWatermarkSince(cacheKey, dbInfo))
 			if err != nil {
 				return out, fmt.Errorf("collect opencode sqlite telemetry: %w", err)
 			}
-			appendDedupTelemetryEvents(&out, events, seenMessage, seenTools, accountID)
+			p.storeSQLiteWatermark(cacheKey, dbInfo, res)
+			appendDedupTelemetryEvents(&out, res.Events, seenMessage, seenTools, accountID)
 
 			fingerprintAfter, err := opencodeSQLiteFingerprint(dbPath)
 			if err != nil {
