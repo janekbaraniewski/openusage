@@ -50,6 +50,31 @@ func ParseResetTime(val string) *time.Time {
 	return nil
 }
 
+// ParseRetryAfter parses an HTTP Retry-After header value, which is either a
+// number of seconds or an HTTP-date (RFC 9110 section 10.2.3). It returns the
+// absolute time before which the client should not retry, or false when the
+// value is empty or malformed.
+func ParseRetryAfter(val string, now time.Time) (time.Time, bool) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return time.Time{}, false
+	}
+	if secs, err := strconv.ParseInt(val, 10, 64); err == nil {
+		if secs < 0 {
+			return time.Time{}, false
+		}
+		const maxSecs = 7 * 24 * 60 * 60 // avoid Duration overflow on junk values
+		if secs > maxSecs {
+			secs = maxSecs
+		}
+		return now.Add(time.Duration(secs) * time.Second), true
+	}
+	if t, err := http.ParseTime(val); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 func ParseRateLimitGroup(h http.Header, limitHeader, remainingHeader, resetHeader string) *RateLimitGroup {
 	limit := ParseFloat(h.Get(limitHeader))
 	remaining := ParseFloat(h.Get(remainingHeader))

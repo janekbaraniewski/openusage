@@ -38,13 +38,34 @@ func ProcessStandardResponse(resp *http.Response, acct core.AccountConfig, provi
 // status code. Centralises the 401/403 → StatusAuth, 429 → StatusLimited
 // mapping that providers with custom response handling (mistral, gemini_api,
 // alibaba_cloud, moonshot, zai) used to hand-roll. Call this first, then add
-// provider-specific cases on top if needed. Reads Retry-After when present.
+// provider-specific cases on top if needed. A 5xx maps to StatusError when no
+// status was set yet. On 429 and 5xx, Retry-After is parsed into
+// snap.NextPollNotBefore so the poller holds off until then.
 func ApplyStatusFromResponse(resp *http.Response, snap *core.UsageSnapshot) {
 	ApplyStatusFromCode(resp.StatusCode, snap, "")
-	if snap.Status == core.StatusLimited {
-		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-			snap.Raw["retry_after"] = retryAfter
-		}
+	if resp.StatusCode >= 500 && resp.StatusCode <= 599 && snap.Status == "" {
+		snap.Status = core.StatusError
+		snap.Message = fmt.Sprintf("upstream error (HTTP %d)", resp.StatusCode)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		ApplyRetryAfter(resp.Header, snap)
+	}
+}
+
+// ApplyRetryAfter copies a Retry-After header into snap.Raw and
+// snap.NextPollNotBefore. Providers with custom 429/5xx handling should call
+// it so the daemon poller honours the server's requested delay.
+func ApplyRetryAfter(h http.Header, snap *core.UsageSnapshot) {
+	retryAfter := h.Get("Retry-After")
+	if retryAfter == "" {
+		return
+	}
+	if snap.Raw == nil {
+		snap.Raw = make(map[string]string)
+	}
+	snap.Raw["retry_after"] = retryAfter
+	if until, ok := parsers.ParseRetryAfter(retryAfter, time.Now()); ok && until.After(snap.NextPollNotBefore) {
+		snap.NextPollNotBefore = until
 	}
 }
 

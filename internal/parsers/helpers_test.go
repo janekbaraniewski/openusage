@@ -8,6 +8,30 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	date := now.Add(90 * time.Second)
+	tests := []struct {
+		in     string
+		want   time.Time
+		wantOK bool
+	}{
+		{"120", now.Add(2 * time.Minute), true},
+		{" 0 ", now, true},
+		{date.Format(http.TimeFormat), date, true},
+		{"", time.Time{}, false},
+		{"-5", time.Time{}, false},
+		{"soon", time.Time{}, false},
+		{"99999999999999", now.Add(7 * 24 * time.Hour), true},
+	}
+	for _, tt := range tests {
+		got, ok := ParseRetryAfter(tt.in, now)
+		if ok != tt.wantOK || !got.Equal(tt.want) {
+			t.Errorf("ParseRetryAfter(%q) = %s,%t want %s,%t", tt.in, got, ok, tt.want, tt.wantOK)
+		}
+	}
+}
+
 func TestParseFloat(t *testing.T) {
 	tests := []struct {
 		input string

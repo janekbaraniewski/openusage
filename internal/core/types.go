@@ -57,6 +57,11 @@ type UsageSnapshot struct {
 	ModelUsage  []ModelUsageRecord     `json:"model_usage,omitempty"`  // per-model usage rows with canonical IDs
 	DailySeries map[string][]TimePoint `json:"daily_series,omitempty"` // time-indexed data (e.g. "messages", "cost", "tokens_<model>")
 	Message     string                 `json:"message,omitempty"`      // human-readable summary
+
+	// NextPollNotBefore asks the poller not to fetch this account again
+	// before the given time (e.g. from an HTTP Retry-After header on a 429 or
+	// 5xx). Zero means no provider-imposed delay.
+	NextPollNotBefore time.Time `json:"next_poll_not_before,omitzero"`
 }
 
 func NewUsageSnapshot(providerID, accountID string) UsageSnapshot {

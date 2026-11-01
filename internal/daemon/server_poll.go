@@ -135,6 +135,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 			// Track whether data actually changed for adaptive backoff.
 			changed := s.pollScheduler.SnapshotChanged(account.ID, snap)
 			s.pollScheduler.RecordPoll(account.ID, changed)
+			s.pollScheduler.RecordOutcome(account.ID, snap)
 
 			// Record successful fetch for future change detection.
 			s.pollStateMu.Lock()

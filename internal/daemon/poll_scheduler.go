@@ -12,10 +12,16 @@ import (
 // PollScheduler manages per-provider adaptive backoff to reduce CPU usage when data
 // sources are idle. Each account gets its own backoff state: when consecutive polls
 // detect no changes, the effective interval increases in tiers up to a configurable cap.
+//
+// Independently of the no-change tiers, a fetch that ends in StatusLimited or
+// StatusError backs off exponentially (base * 2^failures, capped at
+// maxFailureBackoff), and a provider-supplied NextPollNotBefore (Retry-After)
+// is honoured up to maxNotBeforeHorizon.
 type PollScheduler struct {
 	mu           sync.Mutex
 	states       map[string]*pollBackoffState
 	baseInterval time.Duration
+	now          func() time.Time
 }
 
 type pollBackoffState struct {
@@ -23,6 +29,9 @@ type pollBackoffState struct {
 	consecutiveNoChange int
 	lastSnapshotHash    string
 	hasLocalDetector    bool // true if provider implements ChangeDetector
+
+	consecutiveFailures int       // consecutive Limited/Error outcomes
+	notBefore           time.Time // no fetch before this instant
 }
 
 // backoff tier thresholds and multipliers
@@ -42,12 +51,20 @@ const (
 	maxMultiplierHTTP = 4
 	// Local providers (with ChangeDetector) can back off further since stat() is cheap.
 	maxMultiplierLocal = 16
+
+	// maxFailureBackoff caps the exponential backoff after Limited/Error
+	// outcomes.
+	maxFailureBackoff = 30 * time.Minute
+	// maxNotBeforeHorizon caps how far a provider-supplied Retry-After can
+	// push the next poll, so a bogus header cannot silence an account.
+	maxNotBeforeHorizon = 2 * time.Hour
 )
 
 func newPollScheduler(baseInterval time.Duration) *PollScheduler {
 	return &PollScheduler{
 		states:       make(map[string]*pollBackoffState),
 		baseInterval: baseInterval,
+		now:          time.Now,
 	}
 }
 
@@ -67,8 +84,58 @@ func (ps *PollScheduler) ShouldPoll(accountID string, hasLocalDetector bool) boo
 	}
 	state.hasLocalDetector = hasLocalDetector
 
+	now := ps.now()
+	if now.Before(state.notBefore) {
+		return false
+	}
 	interval := ps.effectiveIntervalLocked(state)
-	return time.Since(state.lastPollAt) >= interval
+	return now.Sub(state.lastPollAt) >= interval
+}
+
+// RecordOutcome applies failure backoff and provider-requested delays from a
+// freshly fetched snapshot. Limited and Error outcomes back off exponentially;
+// any other status clears the failure streak. snap.NextPollNotBefore, when
+// set, extends the hold-off (capped at maxNotBeforeHorizon).
+func (ps *PollScheduler) RecordOutcome(accountID string, snap core.UsageSnapshot) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	state, ok := ps.states[accountID]
+	if !ok {
+		state = &pollBackoffState{}
+		ps.states[accountID] = state
+	}
+
+	now := ps.now()
+	state.notBefore = time.Time{}
+	switch snap.Status {
+	case core.StatusLimited, core.StatusError:
+		state.consecutiveFailures++
+		state.notBefore = now.Add(ps.failureBackoffLocked(state.consecutiveFailures))
+	default:
+		state.consecutiveFailures = 0
+	}
+
+	if !snap.NextPollNotBefore.IsZero() {
+		requested := snap.NextPollNotBefore
+		if limit := now.Add(maxNotBeforeHorizon); requested.After(limit) {
+			requested = limit
+		}
+		if requested.After(state.notBefore) {
+			state.notBefore = requested
+		}
+	}
+}
+
+func (ps *PollScheduler) failureBackoffLocked(failures int) time.Duration {
+	backoff := ps.baseInterval
+	for i := 0; i < failures; i++ {
+		backoff *= 2
+		if backoff >= maxFailureBackoff {
+			return maxFailureBackoff
+		}
+	}
+	return backoff
 }
 
 // RecordPoll records that a poll was executed. changed indicates whether the data
@@ -83,7 +150,7 @@ func (ps *PollScheduler) RecordPoll(accountID string, changed bool) {
 		ps.states[accountID] = state
 	}
 
-	state.lastPollAt = time.Now()
+	state.lastPollAt = ps.now()
 	if changed {
 		state.consecutiveNoChange = 0
 	} else {

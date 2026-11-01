@@ -226,6 +226,7 @@ func (p *Provider) fetchModels(ctx context.Context, codingBase, apiKey string, s
 		}
 		snap.Status = core.StatusLimited
 		snap.Message = "rate limited (HTTP 429)"
+		shared.ApplyRetryAfter(resp.Header, snap)
 		return nil
 	}
 
