@@ -506,8 +506,9 @@ func TestDetectGHCopilot_GHCopilotTakesPrecedence(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
 
-	// Create a fake gh binary that succeeds for "copilot --version".
-	ghBin := writeExe(t, tmp, "gh", `exit 0`)
+	// A fake gh that records any execution: detection must not run it.
+	ranMarker := filepath.Join(tmp, "gh-ran")
+	ghBin := writeExe(t, tmp, "gh", `touch "`+ranMarker+`"; exit 0`)
 
 	// Also create a standalone copilot binary.
 	writeExe(t, tmp, "copilot", "exit 0")
@@ -518,12 +519,24 @@ func TestDetectGHCopilot_GHCopilotTakesPrecedence(t *testing.T) {
 		t.Fatalf("mkdir %s: %v", copilotDir, err)
 	}
 
+	// The gh copilot extension is installed in gh's default data dir.
+	extDir := filepath.Join(home, ".local", "share", "gh", "extensions", "gh-copilot")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", extDir, err)
+	}
+
 	t.Setenv("PATH", tmp)
 	t.Setenv("HOME", home)
+	t.Setenv("GH_DATA_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("OPENUSAGE_DETECT_BIN_DIRS", "")
 
 	var result Result
 	detectGHCopilot(&result)
+
+	if _, err := os.Stat(ranMarker); err == nil {
+		t.Fatal("detectGHCopilot executed gh; it must detect the extension on disk")
+	}
 
 	if len(result.Tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(result.Tools))

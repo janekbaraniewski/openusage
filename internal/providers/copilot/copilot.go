@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,18 @@ const (
 	ttlVersion          = 1 * time.Hour
 	ttlAuthStatus       = 5 * time.Minute
 	ttlSnapshot         = 2 * time.Minute
+
+	// Failures are cached too, for less time, so a missing `gh copilot`
+	// extension or a failing account does not re-run every subprocess on
+	// every poll.
+	ttlVersionFailure  = 10 * time.Minute
+	ttlSnapshotFailure = 1 * time.Minute
+
+	// Org billing and metrics change slowly and cost two `gh api` calls per
+	// org; with many orgs they alone used to exceed the daemon's fetch
+	// timeout. Failures (403 for non-admins is the common case) are cached
+	// for the same hour.
+	ttlOrgData = 1 * time.Hour
 )
 
 // copilotAPICache holds cached results from CLI subprocess calls and API
@@ -44,6 +57,7 @@ type copilotAPICache struct {
 	// Version detection (1 hour TTL)
 	version          string
 	versionSource    string
+	versionErr       string
 	versionFetchedAt time.Time
 
 	// Auth status (5 min TTL)
@@ -54,6 +68,17 @@ type copilotAPICache struct {
 	// Full snapshot cache for quick return (2 min TTL)
 	lastSnap   core.UsageSnapshot
 	lastSnapAt time.Time
+
+	// Org endpoint responses keyed by endpoint path (1 hour TTL).
+	orgResponses map[string]cachedAPIResponse
+}
+
+// cachedAPIResponse is a cached `gh api` result; err is non-empty when the
+// call failed.
+type cachedAPIResponse struct {
+	body      string
+	err       string
+	fetchedAt time.Time
 }
 
 type Provider struct {
@@ -325,7 +350,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	// Fast path: return cached snapshot if still fresh and successful.
 	p.cacheMu.Lock()
-	if c := p.cacheLocked(cacheKey); time.Since(c.lastSnapAt) < ttlSnapshot && c.lastSnap.Status == core.StatusOK {
+	if c := p.cacheLocked(cacheKey); !c.lastSnapAt.IsZero() && time.Since(c.lastSnapAt) < snapshotTTL(c.lastSnap.Status) {
 		snap := c.lastSnap
 		p.cacheMu.Unlock()
 		return snap, nil
@@ -387,7 +412,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 		p.fetchRateLimits(ctx, ghBinary, hostname, &snap)
 
-		p.fetchOrgData(ctx, ghBinary, hostname, &snap)
+		p.fetchOrgData(ctx, cacheKey, ghBinary, hostname, &snap)
 	} else {
 		snap.Raw["auth_status"] = "gh CLI unavailable; skipped GitHub API checks"
 	}
@@ -396,16 +421,24 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	p.resolveStatus(&snap, authOutput)
 
-	// Cache successful snapshots for quick return on subsequent polls.
-	if snap.Status == core.StatusOK {
-		p.cacheMu.Lock()
-		c := p.cacheLocked(cacheKey)
-		c.lastSnap = snap
-		c.lastSnapAt = time.Now()
-		p.cacheMu.Unlock()
-	}
+	// Cache the snapshot for quick return on subsequent polls; non-OK
+	// snapshots get a shorter TTL (see snapshotTTL).
+	p.cacheMu.Lock()
+	c := p.cacheLocked(cacheKey)
+	c.lastSnap = snap
+	c.lastSnapAt = time.Now()
+	p.cacheMu.Unlock()
 
 	return snap, nil
+}
+
+// snapshotTTL is how long a snapshot with the given status is served from
+// cache.
+func snapshotTTL(status core.Status) time.Duration {
+	if status == core.StatusOK {
+		return ttlSnapshot
+	}
+	return ttlSnapshotFailure
 }
 
 // resolveAndCacheBinaries returns cached binary paths if the TTL has not expired,
@@ -435,15 +468,24 @@ func (p *Provider) resolveAndCacheBinaries(acct core.AccountConfig) (string, str
 // otherwise runs the version command and caches the result.
 func (p *Provider) detectAndCacheVersion(ctx context.Context, cacheKey, ghBinary, copilotBinary string) (string, string, error) {
 	p.cacheMu.Lock()
-	if c := p.cacheLocked(cacheKey); c.version != "" && time.Since(c.versionFetchedAt) < ttlVersion {
-		v, src := c.version, c.versionSource
-		p.cacheMu.Unlock()
-		return v, src, nil
+	if c := p.cacheLocked(cacheKey); !c.versionFetchedAt.IsZero() {
+		age := time.Since(c.versionFetchedAt)
+		if c.versionErr == "" && age < ttlVersion {
+			v, src := c.version, c.versionSource
+			p.cacheMu.Unlock()
+			return v, src, nil
+		}
+		if c.versionErr != "" && age < ttlVersionFailure {
+			msg := c.versionErr
+			p.cacheMu.Unlock()
+			return "", "", errors.New(msg)
+		}
 	}
 	p.cacheMu.Unlock()
 
 	version, source, err := detectCopilotVersion(ctx, ghBinary, copilotBinary)
-	if err != nil {
+	if err != nil && ctx.Err() != nil {
+		// Cancelled mid-probe: that says nothing about the extension.
 		return "", "", err
 	}
 
@@ -451,9 +493,16 @@ func (p *Provider) detectAndCacheVersion(ctx context.Context, cacheKey, ghBinary
 	c := p.cacheLocked(cacheKey)
 	c.version = version
 	c.versionSource = source
+	c.versionErr = ""
+	if err != nil {
+		c.versionErr = err.Error()
+	}
 	c.versionFetchedAt = time.Now()
 	p.cacheMu.Unlock()
 
+	if err != nil {
+		return "", "", err
+	}
 	return version, source, nil
 }
 

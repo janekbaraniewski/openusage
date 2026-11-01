@@ -104,6 +104,8 @@ journalctl --user-unit openusage-telemetry.service --since "10 min ago"
 
 The log files in `~/.local/state/openusage/` are also written on Linux when the unit redirects stdout/stderr.
 
+When stderr is a log file (as it is under launchd or systemd), the daemon skips the "missing integrations" hint, because the hint needs a full auto-detect pass on every start. Run `openusage telemetry daemon run` in a terminal, or `openusage integrations list`, to see it. A failed start, such as another daemon already owning the socket, logs only the error and not the full usage text.
+
 ## Missing or duplicate events
 
 ### Spool not draining

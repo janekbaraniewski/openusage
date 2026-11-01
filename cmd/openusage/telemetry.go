@@ -206,20 +206,7 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			resolvedPoll = resolvedInterval
 		}
 
-		// Check for actionable integrations and print advisory hints.
-		detected := detect.AutoDetect()
-		dirs := integrations.NewDefaultDirs()
-		matches := integrations.MatchDetected(integrations.AllDefinitions(), detected, dirs)
-		var actionableIDs []string
-		for _, m := range matches {
-			if m.Actionable {
-				actionableIDs = append(actionableIDs, string(m.Definition.ID))
-			}
-		}
-		if len(actionableIDs) > 0 {
-			fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
-			fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
-		}
+		printIntegrationHints()
 
 		return daemon.RunServer(daemon.Config{
 			DBPath:          strings.TrimSpace(dbPath),
@@ -245,6 +232,9 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			"  openusage telemetry daemon uninstall",
 		}, "\n"),
 		RunE: runDaemon,
+		// A failed start (e.g. another daemon already owns the socket) must
+		// not dump the full usage text into the service's stderr log.
+		SilenceUsage: true,
 	}
 
 	defaultSocketPath, _ := telemetry.DefaultSocketPath()
@@ -288,6 +278,35 @@ func newDaemonRunCommand(runE func(cmd *cobra.Command, args []string) error) *co
 		Use:   "run",
 		Short: "Run the telemetry daemon server",
 		RunE:  runE,
+		// launchd/systemd run this; see the daemon command's SilenceUsage.
+		SilenceUsage: true,
+	}
+}
+
+// integrationHintsWanted reports whether the daemon should print the
+// "missing integrations" hint. The hint needs a full AutoDetect, so it only
+// runs when someone is watching stderr: under launchd/systemd stderr is a
+// log file, and the hint would cost every daemon start ~1s for nobody.
+var integrationHintsWanted = stderrIsTerminal
+
+// printIntegrationHints prints advisory hints for detected tools that are
+// missing their telemetry integration.
+func printIntegrationHints() {
+	if !integrationHintsWanted() {
+		return
+	}
+	detected := detect.AutoDetect()
+	dirs := integrations.NewDefaultDirs()
+	matches := integrations.MatchDetected(integrations.AllDefinitions(), detected, dirs)
+	var actionableIDs []string
+	for _, m := range matches {
+		if m.Actionable {
+			actionableIDs = append(actionableIDs, string(m.Definition.ID))
+		}
+	}
+	if len(actionableIDs) > 0 {
+		fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
+		fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
 	}
 }
 
