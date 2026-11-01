@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 )
 
 type sessionEvent struct {
@@ -124,15 +123,23 @@ func walkSessionFileFrom(path string, byteOffset int64, startLine int, fn func(s
 // filesystem snapshot without consuming bytes appended after it was taken.
 // A negative endOffset reads through the current EOF.
 func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startLine int, fn func(sessionLine) error) (int64, int, error) {
-	f, err := os.Open(path)
+	return walkSessionLines(path, byteOffset, endOffset, startLine, nil, fn)
+}
+
+// sessionLineFilter reports whether a line with the given top-level record
+// type and payload type (nil when not visible in the prefix) must be decoded.
+// It lets callers skip json.Unmarshal for record kinds they never read, which
+// is most of the bytes in a rollout (compacted history, messages, reasoning).
+type sessionLineFilter func(recordType, payloadType []byte) bool
+
+// walkSessionLines is walkSessionFileRange with an optional prefix filter.
+// Lines rejected by keep are still counted and consumed, only not decoded.
+func walkSessionLines(path string, byteOffset int64, endOffset int64, startLine int, keep sessionLineFilter, fn func(sessionLine) error) (int64, int, error) {
+	f, err := openSessionFile(path, byteOffset)
 	if err != nil {
 		return byteOffset, startLine, err
 	}
 	defer f.Close()
-
-	if _, err := f.Seek(byteOffset, io.SeekStart); err != nil {
-		return byteOffset, startLine, err
-	}
 
 	var source io.Reader = f
 	if endOffset >= 0 {
@@ -147,6 +154,11 @@ func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startL
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > maxScannerBufferSize {
+			// An oversized record still being written is left for the next
+			// cycle, so the resume offset never lands mid-line.
+			if readErr == io.EOF && line[len(line)-1] != '\n' {
+				return nextOffset, lineNumber, nil
+			}
 			// Skip oversized lines (e.g., compacted history with huge prior conversation
 			// like 13.6M in 2026/08/13 rollout) instead of failing the whole file,
 			// so token counts for other lines still contribute to Model Burn.
@@ -172,6 +184,15 @@ func walkSessionFileRange(path string, byteOffset int64, endOffset int64, startL
 
 		lineNumber++
 		nextOffset += int64(len(line))
+		if keep != nil && !keepSessionLine(line, keep) {
+			if readErr == io.EOF {
+				return nextOffset, lineNumber, nil
+			}
+			if readErr != nil {
+				return nextOffset, lineNumber, readErr
+			}
+			continue
+		}
 		if record, ok := decodeSessionLine(line, lineNumber); ok {
 			if err := fn(record); err != nil {
 				return nextOffset, lineNumber, err
@@ -233,4 +254,60 @@ func decodeSessionLine(line []byte, lineNumber int) (sessionLine, bool) {
 		return sessionLine{}, false
 	}
 	return record, true
+}
+
+// keepSessionLine applies keep to the record kind read from the line prefix.
+// Lines whose prefix does not have the expected shape are always kept, so an
+// unexpected writer format falls back to a full decode instead of being lost.
+func keepSessionLine(line []byte, keep sessionLineFilter) bool {
+	recordType, payloadType, ok := sessionLineKind(line)
+	if !ok {
+		return true
+	}
+	return keep(recordType, payloadType)
+}
+
+// sessionLineKind reads the record type and payload type from the fixed
+// prefix Codex writes on every rollout line:
+//
+//	{"timestamp":"...","type":"event_msg","payload":{"type":"token_count",...
+//
+// with an optional "ordinal":N between timestamp and type. payloadType is nil
+// when the payload does not open with a type key. ok is false when the line
+// does not match this shape at all.
+func sessionLineKind(line []byte) (recordType, payloadType []byte, ok bool) {
+	rest, found := bytes.CutPrefix(line, []byte(`{"timestamp":"`))
+	if !found {
+		return nil, nil, false
+	}
+	end := bytes.IndexByte(rest, '"')
+	if end < 0 {
+		return nil, nil, false
+	}
+	rest = rest[end+1:]
+	if after, hasOrdinal := bytes.CutPrefix(rest, []byte(`,"ordinal":`)); hasOrdinal {
+		digits := 0
+		for digits < len(after) && after[digits] >= '0' && after[digits] <= '9' {
+			digits++
+		}
+		if digits == 0 {
+			return nil, nil, false
+		}
+		rest = after[digits:]
+	}
+	rest, found = bytes.CutPrefix(rest, []byte(`,"type":"`))
+	if !found {
+		return nil, nil, false
+	}
+	end = bytes.IndexByte(rest, '"')
+	if end < 0 {
+		return nil, nil, false
+	}
+	recordType = rest[:end]
+	if after, hasPayloadType := bytes.CutPrefix(rest[end+1:], []byte(`,"payload":{"type":"`)); hasPayloadType {
+		if end = bytes.IndexByte(after, '"'); end >= 0 {
+			payloadType = after[:end]
+		}
+	}
+	return recordType, payloadType, true
 }

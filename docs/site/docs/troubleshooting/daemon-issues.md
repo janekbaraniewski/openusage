@@ -65,7 +65,7 @@ From the release after 0.25.1, the dashboard:
 
 - waits for launchd to finish unloading the old service and retries the bootstrap on error 5 or 37,
 - serialises reinstalls across OpenUsage processes with a lock file (`~/.local/state/openusage/daemon.install.lock`),
-- upgrades the service automatically at most once per process and never downgrades it,
+- upgrades the service automatically only from an older release to a newer release, at most once every 30 minutes, and never downgrades it (`dev` and local builds never replace a running helper; see [Install](../daemon/install.md)),
 - keeps going with the helper that is running and shows a yellow warning instead of stopping on the startup screen.
 
 Old dashboards that are still running don't have these fixes, so they can still reinstall their own version.
@@ -141,6 +141,12 @@ Tail them while reproducing the issue:
 
 ```bash
 tail -f ~/.local/state/openusage/daemon.stderr.log
+```
+
+Each daemon start and exit is logged with a timestamp, version, and PID. To see how often the helper restarted and which builds started it:
+
+```bash
+grep 'daemon start' ~/.local/state/openusage/daemon.stderr.log | tail -20
 ```
 
 ### journald (Linux)

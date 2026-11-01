@@ -53,6 +53,10 @@ func (p *Pipeline) Flush(ctx context.Context, limit int) (FlushResult, error) {
 	pending, readErr := p.spool.ReadOldest(limit)
 	result := FlushResult{Processed: len(pending)}
 
+	// Decode first, then write every decodable record in batched
+	// transactions; acks follow the per-record outcome.
+	reqs := make([]IngestRequest, 0, len(pending))
+	paths := make([]string, 0, len(pending))
 	for _, item := range pending {
 		var req IngestRequest
 		if err := json.Unmarshal(item.Record.Payload, &req); err != nil {
@@ -60,22 +64,25 @@ func (p *Pipeline) Flush(ctx context.Context, limit int) (FlushResult, error) {
 			_ = p.spool.MarkFailed(item.Path, truncateErr("decode request", err))
 			continue
 		}
+		reqs = append(reqs, req)
+		paths = append(paths, item.Path)
+	}
 
-		ingestResult, err := p.store.Ingest(ctx, req)
-		if err != nil {
+	for i, outcome := range p.store.IngestBatch(ctx, reqs) {
+		path := paths[i]
+		if outcome.Err != nil {
 			result.Failed++
-			_ = p.spool.MarkFailed(item.Path, truncateErr("ingest", err))
+			_ = p.spool.MarkFailed(path, truncateErr("ingest", outcome.Err))
 			continue
 		}
-
-		if ingestResult.Deduped {
+		if outcome.Result.Deduped {
 			result.Deduped++
 		} else {
 			result.Ingested++
 		}
-		if err := p.spool.Ack(item.Path); err != nil {
+		if err := p.spool.Ack(path); err != nil {
 			result.Failed++
-			_ = p.spool.MarkFailed(item.Path, truncateErr("ack", err))
+			_ = p.spool.MarkFailed(path, truncateErr("ack", err))
 		}
 	}
 

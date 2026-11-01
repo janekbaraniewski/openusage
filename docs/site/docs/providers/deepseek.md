@@ -74,7 +74,7 @@ Each poll (default every 30 seconds in daemon mode) makes two calls under `https
 
 ### Auth status
 
-- Source: HTTP status code. `401`/`403` → `auth`; `429` → `limited`; otherwise `ok` (unless `account_available` is false, which forces `error`).
+- Source: HTTP status code. `401`/`403` → `auth`; `429` → `limited`; `5xx` → `error`; otherwise `ok` (unless `account_available` is false, which forces `error`).
 
 ### What's NOT tracked
 

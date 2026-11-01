@@ -1,10 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
+
+	"github.com/janekbaraniewski/openusage/internal/config"
 )
 
 func TestAssembleTemplate(t *testing.T) {
@@ -50,12 +58,12 @@ func TestValidateTemplate(t *testing.T) {
 func TestLastStatusRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	if _, ok := readLastStatus(); ok {
+	if _, ok := readLastStatus(""); ok {
 		t.Fatal("expected no cached status in a fresh HOME")
 	}
 
-	writeLastStatus("🤖 5h 15% $6.79/today")
-	got, ok := readLastStatus()
+	writeLastStatus("", "🤖 5h 15% $6.79/today")
+	got, ok := readLastStatus("")
 	if !ok {
 		t.Fatal("expected a cached status after write")
 	}
@@ -64,9 +72,191 @@ func TestLastStatusRoundTrip(t *testing.T) {
 	}
 
 	// A blank render must not be treated as a usable cached status.
-	writeLastStatus("   ")
-	if _, ok := readLastStatus(); ok {
+	writeLastStatus("", "   ")
+	if _, ok := readLastStatus(""); ok {
 		t.Fatal("blank status should not count as a cache hit")
+	}
+}
+
+// ageLastStatus backdates the cache file far past any TTL.
+func ageLastStatus(t *testing.T, key string) {
+	t.Helper()
+	old := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(lastStatusPath(key), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmitTmuxStatus_DegradedServesOldCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const good = "🤖 5h 15% $6.79/today"
+	writeLastStatus("", good)
+	ageLastStatus(t, "")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "✨", true, nil)
+	if got := buf.String(); got != good+"\n" {
+		t.Fatalf("degraded render with old cache: got %q, want last good status", got)
+	}
+	if last, _ := readLastStatus(""); last != good {
+		t.Fatalf("degraded render overwrote the cache: %q", last)
+	}
+}
+
+func TestEmitTmuxStatus_DegradedWithoutCacheIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "✨", true, nil)
+	if got := buf.String(); got != "\n" {
+		t.Fatalf("degraded render without cache: got %q, want empty line", got)
+	}
+	if _, ok := readLastStatus(""); ok {
+		t.Fatal("degraded render must not be written to the cache")
+	}
+}
+
+func TestEmitTmuxStatus_ErrorWithoutCacheIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "", false, errors.New("daemon read timed out"))
+	if got := buf.String(); got != "\n" {
+		t.Fatalf("failed render without cache: got %q, want empty line", got)
+	}
+}
+
+func TestEmitTmuxStatus_ErrorServesOldCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writeLastStatus("", "good")
+	ageLastStatus(t, "")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "", false, errors.New("boom"))
+	if got := buf.String(); got != "good\n" {
+		t.Fatalf("failed render with old cache: got %q", got)
+	}
+}
+
+func TestEmitTmuxStatus_CleanRenderUpdatesCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writeLastStatus("", "old")
+
+	var buf bytes.Buffer
+	emitTmuxStatus(&buf, "", "new", false, nil)
+	if got := buf.String(); got != "new\n" {
+		t.Fatalf("clean render: got %q", got)
+	}
+	if last, _ := readLastStatus(""); last != "new" {
+		t.Fatalf("clean render did not refresh the cache: %q", last)
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	fn()
+	_ = w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func TestRunTmuxRender_FreshCacheShortCircuits(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX", "/tmp/tmux-test,1,0")
+	// Point the daemon socket somewhere that does not exist, so if the
+	// short-circuit failed the render could only produce "?" or a fallback.
+	t.Setenv("OPENUSAGE_TELEMETRY_SOCKET", filepath.Join(home, "missing.sock"))
+
+	const cached = "#[fg=#FF6600]cached 5h 42%"
+	writeLastStatus("", cached)
+
+	cmd := newTmuxCommand()
+	cmd.SetArgs([]string{})
+	out := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+	})
+	if out != cached+"\n" {
+		t.Fatalf("fresh cache not served verbatim: got %q", out)
+	}
+}
+
+func TestReadFreshStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeLastStatus("", "fresh")
+	now := time.Now()
+	if got, ok := readFreshStatus("", now); !ok || got != "fresh" {
+		t.Fatalf("expected fresh hit, got %q ok=%v", got, ok)
+	}
+
+	// Different flags use a different file.
+	if _, ok := readFreshStatus("abcd", now); ok {
+		t.Fatal("a different flag fingerprint must not share the cache")
+	}
+
+	// Past tmuxFreshTTL: no short-circuit, but still usable as a fallback.
+	if _, ok := readFreshStatus("", now.Add(tmuxFreshTTL+time.Second)); ok {
+		t.Fatal("expired cache must not short-circuit")
+	}
+	path := lastStatusPath("")
+	old := now.Add(-tmuxFreshTTL - time.Second)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readFreshStatus("", now); ok {
+		t.Fatal("expired cache must not short-circuit")
+	}
+	if _, ok := readLastStatus(""); !ok {
+		t.Fatal("expired fresh cache should still serve as the degraded fallback")
+	}
+
+	// Editing settings.json after the render invalidates the short-circuit.
+	writeLastStatus("", "fresh")
+	cfgPath := config.ConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(cfgPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readFreshStatus("", time.Now()); ok {
+		t.Fatal("a settings.json newer than the cache must bypass the short-circuit")
+	}
+}
+
+func TestTmuxCacheKeyDependsOnFlags(t *testing.T) {
+	plain := newTmuxCommand()
+	if err := plain.ParseFlags([]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tmuxCacheKey(plain); got != "" {
+		t.Fatalf("plain invocation should use the legacy key, got %q", got)
+	}
+	a := newTmuxCommand()
+	_ = a.ParseFlags([]string{"--preset", "minimal"})
+	b := newTmuxCommand()
+	_ = b.ParseFlags([]string{"--preset", "claude-focused"})
+	if tmuxCacheKey(a) == "" || tmuxCacheKey(a) == tmuxCacheKey(b) {
+		t.Fatalf("distinct flags must produce distinct keys: %q vs %q", tmuxCacheKey(a), tmuxCacheKey(b))
 	}
 }
 

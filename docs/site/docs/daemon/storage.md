@@ -32,7 +32,8 @@ openusage telemetry daemon run --db-path /var/data/openusage/telemetry.db
 | `usage_events` | Canonical normalized events. One row per turn, message, tool call, or limit snapshot. |
 | `usage_raw_events` | Untouched payload bodies with a schema discriminator. Useful for replay and debugging. |
 | `usage_rollup_daily` | Daily downsample of `usage_events` (per day × provider/account/model/tool/project/status). Kept long-term so raw rows past the hot window can be pruned without losing the shape of history. |
-| `balance_observations` | Compact numeric time-series of balance/credit metrics per provider/account. |
+| `balance_observations` | Compact numeric time-series of money metrics per provider/account: metrics a provider declares as credit metrics, the credit/balance keys used for windowed spend, and metrics in a currency unit. Token, session and request counters are not recorded. |
+| `usage_event_changes` | Change log that lets the read model update incrementally. Bounded to about 200k rows, always keeping the newest 10k sequence numbers. |
 | `daemon_meta` | Key/value daemon state (e.g. the rollup watermark). |
 
 Event types written into `usage_events.event_type`:
@@ -130,10 +131,12 @@ The daemon runs, in order each cycle:
    so the blob is only replay/debug detail.
 
    One exception: the newest `limit_snapshot` per provider/account keeps its
-   payload permanently. That payload *is* the provider's quota state — it is
+   payload permanently. That payload *is* the provider's quota state: it is
    what the daemon reads back to rebuild a tile's metrics, and no column in
    `usage_events` can substitute for it. Superseded snapshots are still cleared,
-   and they are the bulk of the volume.
+   and they are the bulk of the volume. A poll whose snapshot is identical to
+   the newest stored one does not write a new row; it only moves that row's
+   timestamp forward.
 
 ```json
 {
@@ -150,10 +153,30 @@ keeps the long-term shape regardless. There is no hard upper wall beyond a
 
 :::note Late-arriving / re-imported history
 Local-file sources (codex, opencode, …) re-derive events from their own session
-logs each cycle. Because the hot window (90d) is at least as long as that
-re-import lookback, re-imported events land inside the hot window and are simply
-deduplicated — they do not fight retention.
+logs each cycle and re-read their full history after a restart. Re-imported
+events inside the hot window are deduplicated. Events that are both older than
+the hot window and on a day already in the daily rollup are skipped at ingest,
+since retention would delete them straight away. Until the first rollup has run,
+nothing is skipped, so a first import always reaches the rollup.
 :::
+
+## Write path and maintenance
+
+- **Batched ingest.** Events are written up to 500 per transaction with
+  prepared statements. Each event runs inside its own savepoint, so a bad event
+  is rolled back on its own and the rest of the batch still commits.
+- **WAL checkpoints.** Every 60 seconds the daemon runs a `PASSIVE` checkpoint,
+  which never blocks readers or writers. It switches to `TRUNCATE` only when the
+  WAL is larger than 64 MB, and on shutdown.
+- **Memory limit.** The daemon sets a soft Go memory limit of 1 GiB at start,
+  so the garbage collector works harder before the heap grows past it. Override
+  it with `OPENUSAGE_DAEMON_MEMORY_LIMIT` (for example `2GiB`, or `off`). A
+  `GOMEMLIMIT` already set in the environment takes precedence.
+- **Upgrade cleanup.** On first start after upgrading, a one-time migration
+  deletes the non-money rows from `balance_observations`, and two redundant
+  indexes are dropped. The freed pages are reused by SQLite, but the file does
+  not shrink on its own. To return the space to the OS, stop the daemon and run
+  `sqlite3 ~/.local/state/openusage/telemetry.db 'VACUUM;'`.
 
 :::warning Lowering the window prunes detail
 Lowering `retention_days` lets the next prune delete raw per-event rows older

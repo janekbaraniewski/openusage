@@ -50,7 +50,9 @@ The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.
 :::
 
 :::note
-Claude Code re-runs the statusline on every message, so each render reads only the conversation logs modified in the last 24 hours, plus every log of the current session. Older history can't change today's cost, the active block, or the context window, so skipping it keeps each render well under a second, even with gigabytes of history. The session figure still covers the whole conversation.
+Claude Code re-runs the statusline on every message, so each render reads only the conversation logs modified since local midnight or in the last 10 hours, whichever reaches further back, plus every log of the current session. Older history can't change today's cost, the active block, or the context window, so skipping it keeps each render well under a second, even with gigabytes of history. The session figure still covers the whole conversation.
+
+On top of that, the last rendered line is cached per session in `~/.cache/openusage/statusline-render-*`. If the session input, the transcript file (its modification time and size) and the statusline flags are unchanged and the cached line is less than 10 seconds old, it is printed as is, without reading logs or contacting the daemon. A new message changes the transcript, so it always triggers a fresh render. Cache files for sessions idle for a day are removed automatically.
 :::
 
 ## Customize

@@ -257,6 +257,12 @@ func launchdPlist(exePath, socketPath, stdoutPath, stderrPath string, env map[st
 	</dict>
 	<key>ThrottleInterval</key>
 	<integer>30</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>Nice</key>
+	<integer>10</integer>
 	<key>StandardOutPath</key>
 	<string>%s</string>
 	<key>StandardErrorPath</key>

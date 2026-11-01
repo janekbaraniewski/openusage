@@ -15,7 +15,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // already in go.mod for cursor provider
@@ -128,11 +130,39 @@ func getClaudeSessionCookies() (map[string]string, error) {
 // Try each in order so we work across versions.
 var claudeSafeStorageAccounts = []string{"Claude Key", "Claude"}
 
+// chromiumKeyCache holds the derived Safe Storage key for the process
+// lifetime so each usage poll does not spawn `security` and re-run PBKDF2.
+// Only successful lookups are cached.
+var chromiumKeyCache struct {
+	sync.Mutex
+	key []byte
+}
+
+// securityLookupTimeout bounds each `security` subprocess. A keychain prompt
+// or a wedged securityd must not stall the poll.
+const securityLookupTimeout = 5 * time.Second
+
 func getChromiumEncryptionKey() ([]byte, error) {
+	chromiumKeyCache.Lock()
+	defer chromiumKeyCache.Unlock()
+	if chromiumKeyCache.key != nil {
+		return chromiumKeyCache.key, nil
+	}
+	key, err := lookupChromiumEncryptionKey()
+	if err != nil {
+		return nil, err
+	}
+	chromiumKeyCache.key = key
+	return key, nil
+}
+
+func lookupChromiumEncryptionKey() ([]byte, error) {
 	var lastErr error
 	for _, account := range claudeSafeStorageAccounts {
-		cmd := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", account)
+		ctx, cancel := context.WithTimeout(context.Background(), securityLookupTimeout)
+		cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-w", "-s", "Claude Safe Storage", "-a", account)
 		out, err := cmd.Output()
+		cancel()
 		if err != nil {
 			if !keychainItemNotFound(err) {
 				return nil, fmt.Errorf("keychain lookup for account %q failed: %w", account, err)
@@ -230,7 +260,11 @@ func fetchUsageAPIWithAuth(ctx context.Context, url string, setAuth func(*http.R
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
+		return nil, &usageAPIStatusError{
+			Code:       resp.StatusCode,
+			Body:       string(body),
+			RetryAfter: parseRetryAfterSeconds(resp.Header.Get("Retry-After")),
+		}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -244,6 +278,38 @@ func fetchUsageAPIWithAuth(ctx context.Context, url string, setAuth func(*http.R
 	}
 
 	return &usage, nil
+}
+
+// usageAPIStatusError is a non-200 usage API response. Throttled reports
+// whether it is a 429/5xx, which means "back off", not "this auth is broken".
+type usageAPIStatusError struct {
+	Code       int
+	Body       string
+	RetryAfter time.Duration
+}
+
+func (e *usageAPIStatusError) Error() string {
+	return fmt.Sprintf("API returned %d: %s", e.Code, e.Body)
+}
+
+func (e *usageAPIStatusError) Throttled() bool {
+	return e.Code == http.StatusTooManyRequests || e.Code >= 500
+}
+
+func parseRetryAfterSeconds(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // oauthUsageURL is Anthropic's OAuth-scoped usage endpoint. It is a package

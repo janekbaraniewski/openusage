@@ -10,12 +10,53 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
 )
 
-func (s *Service) runCollectLoop(ctx context.Context) {
-	interval := s.cfg.CollectInterval
-	maxInterval := 5 * time.Minute
-	consecutiveEmpty := 0
+// collectBackoff tracks the adaptive interval of the telemetry collect loop.
+// It backs off when cycles ingest nothing new. Backoff is keyed on newly
+// ingested events, not on how many events collectors returned: several
+// collectors (Ollama, Copilot, Antigravity, Gemini CLI, OpenCode JSONL)
+// re-emit their full history every cycle and rely on store-level dedup, so the
+// returned count never drops to zero on an idle machine.
+type collectBackoff struct {
+	base             time.Duration
+	max              time.Duration
+	interval         time.Duration
+	consecutiveEmpty int
+}
 
-	s.infof("collect_loop_start", "interval=%s", interval)
+const collectBackoffMax = 5 * time.Minute
+
+func newCollectBackoff(base time.Duration) *collectBackoff {
+	return &collectBackoff{base: base, max: collectBackoffMax, interval: base}
+}
+
+// observe records the outcome of one cycle and returns the next interval and
+// whether it changed. Change-triggered cycles that ingest nothing are ignored:
+// noisy filesystem notifications must not accelerate periodic backoff.
+func (b *collectBackoff) observe(ingested int, triggeredByChange bool) (time.Duration, bool) {
+	prev := b.interval
+	if ingested > 0 {
+		b.consecutiveEmpty = 0
+		b.interval = b.base
+		return b.interval, b.interval != prev
+	}
+	if triggeredByChange {
+		return b.interval, false
+	}
+	b.consecutiveEmpty++
+	if b.consecutiveEmpty >= 3 {
+		next := b.interval * 2
+		if next > b.max {
+			next = b.max
+		}
+		b.interval = next
+	}
+	return b.interval, b.interval != prev
+}
+
+func (s *Service) runCollectLoop(ctx context.Context) {
+	backoff := newCollectBackoff(s.cfg.CollectInterval)
+
+	s.infof("collect_loop_start", "interval=%s", backoff.interval)
 	s.collectAndFlush(ctx)
 	for {
 		triggeredByChange := false
@@ -23,35 +64,21 @@ func (s *Service) runCollectLoop(ctx context.Context) {
 		case <-ctx.Done():
 			s.infof("collect_loop_stop", "reason=context_done")
 			return
-		case <-time.After(interval):
+		case <-time.After(backoff.interval):
 		case <-s.collectNow:
 			triggeredByChange = true
 		}
 
-		collected := s.collectAndFlush(ctx)
-		if collected == 0 {
-			// Noisy filesystem notifications must not accelerate periodic
-			// backoff; they already received an immediate collection attempt.
-			if triggeredByChange {
-				continue
-			}
-			consecutiveEmpty++
-			if consecutiveEmpty >= 3 {
-				newInterval := interval * 2
-				if newInterval > maxInterval {
-					newInterval = maxInterval
-				}
-				if newInterval != interval {
-					interval = newInterval
-					s.infof("collect_backoff", "interval=%s empty_cycles=%d", interval, consecutiveEmpty)
-				}
-			}
+		ingested := s.collectAndFlush(ctx)
+		prev := backoff.interval
+		interval, changed := backoff.observe(ingested, triggeredByChange)
+		if !changed {
+			continue
+		}
+		if ingested > 0 {
+			s.infof("collect_reset", "interval=%s→%s ingested=%d", prev, interval, ingested)
 		} else {
-			if consecutiveEmpty > 0 && interval != s.cfg.CollectInterval {
-				s.infof("collect_reset", "interval=%s→%s collected=%d", interval, s.cfg.CollectInterval, collected)
-			}
-			consecutiveEmpty = 0
-			interval = s.cfg.CollectInterval
+			s.infof("collect_backoff", "interval=%s empty_cycles=%d", interval, backoff.consecutiveEmpty)
 		}
 	}
 }
@@ -80,6 +107,9 @@ func (s *Service) pushToExporter(_ context.Context, snaps map[string]core.UsageS
 	s.exp.Ingest(snaps)
 }
 
+// collectAndFlush runs one collection cycle and returns the number of events
+// newly ingested (direct plus backlog flush). Deduplicated re-emissions do not
+// count, so the collect loop can back off while sources are idle.
 func (s *Service) collectAndFlush(ctx context.Context) int {
 	if s == nil {
 		return 0
@@ -134,14 +164,14 @@ func (s *Service) collectAndFlush(ctx context.Context) int {
 		for _, warning := range warnings {
 			s.warnf("collect_warning", "message=%q", warning)
 		}
-		return totalCollected
+		return direct.ingested + flush.Ingested
 	}
 
 	if durationMs >= 1500 && s.shouldLog("collect_slow", 30*time.Second) {
 		s.infof("collect_idle_slow", "duration_ms=%d", durationMs)
 	}
 
-	return totalCollected
+	return direct.ingested + flush.Ingested
 }
 
 const telemetryPayloadMaintenanceBatchSize = 10000

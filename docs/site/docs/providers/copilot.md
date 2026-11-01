@@ -29,8 +29,8 @@ Wraps the `gh` CLI (or the standalone `copilot` binary) to surface Copilot entit
 
 Two paths trigger detection:
 
-1. **gh CLI** — `gh` on `PATH` with the Copilot extension installed
-2. **Standalone CLI** — a `copilot` binary on `PATH` plus a `~/.copilot/` directory
+1. **gh CLI**: `gh` on `PATH` with the Copilot extension installed (`<gh data dir>/extensions/gh-copilot`) or the Copilot CLI that `gh copilot` downloaded (`<gh data dir>/copilot`). The gh data dir is `$GH_DATA_DIR`, else `$XDG_DATA_HOME/gh`, else `%LOCALAPPDATA%\GitHub CLI` on Windows, else `~/.local/share/gh`. Detection only checks these paths. It never runs `gh copilot`.
+2. **Standalone CLI**: a `copilot` binary on `PATH` plus a `~/.copilot/` directory
 
 Run `gh auth status` to confirm you're signed in.
 
@@ -137,6 +137,16 @@ Copilot bills per seat on every plan, so per-turn dollar figures are not meaning
 ### How fresh is the data?
 
 - Polled every 30 s by default. `gh` calls are throttled by GitHub's own rate limit; the values OpenUsage reads include `remaining` and `reset` so you can see headroom.
+- To keep each poll to a few `gh` processes, results are cached per account and host:
+
+  | Data | Cached for |
+  |---|---|
+  | Full snapshot | 2 min (1 min when the status is not OK) |
+  | `gh auth status` | 5 min |
+  | Copilot version | 1 h (10 min when no version command works) |
+  | Org billing and metrics, including 403s for non-admins | 1 h |
+
+- Every `gh` subprocess runs in its own process group. On timeout the whole group is killed, so a child that `gh` started (such as the `copilot` binary behind `gh copilot`) cannot keep the poll hanging.
 
 ## API endpoints used
 

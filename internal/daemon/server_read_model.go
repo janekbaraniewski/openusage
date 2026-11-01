@@ -13,7 +13,7 @@ func (s *Service) computeReadModel(
 	req ReadModelRequest,
 ) (map[string]core.UsageSnapshot, error) {
 	start := time.Now()
-	templates := ReadModelTemplatesFromRequest(req, DisabledAccountsFromConfig())
+	templates := ReadModelTemplatesFromRequest(req, s.disabledAccounts())
 	if len(templates) == 0 {
 		return map[string]core.UsageSnapshot{}, nil
 	}
@@ -107,7 +107,7 @@ func (s *Service) readModelCacheLoopEnabled() bool {
 }
 
 func (s *Service) refreshReadModelCacheFromConfig(ctx context.Context) {
-	req, err := BuildReadModelRequestFromConfig()
+	req, _, err := s.cachedReadModelRequest(ctx)
 	if err != nil {
 		if s.shouldLog("read_model_cache_config_error", 15*time.Second) {
 			s.warnf("read_model_cache_config_error", "error=%v", err)

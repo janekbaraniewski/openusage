@@ -48,7 +48,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 	}
 	started := time.Now()
 
-	accounts, modelNorm, err := LoadAccountsAndNorm()
+	accounts, modelNorm, err := s.cachedAccountsAndNorm(ctx)
 	if err != nil {
 		if s.shouldLog("poll_config_warning", 20*time.Second) {
 			s.warnf("poll_config_warning", "error=%v", err)
@@ -135,6 +135,7 @@ func (s *Service) pollProviders(ctx context.Context) {
 			// Track whether data actually changed for adaptive backoff.
 			changed := s.pollScheduler.SnapshotChanged(account.ID, snap)
 			s.pollScheduler.RecordPoll(account.ID, changed)
+			s.pollScheduler.RecordOutcome(account.ID, snap)
 
 			// Record successful fetch for future change detection.
 			s.pollStateMu.Lock()

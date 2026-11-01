@@ -253,9 +253,9 @@ func populateClaudeCodeSynthetics(c *Context, opts BuildOptions) {
 	if opts.OfflineClaudePricing {
 		mode = claude_code.CostModeCalculate
 	}
-	// tmux re-renders every status-interval; only the active block and the
-	// latest context are shown, so skip logs untouched in the lookback window.
-	events, err := ccevents.Recent(mode, opts.OfflineClaudePricing, opts.Now, "")
+	// tmux re-renders every status-interval and shows only the active block
+	// and the latest context, so read just the block lookback window.
+	events, err := ccevents.Recent(mode, opts.OfflineClaudePricing, ccevents.BlockSince(opts.Now), "")
 	if err != nil || len(events) == 0 {
 		return
 	}

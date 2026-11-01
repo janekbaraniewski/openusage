@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 func (p *Provider) fetchUserInfo(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
@@ -219,7 +220,42 @@ func (p *Provider) fetchRateLimits(ctx context.Context, binary, hostname string,
 	}
 }
 
-func (p *Provider) fetchOrgData(ctx context.Context, binary, hostname string, snap *core.UsageSnapshot) {
+// cachedOrgAPI runs `gh api endpoint` through the per-account org cache:
+// responses and failures are reused for ttlOrgData.
+func (p *Provider) cachedOrgAPI(ctx context.Context, cacheKey, binary, hostname, endpoint string) (string, error) {
+	p.cacheMu.Lock()
+	c := p.cacheLocked(cacheKey)
+	if r, ok := c.orgResponses[endpoint]; ok && time.Since(r.fetchedAt) < ttlOrgData {
+		p.cacheMu.Unlock()
+		if r.err != "" {
+			return "", errors.New(r.err)
+		}
+		return r.body, nil
+	}
+	p.cacheMu.Unlock()
+
+	body, err := runGHAPI(ctx, binary, hostname, endpoint)
+	if err != nil && ctx.Err() != nil {
+		// Cancelled: do not cache a failure the org did not cause.
+		return "", err
+	}
+	entry := cachedAPIResponse{body: body, fetchedAt: time.Now()}
+	if err != nil {
+		entry.body = ""
+		entry.err = err.Error()
+	}
+
+	p.cacheMu.Lock()
+	c = p.cacheLocked(cacheKey)
+	if c.orgResponses == nil {
+		c.orgResponses = make(map[string]cachedAPIResponse)
+	}
+	c.orgResponses[endpoint] = entry
+	p.cacheMu.Unlock()
+	return body, err
+}
+
+func (p *Provider) fetchOrgData(ctx context.Context, cacheKey, binary, hostname string, snap *core.UsageSnapshot) {
 	orgs := snap.Raw["copilot_orgs"]
 	if orgs == "" {
 		return
@@ -230,13 +266,13 @@ func (p *Provider) fetchOrgData(ctx context.Context, binary, hostname string, sn
 		if org == "" {
 			continue
 		}
-		p.fetchOrgBilling(ctx, binary, hostname, org, snap)
-		p.fetchOrgMetrics(ctx, binary, hostname, org, snap)
+		p.fetchOrgBilling(ctx, cacheKey, binary, hostname, org, snap)
+		p.fetchOrgMetrics(ctx, cacheKey, binary, hostname, org, snap)
 	}
 }
 
-func (p *Provider) fetchOrgBilling(ctx context.Context, binary, hostname, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/billing", org))
+func (p *Provider) fetchOrgBilling(ctx context.Context, cacheKey, binary, hostname, org string, snap *core.UsageSnapshot) {
+	body, err := p.cachedOrgAPI(ctx, cacheKey, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/billing", org))
 	if err != nil {
 		return
 	}
@@ -265,8 +301,8 @@ func (p *Provider) fetchOrgBilling(ctx context.Context, binary, hostname, org st
 	}
 }
 
-func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, hostname, org string, snap *core.UsageSnapshot) {
-	body, err := runGHAPI(ctx, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
+func (p *Provider) fetchOrgMetrics(ctx context.Context, cacheKey, binary, hostname, org string, snap *core.UsageSnapshot) {
+	body, err := p.cachedOrgAPI(ctx, cacheKey, binary, hostname, fmt.Sprintf("/orgs/%s/copilot/metrics", org))
 	if err != nil {
 		return
 	}
@@ -352,7 +388,9 @@ func (p *Provider) fetchOrgMetrics(ctx context.Context, binary, hostname, org st
 
 func runGH(ctx context.Context, binary string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, binary, args...)
+	// gh copilot starts a separate copilot binary; kill the whole group on
+	// timeout so that child cannot hold the pipes open (#446).
+	cmd := shared.CommandContext(ctx, binary, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 

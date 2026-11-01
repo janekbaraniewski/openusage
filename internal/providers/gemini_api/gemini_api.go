@@ -94,7 +94,7 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 	}
 	shared.ApplyStatusFromResponse(resp, &snap)
 	switch snap.Status {
-	case core.StatusAuth:
+	case core.StatusAuth, core.StatusError:
 		return snap, nil
 	case core.StatusLimited:
 		p.parseRetryInfo(resp.Body, &snap)

@@ -36,6 +36,11 @@ type ReadModelRequest struct {
 
 type ReadModelResponse struct {
 	Snapshots map[string]core.UsageSnapshot `json:"snapshots"`
+	// Pending is set when the daemon had nothing cached for the request and
+	// could not finish computing it within the caller's budget. Snapshots
+	// then holds empty templates; the compute continues in the background and
+	// a retry shortly after is served from cache.
+	Pending bool `json:"pending,omitempty"`
 }
 
 type HookResponse struct {
@@ -65,13 +70,13 @@ type cachedReadModelEntry struct {
 type readModelCache struct {
 	mu       sync.RWMutex
 	entries  map[string]cachedReadModelEntry
-	inFlight map[string]bool
+	inFlight map[string]chan struct{} // closed when the refresh for the key ends
 }
 
 func newReadModelCache() *readModelCache {
 	return &readModelCache{
 		entries:  make(map[string]cachedReadModelEntry),
-		inFlight: make(map[string]bool),
+		inFlight: make(map[string]chan struct{}),
 	}
 }
 
@@ -137,17 +142,31 @@ func (c *readModelCache) beginRefresh(cacheKey string) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.inFlight[cacheKey] {
+	if _, running := c.inFlight[cacheKey]; running {
 		return false
 	}
-	c.inFlight[cacheKey] = true
+	c.inFlight[cacheKey] = make(chan struct{})
 	return true
 }
 
 func (c *readModelCache) endRefresh(cacheKey string) {
 	c.mu.Lock()
-	delete(c.inFlight, cacheKey)
+	if done, ok := c.inFlight[cacheKey]; ok {
+		close(done)
+		delete(c.inFlight, cacheKey)
+	}
 	c.mu.Unlock()
+}
+
+// refreshDone returns a channel closed when the in-flight refresh for
+// cacheKey ends, or nil when none is running.
+func (c *readModelCache) refreshDone(cacheKey string) <-chan struct{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if done, ok := c.inFlight[cacheKey]; ok {
+		return done
+	}
+	return nil
 }
 
 type ingestTally struct {

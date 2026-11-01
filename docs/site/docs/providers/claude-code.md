@@ -151,6 +151,7 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 - Source (macOS): the Claude **desktop app's** session cookies, decrypted from the macOS keychain, are used to call the usage API above.
 - Source (fallback, all platforms): when desktop-app cookie extraction is unavailable — anywhere but macOS, or when the desktop app isn't installed — the provider reads the Claude Code CLI's own OAuth access token from `~/.claude/.credentials.json` and calls `GET https://api.anthropic.com/api/oauth/usage`. This needs no organization UUID (the token is account-scoped) and no desktop app, so the 5h/7d gauges work on Linux and Windows. An expired token is skipped (Claude Code refreshes it on next use).
 - Transform: the response (same `five_hour` / `seven_day` utilization shape from either source) populates the gauges and warms the shared 5h cache read by the statusline and tmux segments.
+- Rate: a successful response is reused for 3 minutes, so the usage API is called at most once per 3 minutes however often the provider is polled. On HTTP 429 or 5xx the provider keeps the auth method that worked, serves the cached response, and backs off from 1 minute, doubling each time up to 30 minutes, or longer if `Retry-After` asks for it (also capped at 30 minutes). The desktop app's keychain key is looked up once per process, and each `security` lookup times out after 5 seconds.
 
 ### Auth status
 
@@ -163,7 +164,8 @@ Family is matched by substring on the model name (e.g. `claude-3-5-sonnet-…` �
 
 ### How fresh is the data?
 
-- Polling: every 30 s by default. JSONL files are re-parsed only when their mtime/size changes; otherwise served from cache. Each file's all-time totals are cached too, so a poll where only the live session grew recomputes that one file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Polling: every 30 s by default. Each JSONL file is read incrementally: a poll decodes only the lines appended since the previous poll, and a line still being written is picked up once it is complete. A file that shrank or was replaced is read again from the start. When the new lines are newer than everything already counted (the normal case for a live session), the all-time totals are updated with just those lines instead of being recomputed across every file. The today, 7-day, and 5-hour-block figures are recomputed each poll from recent records only.
+- Change detection: the dashboard re-polls when any session file under `~/.claude/projects` changes, including appends to files in nested project folders.
 - Hook (when integration is installed): real-time per turn.
 
 ## Files read

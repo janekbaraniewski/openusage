@@ -334,6 +334,28 @@ func writeJSONObjectWithBackup(path string, cfg map[string]any) error {
 func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) error {
 	in := readStatuslineInput(stdin)
 
+	// Claude Code re-runs the statusline several times a minute. When nothing it
+	// depends on has changed (same session input, same transcript mtime/size,
+	// same options) and the last render is fresh, reprint it verbatim and skip
+	// the log parse and daemon round trip. Any cache error falls through to a
+	// normal render.
+	key := statuslineCacheKey(in, opts)
+	if line, ok := readStatuslineCache(in.SessionID, key, time.Now()); ok {
+		fmt.Fprintln(stdout, line)
+		return nil
+	}
+
+	line := statuslineRender(in, opts)
+	writeStatuslineCache(in.SessionID, key, line)
+	fmt.Fprintln(stdout, line)
+	return nil
+}
+
+// statuslineRender does the full (uncached) render. It is a variable so tests
+// can count how often the slow path runs.
+var statuslineRender = renderStatuslineFresh
+
+func renderStatuslineFresh(in statuslineInput, opts statuslineOptions) string {
 	// The 5h usage-window % is rate-limit data the daemon collects; resolve it
 	// only when the segment is shown (cache-first, so most renders are instant).
 	fiveHourPct, haveFiveHour := 0.0, false
@@ -346,13 +368,13 @@ func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) er
 	var events []report.Event
 	if statuslineNeedsLogs(opts) {
 		// Claude Code re-runs the statusline on every message, so only read
-		// recently-touched logs (plus this session's) instead of the full history.
-		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, time.Now(), in.SessionID); err == nil {
+		// logs touched today or within the block lookback (plus this
+		// session's) instead of the full history.
+		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, ccevents.TodaySince(time.Now()), in.SessionID); err == nil {
 			events = evs
 		}
 	}
-	fmt.Fprintln(stdout, renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts))
-	return nil
+	return renderStatusline(in, events, fiveHourPct, haveFiveHour, time.Now(), opts)
 }
 
 // statuslineNeedsLogs reports whether any shown segment is derived from the

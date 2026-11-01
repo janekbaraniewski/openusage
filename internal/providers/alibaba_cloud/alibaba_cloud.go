@@ -101,8 +101,11 @@ func (p *Provider) Fetch(ctx context.Context, acct core.AccountConfig) (core.Usa
 
 	// Fetch quotas data
 	var quotasResp quotasResponse
-	statusCode, _, err := shared.FetchJSON(ctx, baseURL+"/quotas", apiKey, &quotasResp, p.Client())
+	statusCode, quotaHeaders, err := shared.FetchJSON(ctx, baseURL+"/quotas", apiKey, &quotasResp, p.Client())
 	if err != nil {
+		if statusCode == http.StatusTooManyRequests || statusCode >= 500 {
+			shared.ApplyRetryAfter(quotaHeaders, &snap)
+		}
 		// FetchJSON returns an error for non-200 status codes; handle gracefully.
 		switch {
 		case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:

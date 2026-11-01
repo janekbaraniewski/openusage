@@ -73,6 +73,14 @@ func ApplyCanonicalTelemetryViewWithOptions(
 			time.Since(totalStart).Milliseconds(), options.TimeWindow, options.Since.Format(time.RFC3339), len(snaps))
 	}()
 
+	// Rolling windows (3d/7d/30d) compute Since from time.Now(), so every
+	// request carried a distinct nanosecond boundary and the usage-view cache
+	// (which requires an exact Since match) never hit. Minute resolution is
+	// far below anything the dashboard can show.
+	if !options.Since.IsZero() {
+		options.Since = options.Since.Truncate(time.Minute)
+	}
+
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
 		var err error

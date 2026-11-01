@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/exporter"
 	"github.com/janekbaraniewski/openusage/internal/providers"
@@ -52,6 +53,10 @@ type Service struct {
 	// state that needs to be reproducible in tests. Defaults to
 	// core.SystemClock{}; tests can override via WithClock.
 	clock core.Clock
+
+	// accounts caches the resolved account set; use accountsCache().
+	accountsOnce sync.Once
+	accounts     *accountsCache
 }
 
 func (s *Service) markDataIngested() {
@@ -107,6 +112,7 @@ func RunServer(cfg Config) error {
 }
 
 func startService(ctx context.Context, cfg Config) (*Service, error) {
+	memLimit := applyDaemonMemoryLimit()
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		defaultDBPath, err := telemetry.DefaultDBPath()
 		if err != nil {
@@ -153,6 +159,11 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	}
 
 	telemetrySources := telemetrySourcesBySystem()
+	for _, source := range telemetrySources {
+		if stateful, ok := source.(shared.TelemetryStatefulSource); ok {
+			stateful.SetTelemetryStateStore(store)
+		}
+	}
 	svc := &Service{
 		cfg:              cfg,
 		ctx:              ctx,
@@ -172,7 +183,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 
 	svc.infof(
 		"daemon_start",
-		"socket=%s db=%s spool=%s collect_interval=%s poll_interval=%s collectors=%d providers=%d",
+		"socket=%s db=%s spool=%s collect_interval=%s poll_interval=%s collectors=%d providers=%d mem_limit_mb=%d",
 		svc.cfg.SocketPath,
 		svc.cfg.DBPath,
 		svc.cfg.SpoolDir,
@@ -180,6 +191,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 		svc.cfg.PollInterval,
 		len(telemetrySources),
 		len(svc.providerByID),
+		memLimit>>20,
 	)
 
 	if err := svc.startSocketServer(ctx); err != nil {
@@ -195,6 +207,7 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 			svc.infof(key, "%s", msg)
 		}
 	})
+	svc.accountsCache().warm(ctx)
 	go svc.runCollectLoop(ctx)
 	go svc.runPollLoop(ctx)
 	go svc.runReadModelCacheLoop(ctx)
@@ -219,13 +232,6 @@ func (s *Service) Close() error {
 }
 
 // --- Ingest helpers ---
-
-func (s *Service) ingestRequest(ctx context.Context, req telemetry.IngestRequest) (telemetry.IngestResult, error) {
-	if s == nil || s.store == nil {
-		return telemetry.IngestResult{}, fmt.Errorf("telemetry store unavailable")
-	}
-	return s.store.Ingest(ctx, req)
-}
 
 func (s *Service) ingestQuotaSnapshots(ctx context.Context, snapshots map[string]core.UsageSnapshot) error {
 	if s == nil || s.quotaIngest == nil {
@@ -253,6 +259,10 @@ func (s *Service) recordBalanceObservations(ctx context.Context, snapshots map[s
 		spec := provider.Spec()
 		var obs []telemetry.BalanceObservation
 		for key, met := range snap.Metrics {
+			_, declared := spec.CreditMetrics[key]
+			if !telemetry.ShouldRecordBalanceMetric(key, met.Unit, declared) {
+				continue
+			}
 			sem, ok := spec.InferBalanceSemantics(key, met.Window)
 			if !ok || sem == core.BalanceLimit {
 				continue
@@ -287,22 +297,49 @@ func (s *Service) recordBalanceObservations(ctx context.Context, snapshots map[s
 
 func (s *Service) ingestBatch(ctx context.Context, reqs []telemetry.IngestRequest) (ingestTally, []telemetry.IngestRequest) {
 	var tally ingestTally
+	if len(reqs) == 0 {
+		return tally, nil
+	}
+	if s == nil || s.store == nil {
+		tally.processed = len(reqs)
+		tally.failed = len(reqs)
+		return tally, reqs
+	}
+	// Local-file sources re-read their whole history on every restart. Drop
+	// events that retention would delete straight away and whose day is
+	// already in the daily rollup, instead of inserting and re-pruning them.
+	if horizon, err := s.store.LocalIngestHorizon(ctx, s.retentionDays()); err == nil {
+		var dropped int
+		reqs, dropped = telemetry.DropExpiredLocalEvents(reqs, horizon)
+		tally.processed += dropped
+		tally.deduped += dropped
+	}
+
 	var retries []telemetry.IngestRequest
-	for _, req := range reqs {
+	for i, outcome := range s.store.IngestBatch(ctx, reqs) {
 		tally.processed++
-		result, err := s.ingestRequest(ctx, req)
-		if err != nil {
+		if outcome.Err != nil {
 			tally.failed++
-			retries = append(retries, req)
+			retries = append(retries, reqs[i])
 			continue
 		}
-		if result.Deduped {
+		if outcome.Result.Deduped {
 			tally.deduped++
 		} else {
 			tally.ingested++
 		}
 	}
 	return tally, retries
+}
+
+// retentionDays is the configured hot window, defaulting to 30 days when the
+// config is unreadable or unset (matching pruneOldData).
+func (s *Service) retentionDays() int {
+	cfg, err := config.Load()
+	if err != nil || cfg.Data.RetentionDays <= 0 {
+		return 30
+	}
+	return cfg.Data.RetentionDays
 }
 
 func (s *Service) flushBacklog(ctx context.Context, retryReqs []telemetry.IngestRequest, limit int) (telemetry.FlushResult, int, []string) {
@@ -333,12 +370,25 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(s.cfg.SocketPath), 0o755); err != nil {
 		return fmt.Errorf("create telemetry daemon socket dir: %w", err)
 	}
+	// Hold the instance lock across probe, stale-socket removal and bind.
+	// Without it two daemons starting together could both pass the probe,
+	// and the second one's remove+bind would orphan the first one's socket,
+	// leaving it running but unreachable.
+	releaseLock, err := acquireInstanceLock(InstanceLockPath(s.cfg.SocketPath))
+	if err != nil {
+		if errors.Is(err, errInstanceLocked) {
+			return fmt.Errorf("telemetry daemon already running on socket %s: %w", s.cfg.SocketPath, err)
+		}
+		return err
+	}
 	if err := EnsureSocketPathAvailable(s.cfg.SocketPath); err != nil {
+		releaseLock()
 		return err
 	}
 
 	listener, err := net.Listen("unix", s.cfg.SocketPath)
 	if err != nil {
+		releaseLock()
 		return fmt.Errorf("listen telemetry daemon socket: %w", err)
 	}
 	_ = os.Chmod(s.cfg.SocketPath, 0o660)
@@ -365,6 +415,7 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 		_ = server.Shutdown(shutdownCtx)
 		_ = listener.Close()
 		_ = os.Remove(s.cfg.SocketPath)
+		releaseLock()
 	}()
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -373,6 +424,13 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// InstanceLockPath is the flock file that makes the daemon a single instance
+// per socket. It sits next to the socket and outlives it on purpose: only the
+// flock matters, never the file's existence.
+func InstanceLockPath(socketPath string) string {
+	return strings.TrimSpace(socketPath) + ".lock"
 }
 
 func EnsureSocketPathAvailable(socketPath string) error {

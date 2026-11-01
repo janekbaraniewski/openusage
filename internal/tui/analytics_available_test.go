@@ -55,7 +55,7 @@ func TestAnalyticsScreenRendersAcrossWidths(t *testing.T) {
 		m := newAnalyticsModel(t)
 		m.width, m.height = size[0], size[1]
 		m.screen = screenAnalytics
-		m.analyticsCache = analyticsRenderCacheEntry{}
+		m.analyticsCache = &analyticsRenderCacheEntry{}
 		if strings.TrimSpace(m.View()) == "" {
 			t.Errorf("analytics view empty at %dx%d", size[0], size[1])
 		}
@@ -68,7 +68,7 @@ func TestAnalyticsScreenRendersAcrossWidths(t *testing.T) {
 func TestDashboardRenderDoesNotBuildAnalyticsCache(t *testing.T) {
 	m := newAnalyticsModel(t)
 	m.screen = screenDashboard
-	m.analyticsCache = analyticsRenderCacheEntry{}
+	m.analyticsCache = &analyticsRenderCacheEntry{}
 
 	_ = m.View()
 

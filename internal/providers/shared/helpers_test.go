@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
 )
@@ -136,6 +137,7 @@ func TestProcessStandardResponse_StatusMapping(t *testing.T) {
 		{"401 Unauthorized", http.StatusUnauthorized, core.StatusAuth},
 		{"403 Forbidden", http.StatusForbidden, core.StatusAuth},
 		{"429 Too Many Requests", http.StatusTooManyRequests, core.StatusLimited},
+		{"503 Service Unavailable", http.StatusServiceUnavailable, core.StatusError},
 	}
 
 	for _, tt := range tests {
@@ -170,6 +172,27 @@ func TestProcessStandardResponse_429RetryAfter(t *testing.T) {
 	}
 	if snap.Raw["retry_after"] != "60" {
 		t.Errorf("retry_after = %q, want %q", snap.Raw["retry_after"], "60")
+	}
+	wait := time.Until(snap.NextPollNotBefore)
+	if wait < 55*time.Second || wait > 61*time.Second {
+		t.Errorf("NextPollNotBefore in %s, want about 60s", wait)
+	}
+}
+
+func TestProcessStandardResponse_503RetryAfterHTTPDate(t *testing.T) {
+	until := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}
+	resp.Header.Set("Retry-After", until.Format(http.TimeFormat))
+
+	snap, err := ProcessStandardResponse(resp, core.AccountConfig{ID: "acct-1"}, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap.Status != core.StatusError {
+		t.Errorf("Status = %q, want error", snap.Status)
+	}
+	if !snap.NextPollNotBefore.Equal(until) {
+		t.Errorf("NextPollNotBefore = %s, want %s", snap.NextPollNotBefore, until)
 	}
 }
 

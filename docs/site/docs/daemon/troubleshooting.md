@@ -86,6 +86,10 @@ rm ~/.local/state/openusage/telemetry.sock
 
 The daemon recreates it on startup.
 
+### "telemetry daemon already running"
+
+Only one daemon can run per socket. On startup the daemon takes an exclusive lock on `telemetry.sock.lock` next to the socket, before it probes or replaces the socket. A second daemon started at the same moment exits with `telemetry daemon already running` instead of replacing the first one's socket. The lock is released when the process exits, even after a crash, so a leftover `telemetry.sock.lock` file is harmless. Don't delete it while a daemon is running.
+
 ## Inspecting logs
 
 ### macOS
@@ -103,6 +107,8 @@ journalctl --user-unit openusage-telemetry.service --since "10 min ago"
 ```
 
 The log files in `~/.local/state/openusage/` are also written on Linux when the unit redirects stdout/stderr.
+
+When stderr is a log file (as it is under launchd or systemd), the daemon skips the "missing integrations" hint, because the hint needs a full auto-detect pass on every start. Run `openusage telemetry daemon run` in a terminal, or `openusage integrations list`, to see it. A failed start, such as another daemon already owning the socket, logs only the error and not the full usage text.
 
 ## Missing or duplicate events
 
@@ -188,7 +194,7 @@ Activity Monitor or a power monitor lists `openusage` among the top energy users
 
 ### Check versions
 
-Earlier releases re-scanned the full Cursor state DB on every collect cycle, re-parsed every Claude Code log on every statusline and tmux render, and could leave orphaned `codex app-server` processes behind. Upgrade (see [Upgrade](../getting-started/upgrade.md)), then restart the daemon so the new binary is loaded:
+Earlier releases re-scanned the full Cursor state DB on every collect cycle, re-read the whole OpenCode database on every cycle while OpenCode was running, re-parsed every Claude Code log on every statusline and tmux render, re-read a whole Claude Code session log (and re-totalled all of them) whenever it grew, re-scanned every Ollama server log on each poll, and could leave orphaned `codex app-server` processes behind. Upgrade (see [Upgrade](../getting-started/upgrade.md)), then restart the daemon so the new binary is loaded:
 
 ```bash
 openusage telemetry daemon install

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -221,11 +222,23 @@ func (s *Store) PrimaryCreditMetric(ctx context.Context, providerID, accountID s
 	if s == nil || s.db == nil {
 		return "", "", false, nil
 	}
+	// Restrict to the priority keys so the (provider, account, metric_key)
+	// index prefix is used. Without it the query visits every observation of
+	// the account (half a million rows for Claude Code token metrics) to find
+	// a handful of money metrics. MAX(observed_at) makes SQLite take the
+	// semantics from the newest row of each key.
+	args := make([]any, 0, len(creditMetricPriority)+2)
+	args = append(args, providerID, accountID)
+	for _, k := range creditMetricPriority {
+		args = append(args, k)
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT metric_key, semantics
+		SELECT metric_key, semantics, MAX(observed_at)
 		FROM balance_observations
 		WHERE provider_id = ? AND account_id = ?
-	`, providerID, accountID)
+		  AND metric_key IN (`+sqlPlaceholders(len(creditMetricPriority))+`)
+		GROUP BY metric_key
+	`, args...)
 	if err != nil {
 		return "", "", false, fmt.Errorf("telemetry: query credit metrics: %w", err)
 	}
@@ -234,7 +247,8 @@ func (s *Store) PrimaryCreditMetric(ctx context.Context, providerID, accountID s
 	present := map[string]string{}
 	for rows.Next() {
 		var k, sem string
-		if err := rows.Scan(&k, &sem); err != nil {
+		var newest sql.NullString
+		if err := rows.Scan(&k, &sem, &newest); err != nil {
 			return "", "", false, fmt.Errorf("telemetry: scan credit metric: %w", err)
 		}
 		present[k] = sem
@@ -319,4 +333,12 @@ func (s *Store) PruneBalanceObservations(ctx context.Context, retentionDays int)
 		return total, fmt.Errorf("telemetry: thin balance hourly: %w", err)
 	}
 	return total, nil
+}
+
+// sqlPlaceholders returns "?, ?, ..." with n placeholders.
+func sqlPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }

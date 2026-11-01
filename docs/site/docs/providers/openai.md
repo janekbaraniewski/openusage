@@ -73,7 +73,7 @@ Request headers:
 ### Auth status
 
 - Source: HTTP status code.
-- Transform: `401`/`403` → `auth`; `429` → `limited` (with `retry_after` from `Retry-After` if present); otherwise `ok`.
+- Transform: `401`/`403` → `auth`; `429` → `limited`; `5xx` → `error`; otherwise `ok`. On 429 and 5xx a `Retry-After` header is kept as `retry_after` and the daemon waits until then before polling again (see [adaptive polling](../daemon/overview.md#adaptive-polling-and-backoff)).
 
 ### What's NOT tracked
 

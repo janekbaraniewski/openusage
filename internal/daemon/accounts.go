@@ -182,15 +182,6 @@ func resolveConfigAccounts(
 	return ApplyCredentials(accounts)
 }
 
-func LoadAccountsAndNorm() ([]core.AccountConfig, core.ModelNormalizationConfig, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, core.DefaultModelNormalizationConfig(), err
-	}
-	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
-	return accounts, core.NormalizeModelNormalizationConfig(cfg.ModelNormalization), nil
-}
-
 func BuildReadModelRequest(
 	accounts []core.AccountConfig,
 	providerLinks map[string]string,
@@ -223,15 +214,6 @@ func BuildReadModelRequest(
 		ProviderLinks: links,
 		TimeWindow:    normalizeReadModelTimeWindow(timeWindow),
 	}
-}
-
-func BuildReadModelRequestFromConfig() (ReadModelRequest, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return ReadModelRequest{}, err
-	}
-	accounts := resolveConfigAccounts(&cfg, ResolveAccounts)
-	return BuildReadModelRequest(accounts, cfg.Telemetry.ProviderLinks, core.ParseTimeWindow(cfg.Data.TimeWindow)), nil
 }
 
 func ReadModelRequestKey(req ReadModelRequest) string {

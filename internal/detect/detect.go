@@ -1,7 +1,6 @@
 package detect
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
 	"github.com/janekbaraniewski/openusage/internal/core"
@@ -307,6 +305,49 @@ func detectAider(result *Result) {
 	log.Printf("[detect] Found Aider at %s", bin)
 }
 
+// ghDataDir mirrors gh's data directory lookup: GH_DATA_DIR, then
+// XDG_DATA_HOME/gh, then %LocalAppData%/GitHub CLI on Windows, then
+// ~/.local/share/gh.
+func ghDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("GH_DATA_DIR")); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); dir != "" {
+		return filepath.Join(dir, "gh")
+	}
+	if runtime.GOOS == "windows" {
+		if dir := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); dir != "" {
+			return filepath.Join(dir, "GitHub CLI")
+		}
+	}
+	home := homeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "gh")
+}
+
+// ghCopilotInstallPath returns where `gh copilot` lives on disk without
+// executing anything: the legacy gh-copilot extension, or the Copilot CLI
+// that `gh copilot` downloaded into gh's data dir. It returns "" when
+// neither exists. A copilot binary on PATH is handled by the standalone
+// branch of detectGHCopilot.
+func ghCopilotInstallPath() string {
+	dataDir := ghDataDir()
+	if dataDir == "" {
+		return ""
+	}
+	for _, candidate := range []string{
+		filepath.Join(dataDir, "extensions", "gh-copilot"),
+		filepath.Join(dataDir, "copilot"),
+	} {
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func detectGHCopilot(result *Result) {
 	home := homeDir()
 	if home == "" {
@@ -316,18 +357,18 @@ func detectGHCopilot(result *Result) {
 	ghBin := findBinary("gh")
 	ghCopilotOK := false
 
-	// Try gh copilot extension first (existing/deprecated path).
-	// Use a 5-second timeout to prevent hanging if gh CLI is broken,
-	// unauthenticated, or blocked by network/proxy issues.
+	// Look for the gh copilot extension (or the Copilot CLI that gh
+	// downloaded) on disk instead of running `gh copilot --version`: that
+	// takes ~750ms because gh starts the separate copilot binary, newer gh
+	// builds offer to download the CLI when it is missing, and AutoDetect
+	// runs on every daemon start and account resolve.
 	if ghBin != "" {
 		log.Printf("[detect] Found gh CLI at %s", ghBin)
-		ghCtx, ghCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer ghCancel()
-		cmd := exec.CommandContext(ghCtx, ghBin, "copilot", "--version")
-		if err := cmd.Run(); err == nil {
+		if path := ghCopilotInstallPath(); path != "" {
 			ghCopilotOK = true
+			log.Printf("[detect] Found gh copilot at %s", path)
 		} else {
-			log.Printf("[detect] gh copilot extension not installed or timed out: %v", err)
+			log.Printf("[detect] gh copilot extension not installed")
 		}
 	}
 

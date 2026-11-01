@@ -99,7 +99,7 @@ func main() {
 		go refreshAll()
 	})
 
-	p = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
+	p = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(15))
 
 	go func() {
 		refreshAll()

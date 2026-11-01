@@ -78,6 +78,20 @@ type TelemetrySource interface {
 	ParseHookPayload(raw []byte, opts TelemetryCollectOptions) ([]TelemetryEvent, error)
 }
 
+// TelemetryStateStore persists small string values across daemon restarts.
+// The daemon passes its telemetry store, which keeps them in daemon_meta.
+type TelemetryStateStore interface {
+	MetaGet(ctx context.Context, key string) (string, bool, error)
+	MetaSet(ctx context.Context, key, value string) error
+}
+
+// TelemetryStatefulSource is an optional interface for telemetry sources that
+// keep a read position (for example a SQLite high-water mark) that should
+// survive daemon restarts. Sources without a store keep it in memory only.
+type TelemetryStatefulSource interface {
+	SetTelemetryStateStore(store TelemetryStateStore)
+}
+
 type TelemetryEvent struct {
 	SchemaVersion string
 	Channel       TelemetryChannel

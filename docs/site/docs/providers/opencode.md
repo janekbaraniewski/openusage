@@ -107,6 +107,7 @@ If the upstream provider doesn't have an account configured in OpenUsage, the ev
 
 - Polling: every 30 s by default.
 - Telemetry: real-time (events ingested as the plugin emits them, dedup'd in the daemon's SQLite store).
+- Local database: the daemon also reads OpenCode's `~/.local/share/opencode/opencode.db` (read-only). It skips the file while it is unchanged. When it changes, the daemon reads only the messages updated since the last read, plus a two-minute overlap that dedup absorbs. A full read happens on the first cycle, after the file is replaced, or when its newest rows are older than the last read.
 - Console enrichment: same cadence as polling.
 
 ## API endpoints used

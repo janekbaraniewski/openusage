@@ -63,7 +63,7 @@ Default: `"Gruvbox"`.
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `refresh_interval_seconds` | int | `30` | How often the TUI re-fetches the read model from the daemon. |
+| `refresh_interval_seconds` | int | `30` | How often the daemon collects and the TUI re-fetches the read model from it. The TUI reads once per interval and only re-renders when the data or the daemon status changed. |
 | `warn_threshold` | float | `0.20` | Gauge turns yellow when remaining ratio drops below this. |
 | `crit_threshold` | float | `0.05` | Gauge turns red below this. |
 

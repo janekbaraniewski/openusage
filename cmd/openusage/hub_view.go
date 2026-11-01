@@ -94,7 +94,7 @@ func runHubView(cfg config.Config, hubURL, token string) {
 		timeWindow,
 	)
 
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30))
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(tuiMaxFPS))
 	dispatcher := &snapshotDispatcher{}
 	dispatcher.bind(program)
 

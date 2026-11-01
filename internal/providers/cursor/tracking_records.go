@@ -161,7 +161,7 @@ func cursorTableColumns(ctx context.Context, db *sql.DB, table string) (map[stri
 	return columns, nil
 }
 
-func loadDailyStatsRecords(ctx context.Context, db *sql.DB) ([]cursorDailyStatsRecord, error) {
+func loadDailyStatsRecords(ctx context.Context, db sqlQueryer) ([]cursorDailyStatsRecord, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT key, value FROM ItemTable
 		WHERE key LIKE 'aiCodeTracking.dailyStats.%'

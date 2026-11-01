@@ -5,11 +5,11 @@ package detect
 import (
 	"context"
 	"log"
-	"os/exec"
 	"path/filepath"
 	"time"
 
 	"github.com/janekbaraniewski/openusage/internal/core"
+	"github.com/janekbaraniewski/openusage/internal/providers/shared"
 )
 
 // detectMacOSKeychainCredentials probes well-known macOS keychain entries
@@ -110,7 +110,7 @@ func keychainGenericPasswordExists(service string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-s", service)
+	cmd := shared.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-s", service)
 	if err := cmd.Run(); err != nil {
 		return false
 	}

@@ -241,17 +241,8 @@ func StartBroadcaster(
 	handler SnapshotHandler,
 	stateHandler StateHandler,
 ) {
-	interval := refreshInterval / 3
-	if interval <= 0 {
-		interval = 4 * time.Second
-	}
-	interval = max(1*time.Second, min(5*time.Second, interval))
-
-	emitState := func() {
-		if stateHandler != nil {
-			stateHandler(rt.State())
-		}
-	}
+	interval := broadcastInterval(refreshInterval)
+	emitState := newStateEmitter(rt, stateHandler)
 
 	go func() {
 		emitState()
@@ -281,6 +272,39 @@ func StartBroadcaster(
 			}
 		}
 	}()
+}
+
+// broadcastInterval is how often the TUI re-reads the daemon read model once
+// warm-up is done. The daemon only collects and polls once per refresh
+// interval, so reading faster finds the same data and wakes the TUI for
+// nothing.
+func broadcastInterval(refreshInterval time.Duration) time.Duration {
+	if refreshInterval <= 0 {
+		return 30 * time.Second
+	}
+	return max(1*time.Second, refreshInterval)
+}
+
+// newStateEmitter returns a func that forwards rt's daemon state to handler
+// only when it differs from the last state forwarded. Every forwarded state
+// becomes a tea message and a re-render, so repeating an unchanged state kept
+// an idle TUI from ever resting.
+func newStateEmitter(rt *ViewRuntime, handler StateHandler) func() {
+	var (
+		last    DaemonState
+		emitted bool
+	)
+	return func() {
+		if handler == nil {
+			return
+		}
+		state := rt.State()
+		if emitted && state == last {
+			return
+		}
+		last, emitted = state, true
+		handler(state)
+	}
 }
 
 // snapshotFingerprint builds a lightweight fingerprint from snapshot keys,

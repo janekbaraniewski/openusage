@@ -34,11 +34,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DaemonStatusMsg:
+		warning := strings.TrimSpace(msg.Warning)
+		changed := m.daemon.status != msg.Status ||
+			m.daemon.message != msg.Message ||
+			m.daemon.warning != warning
 		m.daemon.status = msg.Status
 		m.daemon.message = msg.Message
-		m.daemon.warning = strings.TrimSpace(msg.Warning)
+		m.daemon.warning = warning
 		if msg.Status == DaemonRunning {
 			m.daemon.installing = false
+		}
+		// An unchanged status has nothing new to animate; waking the tick
+		// chain for it kept an idle dashboard re-rendering.
+		if !changed {
+			return m, nil
 		}
 		return m, m.restartTickIfNeeded()
 
@@ -218,12 +227,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleTickMsg(_ tickMsg) (tea.Model, tea.Cmd) {
 	m.animFrame++
+	m.trackLoading(time.Now())
 	interval := m.nextTickInterval()
 	if interval == 0 {
 		m.tickRunning = false
 		return m, nil
 	}
 	return m, scheduleTickCmd(interval)
+}
+
+// trackLoading records when the current splash or refresh started and clears
+// a refresh that has waited longer than refreshTimeout for its snapshots.
+func (m *Model) trackLoading(now time.Time) {
+	if m.hasData && !m.refreshing {
+		m.loadingSince = time.Time{}
+		return
+	}
+	if m.loadingSince.IsZero() {
+		m.loadingSince = now
+		return
+	}
+	if m.hasData && m.refreshing && now.Sub(m.loadingSince) >= refreshTimeout {
+		m.refreshing = false
+		m.loadingSince = time.Time{}
+	}
 }
 
 func (m Model) handleDaemonInstallResultMsg(msg daemonInstallResultMsg) (tea.Model, tea.Cmd) {

@@ -21,7 +21,7 @@ OpenUsage ships a `tmux` subcommand that renders a one-line status segment of yo
 - **segment** single named segment
 - **json** structured payload
 
-It is meant to live in `status-right` or `status-left` and update every few seconds. The renderer ships its own runtime budget so a slow daemon or a missing key can never freeze tmux. If the daemon read uses up that budget, the bar reuses its last good status. It does not fall back to scanning every provider's local history, because that work would finish too late to show and would repeat on every refresh. Claude Code block and context values come from logs modified in the last 24 hours, not from the full history.
+It is meant to live in `status-right` or `status-left` and update every few seconds. The renderer ships its own runtime budget so a slow daemon or a missing key can never freeze tmux. If the daemon read uses up that budget, the bar reuses its last good status. It does not fall back to scanning every provider's local history, because that work would finish too late to show and would repeat on every refresh. Claude Code block and context values come from logs modified in the last 10 hours (two 5-hour blocks), not from the full history.
 
 {/* TODO: asciinema cast */}
 
@@ -94,10 +94,16 @@ The install helper looks for your tmux config in this order: `$XDG_CONFIG_HOME/t
 If you prefer to edit your tmux config by hand, splice the `#(openusage …)` command directly into your own `status-right` (or `status-left`) at the spot you want it. Editing by hand, *you* control the position, so there is no need for the `run-shell` prepend the installer uses. For example, first on the right side:
 
 ```
-set -g status-interval 5
+set -g status-interval 15
 set -g status-right-length 200
 set -g status-right "#(openusage tmux --preset compact) | %H:%M | %d-%b"
 ```
+
+We recommend `status-interval 15` (or `set -g status-interval 15` after the
+managed block if you used the installer, which writes 5). A render that is
+less than 15 seconds old is reprinted without contacting the daemon, so a
+shorter interval mostly launches extra processes that print the same line.
+On a laptop, the longer interval noticeably cuts the energy openusage uses.
 
 Or append it to the far-right edge instead:
 
@@ -403,19 +409,28 @@ you with an icon and blank numbers. Pin a provider (`--provider` /
 
 ### Why the value sometimes looks "stale" for a moment
 
-If the snapshot read is degraded (for example the telemetry daemon is briefly
-unreachable), the renderer reuses the **last good** status instead of flashing
-a blank or zeroed segment. This is an intentional anti-flicker measure; the
-cached value is used for at most a few minutes before live (possibly empty)
-state shows through.
+Each successful render is cached in `~/.cache/openusage/tmux-laststatus`
+(one file per distinct set of flags). When that render is less than 15
+seconds old, `openusage tmux` prints it straight away without loading config
+or contacting the daemon, so the segment refreshes at most every 15 seconds.
+Editing `settings.json` invalidates the cache on the next tick, and `--json`
+or `--no-cache` always render live.
+
+If the snapshot read fails or is degraded (for example the daemon read runs
+past the 800ms budget, the daemon is still computing its first result, or it is
+briefly unreachable), the renderer prints the **last good** status, however old
+it is, instead of a bare provider icon or a zeroed segment. A failed or degraded
+render never replaces the cached status. If there is no cached status yet, the
+segment stays empty until the first successful render.
 
 ## Troubleshooting
 
-### `openusage tmux` prints `?`
+### The `openusage tmux` segment is empty or does not update
 
-The renderer ran into an error and gracefully emitted a placeholder so tmux would not block. Look at `tmux show-environment -g` or run `openusage tmux doctor` to inspect the cause. Likely culprits:
+The renderer hit an error or a degraded read and had no earlier good status to show, so it printed an empty line rather than block tmux. Run `openusage tmux doctor` to inspect the cause; the error is also written to stderr when you run `openusage tmux` by hand. Likely culprits:
 
 - Daemon is configured but not running, and the snapshot fetch timed out within the 800ms budget. Either start it (`openusage telemetry daemon install`) or pass `--source direct` to bypass it.
+- The daemon just started and is still computing its first result. The render keeps the last good status (or an empty segment if there is none yet) and the next refresh is served from the daemon's cache. The renderer never runs account auto-detection itself; the daemon resolves and caches accounts (see [daemon account resolution](../daemon/overview.md#account-resolution)).
 - No provider is detected. See below.
 
 ### "active provider: none detected" in `doctor`
