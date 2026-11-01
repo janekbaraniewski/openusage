@@ -9,7 +9,7 @@ import (
 
 // fileIdentity returns the device and inode of a file, used to notice when a
 // DB file is replaced rather than written in place.
-func fileIdentity(fi os.FileInfo) (dev, ino uint64, ok bool) {
+func fileIdentity(_ string, fi os.FileInfo) (dev, ino uint64, ok bool) {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok || st == nil {
 		return 0, 0, false

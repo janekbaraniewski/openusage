@@ -77,7 +77,7 @@ func (p *Provider) collectStateDBEventsIncremental(ctx context.Context, dbPath s
 		}
 		return nil, fmt.Errorf("stat cursor state db: %w", err)
 	}
-	dev, ino, _ := fileIdentity(fi)
+	dev, ino, _ := fileIdentity(dbPath, fi)
 	now := p.now().UTC()
 
 	db, err := openCursorDBReadOnly(dbPath)
