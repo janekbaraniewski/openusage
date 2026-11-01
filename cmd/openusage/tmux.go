@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/term"
 
 	"github.com/janekbaraniewski/openusage/internal/config"
@@ -233,17 +236,29 @@ no per-range fallback; for those, use ` + "`openusage tmux font patch`" + `.`,
 // runTmuxRender is the default `openusage tmux` entry point. It applies the
 // max-runtime budget so a slow daemon can never freeze tmux: on timeout we
 // emit a `?` placeholder and exit 0 so the status bar keeps ticking.
+//
+// tmux re-runs this every status-interval (often 5s), so the common path is a
+// short-circuit: when the last good render for the same flags is younger than
+// tmuxFreshTTL we print it without loading config or contacting the daemon.
 func runTmuxRender(c *cobra.Command, f *tmuxFlags) error {
-	cfg, _ := config.Load()
-	opts := resolveTmuxOptions(c, f, cfg)
-
 	// Smart TTY hint: when not inside tmux and stdout is a terminal, and no
 	// override flags were passed, point users at the install command.
-	if !opts.raw && !opts.jsonOut && os.Getenv("TMUX") == "" && isStdoutTerminal() &&
+	if !f.raw && !f.jsonOut && os.Getenv("TMUX") == "" && isStdoutTerminal() &&
 		!c.Flags().Changed("preset") && !c.Flags().Changed("format") && !c.Flags().Changed("segment") {
 		fmt.Fprintln(os.Stdout, "not running inside tmux. Try `openusage tmux install` to add it to your status bar.")
 		return nil
 	}
+
+	cacheKey := tmuxCacheKey(c)
+	if !f.jsonOut && !f.noCache {
+		if last, ok := readFreshStatus(cacheKey, time.Now()); ok {
+			fmt.Fprintln(os.Stdout, last)
+			return nil
+		}
+	}
+
+	cfg, _ := config.Load()
+	opts := resolveTmuxOptions(c, f, cfg)
 
 	ctx, cancel := context.WithTimeout(c.Context(), opts.maxRuntime)
 	defer cancel()
@@ -253,7 +268,7 @@ func runTmuxRender(c *cobra.Command, f *tmuxFlags) error {
 		// Never block tmux. Prefer the last good status (so a transient daemon
 		// hiccup does not blank the bar); fall back to "?" only if there is no
 		// recent cache.
-		if last, ok := readLastStatus(); ok {
+		if last, ok := readLastStatus(cacheKey); ok {
 			fmt.Fprintln(os.Stdout, last)
 			return nil
 		}
@@ -272,12 +287,12 @@ func runTmuxRender(c *cobra.Command, f *tmuxFlags) error {
 	// status instead of flashing a blank/zeroed segment. Only successful
 	// renders update the cache.
 	if bctx.Degraded {
-		if last, ok := readLastStatus(); ok {
+		if last, ok := readLastStatus(cacheKey); ok {
 			fmt.Fprintln(os.Stdout, last)
 			return nil
 		}
 	} else if strings.TrimSpace(rendered) != "" {
-		writeLastStatus(rendered)
+		writeLastStatus(cacheKey, rendered)
 	}
 
 	fmt.Fprintln(os.Stdout, rendered)
@@ -289,24 +304,76 @@ func runTmuxRender(c *cobra.Command, f *tmuxFlags) error {
 // idle machine eventually shows live (possibly empty) state.
 const lastStatusTTL = 10 * time.Minute
 
-// lastStatusPath is the cache file for the most recent successful render.
-func lastStatusPath() string {
+// tmuxFreshTTL is how long a successful render is reused verbatim without
+// loading config or contacting the daemon. tmux typically re-runs the command
+// every 5s; the underlying usage data moves far slower than that, so serving
+// a render up to 15s old saves most of the per-tick work at no visible cost.
+const tmuxFreshTTL = 15 * time.Second
+
+// tmuxCacheKey fingerprints the explicitly passed flags so two tmux segments
+// with different presets or formats never serve each other's cached output.
+// The plain `openusage tmux` invocation maps to "" (the historical file name).
+func tmuxCacheKey(c *cobra.Command) string {
+	var parts []string
+	c.Flags().Visit(func(fl *pflag.Flag) {
+		parts = append(parts, fl.Name+"="+fl.Value.String())
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:8])
+}
+
+// lastStatusPath is the cache file for the most recent successful render of
+// the given flag fingerprint.
+func lastStatusPath(key string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".cache", "openusage", "tmux-laststatus")
+	name := "tmux-laststatus"
+	if key != "" {
+		name += "-" + key
+	}
+	return filepath.Join(home, ".cache", "openusage", name)
 }
 
 // readLastStatus returns the last good rendered status if it exists and is
 // within lastStatusTTL.
-func readLastStatus() (string, bool) {
-	path := lastStatusPath()
+func readLastStatus(key string) (string, bool) {
+	return readStatusWithin(key, lastStatusTTL, time.Now())
+}
+
+// readFreshStatus returns the cached status when it is younger than
+// tmuxFreshTTL and settings.json has not changed since it was written, so
+// editing the tmux config takes effect on the next tick.
+func readFreshStatus(key string, now time.Time) (string, bool) {
+	path := lastStatusPath(key)
 	if path == "" {
 		return "", false
 	}
 	info, err := os.Stat(path)
-	if err != nil || time.Since(info.ModTime()) > lastStatusTTL {
+	if err != nil {
+		return "", false
+	}
+	if cfgInfo, err := os.Stat(config.ConfigPath()); err == nil && cfgInfo.ModTime().After(info.ModTime()) {
+		return "", false
+	}
+	return readStatusWithin(key, tmuxFreshTTL, now)
+}
+
+func readStatusWithin(key string, ttl time.Duration, now time.Time) (string, bool) {
+	path := lastStatusPath(key)
+	if path == "" {
+		return "", false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	if age := now.Sub(info.ModTime()); age < 0 || age > ttl {
 		return "", false
 	}
 	data, err := os.ReadFile(path)
@@ -320,17 +387,44 @@ func readLastStatus() (string, bool) {
 	return s, true
 }
 
-// writeLastStatus records a successful render for reuse on the next degraded
-// read. Failures are silent: the cache is a best-effort flicker guard.
-func writeLastStatus(rendered string) {
-	path := lastStatusPath()
+// writeLastStatus records a successful render for the fresh-cache
+// short-circuit and for the next degraded read. Failures are silent: the
+// cache is best-effort.
+func writeLastStatus(key, rendered string) {
+	path := lastStatusPath(key)
 	if path == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
+	_ = writeFileAtomic(path, []byte(rendered))
+}
+
+// writeFileAtomic writes data via a temp file in the same directory plus a
+// rename, so concurrent readers (parallel tmux or statusline renders) never
+// observe a partially written file.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
 	}
-	_ = os.WriteFile(path, []byte(rendered), 0o600)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // tmuxOptions is the post-resolution form of tmuxFlags; one struct that the

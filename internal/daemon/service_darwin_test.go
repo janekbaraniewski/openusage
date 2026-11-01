@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -25,6 +26,31 @@ func TestLaunchdPlist_UsesDaemonRunSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(plist, "<key>EnvironmentVariables</key>") || !strings.Contains(plist, "<key>OPENAI_API_KEY</key>") {
 		t.Fatalf("launchd plist does not include env vars:\n%s", plist)
+	}
+}
+
+func TestLaunchdPlist_HasEnergyHints(t *testing.T) {
+	plist := launchdPlist("/tmp/openusage", "/tmp/openusage.sock", "/tmp/o.log", "/tmp/e.log", nil)
+
+	for _, want := range []string{
+		"\t<key>ProcessType</key>\n\t<string>Background</string>\n",
+		"\t<key>LowPriorityIO</key>\n\t<true/>\n",
+		"\t<key>Nice</key>\n\t<integer>10</integer>\n",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Errorf("launchd plist is missing energy hint %q:\n%s", want, plist)
+		}
+	}
+
+	// The plist must stay well-formed for launchd; plutil ships with macOS.
+	if _, err := exec.LookPath("plutil"); err == nil {
+		path := filepath.Join(t.TempDir(), "agent.plist")
+		if err := os.WriteFile(path, []byte(plist), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+			t.Fatalf("plutil -lint failed: %v\n%s", err, out)
+		}
 	}
 }
 
