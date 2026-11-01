@@ -1,8 +1,8 @@
 package openrouter
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"hash/maphash"
+	"strconv"
 	"sync"
 )
 
@@ -129,11 +129,16 @@ func (c *generationCache) dropWindow(key string) {
 	}
 }
 
+// windowKeySeed is random per process, so window keys cannot be precomputed
+// or compared across runs.
+var windowKeySeed = maphash.MakeSeed()
+
 // generationWindowKey identifies an account without keeping the raw API key
-// in memory as a map key.
+// in memory as a map key. It is an in-memory cache key, not a stored secret
+// digest, so a seeded non-cryptographic hash is enough; collisions across the
+// handful of cached accounts are negligible at 64 bits.
 func generationWindowKey(baseURL, apiKey string) string {
-	sum := sha256.Sum256([]byte(baseURL + "\x00" + apiKey))
-	return hex.EncodeToString(sum[:16])
+	return strconv.FormatUint(maphash.String(windowKeySeed, baseURL+"\x00"+apiKey), 16)
 }
 
 func (d generationDetail) apply(row *generationEntry) {
