@@ -180,6 +180,28 @@ openusage telemetry daemon install
 
 This wipes the DB, spool, and logs. Hook scripts and tool config patches are unaffected (managed separately by `openusage integrations`).
 
+## High CPU or power usage
+
+### Symptom
+
+Activity Monitor or a power monitor lists `openusage` among the top energy users, often as several processes: the daemon, `openusage tmux`, and one `openusage statusline` per Claude Code session.
+
+### Check versions
+
+Earlier releases re-scanned the full Cursor state DB on every collect cycle, re-parsed every Claude Code log on every statusline and tmux render, and could leave orphaned `codex app-server` processes behind. Upgrade (see [Upgrade](../getting-started/upgrade.md)), then restart the daemon so the new binary is loaded:
+
+```bash
+openusage telemetry daemon install
+```
+
+### Check for leftovers
+
+```bash
+pgrep -fl 'openusage|codex app-server'
+```
+
+Expect one `openusage telemetry daemon run`, plus short-lived `tmux`/`statusline` renders that exit within about a second. If an old `codex app-server --stdio` is still running with the init process (or `systemd --user`) as its parent, it is an orphan from an older release and is safe to kill.
+
 ## Still stuck?
 
 - Run the daemon in the foreground with verbose logging: `openusage telemetry daemon run --verbose`.

@@ -65,6 +65,11 @@ type Provider struct {
 	bubbleRecords      []cursorBubbleRecord
 	scoredCommitsCount int
 	scoredCommitsAgg   *scoredCommitsAggregate
+
+	// Telemetry Collect skip cache: DB path -> file fingerprint at the last
+	// successful collect (see sqliteFileFingerprint).
+	collectFPMu sync.Mutex
+	collectFP   map[string]string
 }
 
 type cachedAccountState struct {

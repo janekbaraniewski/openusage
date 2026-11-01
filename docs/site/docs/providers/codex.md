@@ -150,7 +150,7 @@ On a ChatGPT subscription plan (Plus, Pro, Team, Enterprise) the dollar number i
   - `GET https://chatgpt.com/backend-api/wham/usage` (default), or
   - `GET <base>/api/codex/usage` for non-ChatGPT bases.
   - Headers: `Authorization: Bearer <auth.json access_token>` and `ChatGPT-Account-Id: <account_id>` when available.
-- Preferred local CLI quota endpoint: `codex app-server --stdio`, using the JSON-RPC handshake followed by `account/rateLimits/read`.
+- Preferred local CLI quota endpoint: `codex app-server --stdio`, using the JSON-RPC handshake followed by `account/rateLimits/read`. On macOS and Linux the app-server runs in its own process group, and the whole group is stopped when the call finishes or times out. An npm-installed `codex` (a Node wrapper that starts the native binary as a child) therefore can't leave an orphaned `codex app-server` behind or stall the daemon's poll.
 
 ## Files read
 

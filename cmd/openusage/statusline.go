@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/janekbaraniewski/openusage/internal/ccevents"
 	"github.com/janekbaraniewski/openusage/internal/core"
 	"github.com/janekbaraniewski/openusage/internal/export"
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
@@ -344,7 +345,9 @@ func runStatusline(opts statuslineOptions, stdin io.Reader, stdout io.Writer) er
 	// log-derived segment is shown (e.g. a window5h-only statusline).
 	var events []report.Event
 	if statuslineNeedsLogs(opts) {
-		if evs, err := claudeCodeConversationEvents(claude_code.ParseCostMode(opts.mode), opts.offline); err == nil {
+		// Claude Code re-runs the statusline on every message, so only read
+		// recently-touched logs (plus this session's) instead of the full history.
+		if evs, err := ccevents.Recent(claude_code.ParseCostMode(opts.mode), opts.offline, time.Now(), in.SessionID); err == nil {
 			events = evs
 		}
 	}

@@ -141,6 +141,14 @@ func (r *runner) collect(ctx context.Context, src Source) ([]core.UsageSnapshot,
 			if err == nil {
 				return snaps, SourceDaemon, nil
 			}
+			// The daemon read consumed the caller's whole budget (tmux renders
+			// get 800ms). A direct collect now would parse every provider's
+			// local history (seconds of CPU on large Claude Code logs) for a
+			// result the caller can no longer use, on every render. Fail fast;
+			// callers already fall back to their last good output.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, SourceDaemon, fmt.Errorf("export: telemetry daemon read failed and no time left for direct mode: %w", err)
+			}
 			fmt.Fprintf(r.stderr,
 				"export: telemetry daemon read failed (%v); falling back to direct mode\n", err)
 		}

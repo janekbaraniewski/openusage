@@ -49,6 +49,10 @@ Then **restart Claude Code** (or open a new session) so it re-reads `settings.js
 The **5h usage window** segment needs the [telemetry daemon](../daemon/overview.md) (`openusage telemetry daemon install`), which is what polls Claude Code's rate-limit quota. The value is cached locally for ~30s (a single small file shared across sessions), so renders stay instant and the daemon isn't hit on every keystroke. The other segments work purely from local logs with no daemon.
 :::
 
+:::note
+Claude Code re-runs the statusline on every message, so each render reads only the conversation logs modified in the last 24 hours, plus every log of the current session. Older history can't change today's cost, the active block, or the context window, so skipping it keeps each render well under a second, even with gigabytes of history. The session figure still covers the whole conversation.
+:::
+
 ## Customize
 
 Everything the configurator sets can also be passed as flags — useful for scripting or for editing the `command` in `settings.json` directly.

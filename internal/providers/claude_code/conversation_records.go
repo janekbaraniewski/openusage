@@ -2,6 +2,7 @@ package claude_code
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,8 @@ type conversationRecord struct {
 	agentID    string
 	costUSD    *float64 // pre-computed cost from the JSONL entry, if present
 }
+
+var assistantToken = []byte(`"assistant"`)
 
 func parseConversationRecords(path string) []conversationRecord {
 	f, err := os.Open(path)
@@ -57,6 +60,14 @@ func parseConversationRecords(path string) []conversationRecord {
 // mergeStreamingDuplicates.
 func conversationRecordFromLine(line []byte, lineNumber int, path, agentLabel string) (conversationRecord, bool) {
 	if len(line) == 0 {
+		return conversationRecord{}, false
+	}
+	// Cheap pre-filter: only assistant entries carry usage, and they make up a
+	// small fraction of the log bytes (user/tool_result lines dominate). Any
+	// line whose "type" is "assistant" must contain the literal token, so
+	// skipping the rest before json.Unmarshal changes no results while
+	// avoiding most of the decode work on multi-GB histories.
+	if !bytes.Contains(line, assistantToken) {
 		return conversationRecord{}, false
 	}
 	var entry jsonlEntry

@@ -105,7 +105,9 @@ func TestRPCProcessResolvesInterpreterNextToBinary(t *testing.T) {
 	}
 	t.Setenv("PATH", "/usr/bin"+string(os.PathListSeparator)+"/bin")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The RPC gets half the context (capped); keep it generous so spawning two
+	// shells under -race and a parallel `make test` does not flake.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := fetchCodexRateLimitsRPCProcess(ctx, core.AccountConfig{Binary: binary}, dir)
 	if err != nil || result.RateLimitsV2 == nil {
