@@ -10,8 +10,10 @@ import (
 // defaultDaemonMemoryLimit is the soft Go heap limit applied at daemon start.
 // It makes the GC work harder as the heap approaches the limit instead of
 // letting a large re-ingest or read-model rebuild grow RSS unchecked. It is a
-// soft limit: the runtime may exceed it rather than fail.
-const defaultDaemonMemoryLimit int64 = 300 << 20 // 300 MiB
+// soft limit: the runtime may exceed it rather than fail. It sits well above
+// the daemon's ~250 MiB live heap; a limit just above the live heap would
+// keep the GC running almost constantly.
+const defaultDaemonMemoryLimit int64 = 1 << 30 // 1 GiB
 
 // daemonMemoryLimitEnv overrides the limit. Accepts a byte count or a number
 // with a KiB/MiB/GiB (or K/M/G) suffix; "off" or "0" disables it.

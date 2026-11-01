@@ -168,9 +168,9 @@ nothing is skipped, so a first import always reaches the rollup.
 - **WAL checkpoints.** Every 60 seconds the daemon runs a `PASSIVE` checkpoint,
   which never blocks readers or writers. It switches to `TRUNCATE` only when the
   WAL is larger than 64 MB, and on shutdown.
-- **Memory limit.** The daemon sets a soft Go memory limit of 300 MiB at start,
+- **Memory limit.** The daemon sets a soft Go memory limit of 1 GiB at start,
   so the garbage collector works harder before the heap grows past it. Override
-  it with `OPENUSAGE_DAEMON_MEMORY_LIMIT` (for example `512MiB`, or `off`). A
+  it with `OPENUSAGE_DAEMON_MEMORY_LIMIT` (for example `2GiB`, or `off`). A
   `GOMEMLIMIT` already set in the environment takes precedence.
 - **Upgrade cleanup.** On first start after upgrading, a one-time migration
   deletes the non-money rows from `balance_observations`, and two redundant
