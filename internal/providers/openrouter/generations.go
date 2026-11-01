@@ -537,6 +537,14 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 	offset := 0
 	cutoff := p.now().UTC().Add(-generationMaxAge)
 
+	windowKey := generationWindowKey(baseURL, apiKey)
+	previous := p.genCache.window(windowKey)
+	lastSeenID := ""
+	if len(previous) > 0 {
+		lastSeenID = previous[0].ID
+	}
+	reachedLastSeen := false
+
 	for offset < maxGenerationsToFetch {
 		remaining := maxGenerationsToFetch - offset
 		limit := generationPageSize
@@ -565,10 +573,12 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 				lowerBody := strings.ToLower(string(body))
 				lowerMsg := strings.ToLower(parseAPIErrorMessage(body))
 				if strings.Contains(lowerMsg, "expected string") && strings.Contains(lowerMsg, "id") {
+					p.genCache.dropWindow(windowKey)
 					return all, errGenerationListUnsupported
 				}
 				hasID := strings.Contains(lowerBody, "\"id\"") || strings.Contains(lowerBody, "\\\"id\\\"") || strings.Contains(lowerBody, "for id")
 				if strings.Contains(lowerBody, "expected string") && hasID {
+					p.genCache.dropWindow(windowKey)
 					return all, errGenerationListUnsupported
 				}
 			}
@@ -582,32 +592,62 @@ func (p *Provider) fetchAllGenerations(ctx context.Context, baseURL, apiKey stri
 
 		hitCutoff := false
 		for _, entry := range generationStats.Data {
-			ts, err := time.Parse(time.RFC3339, entry.CreatedAt)
-			if err != nil {
-				ts, _ = time.Parse(time.RFC3339Nano, entry.CreatedAt)
+			if lastSeenID != "" && entry.ID == lastSeenID {
+				reachedLastSeen = true
+				break
 			}
-			if !ts.IsZero() && ts.Before(cutoff) {
+			if generationCreatedBefore(entry, cutoff) {
 				hitCutoff = true
 				break
 			}
 			all = append(all, entry)
 		}
 
-		if hitCutoff || len(generationStats.Data) < limit {
+		if reachedLastSeen || hitCutoff || len(generationStats.Data) < limit {
 			break
 		}
 		offset += len(generationStats.Data)
 	}
+
+	// Everything from the last-seen generation onwards was returned by an
+	// earlier poll and is immutable, so reuse it instead of re-paging.
+	if reachedLastSeen {
+		for _, entry := range previous {
+			if len(all) >= maxGenerationsToFetch {
+				break
+			}
+			if generationCreatedBefore(entry, cutoff) {
+				break
+			}
+			all = append(all, entry)
+		}
+	}
+
+	if len(all) > 0 {
+		p.genCache.storeWindow(windowKey, all)
+	} else {
+		p.genCache.dropWindow(windowKey)
+	}
 	return all, nil
 }
 
+func generationCreatedBefore(entry generationEntry, cutoff time.Time) bool {
+	ts, err := time.Parse(time.RFC3339, entry.CreatedAt)
+	if err != nil {
+		ts, _ = time.Parse(time.RFC3339Nano, entry.CreatedAt)
+	}
+	return !ts.IsZero() && ts.Before(cutoff)
+}
+
+// enrichGenerationProviderMetadata fills in hosting-provider details for rows
+// whose list entry lacks them. Details of completed generations never change,
+// so they are served from the in-memory cache when known; only cache misses
+// count against maxGenerationProviderDetailLookups. It returns the number of
+// network lookups and the number of rows whose resolved provider changed.
 func (p *Provider) enrichGenerationProviderMetadata(ctx context.Context, baseURL, apiKey string, rows []generationEntry) (int, int) {
 	attempts := 0
 	hits := 0
 	for i := range rows {
-		if attempts >= maxGenerationProviderDetailLookups {
-			break
-		}
 		if rows[i].ID == "" {
 			continue
 		}
@@ -618,21 +658,25 @@ func (p *Provider) enrichGenerationProviderMetadata(ctx context.Context, baseURL
 			continue
 		}
 
-		attempts++
-		detail, err := p.fetchGenerationDetail(ctx, baseURL, apiKey, rows[i].ID)
-		if err != nil {
-			continue
+		detail, cached := p.genCache.detail(rows[i].ID)
+		if !cached {
+			if attempts >= maxGenerationProviderDetailLookups {
+				continue
+			}
+			attempts++
+			entry, err := p.fetchGenerationDetail(ctx, baseURL, apiKey, rows[i].ID)
+			if err != nil {
+				continue
+			}
+			detail = generationDetail{
+				ProviderName:      strings.TrimSpace(entry.ProviderName),
+				UpstreamID:        strings.TrimSpace(entry.UpstreamID),
+				ProviderResponses: entry.ProviderResponses,
+			}
+			p.genCache.storeDetail(rows[i].ID, detail)
 		}
 		resolvedBefore := resolveGenerationHostingProvider(rows[i])
-		if len(detail.ProviderResponses) > 0 {
-			rows[i].ProviderResponses = detail.ProviderResponses
-		}
-		if providerName := strings.TrimSpace(detail.ProviderName); providerName != "" {
-			rows[i].ProviderName = providerName
-		}
-		if upstream := strings.TrimSpace(detail.UpstreamID); upstream != "" {
-			rows[i].UpstreamID = upstream
-		}
+		detail.apply(&rows[i])
 		if resolvedAfter := resolveGenerationHostingProvider(rows[i]); resolvedAfter != "" && resolvedAfter != resolvedBefore {
 			hits++
 		}
