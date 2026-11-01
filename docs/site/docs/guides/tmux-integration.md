@@ -94,10 +94,16 @@ The install helper looks for your tmux config in this order: `$XDG_CONFIG_HOME/t
 If you prefer to edit your tmux config by hand, splice the `#(openusage …)` command directly into your own `status-right` (or `status-left`) at the spot you want it. Editing by hand, *you* control the position, so there is no need for the `run-shell` prepend the installer uses. For example, first on the right side:
 
 ```
-set -g status-interval 5
+set -g status-interval 15
 set -g status-right-length 200
 set -g status-right "#(openusage tmux --preset compact) | %H:%M | %d-%b"
 ```
+
+We recommend `status-interval 15` (or `set -g status-interval 15` after the
+managed block if you used the installer, which writes 5). A render that is
+less than 15 seconds old is reprinted without contacting the daemon, so a
+shorter interval mostly launches extra processes that print the same line.
+On a laptop, the longer interval noticeably cuts the energy openusage uses.
 
 Or append it to the far-right edge instead:
 
@@ -402,6 +408,13 @@ you with an icon and blank numbers. Pin a provider (`--provider` /
 `settings.tmux.provider`) when you want one tool's metrics, always.
 
 ### Why the value sometimes looks "stale" for a moment
+
+Each successful render is cached in `~/.cache/openusage/tmux-laststatus`
+(one file per distinct set of flags). When that render is less than 15
+seconds old, `openusage tmux` prints it straight away without loading config
+or contacting the daemon, so the segment refreshes at most every 15 seconds.
+Editing `settings.json` invalidates the cache on the next tick, and `--json`
+or `--no-cache` always render live.
 
 If the snapshot read is degraded (for example the telemetry daemon is briefly
 unreachable), the renderer reuses the **last good** status instead of flashing

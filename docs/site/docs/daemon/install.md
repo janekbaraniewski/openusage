@@ -25,7 +25,7 @@ openusage telemetry daemon install
 
 What it does:
 
-- **macOS** — writes `~/Library/LaunchAgents/com.openusage.telemetryd.plist` with `KeepAlive=true` and `RunAtLoad=true`, then bootstraps and kickstarts it via the modern `launchctl bootstrap` / `launchctl kickstart` API.
+- **macOS** — writes `~/Library/LaunchAgents/com.openusage.telemetryd.plist` with `KeepAlive=true` and `RunAtLoad=true`, then bootstraps and kickstarts it via the modern `launchctl bootstrap` / `launchctl kickstart` API. The plist also marks the helper as a background job (`ProcessType=Background`, `LowPriorityIO=true`, `Nice=10`), so macOS runs it on efficiency cores and throttles its disk I/O. The statusline and tmux renders cache their output, so the lower priority does not slow down what you see.
 - **Linux** — writes `~/.config/systemd/user/openusage-telemetry.service` (`Type=simple`, `Restart=always`, `RestartSec=2`), runs `systemctl --user daemon-reload`, and `systemctl --user enable --now openusage-telemetry.service`.
 
 After install the daemon is running and will restart automatically on logout/login or reboot (provided your platform's user services are active).
@@ -125,6 +125,7 @@ If the dashboard shows "telemetry: connected" in the Telemetry settings tab (<kb
 
 - **`go run` install rejected.** Build with `make build` and put the binary on `$PATH` before running `daemon install`.
 - **Multiple binaries on `$PATH`.** The plist or service unit pins the absolute path captured at install time. Reinstall (`uninstall` then `install`) after moving the binary.
+- **Picking up plist changes.** The plist is rewritten only by `openusage telemetry daemon install` or by an automatic upgrade. An existing install gets the background-job settings the next time either happens; to apply them now, run `openusage telemetry daemon install` again.
 - **Automatic upgrades.** The dashboard reinstalls the service from its own binary only when both it and the running helper are release builds and the dashboard's version is strictly newer. It does this at most once every 30 minutes per dashboard process. In every other case it leaves a working helper alone:
 
   | Dashboard vs. running helper | What happens |
