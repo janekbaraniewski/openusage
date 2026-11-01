@@ -95,6 +95,8 @@ When run as a service:
 - `~/.local/state/openusage/daemon.stdout.log`
 - `~/.local/state/openusage/daemon.stderr.log`
 
+Every line in `daemon.stderr.log` is timestamped, and each start and exit is logged with the version and PID (`daemon start version=v0.27.0 pid=4242`), even without `--verbose`. Count the `daemon start` lines to see how often the helper restarts.
+
 On Linux, `systemd-journal` also captures everything:
 
 ```bash
@@ -123,7 +125,17 @@ If the dashboard shows "telemetry: connected" in the Telemetry settings tab (<kb
 
 - **`go run` install rejected.** Build with `make build` and put the binary on `$PATH` before running `daemon install`.
 - **Multiple binaries on `$PATH`.** The plist or service unit pins the absolute path captured at install time. Reinstall (`uninstall` then `install`) after moving the binary.
-- **Automatic upgrades.** When the dashboard finds a helper from an older build, it reinstalls the service from its own binary, at most once per dashboard process. It never downgrades a helper that is newer than itself, and a local build without a version (`dev`) never replaces a released helper. In those cases the dashboard keeps using the running helper and shows a yellow warning in the footer. Run `openusage telemetry daemon install` from the binary you want the helper to use.
+- **Automatic upgrades.** The dashboard reinstalls the service from its own binary only when both it and the running helper are release builds and the dashboard's version is strictly newer. It does this at most once every 30 minutes per dashboard process. In every other case it leaves a working helper alone:
+
+  | Dashboard vs. running helper | What happens |
+  |---|---|
+  | Newer release | Reinstall (at most once per 30 minutes) |
+  | Same version | Nothing |
+  | Older release | Keep the helper, show a footer hint |
+  | `dev`, `make build`, or dirty build on either side | Keep the helper, show a footer hint |
+  | Helper speaks an incompatible API | Reinstall, unless the helper is newer; then the dashboard asks you to upgrade OpenUsage |
+
+  The footer hint names both versions. Run `openusage telemetry daemon install` from the binary you want the helper to use.
 - **Several OpenUsage versions at once.** Every dashboard shares one background service. Dashboards from 0.25.x and earlier still running in other terminals will reinstall their own version when they see a different one, which can restart the helper over and over. Quit or upgrade the old dashboards. See [Daemon issues](../troubleshooting/daemon-issues.md#dashboard-stuck-on-upgrade-telemetry-daemon-service).
 - **Linux without lingering.** If `systemctl --user` services do not survive logout, enable lingering once: `loginctl enable-linger $USER`.
 

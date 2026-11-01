@@ -15,6 +15,7 @@ import (
 	"github.com/janekbaraniewski/openusage/internal/integrations"
 	"github.com/janekbaraniewski/openusage/internal/providers"
 	"github.com/janekbaraniewski/openusage/internal/telemetry"
+	"github.com/janekbaraniewski/openusage/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -183,6 +184,12 @@ func newTelemetryDaemonCommand() *cobra.Command {
 	)
 
 	runDaemon := func(_ *cobra.Command, _ []string) error {
+		// The service manager points the daemon's stderr at daemon.stderr.log.
+		// Timestamp everything written there, whether or not --verbose is set,
+		// so restarts and duplicate launches can be diagnosed from the log.
+		stderrLog := log.New(os.Stderr, "", log.LstdFlags)
+		stderrLog.Printf("daemon start version=%s pid=%d", displayDaemonVersion(), os.Getpid())
+
 		cfgFile, loadErr := config.Load()
 		if loadErr != nil {
 			log.Printf("warning: failed to load config, using defaults: %v", loadErr)
@@ -206,9 +213,9 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			resolvedPoll = resolvedInterval
 		}
 
-		printIntegrationHints()
+		printIntegrationHints(stderrLog)
 
-		return daemon.RunServer(daemon.Config{
+		err := daemon.RunServer(daemon.Config{
 			DBPath:          strings.TrimSpace(dbPath),
 			SpoolDir:        strings.TrimSpace(spoolDir),
 			SocketPath:      strings.TrimSpace(socketPath),
@@ -217,6 +224,12 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			Verbose:         verbose,
 			Export:          cfgFile.Export,
 		})
+		if err != nil {
+			stderrLog.Printf("daemon exit error: %v", err)
+			return err
+		}
+		stderrLog.Printf("daemon exit")
+		return nil
 	}
 
 	cmd := &cobra.Command{
@@ -232,9 +245,10 @@ func newTelemetryDaemonCommand() *cobra.Command {
 			"  openusage telemetry daemon uninstall",
 		}, "\n"),
 		RunE: runDaemon,
-		// A failed start (e.g. another daemon already owns the socket) must
-		// not dump the full usage text into the service's stderr log.
-		SilenceUsage: true,
+		// runDaemon logs its own timestamped error; keep cobra's untimestamped
+		// error and usage dump out of daemon.stderr.log.
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	defaultSocketPath, _ := telemetry.DefaultSocketPath()
@@ -278,8 +292,9 @@ func newDaemonRunCommand(runE func(cmd *cobra.Command, args []string) error) *co
 		Use:   "run",
 		Short: "Run the telemetry daemon server",
 		RunE:  runE,
-		// launchd/systemd run this; see the daemon command's SilenceUsage.
-		SilenceUsage: true,
+		// launchd/systemd run this; see the daemon command's SilenceErrors/SilenceUsage.
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 }
 
@@ -291,7 +306,7 @@ var integrationHintsWanted = stderrIsTerminal
 
 // printIntegrationHints prints advisory hints for detected tools that are
 // missing their telemetry integration.
-func printIntegrationHints() {
+func printIntegrationHints(logger *log.Logger) {
 	if !integrationHintsWanted() {
 		return
 	}
@@ -305,9 +320,16 @@ func printIntegrationHints() {
 		}
 	}
 	if len(actionableIDs) > 0 {
-		fmt.Fprintf(os.Stderr, "hint: detected tools with missing integrations: %s\n", strings.Join(actionableIDs, ", "))
-		fmt.Fprintf(os.Stderr, "hint: run 'openusage integrations install <id>' to set up telemetry hooks\n")
+		logger.Printf("hint: detected tools with missing integrations: %s", strings.Join(actionableIDs, ", "))
+		logger.Printf("hint: run 'openusage integrations install <id>' to set up telemetry hooks")
 	}
+}
+
+func displayDaemonVersion() string {
+	if v := strings.TrimSpace(version.Version); v != "" {
+		return v
+	}
+	return "dev"
 }
 
 func newDaemonInstallCommand() *cobra.Command {

@@ -91,35 +91,54 @@ func EnsureRunning(ctx context.Context, socketPath string, verbose bool) (*Clien
 	return nil, "", err
 }
 
-// autoUpgrade bookkeeping: a process performs at most one automatic service
-// upgrade. If the daemon is incompatible again afterwards, something else
-// (typically an older openusage dashboard still running in another terminal)
-// reinstalled its own build, and fighting it only produces a restart loop and
-// launchctl bootstrap races.
+// autoUpgradeCooldown is the minimum time between two automatic service
+// reinstalls from one dashboard process. If the daemon is replaced again
+// within the window, something else (typically an older openusage still
+// running in another terminal) reinstalled its own build, and fighting it
+// only produces a restart loop that re-ingests history on every start.
+const autoUpgradeCooldown = 30 * time.Minute
+
 var (
 	autoUpgradeMu   sync.Mutex
-	autoUpgradeDone bool
+	autoUpgradeLast time.Time
+	autoUpgradeNow  = time.Now
 )
 
+// markAutoUpgradeAttempted records a reinstall attempt and reports whether one
+// is allowed now, i.e. no attempt happened within autoUpgradeCooldown.
 func markAutoUpgradeAttempted() bool {
 	autoUpgradeMu.Lock()
 	defer autoUpgradeMu.Unlock()
-	if autoUpgradeDone {
+	now := autoUpgradeNow()
+	if !autoUpgradeLast.IsZero() && now.Sub(autoUpgradeLast) < autoUpgradeCooldown {
 		return false
 	}
-	autoUpgradeDone = true
+	autoUpgradeLast = now
 	return true
 }
 
 func resetAutoUpgradeForTest() {
 	autoUpgradeMu.Lock()
-	autoUpgradeDone = false
+	autoUpgradeLast = time.Time{}
+	autoUpgradeNow = time.Now
 	autoUpgradeMu.Unlock()
 }
 
 // autoUpgradeAllowed decides whether this binary may replace the running
-// daemon service without an explicit user action. It never downgrades: a
-// daemon reporting a newer version than this binary is left alone.
+// daemon service without an explicit user action. When it returns false the
+// string is the reason, shown to the user as a status-line hint (or as the
+// error when the daemon is unusable). An empty reason with false means the
+// running daemon is fine as is.
+//
+// Policy, while the daemon speaks a compatible API:
+//   - reinstall only when both builds are releases and ours is strictly newer;
+//   - never downgrade a newer daemon;
+//   - equal versions are a no-op;
+//   - dev, `git describe`, or dirty builds on either side never replace a
+//     healthy daemon; the user runs `openusage telemetry daemon install`.
+//
+// An API-incompatible daemon is unusable, so it is replaced unless that would
+// be a downgrade. Every reinstall is debounced by autoUpgradeCooldown.
 func autoUpgradeAllowed(health HealthResponse) (bool, string) {
 	ours := strings.TrimSpace(version.Version)
 	running := HealthVersion(health)
@@ -128,14 +147,24 @@ func autoUpgradeAllowed(health HealthResponse) (bool, string) {
 		running, displayVersion(ours),
 	)
 	apiCompatible := HealthAPICompatible(health)
+	cmp, comparable := compareBuildVersions(ours, running)
+
+	if comparable && cmp < 0 {
+		if apiCompatible {
+			return false, hint + " (not downgrading automatically)"
+		}
+		return false, fmt.Sprintf(
+			"telemetry daemon %s is newer than this openusage (%s) and speaks an incompatible API; upgrade openusage",
+			running, displayVersion(ours),
+		)
+	}
 
 	if apiCompatible {
-		cmp, comparable := compareBuildVersions(ours, running)
+		bothReleases := IsReleaseSemver(normalizeVersion(ours)) && IsReleaseSemver(normalizeVersion(running))
 		switch {
-		case comparable && cmp < 0:
-			return false, hint + " (not downgrading automatically)"
-		case !comparable && parseBuildVersion(ours) == nil && IsReleaseSemver(normalizeVersion(running)):
-			// Unversioned local build against a released daemon.
+		case comparable && cmp == 0:
+			return false, ""
+		case !bothReleases:
 			return false, hint
 		}
 	}
