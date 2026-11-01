@@ -107,6 +107,14 @@ func RunServer(cfg Config) error {
 }
 
 func startService(ctx context.Context, cfg Config) (*Service, error) {
+	if strings.TrimSpace(cfg.RoutineListenAddr) != "" {
+		if strings.TrimSpace(cfg.RoutineToken) == "" {
+			return nil, fmt.Errorf("routine report listener requires OPENUSAGE_ROUTINE_TOKEN")
+		}
+		if strings.TrimSpace(cfg.RoutineAccountID) == "" {
+			return nil, fmt.Errorf("routine report listener requires a configured Claude Code account")
+		}
+	}
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		defaultDBPath, err := telemetry.DefaultDBPath()
 		if err != nil {
@@ -183,6 +191,10 @@ func startService(ctx context.Context, cfg Config) (*Service, error) {
 	)
 
 	if err := svc.startSocketServer(ctx); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	if err := svc.startRoutineReportServer(ctx); err != nil {
 		_ = store.Close()
 		return nil, err
 	}
@@ -372,6 +384,34 @@ func (s *Service) startSocketServer(ctx context.Context) error {
 		}
 	}()
 
+	return nil
+}
+
+func (s *Service) startRoutineReportServer(ctx context.Context) error {
+	addr := strings.TrimSpace(s.cfg.RoutineListenAddr)
+	if addr == "" {
+		return nil
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen routine report endpoint: %w", err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/routines/claude-code/report", s.handleRoutineReport)
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
+	s.infof("routine_report_listening", "addr=%s", addr)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+		_ = listener.Close()
+	}()
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.warnf("routine_report_server_error", "error=%v", err)
+		}
+	}()
 	return nil
 }
 

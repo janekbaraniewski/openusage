@@ -399,6 +399,8 @@ var daemonInstallEnvVars = []string{
 	// exporter can authenticate to a remote hub without the operator having
 	// to hand-edit the platform service file.
 	"OPENUSAGE_HUB_TOKEN",
+	"OPENUSAGE_ROUTINE_LISTEN_ADDR",
+	"OPENUSAGE_ROUTINE_TOKEN",
 }
 
 func currentServiceEnvSnapshot() map[string]string {

@@ -66,7 +66,7 @@ Three input sources feed the pipeline:
 
 ## Endpoints
 
-The daemon listens on a Unix domain socket (no TCP):
+The daemon listens on a Unix domain socket by default (no TCP). An optional Routine Cloud report listener is started only when explicitly configured; see [integration setup](./integrations.md#claude-code-routine-cloud-reports).
 
 | Method | Path | Purpose |
 |---|---|---|

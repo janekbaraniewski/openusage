@@ -6,7 +6,7 @@ description: How the daemon stores events, deduplicates them, and turns them int
 When OpenUsage is collecting data, it flows through a small event-sourced pipeline in the daemon before it ever reaches the TUI. Understanding this pipeline helps explain why hooks give richer data than polling alone, why the same conversation isn't double-counted, and where retention bounds live.
 
 :::note
-Telemetry stays local. The daemon listens on a Unix domain socket only; no TCP, no remote attach, nothing leaves your machine. The "telemetry" name refers to event-sourced collection, not external reporting.
+Telemetry stays local by default. The daemon listens on a Unix domain socket only. An optional Claude Code Routine report receiver can be enabled explicitly; see [Routine Cloud reports](../daemon/integrations.md#claude-code-routine-cloud-reports). The "telemetry" name refers to event-sourced **collection**, not external reporting.
 :::
 
 ## Why a pipeline at all?
