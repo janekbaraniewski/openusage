@@ -145,6 +145,8 @@ The daemon detects corruption on startup and:
 2. Removes orphaned `telemetry.db-shm` and `telemetry.db-wal`.
 3. Initializes a fresh `telemetry.db` and continues.
 
+Recovery only happens when no other OpenUsage process has the database open (tracked with the `telemetry.db.lock` file). If another process has it open, the DB is left untouched and the opener reports an error instead.
+
 Look for the corrupt file:
 
 ```bash

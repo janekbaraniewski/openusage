@@ -183,6 +183,8 @@ On detected corruption (failed page checksum, unreadable header), the daemon:
 
 Hooks fired during this window go to the spool and drain into the new DB on next pipeline cycle. Only the **most recent** corrupt copy is kept for forensics; older `telemetry.db.corrupt.*` snapshots are removed automatically on startup so they cannot accumulate on disk.
 
+These recovery steps (removing a stale `-shm`, renaming the DB and pruning old corrupt copies) only run when the opening process is the **only** one with the database open. Every opener holds a shared advisory lock on `telemetry.db.lock` for as long as it has the DB open, and briefly takes `telemetry.db.open.lock` while it opens. A process that opens the DB while another one has it open (for example a hook writing directly while the daemon restarts) never removes, renames or deletes anything. If it finds the DB corrupt, it reports an error and leaves recovery to the next sole opener. Both lock files are small and safe to leave in place.
+
 To reduce the chance of corruption, read paths (the dashboard read model) open the database **read-only** — a reader can never modify (and therefore never corrupt) the writer's file, and its queries do not take the write lock or contend with the daemon's writes.
 
 ## Manual cleanup
