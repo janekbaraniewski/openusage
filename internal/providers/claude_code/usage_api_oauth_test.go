@@ -277,6 +277,7 @@ func TestFindUsageAuthSource(t *testing.T) {
 // is the only source that can succeed here; that's enough to exercise pin
 // set/reuse/clear without needing to fake a working cookie source too.
 func TestReadUsageAPI_PinsSuccessfulAuthSource(t *testing.T) {
+	setUsageAPIMinInterval(t, 0)
 	var oauthCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		oauthCalls++
@@ -331,5 +332,114 @@ func TestReadUsageAPI_PinsSuccessfulAuthSource(t *testing.T) {
 	}
 	if oauthCalls != 2 {
 		t.Fatalf("oauth server calls after credential removal = %d, want still 2 (prepare should fail before any request)", oauthCalls)
+	}
+}
+
+func setUsageAPIMinInterval(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := usageAPIMinInterval
+	usageAPIMinInterval = d
+	t.Cleanup(func() { usageAPIMinInterval = old })
+}
+
+// A fresh cached response is served without calling the API again.
+func TestReadUsageAPI_TTLServesCache(t *testing.T) {
+	setUsageAPIMinInterval(t, 3*time.Minute)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2999-01-01T00:00:00Z"}}`))
+	}))
+	defer srv.Close()
+	old := oauthUsageURL
+	oauthUsageURL = srv.URL
+	defer func() { oauthUsageURL = old }()
+
+	futureMs := strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
+	writeCredentials(t, `{"claudeAiOauth":{"accessToken":"tok","expiresAt":`+futureMs+`}}`)
+
+	p := &Provider{}
+	for i := 0; i < 5; i++ {
+		snap := core.NewUsageSnapshot("claude_code", "acct")
+		if err := p.readUsageAPI(context.Background(), "org-uuid", &snap); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if _, ok := snap.Metrics["usage_five_hour"]; !ok {
+			t.Fatalf("call %d: usage_five_hour missing", i)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("API calls = %d, want 1 within TTL", calls)
+	}
+
+	// Once the TTL lapses the API is called again.
+	p.mu.Lock()
+	p.usageAPIFetchedAt = time.Now().Add(-4 * time.Minute)
+	p.mu.Unlock()
+	snap := core.NewUsageSnapshot("claude_code", "acct")
+	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("API calls after TTL = %d, want 2", calls)
+	}
+}
+
+// A 429 keeps the pinned auth source, serves cached usage, and backs off
+// (honouring Retry-After) without re-probing other sources.
+func TestReadUsageAPI_429KeepsAuthSourceAndBacksOff(t *testing.T) {
+	setUsageAPIMinInterval(t, 0)
+	var calls int
+	limited := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if limited {
+			w.Header().Set("Retry-After", "600")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2999-01-01T00:00:00Z"}}`))
+	}))
+	defer srv.Close()
+	old := oauthUsageURL
+	oauthUsageURL = srv.URL
+	defer func() { oauthUsageURL = old }()
+
+	futureMs := strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
+	writeCredentials(t, `{"claudeAiOauth":{"accessToken":"tok","expiresAt":`+futureMs+`}}`)
+
+	p := &Provider{}
+	snap := core.NewUsageSnapshot("claude_code", "acct")
+	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap); err != nil {
+		t.Fatal(err)
+	}
+
+	limited = true
+	snap2 := core.NewUsageSnapshot("claude_code", "acct")
+	if err := p.readUsageAPI(context.Background(), "org-uuid", &snap2); err != nil {
+		t.Fatalf("429 call: expected cached fallback, got %v", err)
+	}
+	if snap2.Raw["usage_api_cached"] != "true" {
+		t.Fatalf("429 call: expected cached usage, Raw=%v", snap2.Raw)
+	}
+	if got := p.getLastUsageAuthSource(); got != "oauth" {
+		t.Fatalf("pinned source after 429 = %q, want oauth", got)
+	}
+	p.mu.Lock()
+	wait := time.Until(p.usageAPIRetryAt)
+	p.mu.Unlock()
+	if wait < 9*time.Minute || wait > 10*time.Minute {
+		t.Fatalf("backoff = %s, want about 10m from Retry-After", wait)
+	}
+
+	// During backoff no request is made.
+	for i := 0; i < 3; i++ {
+		s := core.NewUsageSnapshot("claude_code", "acct")
+		if err := p.readUsageAPI(context.Background(), "org-uuid", &s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("API calls = %d, want 2 (no calls during backoff)", calls)
 	}
 }
