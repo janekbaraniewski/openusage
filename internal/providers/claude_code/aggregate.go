@@ -71,6 +71,15 @@ type AggregateOptions struct {
 	// Offline skips the network pricing lookup and uses the embedded
 	// Anthropic family rates so the call returns instantly.
 	Offline bool
+	// ModifiedSince, when non-zero, skips JSONL files last modified before
+	// it. Logs are append-only, so a file untouched since the cutoff holds no
+	// event after it; callers that only need recent windows (statusline, tmux)
+	// avoid re-parsing the whole multi-GB history on every render.
+	ModifiedSince time.Time
+	// KeepPath, when set, keeps a file regardless of ModifiedSince (e.g. the
+	// active session's transcript and subagent logs, so session totals stay
+	// exact).
+	KeepPath func(path string) bool
 }
 
 // AggregateConversations parses the Claude Code conversation logs and returns
@@ -91,7 +100,11 @@ func AggregateConversations(opts AggregateOptions) ([]UsageStat, error) {
 			return nil, err
 		}
 		paths = make([]string, 0, len(fileInfos))
-		for p := range fileInfos {
+		for p, info := range fileInfos {
+			if !opts.ModifiedSince.IsZero() && info.ModTime().Before(opts.ModifiedSince) &&
+				(opts.KeepPath == nil || !opts.KeepPath(p)) {
+				continue
+			}
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)

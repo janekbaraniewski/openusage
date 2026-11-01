@@ -5,6 +5,9 @@
 package ccevents
 
 import (
+	"strings"
+	"time"
+
 	"github.com/janekbaraniewski/openusage/internal/providers/claude_code"
 	"github.com/janekbaraniewski/openusage/internal/report"
 )
@@ -13,10 +16,37 @@ import (
 // them as a unified report.Event slice. offline=true forces the embedded
 // pricing table, skipping any network lookup.
 func Conversations(mode claude_code.CostMode, offline bool) ([]report.Event, error) {
-	stats, err := claude_code.AggregateConversations(claude_code.AggregateOptions{
-		Mode:    mode,
-		Offline: offline,
-	})
+	return aggregate(claude_code.AggregateOptions{Mode: mode, Offline: offline})
+}
+
+// RecentLookback bounds how far back Recent reads. It covers "today" (local
+// midnight is always within 24h) and the active 5h billing block plus the
+// chain of blocks before it in all but round-the-clock usage.
+const RecentLookback = 24 * time.Hour
+
+// Recent is Conversations restricted to log files modified within
+// RecentLookback of now, plus any file whose path contains sessionID (the
+// active session's transcript and subagent logs). It is meant for the
+// per-render callers (statusline, tmux) that only show today, the active
+// block, the current session and its context window, and which previously
+// re-parsed the entire history on every render.
+func Recent(mode claude_code.CostMode, offline bool, now time.Time, sessionID string) ([]report.Event, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	opts := claude_code.AggregateOptions{
+		Mode:          mode,
+		Offline:       offline,
+		ModifiedSince: now.Add(-RecentLookback),
+	}
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		opts.KeepPath = func(p string) bool { return strings.Contains(p, sid) }
+	}
+	return aggregate(opts)
+}
+
+func aggregate(opts claude_code.AggregateOptions) ([]report.Event, error) {
+	stats, err := claude_code.AggregateConversations(opts)
 	if err != nil {
 		return nil, err
 	}

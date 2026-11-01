@@ -180,6 +180,7 @@ All under `https://api2.cursor.sh`:
 This provider requires CGO because it reads SQLite directly. Pre-built binaries ship with CGO enabled; if you build from source, set `CGO_ENABLED=1`.
 :::
 
+- The telemetry daemon re-reads the tracking and state DBs only when one of them (or its `-wal` file) changes size or modification time. The state DB can grow to several GB, so an idle Cursor costs the daemon almost nothing.
 - Composer cost is billable usage and counts against the plan limit.
 - AI code scoring caches aggregate data; very recent activity may take a few minutes to appear.
 - Team aggregation only kicks in when a team plan is detected on the account.

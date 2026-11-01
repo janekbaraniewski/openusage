@@ -21,7 +21,7 @@ OpenUsage ships a `tmux` subcommand that renders a one-line status segment of yo
 - **segment** single named segment
 - **json** structured payload
 
-It is meant to live in `status-right` or `status-left` and update every few seconds. The renderer ships its own runtime budget so a slow daemon or a missing key can never freeze tmux.
+It is meant to live in `status-right` or `status-left` and update every few seconds. The renderer ships its own runtime budget so a slow daemon or a missing key can never freeze tmux. If the daemon read uses up that budget, the bar reuses its last good status. It does not fall back to scanning every provider's local history, because that work would finish too late to show and would repeat on every refresh. Claude Code block and context values come from logs modified in the last 24 hours, not from the full history.
 
 {/* TODO: asciinema cast */}
 

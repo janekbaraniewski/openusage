@@ -163,6 +163,11 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 	cmd := exec.CommandContext(rpcCtx, binary, "app-server", "--stdio")
 	cmd.Stderr = io.Discard
 	cmd.Env = codexAppServerEnv(os.Environ(), binary, configDir)
+	// codex is often a wrapper (npm's codex.js) whose child would outlive a
+	// plain kill and hold the pipes open; kill the whole group, and never let
+	// Wait block on a leaked pipe holder (#446).
+	startInOwnProcessGroup(cmd)
+	cmd.WaitDelay = time.Second
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -188,7 +193,10 @@ func fetchCodexRateLimitsRPCProcess(ctx context.Context, acct core.AccountConfig
 	}
 	defer func() {
 		if !waited && cmd.Process != nil {
-			_ = cmd.Process.Kill()
+			// app-server exits on stdin EOF; then kill the group so a
+			// wrapper's child cannot survive as an orphan.
+			_ = stdin.Close()
+			_ = killProcessGroup(cmd)
 		}
 		_ = waitProcess()
 	}()

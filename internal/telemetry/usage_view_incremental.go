@@ -260,6 +260,10 @@ func (s *incrementalUsageState) applyChanges(ctx context.Context, db *sql.DB, fi
 		}
 		changes = append(changes, c)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, false, fmt.Errorf("iterate incremental usage changes: %w", err)
+	}
 	if err := rows.Close(); err != nil {
 		return nil, false, err
 	}

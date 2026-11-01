@@ -43,26 +43,79 @@ func (p *Provider) Collect(ctx context.Context, opts shared.TelemetryCollectOpti
 	seenTools := make(map[string]bool)
 	var out []shared.TelemetryEvent
 
+	// The daemon calls Collect every collect interval. Both DBs are re-read in
+	// full (the state DB can be multiple GB and every row goes through
+	// json_extract), and the store dedups everything again on ingest. When a DB
+	// is byte-for-byte where it was at the last successful collect, it cannot
+	// yield anything new, so skip it. This also lets the collect loop back off.
+	trackingFP, stateFP := sqliteFileFingerprint(trackingDBPath), sqliteFileFingerprint(stateDBPath)
+
 	// Collect from the tracking DB (ai_code_hashes + scored_commits).
-	if trackingDBPath != "" {
+	if trackingDBPath != "" && !p.collectUnchanged(trackingDBPath, trackingFP) {
 		events, commitEvents, err := collectTrackingDBEvents(ctx, trackingDBPath)
 		if err != nil {
 			return nil, fmt.Errorf("collect cursor tracking telemetry: %w", err)
 		}
 		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
 		appendCursorDedupEvents(&out, commitEvents, seenMessages, seenTools)
+		p.recordCollect(trackingDBPath, trackingFP)
 	}
 
 	// Collect from the state DB (composerData + bubbleId entries).
-	if stateDBPath != "" {
+	if stateDBPath != "" && !p.collectUnchanged(stateDBPath, stateFP) {
 		events, err := collectStateDBEvents(ctx, stateDBPath)
 		if err != nil {
 			return nil, fmt.Errorf("collect cursor state telemetry: %w", err)
 		}
 		appendCursorDedupEvents(&out, events, seenMessages, seenTools)
+		p.recordCollect(stateDBPath, stateFP)
 	}
 
 	return out, nil
+}
+
+// sqliteFileFingerprint summarises a SQLite DB and its WAL by size and mtime.
+// Writes land in the -wal file first and in the main file on checkpoint, so
+// any write changes at least one of them. Returns "" when the DB is missing.
+func sqliteFileFingerprint(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	fp := ""
+	for _, p := range []string{path, path + "-wal"} {
+		info, err := os.Stat(p)
+		if err != nil {
+			if p == path {
+				return ""
+			}
+			continue
+		}
+		fp += fmt.Sprintf("%d:%d;", info.Size(), info.ModTime().UnixNano())
+	}
+	return fp
+}
+
+// collectUnchanged reports whether path still has the fingerprint recorded at
+// its last successful collect.
+func (p *Provider) collectUnchanged(path, fp string) bool {
+	if fp == "" {
+		return false
+	}
+	p.collectFPMu.Lock()
+	defer p.collectFPMu.Unlock()
+	return p.collectFP[path] == fp
+}
+
+func (p *Provider) recordCollect(path, fp string) {
+	if fp == "" {
+		return
+	}
+	p.collectFPMu.Lock()
+	defer p.collectFPMu.Unlock()
+	if p.collectFP == nil {
+		p.collectFP = make(map[string]string)
+	}
+	p.collectFP[path] = fp
 }
 
 // ParseHookPayload implements shared.TelemetrySource. Cursor does not have a
