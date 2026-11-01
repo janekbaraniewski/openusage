@@ -54,7 +54,7 @@ Each poll (default every 30 seconds in daemon mode) issues several authenticated
 | 2 | `GET /credits` | Balance and limit |
 | 3 | `GET /keys?include_disabled=true&offset=…` | List of keys (management-key only) |
 | 4 | `GET /activity` (and fallbacks) | 30-day analytics rollup |
-| 5 | `GET /generation?limit=…&offset=…` then `GET /generation?id=…` | Per-generation drill-down (≤20 lookups per poll) |
+| 5 | `GET /generation?limit=…&offset=…` then `GET /generation?id=…` | Per-generation drill-down. Paging stops at the newest generation seen on the previous poll; detail lookups only run for generation IDs not already cached (≤20 per poll) |
 
 ### Key info
 
@@ -84,7 +84,7 @@ Each poll (default every 30 seconds in daemon mode) issues several authenticated
 ### Per-model & per-provider analytics
 
 - Source: rows of the same analytics response, plus enrichment from `/generation?id=…`.
-- Transform: each row is bucketed by `model` and `provider`. Up to 20 generation IDs per poll are followed up with `/generation?id=…` to backfill provider metadata that the rollup endpoint omits. Higher-volume rows are prioritized for enrichment.
+- Transform: each row is bucketed by `model` and `provider`. Generation IDs missing provider metadata are followed up with `/generation?id=…` to backfill what the rollup endpoint omits. Completed generations never change, so each detail is fetched once and kept in a bounded in-memory cache; at most 20 uncached IDs are looked up per poll. Higher-volume rows are prioritized for enrichment.
 
 ### BYOK breakdown
 
@@ -112,7 +112,7 @@ Each poll (default every 30 seconds in daemon mode) issues several authenticated
 
 ### How fresh is the data?
 
-- Polled every 30 s by default. Analytics rollups are themselves cached server-side; the `cached_at` timestamp is stored in `Raw["activity_cached_at"]`. Per-generation enrichment is capped at 20 lookups per poll to avoid hammering OpenRouter's per-key limits.
+- Polled every 30 s by default. Analytics rollups are themselves cached server-side; the `cached_at` timestamp is stored in `Raw["activity_cached_at"]`. Generation rows and per-generation details are cached in memory between polls: a steady-state poll fetches one `/generation` page and makes no detail lookups for generations it has already seen. New generations are picked up on the next poll. The cache is reset when OpenUsage restarts.
 
 ## API endpoints used
 
@@ -120,14 +120,15 @@ Each poll (default every 30 seconds in daemon mode) issues several authenticated
 - `GET /api/v1/credits`
 - `GET /api/v1/keys` — only with a management key
 - `GET /api/v1/activity` (and `/analytics/user-activity` / `/api/internal/v1/transaction-analytics` fallbacks)
-- `GET /api/v1/generation?id=…` — up to 20 lookups per cycle
+- `GET /api/v1/generation?limit=…&offset=…`: pages until the last-seen generation (at most 5 pages on the first poll)
+- `GET /api/v1/generation?id=…`: only for generations not already cached, up to 20 per cycle
 
 ## Caveats
 
 - Analytics window is 30 days; older data is not fetched.
 - BYOK generations may overlap with native OpenRouter spend; the breakdown calls them out so you can reconcile.
 - Rate limits come from response headers only.
-- Generation lookups are capped at 20 per poll to avoid hitting OpenRouter's per-key limits.
+- Uncached generation lookups are capped at 20 per poll to avoid hitting OpenRouter's per-key limits; a large backlog is filled in over several polls.
 
 ## Troubleshooting
 

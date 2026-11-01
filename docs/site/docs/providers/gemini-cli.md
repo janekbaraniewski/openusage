@@ -57,14 +57,15 @@ Optional environment variables consulted when present:
 Gemini CLI has two data paths:
 
 1. **Local files** under `~/.gemini/` — the authoritative source for OAuth status, account email, conversation count, MCP config, and session token usage.
-2. **Optional Cloud Code RPCs** — `loadCodeAssist` and `retrieveUserQuota` against `https://cloudcode-pa.googleapis.com/v1internal/`. Provides Google's view of tier/quota for your account. Requires the OAuth access token from `oauth_creds.json` (refreshed automatically when expired) plus a Google Cloud project ID either from `extra.config_dir`'s settings or the `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID` env var.
+2. **Optional Cloud Code RPCs** — `loadCodeAssist` and `retrieveUserQuota` against `https://cloudcode-pa.googleapis.com/v1internal/`. Provides Google's view of tier/quota for your account. Requires the OAuth access token from `oauth_creds.json` (refreshed automatically when it is within 5 minutes of expiry) plus a Google Cloud project ID either from `extra.config_dir`'s settings or the `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID` env var.
 
 ### OAuth status
 
 - Source: `~/.gemini/oauth_creds.json`. Fields: `access_token`, `refresh_token`, `expiry_date` (Unix millis), `scope`.
 - Transform: status is computed from `expiry_date - now`:
   - missing / unreadable → `auth` (no creds)
-  - expired with `refresh_token` → background refresh against `https://oauth2.googleapis.com/token`; status remains `ok` if refresh succeeds.
+  - expired or within 5 minutes of expiry, with `refresh_token` → refresh against `https://oauth2.googleapis.com/token`; status remains `ok` if refresh succeeds. The refreshed access token is kept in memory only (never written to disk or logs) and reused until it nears expiry.
+  - a still-valid access token rejected with HTTP 401 triggers one refresh and retry.
   - otherwise `ok`. The scope string is stored verbatim.
 
 ### Account email
@@ -110,13 +111,13 @@ Gemini CLI has two data paths:
 
 ### How fresh is the data?
 
-- Polled every 30 s by default. OAuth refresh runs at most once per poll. Conversation files and session JSONs are re-read each poll; counts update as the CLI writes them.
+- Polled every 30 s by default. The OAuth token is refreshed only when it is within 5 minutes of expiry, not on every poll. `loadCodeAssist` (tier, project, upgrade link) is cached per account for 1 hour, so tier changes can take up to an hour to show; `retrieveUserQuota` runs every poll. Conversation files and session JSONs are re-read each poll; counts update as the CLI writes them.
 
 ## API endpoints used
 
-- `POST https://cloudcode-pa.googleapis.com/v1internal/loadCodeAssist` — tier discovery
+- `POST https://cloudcode-pa.googleapis.com/v1internal/loadCodeAssist`: tier discovery (cached per account for 1 hour)
 - `POST https://cloudcode-pa.googleapis.com/v1internal/retrieveUserQuota` — per-tier quota counters
-- `POST https://oauth2.googleapis.com/token` — refresh-token exchange (only when access token is expired)
+- `POST https://oauth2.googleapis.com/token`: refresh-token exchange (only when the access token is within 5 minutes of expiry, or after a 401)
 
 ## Files read
 
