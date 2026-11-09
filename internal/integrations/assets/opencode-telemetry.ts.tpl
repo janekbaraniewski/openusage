@@ -434,4 +434,41 @@ export const OpenUsageTelemetry: Plugin = async () => {
   }
 }
 
-export default OpenUsageTelemetry
+// OpenCode 2 entrypoint. Its plugin module contract requires a default export
+// of `{ id, effect }` or `{ id, setup }`; the bare v1 hook factory above (and
+// the older `export default <function>`) is rejected at load with
+// "Plugin must export a default definition with an id and an effect or setup
+// function". The v1 factory stays as `server` for OpenCode 1; `setup` relays
+// session events to the daemon through the v2 event stream. Guarded so a probe
+// with no context or a throwing subscriber never fails the plugin.
+//
+// The richer v1 payloads (`tool.execute.after`, `chat.message`) are not
+// reproduced until the v2 hook surface for them is documented; events still
+// flow, so the daemon keeps seeing OpenCode activity.
+async function setup(ctx: any) {
+  try {
+    const cfg = loadConfig()
+    if (!cfg.enabled) return
+    if (typeof ctx?.event?.subscribe !== "function") return
+
+    const controller = new AbortController()
+    const consuming = (async () => {
+      for await (const input of ctx.event.subscribe({ signal: controller.signal })) {
+        const payload = input?.event !== undefined ? input.event : input
+        await sendPayload(cfg, { hook: "event", timestamp: Date.now(), event: payload })
+      }
+    })().catch(() => {})
+
+    return async () => {
+      try {
+        controller.abort()
+      } finally {
+        await consuming
+      }
+    }
+  } catch {
+    return
+  }
+}
+
+export default { id: "openusage-telemetry", server: OpenUsageTelemetry, setup }
