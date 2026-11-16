@@ -28,6 +28,15 @@ func computeDisplayInfo(snap core.UsageSnapshot, widget core.DashboardWidget, hi
 			return info
 		}
 	}
+	if usedPct := codexCreditUsedPercent(snap); usedPct >= 0 {
+		return providerDisplayInfo{
+			tagLabel:     "Credits",
+			tagEmoji:     "💰",
+			summary:      fmt.Sprintf("%.1f%% monthly credits used", usedPct),
+			gaugePercent: usedPct,
+			reason:       "codex_credit",
+		}
+	}
 	info.tagLabel, info.tagEmoji = "Usage", "⚡"
 	info.summary, info.detail, info.gaugePercent = "Quotas unavailable", "", -1
 	return info
