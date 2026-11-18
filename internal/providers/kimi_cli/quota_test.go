@@ -21,8 +21,15 @@ const quotaFixture = `{
   "limits": [{"detail":{"limit":"100","used":"99","remaining":"1"}}],
   "usages": {
     "limit_5h": {"used_ratio":0.46,"reset_time":"2026-09-19T03:35:45Z"},
+    "limit_7d": {"used_ratio":0.9093,"reset_time":"2026-09-26T03:35:45Z"},
     "limit_month_total": {"used_ratio":0.2421,"reset_time":"2026-10-19T00:00:00Z"},
     "limit_month_code": {"used_ratio":0,"reset_time":"2026-10-19T00:00:00Z"}
+  },
+  "booster_wallet": {
+    "status": "STATUS_ACTIVE",
+    "balance": {"amountLeft":"790451225"},
+    "monthlyUsed": {"currency":"USD","priceInCents":"1210"},
+    "monthlyChargeLimit": {"currency":"USD","priceInCents":"10000"}
   }
 }`
 
@@ -79,8 +86,20 @@ func TestFetch_QuotaReadOnly(t *testing.T) {
 	if m := snap.Metrics["usage_five_hour"]; m.Used == nil || *m.Used != 46 {
 		t.Errorf("5h quota = %+v, want 46%%", m)
 	}
+	if m := snap.Metrics["usage_seven_day"]; m.Used == nil || *m.Used < 90.92 || *m.Used > 90.94 {
+		t.Errorf("7d quota = %+v, want 90.93%%", m)
+	}
 	if m := snap.Metrics["usage_monthly"]; m.Used == nil || *m.Used < 24.2 || *m.Used > 24.22 {
 		t.Errorf("monthly quota = %+v", m)
+	}
+	if m := snap.Metrics["extra_usage_balance"]; m.Remaining == nil || *m.Remaining != 7.90451225 || m.Unit != "USD" {
+		t.Errorf("extra usage balance = %+v", m)
+	}
+	if m := snap.Metrics["extra_usage_monthly_spend"]; m.Used == nil || *m.Used != 12.1 || m.Limit != nil || m.Unit != "USD" {
+		t.Errorf("extra usage monthly spend = %+v, want 12.10 USD with unlimited cap", m)
+	}
+	if snap.Attributes["extra_usage_status"] != "ACTIVE" {
+		t.Errorf("extra usage status = %q", snap.Attributes["extra_usage_status"])
 	}
 	if _, ok := snap.Metrics["rate_limit_primary"]; ok {
 		t.Error("request-rate limit must not displace subscription quota")
@@ -285,6 +304,25 @@ func TestFetch_QuotaErrorKeepsLocalStats(t *testing.T) {
 	if err != nil || snap.Status != core.StatusOK || snap.Diagnostics["quota_error"] == "" ||
 		snap.Metrics["total_input_tokens"].Used == nil {
 		t.Fatalf("local stats should survive quota HTTP error: status=%v metrics=%v diagnostics=%v err=%v", snap.Status, snap.Metrics, snap.Diagnostics, err)
+	}
+}
+
+func TestApplyQuota_ExtraUsageLimitOnlyWhenEnabled(t *testing.T) {
+	var response kimiUsagesResponse
+	if err := json.Unmarshal([]byte(`{
+		"booster_wallet": {
+			"monthlyUsed": {"currency":"USD","priceInCents":"1210"},
+			"monthlyChargeLimit": {"currency":"USD","priceInCents":"10000"},
+			"monthlyChargeLimitEnabled": true
+		}
+	}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	snap := core.NewUsageSnapshot(ID, "one")
+	applyQuotaToSnapshot(&snap, &response, time.Date(2026, 9, 19, 0, 0, 0, 0, time.UTC))
+	metric := snap.Metrics["extra_usage_monthly_spend"]
+	if metric.Used == nil || *metric.Used != 12.1 || metric.Limit == nil || *metric.Limit != 100 {
+		t.Errorf("limited extra usage spend = %+v", metric)
 	}
 }
 

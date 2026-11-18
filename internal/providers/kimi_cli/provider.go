@@ -41,6 +41,9 @@ type Provider struct {
 
 	quotaMu    sync.Mutex
 	quotaCache map[string]quotaCacheEntry
+
+	telemetryMu      sync.Mutex
+	telemetryReaders map[string]*shared.IncrementalReader
 }
 
 // New constructs a Kimi CLI provider with sensible widget defaults.
