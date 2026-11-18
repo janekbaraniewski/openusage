@@ -45,6 +45,8 @@ Use `provider_paths` for provider-specific overrides. JSON paths must be absolut
 
 The provider walks the selected sessions directory for `wire.jsonl` files. Kimi CLI records contain `message.type = StatusUpdate` and snake_case `token_usage` fields. Kimi Code CLI records contain `type = usage.record`, camelCase `usage` fields, and an epoch-millisecond `time`. Only records with nonzero token usage count.
 
+The daemon collects these records incrementally into canonical telemetry. This preserves per-model breakdowns, daily token history, request counts, and cache-hit ratio in daemon-backed dashboard and export views.
+
 | Metric | Source fields |
 | --- | --- |
 | `total_input_tokens` | `input_other` or `inputOther` |

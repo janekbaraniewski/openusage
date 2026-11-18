@@ -119,19 +119,7 @@ func readKimiWireFileWithModel(path, fallbackModel string) ([]kimiModelEntry, er
 	}
 	defer f.Close()
 
-	// Layout is <root>/<group>/<uuid>/wire.jsonl; combine both to avoid
-	// collisions when the same UUID appears under different groups. Kimi
-	// Code CLI nests logs deeper at <root>/<group>/<uuid>/agents/<agent>/
-	// wire.jsonl, so climb out of the agents directory to keep the same
-	// <group>/<uuid> session id.
-	uuidDir := filepath.Dir(path)
-	if filepath.Base(filepath.Dir(uuidDir)) == "agents" {
-		uuidDir = filepath.Dir(filepath.Dir(uuidDir))
-	}
-	sessionID := filepath.Base(uuidDir)
-	if group := filepath.Base(filepath.Dir(uuidDir)); group != "" && group != "." && group != string(filepath.Separator) {
-		sessionID = group + "/" + sessionID
-	}
+	sessionID := kimiWireSessionID(path)
 	if fallbackModel == "" {
 		fallbackModel = defaultModel
 	}
@@ -222,6 +210,18 @@ func (rec kimiWireRecord) toEntry(sessionID, fallbackModel string) (entry kimiMo
 		CacheWrite: cacheWrite,
 		Timestamp:  floatToTime(rec.Timestamp),
 	}, true
+}
+
+func kimiWireSessionID(path string) string {
+	uuidDir := filepath.Dir(path)
+	if filepath.Base(filepath.Dir(uuidDir)) == "agents" {
+		uuidDir = filepath.Dir(filepath.Dir(uuidDir))
+	}
+	sessionID := filepath.Base(uuidDir)
+	if group := filepath.Base(filepath.Dir(uuidDir)); group != "" && group != "." && group != string(filepath.Separator) {
+		sessionID = group + "/" + sessionID
+	}
+	return sessionID
 }
 
 func derefInt64(p *int64) int64 {
