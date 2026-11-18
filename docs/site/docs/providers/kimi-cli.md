@@ -60,7 +60,9 @@ The logs do not contain USD prices. Configure the Moonshot API provider separate
 
 ## Kimi Code subscription quota
 
-OpenUsage reads the existing access token from the newest JSON file in `~/.kimi-code/credentials/` and calls `GET https://api.kimi.com/coding/v1/usages`. The response supplies `usage_five_hour`, `usage_monthly`, and `usage_monthly_code` percentage gauges and reset times. Short-term request-rate limits are ignored because they are not subscription quota.
+OpenUsage reads the existing access token from the newest JSON file in `~/.kimi-code/credentials/` and calls `GET https://api.kimi.com/coding/v1/usages`. Depending on the membership plan, the response supplies `usage_five_hour`, `usage_seven_day`, `usage_monthly`, and `usage_monthly_code` percentage gauges and reset times. Short-term request-rate limits are ignored because they are not subscription quota.
+
+When the response includes `booster_wallet`, OpenUsage also shows the Extra Usage balance and current billing-cycle spend. Wallet amounts use Kimi's fixed-point cents representation. The monthly spend limit is applied only when `monthlyChargeLimitEnabled` is true; otherwise the account remains unlimited.
 
 The credential file is read-only to OpenUsage. It never sends the refresh token, refreshes OAuth, or writes Kimi Code credentials. When the access token expires, quota disappears until Kimi Code refreshes its own token; local session stats continue working. Successful and failed quota reads are cached per account for one minute, and the daemon checks again after cache expiry when it next polls the provider.
 
