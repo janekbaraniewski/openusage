@@ -88,7 +88,15 @@ func collectTelemetryFromSQLiteSince(ctx context.Context, dbPath string, since *
 		return res, err
 	}
 	if !hasMessageTable {
-		return res, nil
+		hasSessionMessageTable, err := sqliteTableExists(ctx, tx, "session_message")
+		if err != nil {
+			return res, err
+		}
+		if !hasSessionMessageTable {
+			return res, nil
+		}
+		res.Events, err = collectSQLiteV2Events(ctx, tx, dbPath)
+		return res, err
 	}
 	hasPartTable, err := sqliteTableExists(ctx, tx, "part")
 	if err != nil {
