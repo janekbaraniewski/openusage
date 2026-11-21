@@ -323,6 +323,7 @@ func appendSQLiteMessageTableEvents(
 
 		*out = append(*out, buildSQLiteMessageTableEvent(
 			dbPath,
+			"message",
 			messageIDRaw,
 			sessionIDRaw,
 			timeCreated,
@@ -343,7 +344,7 @@ func appendSQLiteMessageTableEvents(
 }
 
 func buildSQLiteMessageTableEvent(
-	dbPath, messageIDRaw, sessionIDRaw string,
+	dbPath, table, messageIDRaw, sessionIDRaw string,
 	timeCreated, timeUpdated, completedAt, createdAt int64,
 	sessionDir string,
 	payload map[string]any,
@@ -389,7 +390,7 @@ func buildSQLiteMessageTableEvent(
 			Requests:         core.Int64Ptr(1),
 		},
 		Status:  finishStatus(shared.FirstPathString(payload, []string{"finish"})),
-		Payload: sqliteMessagePayload(dbPath, messageIDRaw, sessionIDRaw, timeCreated, timeUpdated, payload, providerID, modelRaw, summary),
+		Payload: sqliteMessagePayload(dbPath, table, messageIDRaw, sessionIDRaw, timeCreated, timeUpdated, payload, providerID, modelRaw, summary),
 	}
 }
 
@@ -406,7 +407,7 @@ func finishStatus(finish string) shared.TelemetryStatus {
 }
 
 func sqliteMessagePayload(
-	dbPath, messageIDRaw, sessionIDRaw string,
+	dbPath, table, messageIDRaw, sessionIDRaw string,
 	timeCreated, timeUpdated int64,
 	payload map[string]any,
 	providerID, modelRaw string,
@@ -415,7 +416,7 @@ func sqliteMessagePayload(
 	return map[string]any{
 		"source": map[string]any{
 			"db_path": dbPath,
-			"table":   "message",
+			"table":   table,
 		},
 		"db": map[string]any{
 			"message_id":   strings.TrimSpace(messageIDRaw),
