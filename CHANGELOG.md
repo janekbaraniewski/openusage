@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.26.4 (2026-11-23)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Dependencies
+* deps(website): bump the website-minor-and-patch group in /website with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/470
+* deps(docs): bump posthog-js from 1.438.19 to 1.442.1 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/469
+* deps(docs): bump posthog-js from 1.442.1 to 1.447.2 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/474
+* ci(actions): bump the actions-minor-and-patch group with 5 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/475
+* deps(docs): bump posthog-js from 1.447.2 to 1.448.0 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/479
+* deps(website): bump the website-minor-and-patch group across 1 directory with 6 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/480
+* deps(deps): bump the go-minor-and-patch group across 1 directory with 7 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/478
+* deps(docs): bump katex and mermaid in /docs/site by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/481
+* deps(docs): bump posthog-js from 1.448.0 to 1.453.0 in /docs/site in the docs-minor-and-patch group by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/488
+* ci(actions): bump the actions-minor-and-patch group with 3 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/490
+* deps(deps): bump the go-minor-and-patch group with 2 updates by @dependabot[bot] in https://github.com/janekbaraniewski/openusage/pull/487
+
+
+**Full Changelog**: https://github.com/janekbaraniewski/openusage/compare/v0.26.3...v0.26.4
+
 ## 0.26.3 (2026-11-01)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
