@@ -149,6 +149,12 @@ func TestInstallOpenCode(t *testing.T) {
 	if !strings.Contains(string(templateData), "openusage-integration-version: "+IntegrationVersion) {
 		t.Fatal("template missing version marker")
 	}
+	if !strings.Contains(string(templateData), `export default { id: "openusage-telemetry", server: OpenUsageTelemetry, setup }`) {
+		t.Fatal("template missing OpenCode 2 default export object")
+	}
+	if !strings.Contains(string(templateData), "async function setup(ctx: any)") {
+		t.Fatal("template missing OpenCode 2 setup function")
+	}
 
 	// The plugin lands in OpenCode's global plugin directory, which OpenCode
 	// loads automatically, so install must not write a config file — doing so
