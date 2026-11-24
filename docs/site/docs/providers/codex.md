@@ -119,7 +119,7 @@ price differently, so a total alone cannot be converted to spend.
 ### Individual credits and forecast
 
 - Source: `individualLimit` from the Codex CLI app-server `account/rateLimits/read` response. The response provides the current-period `limit`, cumulative `used` credits (or a remaining percentage), and the next `resetsAt` timestamp.
-- Transform: `codex_credit_limit` contains used/remaining/total credits, while `codex_credit_percent_used` drives the primary dashboard gauge.
+- Transform: `codex_credit_limit` contains used/remaining/total credits, while `codex_credit_percent_used` supplies the used percentage. When no usable rate-limit windows are available, the dashboard and detail view show a **Monthly credits** gauge, using the percentage or deriving it from the credit allowance. Existing rate-limit windows take precedence. If neither usable windows nor valid monthly credit metrics are available, the gauge area shows **Quotas unavailable**; cache ratios, context usage, and dollar costs do not substitute for an allowance.
 - Forecast: when the next monthly reset is available, OpenUsage infers the preceding calendar-month boundary and calculates the average burn rate from cumulative current-period usage divided by elapsed time since that boundary. The dashboard shows the reset countdown and projected percentage at reset. Without a usable reset timestamp, it falls back to successive observed quota samples.
 - Forecast source is recorded as `inferred_period_start` or `observed_usage` so the estimate is distinguishable from authoritative quota data.
 
