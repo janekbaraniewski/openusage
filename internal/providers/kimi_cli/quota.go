@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +36,26 @@ type kimiUsageWindow struct {
 }
 
 type kimiUsagesResponse struct {
-	Usages map[string]kimiUsageWindow `json:"usages"`
+	Usages        map[string]kimiUsageWindow `json:"usages"`
+	BoosterWallet *kimiBoosterWallet         `json:"booster_wallet"`
+}
+
+type kimiBoosterWallet struct {
+	Status                    string             `json:"status"`
+	Balance                   kimiBoosterBalance `json:"balance"`
+	MonthlyUsed               kimiMoney          `json:"monthlyUsed"`
+	MonthlyChargeLimit        kimiMoney          `json:"monthlyChargeLimit"`
+	MonthlyChargeLimitEnabled *bool              `json:"monthlyChargeLimitEnabled"`
+	AutoRefillCharge          kimiMoney          `json:"autoRefillCharge"`
+}
+
+type kimiBoosterBalance struct {
+	AmountLeft string `json:"amountLeft"`
+}
+
+type kimiMoney struct {
+	Currency     string `json:"currency"`
+	PriceInCents string `json:"priceInCents"`
 }
 
 type quotaCacheEntry struct {
@@ -224,6 +244,7 @@ func applyQuotaToSnapshot(snap *core.UsageSnapshot, usage *kimiUsagesResponse, n
 		source, metric, window string
 	}{
 		{"limit_5h", "usage_five_hour", "5h"},
+		{"limit_7d", "usage_seven_day", "7d"},
 		{"limit_month_total", "usage_monthly", "30d"},
 		{"limit_month_code", "usage_monthly_code", "30d"},
 	} {
@@ -249,6 +270,49 @@ func applyQuotaToSnapshot(snap *core.UsageSnapshot, usage *kimiUsagesResponse, n
 			Window: item.window,
 		}
 	}
+	applyBoosterWalletToSnapshot(snap, usage.BoosterWallet)
+}
+
+func applyBoosterWalletToSnapshot(snap *core.UsageSnapshot, wallet *kimiBoosterWallet) {
+	if wallet == nil {
+		return
+	}
+	currency := core.FirstNonEmpty(wallet.MonthlyUsed.Currency, wallet.MonthlyChargeLimit.Currency, wallet.AutoRefillCharge.Currency)
+	if balance, ok := parseFixedPointCents(wallet.Balance.AmountLeft); ok {
+		snap.Metrics["extra_usage_balance"] = core.Metric{
+			Remaining: &balance,
+			Unit:      currency,
+			Window:    "current",
+		}
+	}
+	if monthlyUsed, ok := parseCents(wallet.MonthlyUsed.PriceInCents); ok {
+		metric := core.Metric{Used: &monthlyUsed, Unit: currency, Window: "billing-cycle"}
+		if wallet.MonthlyChargeLimitEnabled != nil && *wallet.MonthlyChargeLimitEnabled {
+			if limit, ok := parseCents(wallet.MonthlyChargeLimit.PriceInCents); ok {
+				metric.Limit = &limit
+			}
+		}
+		snap.Metrics["extra_usage_monthly_spend"] = metric
+	}
+	if wallet.Status != "" {
+		snap.SetAttribute("extra_usage_status", strings.TrimPrefix(wallet.Status, "STATUS_"))
+	}
+}
+
+func parseFixedPointCents(raw string) (float64, bool) {
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return float64(value) / 100_000_000, true
+}
+
+func parseCents(raw string) (float64, bool) {
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return float64(value) / 100, true
 }
 
 func parseResetTime(raw string) (time.Time, bool) {
